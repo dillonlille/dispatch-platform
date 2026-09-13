@@ -1,0 +1,41 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+
+// Keep this supervisor pinned outside the Core release that it replaces.
+process.umask(0o077);
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { openPlatformUpdateStore } = require('../src/platform-update-store');
+const { loadPrivateOciReleaseCatalog } = require('../src/release-catalog');
+const { loadPlatformReleaseCatalog } = require('../src/platform-release-catalog');
+const { createPlatformCoreUpdater } = require('../src/platform-core-update');
+async function main() {
+  const root = process.env.DISPATCH_ACCESS_CONTROL_DATABASE_ROOT;
+  if (typeof root !== 'string' || !path.isAbsolute(root) || fs.realpathSync(root) !== root) throw new Error();
+  const info = fs.lstatSync(root);
+  if (!info.isDirectory() || info.uid !== process.geteuid() || (info.mode & 0o7777) !== 0o700) throw new Error();
+  const lock = path.join(root, 'platform-update.lock');
+  const fd = fs.openSync(lock, fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_NOFOLLOW, 0o600);
+  const stat = fs.fstatSync(fd);
+  if (!stat.isFile() || stat.uid !== process.geteuid() || stat.nlink !== 1 || (stat.mode & 0o7777) !== 0o600) throw new Error();
+  if (process.argv.length === 2) {
+    const result = spawnSync('/usr/bin/flock', ['--nonblock', '--conflict-exit-code', '75', lock,
+      '/usr/bin/node', '--no-warnings', __filename, '--locked'], { stdio: ['ignore', 'inherit', 'inherit', fd] });
+    fs.closeSync(fd);
+    process.exitCode = result.status === 75 ? 0 : result.status ?? 1;
+    return;
+  }
+  fs.closeSync(fd);
+  if (process.argv.length !== 3 || process.argv[2] !== '--locked') throw new Error();
+  const runtimes = loadPrivateOciReleaseCatalog(process.env.DISPATCH_OCI_RELEASE_CATALOG_FILE);
+  const platformReleases = loadPlatformReleaseCatalog(process.env.DISPATCH_PLATFORM_RELEASE_CATALOG_FILE, runtimes);
+  const store = openPlatformUpdateStore(root);
+  try {
+    const result = await createPlatformCoreUpdater({ store, platformReleases }).run();
+    process.stdout.write(JSON.stringify(result) + '\n');
+    if (result.status === 'core_verified') require('../../accounts/src/worker-wakeup').wake(['reconcile'], { databaseRoot: root });
+    if (result.status === 'core_update_failed') process.exitCode = 1;
+  } finally { store.close(); }
+}
+main().catch(() => { process.stderr.write('{"status":"platform_updater_unavailable"}\n'); process.exitCode = 1; });

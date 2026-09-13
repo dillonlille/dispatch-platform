@@ -1,0 +1,15 @@
+{
+  "name": "dispatch-collection-manager",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Durable local control plane for Dispatch collectors",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "./scripts/build",
+    "test": "./scripts/test",
+    "verify": "./scripts/verify"
+  }
+}

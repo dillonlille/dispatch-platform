@@ -1,0 +1,31 @@
+#!/usr/bin/node
+'use strict';
+
+const { readHelperRequest } = require('../src/oci-helper-input');
+const { installationFailure } = require('../../../shared/contracts/src/installation');
+const { createOciHostHelper } = require('../src/oci-host-helper');
+
+function response(value) {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function main() {
+  process.umask(0o077);
+  let helper;
+  try {
+    if (process.argv.length !== 2) throw new Error('runtime_boundary_violation');
+    const request = readHelperRequest(0, 256 * 1024);
+    helper = createOciHostHelper();
+    const result = helper.execute(request);
+    response({ ok: true, result });
+    return 0;
+  } catch (error) {
+    const failure = installationFailure(error);
+    response({ ok: false, status: failure.code, ...(['image_inspect', 'image_load', 'loaded_image_inspect', 'manifest_attestation'].includes(error.hostStep) ? { step: error.hostStep } : {}) });
+    return 1;
+  } finally {
+    try { helper?.close(); } catch {}
+  }
+}
+
+process.exitCode = main();

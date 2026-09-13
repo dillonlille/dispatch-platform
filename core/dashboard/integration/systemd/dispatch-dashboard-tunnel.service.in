@@ -1,0 +1,25 @@
+[Unit]
+Description=Cloudflare Tunnel for Dispatch Dashboard
+After=network-online.target dispatch-dashboard.service
+Wants=network-online.target dispatch-dashboard.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=PATH=@COMMAND_PATH@
+ExecStart=/usr/bin/env cloudflared --config @LOCAL_ROOT@/config/cloudflared/config.yml --no-autoupdate tunnel run
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

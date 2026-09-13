@@ -1,0 +1,95 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+
+process.umask(0o077);
+const fs = require('node:fs');
+const path = require('node:path');
+const { resolveAccessPaths } = require('../shared/paths/access-paths');
+const { AccessStore, AccessControlService } = require('../core/accounts/src');
+
+function fail(message) { process.stderr.write(`dispatch-access-admin: ${message}\n`); process.exit(2); }
+function option(argv, name, fallback = null) {
+  const index = argv.indexOf(name);
+  if (index < 0) return fallback;
+  if (index + 1 >= argv.length || argv[index + 1].startsWith('--')) fail(`${name} requires a value`);
+  return argv[index + 1];
+}
+function safeOutputPath(file, root) {
+  const selected = path.resolve(file);
+  const allowed = path.resolve(root);
+  const relative = path.relative(allowed, selected);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.dirname(selected) !== allowed) fail('output must be a direct child of the access-control secrets directory');
+  fs.mkdirSync(allowed, { recursive: true, mode: 0o700 });
+  const info = fs.lstatSync(allowed);
+  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.geteuid() || (info.mode & 0o777) !== 0o700) fail('unsafe secrets directory');
+  return selected;
+}
+function safeOutput(file, root) {
+  const selected = safeOutputPath(file, root);
+  if (fs.existsSync(selected)) fail('output file already exists');
+  return selected;
+}
+
+const argv = process.argv.slice(2);
+const action = argv[0];
+if (['rollout-status', 'rollout-start', 'rollout-pause', 'rollout-resume'].includes(action)) {
+  if (process.env.DISPATCH_PLATFORM_CONFIG !== undefined) fail('legacy rollouts are unavailable in directory mode');
+  require('../core/accounts/src/rollout-admin-cli').main(argv).then(code => { process.exitCode = code; });
+  return;
+}
+if (['owner-create', 'owner-recover', 'owner-list'].includes(action)) {
+  require('../core/accounts/src/owner-admin-cli').main(argv).then(code => { process.exitCode = code; });
+  return;
+}
+if (!['status', 'bootstrap', 'revoke-bootstrap'].includes(action)) fail('usage: dispatch-access-admin rollout-status|rollout-start|rollout-pause|rollout-resume --help | owner-create | owner-recover | owner-list | status | bootstrap --email EMAIL [--organization ORGANIZATION_ID] [--output-file FILE] | revoke-bootstrap [--output-file FILE]');
+const paths = resolveAccessPaths();
+if (process.env.DISPATCH_PLATFORM_CONFIG !== undefined) {
+  require('../host/controller/operations').privateDirectory(path.dirname(paths.accessControl.databaseRoot));
+}
+const store = new AccessStore(paths.accessControl);
+const service = new AccessControlService(store);
+try {
+  if (action === 'status') {
+    process.stdout.write(`${JSON.stringify({ ok: true, status: 'found', data: service.bootstrapStatus() })}\n`);
+  } else if (action === 'bootstrap') {
+    const email = option(argv, '--email');
+    if (!email) fail('--email is required');
+    const organizationId = option(argv, '--organization', null);
+    const secretsDirectory = path.join(paths.secretsRoot, 'access-control');
+    const output = safeOutput(option(argv, '--output-file', path.join(secretsDirectory, 'platform-bootstrap.json')), secretsDirectory);
+    const result = service.createPlatformBootstrap({ email, organizationId });
+    const payload = Buffer.from(`${JSON.stringify({
+      invitationPath: `/#/invitation/${result.token}`,
+      invitedEmail: result.invitation.email,
+      organizationId: result.invitation.organizationId,
+      expiresAt: result.invitation.expiresAt,
+    }, null, 2)}\n`);
+    try { fs.writeFileSync(output, payload, { flag: 'wx', mode: 0o600 }); }
+    catch (error) {
+      try { store.revokeInvitation(result.invitation.id); } catch {}
+      throw error;
+    }
+    process.stdout.write(`${JSON.stringify({ ok: true, status: 'invitation_created', output, expiresAt: result.invitation.expiresAt })}\n`);
+  } else {
+    const secretsDirectory = path.join(paths.secretsRoot, 'access-control');
+    const output = safeOutputPath(option(argv, '--output-file', path.join(secretsDirectory, 'platform-bootstrap.json')), secretsDirectory);
+    const invitation = service.revokePlatformBootstrap();
+    let outputRemoved = false;
+    try {
+      fs.unlinkSync(output);
+      outputRemoved = true;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      status: invitation ? 'invitation_revoked' : 'no_pending_invitation',
+      outputRemoved,
+    })}\n`);
+  }
+} catch (error) {
+  process.stderr.write(`${JSON.stringify({ ok: false, status: error?.code || error?.message || 'access_admin_failed' })}\n`);
+  process.exitCode = 1;
+} finally {
+  store.close();
+}

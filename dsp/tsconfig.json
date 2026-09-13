@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "paths": {
+      "dispatch-sdk": [
+        "./node_modules/dispatch-sdk/types/index.d.ts"
+      ],
+      "dispatch-sdk/*": [
+        "./node_modules/dispatch-sdk/types/*.d.ts"
+      ],
+      "*": [
+        "./tooling/frontend/node_modules/@types/*",
+        "./tooling/frontend/node_modules/*"
+      ]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "plugins/*/frontend",
+    "tooling/frontend/env.d.ts"
+  ]
+}

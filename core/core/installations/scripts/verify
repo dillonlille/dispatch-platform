@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+"$ROOT/tooling/build"
+"$ROOT/tooling/test"
+for file in "$ROOT"/examples/*.js; do
+  node --no-warnings "$file"
+done

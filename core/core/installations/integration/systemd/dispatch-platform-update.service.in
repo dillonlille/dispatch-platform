@@ -1,0 +1,16 @@
+[Unit]
+Description=Dispatch Core update supervisor
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Pin this path independently. A Core rollout must not replace/restart this unit.
+ExecStart=/usr/bin/node --no-warnings @UPDATER_ROOT@/core/installations/bin/dispatch-platform-update
+Environment=PATH=/usr/bin:/bin
+Environment=NODE_NO_WARNINGS=1
+EnvironmentFile=@LOCAL_ROOT@/config/provisioning.env
+TimeoutStartSec=15min
+TimeoutStopSec=30s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=false

@@ -1,0 +1,22 @@
+{
+  "name": "dispatch-dsp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bootstrap": "node --no-warnings tooling/project.js bootstrap",
+    "check": "node --no-warnings tooling/project.js check",
+    "test": "node --no-warnings tooling/project.js test",
+    "build": "node --no-warnings tooling/project.js build",
+    "test:integration": "node --no-warnings tooling/project.js test:integration",
+    "export": "node --no-warnings tooling/project.js export"
+  },
+  "dispatchPackages": {
+    "dispatch-sdk": "0.12.0",
+    "dispatch-protocol": "1.0.0",
+    "dispatch-runtime-kit": "0.0.0"
+  }
+}

@@ -1,0 +1,5 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+require('../src/install-command').main(process.argv.slice(2)).catch(error => {
+  process.stderr.write(`${error.message}\n`); process.exitCode = 1;
+});

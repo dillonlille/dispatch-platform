@@ -1,0 +1,133 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+process.umask(0o077);
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { atomic } = require('../src/release-delivery-files');
+const { loadConfig, createRestic, exportSnapshot, WORK } = require('../src/offsite-backup');
+const { RECEIPTS, POLICY } = require('../src/offsite-policy');
+const { HOST_TENANT_ROOT, opaqueRuntimeSuffix } = require('../../runtime-host-identity');
+function directories(root, pattern) {
+  try { return fs.readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory() && pattern.test(e.name)).map(e => e.name); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+}
+function sources(config, excludedRuntimes = new Set()) {
+  const result = [];
+  const root = path.join(config.localRoot, 'backups/platform-core');
+  for (const rollout of directories(root, /^rollout_[a-f0-9]{32}$/)) {
+    for (const attempt of directories(path.join(root, rollout), /^attempt-[1-9][0-9]*$/)) {
+      const source = path.join(root, rollout, attempt);
+      if (fs.existsSync(path.join(source, 'manifest.json')) && !JSON.parse(fs.readFileSync(path.join(source, 'manifest.json'))).localOnly) result.push({ source, uid: config.coreUid });
+    }
+  }
+  for (const suffix of directories(HOST_TENANT_ROOT, /^[a-f0-9]{20}$/)) {
+    const runtimeRoot = path.join(HOST_TENANT_ROOT, suffix, 'runtime');
+    for (const runtime of directories(runtimeRoot, /^[a-z][a-z0-9_-]{2,95}$/)) {
+      if (excludedRuntimes.has(runtime)) continue;
+      if (opaqueRuntimeSuffix(runtime) !== suffix) throw Error();
+      const installation = path.join(runtimeRoot, runtime);
+      const uid = fs.lstatSync(installation).uid;
+      if (uid === 0 || uid === config.coreUid || fs.realpathSync(installation) !== installation) throw Error();
+      for (const name of directories(path.join(installation, 'backups'), /^[a-z][a-z0-9_-]{2,95}$/)) {
+        const source = path.join(installation, 'backups', name);
+        if (fs.existsSync(path.join(source, 'manifest.json'))) result.push({ source, uid });
+      }
+    }
+  }
+  return result;
+}
+async function main() {
+  const [action, locked] = process.argv.slice(2);
+  if (process.geteuid() !== 0 || !['init', 'scan', 'check', 'status', 'enable', 'prewarm'].includes(action)
+      || (locked && locked !== '--locked') || process.argv.length > 4) throw Error();
+  // The timer stays pinned to verified immutable code, independent of Core restarts.
+  const artifact = path.resolve(__dirname, "../../../..");
+  const { rootArtifact } = require('../src/core-recovery-host');
+  const id = path.basename(path.dirname(artifact));
+  if (rootArtifact(id).root !== artifact) throw Error();
+  fs.mkdirSync(WORK, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(RECEIPTS, { recursive: true, mode: 0o755 }); fs.chmodSync(RECEIPTS, 0o755);
+  for (const [dir, mode] of [[WORK, 0o700], [RECEIPTS, 0o755]]) {
+    const stat = fs.lstatSync(dir);
+    if (stat.uid !== 0 || !stat.isDirectory() || (stat.mode & 0o7777) !== mode || fs.realpathSync(dir) !== dir) throw Error();
+  }
+  if (action === 'prewarm') {
+    const result = require('../src/recovery-prewarm').prewarm({
+      report: status => atomic(path.join(RECEIPTS, 'recovery-prewarm.json'), status, 0o644),
+    });
+    process.stdout.write(JSON.stringify(result) + '\n'); return;
+  }
+  if (!locked) {
+    const lockOptions = action === 'enable' ? ['--wait', '3300'] : ['--nonblock', '--conflict-exit-code', '75'];
+    const result = spawnSync('/usr/bin/flock', [...lockOptions, path.join(WORK, 'worker.lock'),
+      '/usr/bin/node', '--no-warnings', __filename, action, '--locked'], { stdio: ['ignore', 'inherit', 'inherit'] });
+    process.exitCode = result.status === 75 ? 0 : result.status ?? 1; return;
+  }
+  if (action === 'status') {
+    const value = require('../src/offsite-policy').publicRootJson(path.join(RECEIPTS, 'status.json'), true);
+    process.stdout.write(JSON.stringify(value || { status: 'not_verified' }) + '\n'); return;
+  }
+  require('../src/backup-scratch').cleanupBackupScratch(WORK);
+  require('../src/recovery-artifacts').pruneLocalCache();
+  require('../src/backup-scratch').cleanupRestoreStaging();
+  const config = loadConfig(); const run = createRestic(config.environment);
+  if (action === 'init') run(['init', '--repository-version', '2']);
+  if (action === 'enable') {
+    try { run(['cat', 'config']); } catch { run(['init', '--repository-version', '2']); }
+  }
+  if (action === 'check') {
+    run(['check', '--read-data']);
+    require('../src/backup-archives').createBackupArchives(config).check();
+    process.stdout.write('{"status":"repository_checked"}\n'); return;
+  }
+  let count = 0, failed = 0;
+  try { require('../src/retired-dsp-metadata').purgeRetiredMetadata(config); } catch { failed++; }
+  const archiveWorker = require('../src/backup-archives').createBackupArchives(config);
+  let archives;
+  for (let pass = 0; pass < 5; pass++) {
+    const before = require('../src/drain-worker').backupQueueKey(config);
+    archives = await archiveWorker.scan();
+    if (before === require('../src/drain-worker').backupQueueKey(config)) break;
+  }
+  count += archives.verified; failed += archives.failed;
+  const managedIds = new Set(archives.managedIds);
+  // Newest snapshots first so an active rollout is not stuck behind old archives.
+  const pending = sources(config, new Set([...(archives.deletedRuntimeKeys || []), ...(archives.heldRuntimes || [])])).sort((a, b) => fs.statSync(b.source).mtimeMs - fs.statSync(a.source).mtimeMs);
+  for (const source of pending) {
+    if (managedIds.has(path.basename(source.source))
+        || (archives.deletedRuntimeKeys || []).includes(path.basename(path.dirname(path.dirname(source.source))))) continue;
+    try { exportSnapshot({ ...source, run, config }); count++; }
+    catch { failed++; }
+  }
+  try { await require('../src/release-retention').pruneReleases(config); } catch { failed++; }
+  const status = { schemaVersion: 1, status: failed ? 'backup_failed' : 'verified', checkedAt: Date.now(), verifiedSnapshots: count, failedSnapshots: failed };
+  atomic(path.join(RECEIPTS, 'status.json'), status, 0o644); fs.chmodSync(path.join(RECEIPTS, 'status.json'), 0o644);
+  if (action === 'enable') {
+    // Confirm encrypted uploads even on a fresh server with no snapshots.
+    const { DatabaseSync } = require('node:sqlite');
+    const canary = fs.mkdtempSync(path.join(WORK, 'canary-'));
+    try {
+      const file = path.join(canary, 'access-control-before.sqlite3');
+      const db = new DatabaseSync(file); db.exec("CREATE TABLE recovery_canary(value TEXT); INSERT INTO recovery_canary VALUES('dispatch upload confirmed')"); db.close(); fs.chmodSync(file, 0o600);
+      atomic(path.join(canary, 'manifest.json'), { version: 1, kind: 'core', sha256: require('../src/release-delivery-files').hashFileSync(file), size: fs.statSync(file).size });
+      exportSnapshot({ source: canary, uid: 0, run });
+    } finally { fs.rmSync(canary, { recursive: true, force: true }); }
+    if (failed) throw Error();
+    const unit = `[Unit]\nDescription=Encrypt and verify Dispatch off-server backups\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nUMask=0077\nExecStart=/usr/bin/node --no-warnings ${__filename} scan\nTimeoutStartSec=1h\n`;
+    const timer = '[Unit]\nDescription=Export completed Dispatch backups\n\n[Timer]\nOnBootSec=15s\nOnUnitInactiveSec=60s\nAccuracySec=1s\n\n[Install]\nWantedBy=timers.target\n';
+    atomic('/etc/systemd/system/dispatch-offsite-backup.service', unit, 0o644);
+    atomic('/etc/systemd/system/dispatch-offsite-backup.timer', timer, 0o644);
+    atomic('/etc/systemd/system/dispatch-offsite-backup.path', `[Unit]\nDescription=Export newly completed Dispatch snapshots\n\n[Path]\nPathChanged=${config.localRoot}/run/backup-ready\nUnit=dispatch-offsite-backup.service\n\n[Install]\nWantedBy=multi-user.target\n`, 0o644);
+    require('../src/recovery-prewarm').install(__filename, config.localRoot);
+    require('../src/backup-readiness').install(path.join(__dirname, "./dispatch-backup-readiness"), config.localRoot);
+    for (const args of [['daemon-reload'], ['enable', '--now', 'dispatch-offsite-backup.timer', 'dispatch-offsite-backup.path', 'dispatch-recovery-prewarm.timer', 'dispatch-recovery-prewarm.path', 'dispatch-backup-readiness.timer', 'dispatch-backup-readiness.path'],
+      ['start', '--no-block', 'dispatch-recovery-prewarm.service', 'dispatch-backup-readiness.service']]) {
+      if (spawnSync('/usr/bin/systemctl', args, { timeout: 30000 }).status !== 0) throw Error();
+    }
+    atomic(POLICY, { schemaVersion: 1, required: true }, 0o644); fs.chmodSync(POLICY, 0o644);
+  }
+  if (require('../src/drain-worker').workPending(config)) require('../src/worker-notify').userWorkers(config);
+  process.stdout.write(JSON.stringify(status) + '\n'); if (failed) process.exitCode = 1;
+}
+main().catch(() => { process.stderr.write('{"status":"offsite_backup_unavailable"}\n'); process.exitCode = 1; });

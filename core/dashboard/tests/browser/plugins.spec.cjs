@@ -1,0 +1,65 @@
+const { test, expect } = require('@playwright/test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+async function login(page, email) {
+  await page.goto('/#/plugins');
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill('synthetic preview password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveTitle('Plugins · Dispatch');
+}
+for (const mobile of [false, true]) test(`Paycom installation stays within its DSP (${mobile ? 'mobile' : 'desktop'})`, async ({ page, browser }) => {
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await login(page, mobile ? 'owner7@example.test' : 'owner6@example.test');
+  await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
+  await page.goto('/#/settings?tab=connections');
+  await expect(page.getByRole('button', { name: 'Connect Cortex', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect Paycom', exact: true })).toHaveCount(0);
+  expect((await page.request.get('/api/paycom/daily')).status()).toBe(409);
+  await page.goto('/#/plugins');
+  await page.getByRole('button', { name: 'Install Paycom', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Open Paycom', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Open Paycom', exact: true }).click();
+  await expect(page).toHaveTitle('Paycom · Dispatch');
+  await expect(page.getByRole('button', { name: 'Connect Paycom', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Connect Paycom', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect Paycom', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Client code').fill('fixture-client');
+  await dialog.getByLabel('Username', { exact: true }).fill('fixture-plugin-user');
+  await dialog.getByLabel('Password', { exact: true }).fill('synthetic plugin connection');
+  for (let index = 1; index <= 5; index++) await dialog.getByLabel(`Security answer ${index}`).fill(`fixture-answer-${index}`);
+  await dialog.getByRole('button', { name: 'Save and connect' }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.goto('/#/plugins');
+  const output = process.env.DISPATCH_UI_ARTIFACTS || path.join(os.tmpdir(), 'dispatch-plugin-ui');
+  fs.mkdirSync(output, { recursive: true });
+  await page.screenshot({ path: path.join(output, `plugins-${mobile ? 'mobile' : 'desktop'}-installed.png`), fullPage: true });
+  await page.getByRole('button', { name: 'Disable', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Enable', exact: true })).toBeEnabled();
+  expect((await page.request.get('/api/paycom/daily')).status()).toBe(409);
+  const hidden = await (await page.request.get('/api/organization/connections')).json();
+  expect(hidden.data.items.some(item => item.service === 'paycom')).toBe(false);
+  await page.getByRole('button', { name: 'Enable', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Disable', exact: true })).toBeEnabled();
+  const retained = await (await page.request.get('/api/organization/connections')).json();
+  expect(retained.data.items.find(item => item.service === 'paycom').configured).toBe(true);
+  await page.getByRole('button', { name: 'Uninstall', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('saved credentials will stay');
+  await page.getByRole('button', { name: 'Uninstall plugin', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Install Paycom', exact: true })).toBeEnabled();
+  expect((await page.request.get('/api/paycom/daily')).status()).toBe(409);
+  const siblingContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  try {
+    const sibling = await siblingContext.newPage();
+    await login(sibling, 'owner@example.test');
+    await expect(sibling.getByRole('link', { name: 'Open Paycom', exact: true })).toBeVisible();
+  } finally { await siblingContext.close(); }
+  await page.screenshot({ path: path.join(output, `plugins-${mobile ? 'mobile' : 'desktop'}-uninstalled.png`), fullPage: true });
+  expect(await page.locator('body').evaluate(body => body.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});

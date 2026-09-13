@@ -1,0 +1,62 @@
+name: Publish platform release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Owner-selected X.Y.Z platform version
+        required: true
+        type: string
+      expected_main:
+        description: Tested main commit (40 characters)
+        required: true
+        type: string
+      changes:
+        description: Reviewed JSON changelog with core, dsp and plugins strings
+        required: true
+        type: string
+concurrency:
+  group: platform-publication
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && inputs.expected_main == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_COMMIT: ${{ inputs.expected_main }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_main }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - name: Verify main and unused version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tooling/release.cjs guard
+      - run: npm run bootstrap -- "$RUNNER_TEMP/platform"
+      - run: npm run check -- "$RUNNER_TEMP/platform"
+      - run: npm run build -- "$RUNNER_TEMP/platform"
+      - name: Package platform release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANGES: ${{ inputs.changes }}
+        run: node tooling/release.cjs package "$RUNNER_TEMP/platform" "$RUNNER_TEMP/publication"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: ${{ runner.temp }}/publication/*
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tooling/release.cjs publish "$RUNNER_TEMP/publication"

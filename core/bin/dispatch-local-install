@@ -1,0 +1,31 @@
+#!/usr/bin/env -S node --no-warnings
+'use strict';
+process.umask(0o077);
+const path = require('node:path');
+const { loadPlatformPaths } = require('../shared/paths/platform-paths');
+const { privateJson } = require('../core/installations/src/release-delivery-files');
+const { installRuntime, activateRuntime } = require('../host/services/installation');
+const { preflight, prepareStartup } = require('../host/services/startup');
+
+async function main() {
+  const args = process.argv.slice(2), paths = loadPlatformPaths();
+  let result;
+  if (args.length === 1 && args[0] === 'check') result = await preflight(paths);
+  else if (args.length === 1 && ['install', 'prepare-upgrade'].includes(args[0])) {
+    const input = privateJson(path.join(paths.local, 'config/runtime-installation-source.json'), process.geteuid());
+    if (!['browserSource,nodeRoot', 'browserSource,nodeSource,tiniSource'].includes(Object.keys(input).sort().join(','))) {
+      throw new Error('directory_installation_invalid');
+    }
+    result = await installRuntime(paths, input, { prepare: args[0] === 'prepare-upgrade' });
+  } else if (args.length === 1 && args[0] === 'activate-upgrade') {
+    result = await activateRuntime(paths);
+  } else if (args.length >= 1 && args.length <= 2 && args[0] === 'prepare-startup') {
+    result = await prepareStartup(paths, args.length === 2 ? { port: Number(args[1]) } : {});
+  } else throw new Error('directory_request_invalid');
+  process.stdout.write(JSON.stringify(result) + '\n');
+}
+main().catch(error => {
+  const selected = error.code || error.message;
+  process.stderr.write(JSON.stringify({ ok: false, status: /^directory_[a-z_]+$/.test(selected || '')
+    ? selected : 'directory_installation_failed' }) + '\n'); process.exitCode = 1;
+});

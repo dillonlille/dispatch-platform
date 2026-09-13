@@ -1,0 +1,18 @@
+{
+  "id": "cdf-weekly-latest-complete",
+  "request": {
+    "source": "cdf-example",
+    "scope": "cdf",
+    "selector": { "kind": "latest-complete" },
+    "mode": "ensure"
+  },
+  "schedule": {
+    "type": "polling-window",
+    "expression": "0 15 * * 2",
+    "timezone": "America/Los_Angeles",
+    "intervalSeconds": 900,
+    "windowSeconds": 86400,
+    "retryErrors": ["week_unavailable"]
+  },
+  "enabled": false
+}

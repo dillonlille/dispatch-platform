@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+FROM docker.io/library/node:22-bookworm-slim@sha256:4d676821dff059fd00d277ee4261ef34ea712317fed0737c03941481b5760c96
+
+ARG DISPATCH_CHROMIUM_VERSION=152.0.7977.82-1~deb12u1
+ARG DISPATCH_CA_CERTIFICATES_VERSION=20250419~deb12u1
+ARG DISPATCH_FONTS_LIBERATION_VERSION=1:1.07.4-11
+ARG DISPATCH_UTIL_LINUX_VERSION=2.38.1-5+deb12u3
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "chromium=${DISPATCH_CHROMIUM_VERSION}" \
+      "chromium-common=${DISPATCH_CHROMIUM_VERSION}" \
+      "chromium-sandbox=${DISPATCH_CHROMIUM_VERSION}" \
+      "ca-certificates=${DISPATCH_CA_CERTIFICATES_VERSION}" \
+      "fonts-liberation=${DISPATCH_FONTS_LIBERATION_VERSION}" \
+      "tini=0.19.0-1+b3" \
+      "util-linux=${DISPATCH_UTIL_LINUX_VERSION}" \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt/* /var/log/dpkg.log \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    && groupadd --gid 10001 dispatch \
+    && useradd --uid 10001 --gid 10001 --home-dir /home/dispatch --create-home --shell /usr/sbin/nologin dispatch \
+    && install -d -o dispatch -g dispatch -m 0700 /var/lib/dispatch /run/dispatch-agent
+
+ARG DISPATCH_SOURCE_COMMIT
+ARG DISPATCH_SOURCE_STATE=dirty
+LABEL org.opencontainers.image.title="Dispatch DSP Runtime" \
+      org.opencontainers.image.description="Isolated outbound DSP runtime for Dispatch Core" \
+      org.opencontainers.image.revision="${DISPATCH_SOURCE_COMMIT}"
+
+WORKDIR /opt/dispatch
+COPY --chown=root:root runtime/ /opt/dispatch/runtime/
+COPY --chown=root:root plugins/ /opt/dispatch/plugins/
+COPY --chown=root:root shared/ /opt/dispatch/shared/
+COPY --chown=root:root compatibility/cdf/ /opt/dispatch/compatibility/cdf/
+COPY --chown=root:root compatibility/paycom/ /opt/dispatch/compatibility/paycom/
+RUN chown -R 10001:10001 /opt/dispatch/plugins/paycom/backend/bin /opt/dispatch/plugins/paycom/backend/config \
+    /opt/dispatch/compatibility/cdf/bin /opt/dispatch/compatibility/cdf/config
+
+RUN /usr/local/bin/node /opt/dispatch/runtime/supervisor/src/install-legacy-entrypoints.js \
+    && chmod -R a-w /opt/dispatch \
+    && DISPATCH_SOURCE_COMMIT="${DISPATCH_SOURCE_COMMIT}" \
+    DISPATCH_SOURCE_STATE="${DISPATCH_SOURCE_STATE}" \
+    DISPATCH_CHROMIUM_VERSION="${DISPATCH_CHROMIUM_VERSION}" \
+    /usr/local/bin/node --no-warnings /opt/dispatch/runtime/supervisor/src/create-release-manifest.js \
+    && test "$(stat -c '%a %U:%G' /opt/dispatch/runtime-release-manifest.json)" = '444 root:root'
+
+ENV DISPATCH_MANAGED_RUNTIME=1 \
+    DISPATCH_PROJECT_ROOT=/opt/dispatch \
+    DISPATCH_RUNTIME_AGENT_HUB_SOCKET=/run/dispatch-agent/runtime-agent-hub.sock \
+    DISPATCH_CHROME_EXECUTABLE=/usr/bin/chromium
+
+USER 10001:10001
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=30s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/node", "--no-warnings", "/opt/dispatch/runtime/supervisor/src/health.js"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/node", "--no-warnings", "/opt/dispatch/runtime/supervisor/src/supervisor.js"]

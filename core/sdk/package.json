@@ -1,0 +1,66 @@
+{
+  "name": "dispatch-sdk",
+  "version": "0.12.0",
+  "private": true,
+  "description": "Scoped plugin client for Dispatch platform services",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./browser": "./browser/index.js",
+    "./ui": {
+      "types": "./types/ui.d.ts",
+      "default": "./browser/ui.js"
+    },
+    "./node": "./node/index.js",
+    "./node/cdp": "./node/cdp.js",
+    "./runtime": {
+      "types": "./types/framework.d.ts",
+      "default": "./node/framework.js"
+    },
+    "./protocol": "./src/protocol.js",
+    "./testing": "./testing/index.js",
+    "./settings": {
+      "types": "./types/settings.d.ts",
+      "default": "./src/settings.js"
+    },
+    "./operations": {
+      "types": "./types/operations.d.ts",
+      "default": "./src/operations.js"
+    },
+    "./plugin": {
+      "types": "./types/plugin.d.ts",
+      "default": "./node/plugin.js"
+    },
+    "./tooling/create-plugin": "./tooling/create-plugin.js",
+    "./tooling/plugin-contracts": "./tooling/plugin-contracts.js",
+    "./tooling/build-installed-plugin": "./tooling/build-installed-plugin.mjs",
+    "./tooling/build-plugin-frontend": "./tooling/build-plugin-frontend.mjs",
+    "./runtime/session": "./src/session.js",
+    "./runtime/storage": "./node/storage.js",
+    "./runtime/cdp-transport": "./node/cdp-transport.js",
+    "./tooling/project": "./tooling/project.js",
+    "./tooling/release-package": "./tooling/release-package.js",
+    "./tooling/release-publication": "./tooling/release-publication.js",
+    "./settings-behavior": "./src/settings-behavior.js"
+  },
+  "files": [
+    "src",
+    "browser",
+    "node",
+    "types",
+    "testing",
+    "README.md",
+    "tooling"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --no-warnings --test tests/*.test.js"
+  }
+}

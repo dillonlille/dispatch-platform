@@ -1,0 +1,52 @@
+{
+  "groups": [
+    {
+      "id": "backups",
+      "title": "Backups",
+      "icon": "database"
+    },
+    {
+      "id": "dashboard-team",
+      "title": "Dashboard & team",
+      "icon": "users"
+    }
+  ],
+  "changelog": [
+    {
+      "kind": "changed",
+      "title": "Independent backup schedules",
+      "description": "Set separate schedules for Core and each DSP.",
+      "group": "backups",
+      "icon": "calendar-clock",
+      "details": "Platform owners can choose the frequency, time zone, and retention policy for Core, each DSP, and full-system backups independently. This keeps backup timing aligned with how your platform is used.",
+      "audience": "platform",
+      "popup": {
+        "title": "Choose backup schedules by scope",
+        "description": "Set the schedules that fit your Core and DSP workloads."
+      }
+    },
+    {
+      "kind": "added",
+      "title": "Dashboard activity overview",
+      "description": "See recent activity across your DSP workspace at a glance.",
+      "group": "dashboard-team",
+      "icon": "chart-column",
+      "details": "The activity overview brings recent workspace events into one place, so DSP owners can quickly understand what changed without opening each area of the dashboard.",
+      "audience": "dsp",
+      "popup": {
+        "title": "See activity at a glance",
+        "description": "Review recent workspace events from one dashboard view."
+      }
+    },
+    {
+      "kind": "fixed",
+      "title": "Team search finds every member",
+      "description": "Find teammates quickly by searching their name or email.",
+      "group": "dashboard-team",
+      "icon": "users",
+      "details": "Team search now checks the full member list and matches names and email addresses consistently, making it easier to find the person you need.",
+      "audience": "dsp"
+    }
+  ],
+  "afterUpdating": []
+}

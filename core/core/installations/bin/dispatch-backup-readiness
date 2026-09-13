@@ -1,0 +1,18 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+process.umask(0o077);
+const path = require('node:path');
+const { atomic } = require('../src/release-delivery-files');
+const { FILE, inspectHost, localIdentity } = require('../src/backup-readiness');
+try {
+  if (process.geteuid() !== 0 || process.argv.length !== 2) throw Error();
+  const artifact = path.resolve(__dirname, "../../../..");
+  const id = path.basename(path.dirname(artifact));
+  if (require('../src/core-recovery-host').rootArtifact(id).root !== artifact) throw Error();
+  const config = require('../src/offsite-backup').loadConfig();
+  let result;
+  try { result = inspectHost(config); }
+  catch { result = { schemaVersion: 1, localRootHash: localIdentity(config.localRoot), checkedAt: Date.now(), status: 'attention', members: [], error: 'backup_inspection_failed' }; }
+  atomic(FILE, result, 0o644);
+  process.stdout.write(JSON.stringify({ status: result.status, checkedAt: result.checkedAt, installations: result.members.length }) + '\n');
+} catch { process.stderr.write('{"status":"backup_readiness_unavailable"}\n'); process.exitCode = 1; }

@@ -1,0 +1,15 @@
+{
+  "name": "dispatch-access-control",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Human identity, tenant authorization, and installation lifecycle authority for Dispatch",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "./scripts/build",
+    "test": "./scripts/test",
+    "verify": "./scripts/verify"
+  }
+}
