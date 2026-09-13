@@ -7,16 +7,24 @@ const sum=(values,key)=>values.some(value=>value[key]===null)?null:values.reduce
 const zero={memoryBytes:0,memoryLimitBytes:null,tasks:0,cpuPercent:0};
 function createDirectoryMonitor({store,manager,paths,execution=null,clock=Date.now,cgroupRoot='/sys/fs/cgroup/system.slice',
  sampleResources=createResourceSampler(),readWorkers=workerGroups,storageSampler=createStorageSampler({paths}),disk=()=>fs.statfsSync(paths.dsps)}={}){
- let cached=null;
- return ()=>{
-  const now=clock();if(cached&&now-cached.sampledAt<2000)return cached;
+ let cached=null,storageAvailableBytes=null;
+ const viewers=new Map();
+ function hasViewers(){
+  for(const [key,expires] of viewers)if(expires<=clock())viewers.delete(key);
+  return viewers.size>0;
+ }
+ return ({refreshStorage=false,viewerKey=null,closeViewer=null}={})=>{
+  if(closeViewer){viewers.delete(closeViewer);return {closed:true};}
+  if(!hasViewers()&&viewerKey){sampleResources.reset?.();cached=null;}
+  if(viewerKey)viewers.set(viewerKey,clock()+7000);
+  const now=clock();if(!refreshStorage&&cached&&now-cached.sampledAt<2000)return cached;
   const rows=store.db.prepare(`SELECT i.runtime_key,i.status installation_status,o.name FROM installations i JOIN organizations o ON o.id=i.organization_id
     WHERE i.backend='directory_service_v1' AND i.status<>'decommissioned' ORDER BY o.created_at,o.id`).all();
-  const ids=rows.map(row=>row.runtime_key),workers=readWorkers(paths,ids),storage=storageSampler.read(ids);
+  const ids=rows.map(row=>row.runtime_key),workers=readWorkers(paths,ids),storage=storageSampler.read(ids,{refresh:refreshStorage,shouldContinue:hasViewers});
   const groups=ids.flatMap(id=>[unitName(id),...(workers.groups.get(id)||[])]);
   const resources=sampleResources(groups.map(name=>path.join(cgroupRoot,name)));
-  let storageAvailableBytes=null;try{const value=disk();storageAvailableBytes=value.bavail*value.bsize;}catch{}
-  cached={enabled:true,sampledAt:now,refreshIntervalMs:2000,storageRefreshIntervalMs:60000,storageAvailableBytes,
+  if(refreshStorage){try{const value=disk();storageAvailableBytes=value.bavail*value.bsize;}catch{storageAvailableBytes=null;}}
+  cached={enabled:true,sampledAt:now,refreshIntervalMs:2000,storageRefreshMode:'on_open',storageAvailableBytes,
    resourceScope:'DSP runtime, isolated plugin jobs and browser workers. Shared Core services are excluded.',
    runtimes:rows.map(row=>{
     const id=row.runtime_key,record=manager.journal.record(id),runtime=resources.get(path.join(cgroupRoot,unitName(id)));

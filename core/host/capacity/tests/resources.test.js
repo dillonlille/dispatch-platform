@@ -11,6 +11,7 @@ test('CPU uses monotonic deltas and resets on cgroup recreation, counter reset o
  const sample=createResourceSampler({read:()=>value,monotonic:()=>now});
  assert.equal(sample(['group']).get('group').cpuPercent,null);
  now=2000;value.cpuUsage+=3000000;assert.equal(sample(['group']).get('group').cpuPercent,150);
+ sample.reset();now=3000;assert.equal(sample(['group']).get('group').cpuPercent,null);
  now=4000;value.identity='two';assert.equal(sample(['group']).get('group').cpuPercent,null);
  now=6000;value.cpuUsage=1;assert.equal(sample(['group']).get('group').cpuPercent,null);
  value=null;assert.equal(sample(['group']).get('group'),null);
@@ -41,4 +42,15 @@ test('monitor aggregates runtime and isolated workers, caches samples, handles s
  assert.equal(first.runtimes[1].memoryBytes,0);assert.equal(first.runtimes[1].status,'sleeping');assert.equal(first.storageAvailableBytes,null);
  assert.equal(JSON.stringify(first).includes(id),false);assert.equal(monitor(),first);assert.equal(calls,1);
  now+=2000;available=false;assert.equal(monitor().runtimes[0].memoryBytes,null);
+});
+
+test('last viewer exit or heartbeat expiry cancels storage without further CPU reads',()=>{
+ let now=1000,checks=0,active;
+ const monitor=createDirectoryMonitor({paths:{},clock:()=>now,store:{db:{prepare:()=>({all:()=>[]})}},manager:{},
+  readWorkers:()=>({available:true,groups:new Map()}),sampleResources:()=>{checks++;return new Map();},disk:()=>({bavail:1,bsize:1}),
+  storageSampler:{read:(_ids,options)=>{if(options.refresh)active=options.shouldContinue;return new Map();}}});
+ monitor({viewerKey:'owner:a',refreshStorage:true});assert.equal(active(),true);
+ monitor({viewerKey:'owner:b'});monitor({closeViewer:'owner:a'});assert.equal(active(),true);assert.equal(checks,1);
+ monitor({closeViewer:'owner:b'});assert.equal(active(),false);assert.equal(checks,1);
+ monitor({viewerKey:'owner:c',refreshStorage:true});assert.equal(active(),true);now+=7001;assert.equal(active(),false);assert.equal(checks,2);
 });

@@ -15,7 +15,7 @@ function readGroup(root){
 // Each sampler is shared by all dashboard clients. CPU is a delta, not lifetime CPU time.
 function createResourceSampler({read=readGroup,monotonic=()=>performance.now()}={}){
  const previous=new Map();
- return roots=>{
+ const sample=roots=>{
   const now=monotonic(),values=new Map();
   for(const root of new Set(roots)){
    const value=read(root),before=previous.get(root);
@@ -28,6 +28,8 @@ function createResourceSampler({read=readGroup,monotonic=()=>performance.now()}=
   for(const root of previous.keys())if(!values.has(root))previous.delete(root);
   return values;
  };
+ sample.reset=()=>previous.clear();
+ return sample;
 }
 // Use Core's worker registry, never a tenant-supplied list of another DSP's jobs.
 function workerGroups(paths,ids){
