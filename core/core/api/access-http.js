@@ -366,12 +366,25 @@ function createAccessHttp({
       return true;
     }
 
-    if (url.pathname === '/api/platform/runtime' && request.method === 'GET') {
+    if (url.pathname === '/api/platform/runtime' && ['GET', 'POST'].includes(request.method)) {
       const current = session(request);
-      requireNoQuery(url);
       access.requirePlatform(current, 'platform.installations.manage');
       if (current.user.platformRole !== 'owner' || current.dspView) throw new AccessError('platform_forbidden', 403);
-      sendJson(response, 200, { ok: true, status: 'found', data: platformRuntime?.()
+      const validViewer = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
+      let options;
+      if (request.method === 'POST') {
+        requireMutation(request, current, url);
+        const input = await readJson(request); exact(input, ['viewerId', 'action']);
+        if (!validViewer(input.viewerId) || input.action !== 'close') throw new AccessError('invalid_request', 400);
+        options = { closeViewer: `${current.user.id}:${input.viewerId}` };
+      } else {
+        const viewer = url.searchParams.get('viewer'), refresh = url.searchParams.get('refreshStorage');
+        if ([...url.searchParams.keys()].some(key => !['viewer', 'refreshStorage'].includes(key))
+            || url.searchParams.getAll('viewer').length > 1 || url.searchParams.getAll('refreshStorage').length > 1
+            || viewer !== null && !validViewer(viewer) || refresh !== null && (refresh !== '1' || !viewer)) throw new AccessError('invalid_request', 400);
+        options = { refreshStorage: refresh === '1', viewerKey: viewer ? `${current.user.id}:${viewer}` : null };
+      }
+      sendJson(response, 200, { ok: true, status: 'found', data: platformRuntime?.(options)
         || { enabled: false, storageAvailableBytes: null, runtimes: [] }, error: null });
       return true;
     }

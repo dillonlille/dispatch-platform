@@ -15,13 +15,22 @@ test('cached storage counts completed DSP backups, excludes neighbors and symlin
  write(path.join(dsp,'backups/plugin-revisions/paycom/1/snapshot.json'),{schemaVersion:1,pluginId:'paycom',revision:1,files:[{size:9}]});
  write(path.join(root,'outside'),'x'.repeat(100000));fs.symlinkSync(path.join(root,'outside'),path.join(dsp,'data/link'));
  const sampler=createStorageSampler({paths,clock:()=>now,volumeCheck:()=>{if(fail)throw Error('mount_missing');return null;}});
- assert.equal(sampler.read([id,peer]).get(id).status,'measuring');await sampler.settled();
+ assert.equal(sampler.read([id,peer],{refresh:true}).get(id).status,'measuring');await sampler.settled();
  const first=sampler.read([id,peer]).get(id);assert.equal(first.status,'ready');assert.equal(first.backups.count,3);assert.equal(first.backups.manual,1);assert.equal(first.backups.updates,1);assert.equal(first.backups.plugins,1);assert.equal(sampler.read([id,peer]).get(peer).backups.count,0);
  assert.equal(first.dataBytes,fs.statSync(path.join(dsp,'data/example')).blocks*512);
  write(path.join(dsp,'data/new'),'x'.repeat(10000));assert.equal(sampler.read([id]).get(id).usedBytes,first.usedBytes);
- now+=60000;fail=true;sampler.read([id]);await sampler.settled();const stale=sampler.read([id]).get(id);assert.equal(stale.status,'stale');assert.equal(stale.usedBytes,first.usedBytes);assert.equal(stale.sampledAt,1000);
- now+=60000;fail=false;sampler.read([id]);await sampler.settled();assert.ok(sampler.read([id]).get(id).usedBytes>first.usedBytes);
+ now+=24*60*60*1000;sampler.read([id]);await sampler.settled();assert.equal(sampler.read([id]).get(id).sampledAt,1000);
+ fail=true;sampler.read([id],{refresh:true});await sampler.settled();const stale=sampler.read([id]).get(id);assert.equal(stale.status,'stale');assert.equal(stale.usedBytes,first.usedBytes);assert.equal(stale.sampledAt,1000);
+ now+=60000;fail=false;sampler.read([id],{refresh:true});await sampler.settled();assert.ok(sampler.read([id]).get(id).usedBytes>first.usedBytes);
 });
 test('missing DSP storage and exhausted scan budgets remain unavailable rather than zero',async t=>{
- const {paths}=setup(t);const sampler=createStorageSampler({paths,maximumEntries:0,volumeCheck:()=>null});sampler.read([id]);await sampler.settled();const view=sampler.read([id]).get(id);assert.equal(view.status,'unavailable');assert.equal(view.usedBytes,undefined);
+ const {paths}=setup(t);const sampler=createStorageSampler({paths,maximumEntries:0,volumeCheck:()=>null});sampler.read([id],{refresh:true});await sampler.settled();const view=sampler.read([id]).get(id);assert.equal(view.status,'unavailable');assert.equal(view.usedBytes,undefined);
+});
+
+test('cancels storage when no viewers remain and does not restart on a poll',async t=>{
+ const {paths}=setup(t);let active=true,visits=0;
+ const sampler=createStorageSampler({paths,volumeCheck:()=>{visits++;active=false;return null;}});
+ sampler.read([id,peer],{refresh:true,shouldContinue:()=>active});await sampler.settled();
+ assert.equal(visits,1);assert.equal(sampler.read([id]).get(id).sampledAt,null);assert.equal(sampler.read([peer]).get(peer).refreshing,false);
+ await sampler.settled();assert.equal(visits,1);
 });

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSession } from "@/lib/session";
 import { request } from "@/lib/api";
 import { ErrorNotice, Loading } from "@/components/shared";
 
@@ -43,14 +44,42 @@ function Metric({ label, value, children }: { label: string; value: string; chil
   </div>;
 }
 export function DspResources() {
+  const { session } = useSession();
+  const [viewerId] = useState(() => crypto.randomUUID());
+  const [visible, setVisible] = useState(() => !document.hidden);
   const [now, setNow] = useState(Date.now);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  const runtime = useQuery({ queryKey: ["platform-runtime"], queryFn: () => request<RuntimeView>("/api/platform/runtime"), refetchInterval: 2000 });
+  const scanOnOpen = useRef(true);
+  useEffect(() => {
+    if (!visible) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [visible]);
+  useEffect(() => {
+    const leave = () => { void request("/api/platform/runtime", { method: "POST", keepalive: true,
+      headers: { "X-Dispatch-CSRF": session.csrfToken || "" }, body: JSON.stringify({ viewerId, action: "close" }),
+    }).catch(() => {}); };
+    const visibility = () => {
+      setVisible(!document.hidden);
+      if (document.hidden) leave(); else scanOnOpen.current = true;
+    };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [viewerId, session.csrfToken]);
+  const runtime = useQuery({ queryKey: ["platform-runtime"], queryFn: ({ signal }) => {
+    const refresh = scanOnOpen.current;
+    scanOnOpen.current = false;
+    return request<RuntimeView>(`/api/platform/runtime?viewer=${viewerId}${refresh ? "&refreshStorage=1" : ""}`, { signal });
+  }, enabled: visible, refetchInterval: 2000, refetchOnMount: "always", refetchIntervalInBackground: false });
   const data = runtime.data;
   const stale = Boolean(runtime.error || (data && now - data.sampledAt > 10000));
   return <section aria-label="DSP resources" className="space-y-4 mb-8">
     <div className="flex flex-wrap justify-between items-start gap-3">
-      <div><h2 className="text-lg font-semibold">DSP resources</h2><p className="text-sm text-muted-foreground">CPU and RAM refresh every 2 seconds. Storage and backups refresh every minute.</p></div>
+      <div><h2 className="text-lg font-semibold">DSP resources</h2><p className="text-sm text-muted-foreground">CPU and RAM refresh every 2 seconds while this page is visible. Storage and backups are checked when you open it.</p></div>
       <p role="status" className="flex items-center gap-2 text-sm"><span aria-hidden="true" className={`h-2 w-2 rounded-full ${stale ? "bg-amber-400" : data?.enabled ? "bg-emerald-400" : "bg-muted-foreground"}`} />{stale ? "Live updates interrupted" : data?.enabled ? "Live" : "Connecting"}</p>
     </div>
     <ErrorNotice error={runtime.error} />
@@ -60,7 +89,7 @@ export function DspResources() {
       <p className="text-xs text-muted-foreground">Measured {age(data.sampledAt, now)} · Host storage available: {bytes(data.storageAvailableBytes)}{stale ? " · Showing last received measurements" : ""}</p>
       {data.runtimes.map(item => {
         const storage = item.storage, backup = storage?.backups;
-        const storageStale = storage?.status === "stale" || (storage?.sampledAt != null && now - storage.sampledAt > 120000);
+        const storageStale = storage?.status === "stale";
         return <article key={item.reference} aria-label={`${item.name} resources`} className="rounded-xl border bg-card p-5 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold break-words min-w-0">{item.name}</h3><span className="text-xs rounded-full bg-muted px-2.5 py-1 capitalize">{item.status}</span></div>
           <dl className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">

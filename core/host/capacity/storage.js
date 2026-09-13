@@ -13,9 +13,11 @@ async function json(file){
  }catch(error){if(error.code==='ENOENT')return null;throw error;}finally{await fd?.close();}
 }
 // Metadata only: never read tenant file contents, follow symlinks, or block the API on a recursive scan.
+function checkpoint(budget){if(budget.active&&!budget.active())throw Error('scan_cancelled');}
 async function size(root,budget,logical=false){
  let bytes=0;const seen=new Set();
  async function walk(file){
+  checkpoint(budget);
   if(++budget.entries>budget.maximum||Date.now()>budget.deadline)throw Error('scan_limit');
   let stat;try{stat=await fsp.lstat(file);}catch(error){if(error.code==='ENOENT')return;throw error;}
   if(stat.isSymbolicLink())return;
@@ -34,6 +36,7 @@ async function backupIndex(paths,ids,budget){
  const manual=path.join(paths.local,'backups/manual'),updates=path.join(paths.local,'backups/updates/dsp');
  for(const [kind,root,pattern,file] of [['manual',manual,/^mbk_[a-f0-9]{32}$/,'manifest.json'],['updates',updates,/^[a-f0-9]{32}$/,'snapshot.json']]){
   try{for(const name of await names(root)){
+   checkpoint(budget);
    if(!pattern.test(name))continue;
    if(kind==='manual'&&await json(path.join(root,name,'.erasing.json')))continue;
    const record=await json(path.join(root,name,file));if(!record)continue;
@@ -49,7 +52,7 @@ async function backupIndex(paths,ids,budget){
     if(!Array.isArray(v.roots)||!/^[a-f0-9]{64}$/.test(v.digest))throw Error('invalid_backup');
     addBackup(result.get(v.dspId),kind,await size(path.join(root,name),budget,true),record.at);
    }
-  }}catch{for(const value of result.values())value.available=false;}
+  }}catch(error){if(error.message==='scan_cancelled')throw error;for(const value of result.values())value.available=false;}
  }
  return result;
 }
@@ -63,8 +66,10 @@ async function measureDsp(paths,id,backups,budget,volumeCheck){
  for(const name of areas)breakdown[name]=await size(path.join(root,name),budget);
  const revisions=path.join(root,'backups/plugin-revisions');
  for(const plugin of await names(revisions)){
+  checkpoint(budget);
   if(!/^[a-z][a-z0-9-]{0,63}$/.test(plugin))continue;
   for(const revision of await names(path.join(revisions,plugin))){
+   checkpoint(budget);
    if(!/^[1-9]\d*$/.test(revision))continue;
    const record=await json(path.join(revisions,plugin,revision,'snapshot.json'));if(!record)continue;
    const value=record.value;
@@ -78,22 +83,23 @@ async function measureDsp(paths,id,backups,budget,volumeCheck){
   usedBytes,runtimeBytes,dataBytes:breakdown.data,pluginBytes:breakdown.plugins,logBytes:breakdown.logs,localBackupBytes:breakdown.backups,
   backups:{...backups,lastAt:backups.lastAt?new Date(backups.lastAt).toISOString():null}};
 }
-function createStorageSampler({paths,clock=Date.now,intervalMs=60000,volumeCheck=assertVolumeMounted,maximumEntries=200000}={}){
- let running=null,lastStart=null;const cache=new Map();
- async function refresh(ids){
-  const budget={entries:0,maximum:maximumEntries,deadline:Date.now()+30000};
+function createStorageSampler({paths,clock=Date.now,volumeCheck=assertVolumeMounted,maximumEntries=200000}={}){
+ let running=null;const cache=new Map();
+ async function refresh(ids,active){
+  const budget={entries:0,maximum:maximumEntries,deadline:Date.now()+30000,active};
+  checkpoint(budget);
   const index=await backupIndex(paths,ids,budget);
   for(const id of ids){
-   try{cache.set(id,{...await measureDsp(paths,id,index.get(id),budget,volumeCheck),sampledAt:clock(),status:'ready'});}
-   catch{const prior=cache.get(id);cache.set(id,{...prior,status:prior?.sampledAt?'stale':'unavailable'});}
+   try{checkpoint(budget);const value=await measureDsp(paths,id,index.get(id),budget,volumeCheck);checkpoint(budget);cache.set(id,{...value,sampledAt:clock(),status:'ready'});}
+   catch(error){if(error.message==='scan_cancelled')return;const prior=cache.get(id);cache.set(id,{...prior,status:prior?.sampledAt?'stale':'unavailable'});}
   }
   for(const id of cache.keys())if(!ids.includes(id))cache.delete(id);
  }
- return {read(ids){
-  if(!running&&(lastStart===null||clock()-lastStart>=intervalMs||ids.some(id=>!cache.has(id)))){
-   lastStart=clock();running=refresh(ids).catch(()=>{for(const id of ids)cache.set(id,{...cache.get(id),status:cache.get(id)?.sampledAt?'stale':'unavailable'});}).finally(()=>{running=null;});
+ return {read(ids,{refresh:requested=false,shouldContinue=()=>true}={}){
+  if(requested&&!running){
+   running=refresh(ids,shouldContinue).catch(error=>{if(error.message==='scan_cancelled')return;for(const id of ids)cache.set(id,{...cache.get(id),status:cache.get(id)?.sampledAt?'stale':'unavailable'});}).finally(()=>{running=null;});
   }
-  return new Map(ids.map(id=>[id,{...(cache.get(id)||{status:'measuring',sampledAt:null}),refreshing:Boolean(running)}]));
+  return new Map(ids.map(id=>[id,{...(cache.get(id)||{status:running?'measuring':'unavailable',sampledAt:null}),refreshing:Boolean(running)}]));
  },settled:()=>running||Promise.resolve()};
 }
 module.exports={createStorageSampler,size,backupIndex};
