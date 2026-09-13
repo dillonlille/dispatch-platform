@@ -1,0 +1,4 @@
+#!/usr/bin/env -S node --no-warnings
+'use strict';
+// Retained for commands already stored in private DSP collection databases.
+require('../../../plugins/paycom/backend/bin/dispatch-paycom-collector');

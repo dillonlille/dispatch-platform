@@ -1,0 +1,41 @@
+schema_version: 1
+id: paycom
+display_name: Paycom Collector
+version: 0.18.8
+summary: Paycom full-workforce immediate sync with retained unknown absences, persisted detail proof, and privacy-safe aggregate deltas.
+owner:
+  data: paycom
+  team: Dispatch Operations
+paths:
+  source: src
+  tests: tests
+  database: <data-root>/paycom
+  state: <state-root>/paycom
+  staging: <staging-root>
+  locks: <state-root>/paycom/locks
+  receipts: <state-root>/paycom/receipts
+commands:
+  test: ./tooling/test
+  build: ./tooling/build
+  verify: ./tooling/verify
+  health: ./tooling/health
+components:
+  - id: paycom-collector
+    kind: collector
+    source: src
+    capabilities:
+      read_local_data: true
+      mutate_data: true
+      collect: true
+      network: true
+      authentication: true
+      direct_delivery: false
+      long_running: true
+    coordinator_mode: paycom
+    runtime:
+      releases: runtime/paycom-collector
+      activation_record: config/activation.json
+retention:
+  keep_current: true
+  keep_rollback: 1
+  preserve_pinned: true

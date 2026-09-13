@@ -1,0 +1,28 @@
+name: Prepare isolated DSP test tools
+description: Satisfy the DSP's existing trusted-tool rules on a disposable hosted runner
+runs:
+  using: composite
+  steps:
+    - name: Require an isolated GitHub-hosted runner
+      shell: bash
+      env:
+        RUNNER_KIND: ${{ runner.environment }}
+      run: test "$RUNNER_KIND" = github-hosted
+    - name: Prepare trusted Node and Chrome paths
+      shell: bash
+      run: |
+        # Hosted tool caches may have writable parents. Do not weaken runtime checks.
+        sudo install -d -o root -g root -m 755 /dispatch-ci /dispatch-ci/bin
+        sudo install -o root -g root -m 755 "$(command -v node)" /dispatch-ci/bin/node
+        echo /dispatch-ci/bin >> "$GITHUB_PATH"
+        test -x /opt/google/chrome/chrome
+        sudo chown root:root /opt /opt/google
+        sudo chown -R root:root /opt/google/chrome
+        sudo chmod go-w /opt /opt/google /opt/google/chrome
+        sudo chmod -R go-w /opt/google/chrome
+        sudo chmod 4755 /opt/google/chrome/chrome-sandbox
+        stat -Lc '%u %a %n' /opt /opt/google /opt/google/chrome /opt/google/chrome/chrome /dispatch-ci/bin/node
+        echo 'DISPATCH_CHROME_EXECUTABLE=/opt/google/chrome/chrome' >> "$GITHUB_ENV"
+        command -v Xvfb
+        command -v setpriv
+        /usr/bin/python3 -c "import ctypes; ctypes.CDLL('libX11.so.6'); ctypes.CDLL('libXtst.so.6')"

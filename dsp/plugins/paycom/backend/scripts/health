@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
+node --no-warnings - <<'NODE'
+process.umask(0o077);
+const fs = require('node:fs');
+const { PaycomStore } = require('./src/store');
+const { DATABASE } = require('./src/paths');
+if (!fs.existsSync(DATABASE)) {
+  console.log(JSON.stringify({ ok: true, status: 'not_initialized', database: 'missing' }));
+} else {
+const store = new PaycomStore(DATABASE, { readOnly: true });
+try {
+  console.log(JSON.stringify({
+    ok: true,
+    status: 'ready',
+    database: fs.existsSync(DATABASE) ? 'ready' : 'missing',
+    payPeriods: store.audit('pay_periods'),
+    roster: store.audit('roster'),
+    timecards: store.audit('timecards'),
+    resourceLinks: store.auditResourceLinks(),
+  }));
+} finally { store.close(); }
+}
+NODE

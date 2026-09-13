@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+cd "$ROOT"
+PACKAGE_PARENT="$(mktemp -d /tmp/dispatch-native-verify-XXXXXX)"
+trap 'rm -rf -- "$PACKAGE_PARENT"' EXIT
+node --no-warnings runtime/supervisor/examples/build-native-fixture.js "$PACKAGE_PARENT/package"
+node --no-warnings runtime/supervisor/examples/native-host-fixture.js "$PACKAGE_PARENT/package"

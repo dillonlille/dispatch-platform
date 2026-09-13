@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "collectors": [
+    {
+      "id": "cdf",
+      "version": "0.3.1",
+      "description": "Broker-authenticated exact-week Customer Delivery Feedback artifact collector",
+      "command": "${DISPATCH_PROJECT_ROOT}/compatibility/cdf/bin/dispatch-cdf-collector",
+      "sourceSchema": {
+        "type": "object",
+        "properties": {
+          "timezone": { "type": "string", "maxLength": 64 },
+          "station": { "type": "string", "maxLength": 12, "pattern": "^[A-Z0-9]{2,12}$" },
+          "companyId": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+          "dsp": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" }
+        },
+        "required": ["timezone", "station", "companyId", "dsp"],
+        "additionalProperties": false
+      },
+      "methods": {
+        "collection.resolve-targets": {
+          "description": "Resolve standard selectors into exact Sunday-through-Saturday CDF reporting weeks",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "selectorKind": { "type": "string", "enum": ["date", "latest-complete", "date-range", "exact-target", "target-range"] },
+              "date": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "start": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "end": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "key": { "type": "string", "maxLength": 8, "pattern": "^\\d{4}-W\\d{2}$" },
+              "startKey": { "type": "string", "maxLength": 8, "pattern": "^\\d{4}-W\\d{2}$" },
+              "endKey": { "type": "string", "maxLength": 8, "pattern": "^\\d{4}-W\\d{2}$" }
+            },
+            "required": ["selectorKind"],
+            "additionalProperties": false
+          },
+          "timeoutSeconds": 30,
+          "maxAttempts": 1,
+          "backoffSeconds": [],
+          "concurrencyKeys": []
+        },
+        "collector.health": {
+          "description": "Inspect CDF runtime and publication storage without collecting",
+          "inputSchema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+          "timeoutSeconds": 30,
+          "maxAttempts": 1,
+          "backoffSeconds": [],
+          "concurrencyKeys": ["publish:cdf"]
+        },
+        "cdf.week.collect": {
+          "description": "Collect, validate, and atomically publish one exact completed CDF reporting week",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "week": { "type": "string", "maxLength": 8, "pattern": "^\\d{4}-W\\d{2}$" },
+              "replace": { "type": "boolean" }
+            },
+            "required": ["week", "replace"],
+            "additionalProperties": false
+          },
+          "timeoutSeconds": 600,
+          "maxAttempts": 1,
+          "backoffSeconds": [],
+          "concurrencyKeys": ["auth:{authProfile}", "publish:cdf"]
+        },
+        "cdf.week.audit": {
+          "description": "Verify one active CDF publication without network or browser access",
+          "inputSchema": {
+            "type": "object",
+            "properties": { "week": { "type": "string", "maxLength": 8, "pattern": "^\\d{4}-W\\d{2}$" } },
+            "required": ["week"],
+            "additionalProperties": false
+          },
+          "timeoutSeconds": 60,
+          "maxAttempts": 1,
+          "backoffSeconds": [],
+          "concurrencyKeys": ["publish:cdf"]
+        }
+      }
+    }
+  ],
+  "sources": [
+    {
+      "id": "cdf-example",
+      "collector": "cdf",
+      "authProfile": "amazon-example",
+      "config": {
+        "timezone": "America/Los_Angeles",
+        "station": "TST1",
+        "companyId": "fixture-company",
+        "dsp": "fixture-dsp"
+      },
+      "collection": {
+        "targetType": "cdf-week",
+        "resolverMethod": "collection.resolve-targets",
+        "selectors": ["latest-complete", "date", "relative-date", "date-range", "last-duration", "exact-target", "target-range"],
+        "targetFields": ["week"],
+        "scopes": {
+          "cdf": {
+            "description": "Exact-week authoritative CDF artifact publication and integrity audit",
+            "tasks": [
+              { "id": "collect", "plan": "cdf-week-collect", "input": { "replace": false }, "targetInput": { "week": "week" }, "dependsOn": [] },
+              { "id": "audit", "plan": "cdf-week-audit", "input": {}, "targetInput": { "week": "week" }, "dependsOn": ["collect"] }
+            ],
+            "auditTasks": [
+              { "id": "audit", "plan": "cdf-week-audit", "input": {}, "targetInput": { "week": "week" }, "dependsOn": [] }
+            ]
+          }
+        },
+        "limits": { "maxTargets": 64, "maxRangeDays": 730 }
+      },
+      "enabled": true
+    }
+  ],
+  "plans": [
+    { "id": "cdf-health", "source": "cdf-example", "method": "collector.health", "schedule": { "type": "manual" }, "input": {}, "dependsOn": [], "enabled": true },
+    { "id": "cdf-week-collect", "source": "cdf-example", "method": "cdf.week.collect", "schedule": { "type": "manual" }, "input": { "week": "2026-W20", "replace": false }, "dependsOn": [], "enabled": true },
+    { "id": "cdf-week-audit", "source": "cdf-example", "method": "cdf.week.audit", "schedule": { "type": "manual" }, "input": { "week": "2026-W20" }, "dependsOn": [], "enabled": true }
+  ],
+  "syncs": []
+}

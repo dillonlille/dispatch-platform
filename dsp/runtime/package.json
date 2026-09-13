@@ -1,0 +1,10 @@
+{
+  "name": "dispatch-dsp-container",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "./scripts/build",
+    "verify": "./scripts/verify"
+  }
+}

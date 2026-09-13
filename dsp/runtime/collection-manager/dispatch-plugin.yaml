@@ -1,0 +1,43 @@
+schema_version: 1
+id: collection-manager
+display_name: Dispatch Collection Manager
+version: 0.9.0
+summary: Durable collector control plane with collections, managed polling syncs, retries, locks, revisions, and receipts.
+owner:
+  data: collection-manager
+  team: Dispatch
+paths:
+  source: src
+  tests: tests
+  database: <data-root>/collection-manager
+  state: <state-root>/collection-manager
+commands:
+  test: ./tooling/test
+  build: ./tooling/build
+  verify: ./tooling/verify
+  health: ./tooling/health
+components:
+  - id: control-plane
+    kind: control-plane
+    source: src
+    capabilities:
+      read_local_data: true
+      mutate_data: true
+      collect: false
+      network: false
+      authentication: false
+      direct_delivery: false
+      long_running: true
+  - id: service
+    kind: service
+    source: src
+    capabilities:
+      read_local_data: true
+      mutate_data: true
+      collect: false
+      network: false
+      authentication: false
+      direct_delivery: false
+      long_running: true
+    service_units:
+      - integration/systemd/dispatch-collection-manager.service.in

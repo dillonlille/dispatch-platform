@@ -1,0 +1,16 @@
+{
+  "name": "dispatch-cdf-plugin",
+  "version": "0.3.1",
+  "private": true,
+  "description": "Independent artifact-first Customer Delivery Feedback collector",
+  "type": "commonjs",
+  "scripts": {
+    "build": "./scripts/build",
+    "test": "./scripts/test",
+    "verify": "./scripts/verify",
+    "health": "./scripts/health"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

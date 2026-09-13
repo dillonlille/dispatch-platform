@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IMAGE=localhost/dispatch-runtime:dev
+inspect="$(podman image inspect "$IMAGE")"
+node --no-warnings -e '
+const image = JSON.parse(process.argv[1])[0];
+const config = image.Config;
+if (image.Os !== "linux" || image.Architecture !== "amd64") throw new Error("invalid_platform");
+if (config.User !== "10001:10001") throw new Error("invalid_image_user");
+if (JSON.stringify(config.Entrypoint) !== JSON.stringify(["/usr/bin/tini","--","/usr/local/bin/node","--no-warnings","/opt/dispatch/runtime/supervisor/src/supervisor.js"])) throw new Error("invalid_entrypoint");
+if (!image.Healthcheck || !Array.isArray(image.Healthcheck.Test) || image.Healthcheck.Test.includes("NONE")) throw new Error("invalid_healthcheck");
+if (!Array.isArray(config.Env) || config.Env.some(value => /^DISPATCH_(?:RUNTIME_KEY|ACCESS_CONTROL)/.test(value))) throw new Error("unsafe_image_environment");
+' "$inspect"
+podman run --rm --pull=never --network none --read-only --entrypoint /usr/local/bin/node "$IMAGE" --no-warnings -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const releaseIdentity = require("/opt/dispatch/runtime/supervisor/src/create-release-manifest.js");
+const manifest = JSON.parse(fs.readFileSync("/opt/dispatch/runtime-release-manifest.json", "utf8"));
+if (manifest.schemaVersion !== 1 || !/^sha256:[a-f0-9]{64}$/.test(manifest.codeTreeDigest) || manifest.sourceFileCount < 1) throw new Error("invalid_runtime_manifest");
+const packageNames = Object.keys(manifest.osPackages || {}).sort();
+if (JSON.stringify(packageNames) !== JSON.stringify(["caCertificates","chromium","chromiumSandbox","fontsLiberation","tini","utilLinux"].sort())
+    || !Object.values(manifest.osPackages).every(value => /^\d+[A-Za-z0-9.+:~_-]*$/.test(value))) throw new Error("invalid_os_packages");
+for (const forbidden of ["dispatch-core", "interfaces", "compatibility"]) if (fs.existsSync(`/opt/dispatch/${forbidden}`)) throw new Error("central_component_in_image");
+for (const forbidden of ["hub.js", "client.js", "control.js"]) if (fs.existsSync(`/opt/dispatch/runtime/agent/src/${forbidden}`)) throw new Error("central_agent_component_in_image");
+for (const forbidden of ["/usr/local/bin/npm", "/usr/local/bin/npx", "/usr/local/bin/corepack", "/usr/bin/gcc", "/usr/bin/g++", "/usr/bin/make"]) if (fs.existsSync(forbidden)) throw new Error("build_tool_in_image");
+for (const plugin of ["cdf", "paycom"]) {
+  if (!fs.statSync(`/opt/dispatch/compatibility/providers/${plugin}/scripts/health`).isFile()) throw new Error("missing_provider_health_command");
+  for (const name of ["build", "test", "verify"]) if (fs.existsSync(`/opt/dispatch/compatibility/providers/${plugin}/scripts/${name}`)) throw new Error("development_script_in_image");
+  const bin = fs.readdirSync(`/opt/dispatch/compatibility/providers/${plugin}/bin`).map(name => `/opt/dispatch/compatibility/providers/${plugin}/bin/${name}`);
+  if (bin.some(file => fs.lstatSync(file).uid !== 10001 || (fs.lstatSync(file).mode & 0o022) !== 0)) throw new Error("unsafe_collector_ownership");
+  const config = fs.readdirSync(`/opt/dispatch/compatibility/providers/${plugin}/config`).map(name => `/opt/dispatch/compatibility/providers/${plugin}/config/${name}`);
+  if (config.some(file => fs.lstatSync(file).uid !== 10001 || (fs.lstatSync(file).mode & 0o022) !== 0)) throw new Error("unsafe_definition_ownership");
+}
+let sourceFiles = 0;
+function visit(target) {
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) throw new Error("mutable_or_linked_runtime_source");
+  if (stat.isDirectory()) {
+    if (["tests", "test", "examples", "docs"].includes(path.basename(target))) throw new Error("non_runtime_source_in_image");
+    for (const child of fs.readdirSync(target)) visit(path.join(target, child));
+    return;
+  }
+  if (!stat.isFile() || stat.nlink !== 1) throw new Error("unsafe_runtime_source");
+  if (target !== "/opt/dispatch/runtime-release-manifest.json") sourceFiles += 1;
+  const tenantOwned = /^\/opt\/dispatch\/(?:runtime\/providers\/cdf|plugins\/paycom\/backend)\/(?:bin|config)\//.test(target);
+  const legacyEntrypoint = /^\/opt\/dispatch\/plugins\/(?:cdf|paycom)\/bin\//.test(target);
+  if (stat.uid !== (tenantOwned || legacyEntrypoint ? 10001 : 0) || stat.gid !== (tenantOwned || legacyEntrypoint ? 10001 : 0)) throw new Error("invalid_runtime_source_owner");
+}
+visit("/opt/dispatch");
+if (sourceFiles !== manifest.sourceFileCount) throw new Error("runtime_manifest_file_count_mismatch");
+if (releaseIdentity.treeDigest(releaseIdentity.sourceFiles()) !== manifest.codeTreeDigest) throw new Error("runtime_manifest_digest_mismatch");
+console.log(JSON.stringify({ ok: true, status: "runtime_manifest_verified", sourceFileCount: manifest.sourceFileCount }));
+'
+for provider in paycom cdf; do
+  output="$(printf '{}\n' | podman run --rm -i --pull=never --network none --read-only \
+    --entrypoint /usr/local/bin/node "$IMAGE" --no-warnings \
+    "/opt/dispatch/plugins/$provider/bin/dispatch-$provider-collector")"
+  node -e 'const value = JSON.parse(process.argv[1]); if (value.ok !== false) throw new Error("legacy_entrypoint_response_invalid");' "$output"
+done
+podman run --rm --pull=never --network none --read-only --entrypoint /usr/local/bin/node "$IMAGE" --version
+printf '%s\n' '{"ok":true,"status":"runtime_image_verified","nonRoot":true,"fixedEntrypoint":true,"healthcheck":true}'

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+for file in \
+  "$ROOT"/src/providers.js \
+  "$ROOT"/src/strict-json.js \
+  "$ROOT"/src/attempt-guard.js \
+  "$ROOT"/src/maintenance-lock.js \
+  "$ROOT"/src/paths.js \
+  "$ROOT"/src/vault.js \
+  "$ROOT"/src/client.js \
+  "$ROOT"/src/browser-client.js \
+  "$ROOT"/src/browser-runtime.js \
+  "$ROOT"/src/native-window.js \
+  "$ROOT"/src/cdp.js \
+  "$ROOT"/src/authentication-diagnostics.js \
+  "$ROOT"/src/session-manager.js \
+  "$ROOT"/src/adapters/paycom.js \
+  "$ROOT"/src/adapters/amazon-logistics.js \
+  "$ROOT"/src/server.js \
+  "$ROOT"/src/server-cli.js \
+  "$ROOT"/src/client-cli.js \
+  "$ROOT"/src/admin-cli.js \
+  "$ROOT"/src/paycom-credentials-cli.js \
+  "$ROOT"/src/offline-verify.js \
+  "$ROOT"/bin/dispatch-auth-broker \
+  "$ROOT"/bin/dispatch-auth-broker-admin \
+  "$ROOT"/bin/dispatch-paycom-credentials \
+  "$ROOT"/bin/dispatch-auth-brokerctl; do
+  node --check "$file"
+done
+python3 -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' "$ROOT/bin/dispatch-auth-broker-signal"
+python3 -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))' "$ROOT/src/native-input.py"
+test -x "$ROOT/bin/dispatch-auth-broker-signal"
+printf '%s\n' '{"ok":true,"status":"built"}'

@@ -1,0 +1,61 @@
+name: Verified platform dependency
+on:
+  workflow_call:
+    inputs:
+      production:
+        type: boolean
+        default: false
+    outputs:
+      sha256:
+        value: ${{ jobs.bundle.outputs.sha256 }}
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sha256: ${{ steps.archive.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: python3 -m unittest discover -s tooling -p 'test_*.py'
+      - id: lock
+        env:
+          PRODUCTION: ${{ inputs.production }}
+        run: |
+          if [ "$PRODUCTION" = true ]; then
+            python3 tooling/platform-lock.py --production
+          else
+            python3 tooling/platform-lock.py
+          fi
+      - if: steps.lock.outputs.mode == 'source'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ steps.lock.outputs.repository }}
+          ref: ${{ steps.lock.outputs.commit }}
+          path: platform-source
+          persist-credentials: false
+      - if: steps.lock.outputs.mode == 'source'
+        env:
+          EXPECTED_COMMIT: ${{ steps.lock.outputs.commit }}
+        run: |
+          test "$(git -C platform-source rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          node platform-source/tooling/platform-packages.js build "$RUNNER_TEMP/platform-packages"
+      - if: steps.lock.outputs.mode == 'release'
+        run: python3 tooling/fetch-platform.py "$RUNNER_TEMP/platform-packages"
+      - id: archive
+        run: |
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -czf "$RUNNER_TEMP/platform-bundle.tar.gz" -C "$RUNNER_TEMP/platform-packages" .
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/platform-bundle.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-bundle
+          path: ${{ runner.temp }}/platform-bundle.tar.gz
+          retention-days: 1
+          if-no-files-found: error

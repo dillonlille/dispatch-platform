@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+for file in "$ROOT"/src/*.js "$ROOT"/tests/*.js "$ROOT"/examples/*.js "$ROOT"/bin/*; do
+  node --no-warnings --check "$file"
+done
+test -x "$ROOT/bin/dispatch-runtime-gateway"
+test -x "$ROOT/bin/dispatch-runtime-gatewayctl"
+node --no-warnings -e "require('$ROOT/src')"
+printf '%s\n' '{"ok":true,"status":"built"}'

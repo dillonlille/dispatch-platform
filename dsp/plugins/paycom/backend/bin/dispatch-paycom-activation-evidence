@@ -1,0 +1,56 @@
+#!/usr/bin/env -S node --no-warnings
+'use strict';
+
+const { parseStrictJson } = require('../../../../runtime/auth-broker/src/strict-json');
+const { managedRuntimeEnvironmentFromProcess } = require('dispatch-protocol/paths/runtime-paths');
+const { verifyActivationEvidence } = require('../src/activation-evidence');
+
+const MAX_INPUT_BYTES = 4096;
+let chunks = [];
+let size = 0;
+let failed = false;
+
+function reject() {
+  if (failed) return;
+  failed = true;
+  chunks = [];
+  process.stdout.write('{"ok":false,"status":"first_publication_failed"}\n');
+  process.exitCode = 1;
+}
+
+process.stdin.on('data', chunk => {
+  size += chunk.length;
+  if (size > MAX_INPUT_BYTES) {
+    reject();
+    process.stdin.destroy();
+    return;
+  }
+  chunks.push(chunk);
+});
+process.stdin.on('error', reject);
+process.stdin.on('end', () => {
+  if (failed) return;
+  try {
+    const text = Buffer.concat(chunks).toString('utf8');
+    chunks = [];
+    if (!text.endsWith('\n') || text.slice(0, -1).includes('\n')) throw new Error('invalid_input');
+    const input = parseStrictJson(text.slice(0, -1));
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+        || Object.keys(input).sort().join(',') !== 'batchId,definitionDigest,preparationRunId') throw new Error('invalid_input');
+    managedRuntimeEnvironmentFromProcess();
+    const { defaultPaths: collectionPaths } = require('../../../../runtime/collection-manager/src/paths');
+    const { DATABASE: paycomDatabase } = require('../src/paths');
+    const evidence = verifyActivationEvidence({
+      collectionPaths: collectionPaths(),
+      paycomDatabase,
+      batchId: input.batchId,
+      preparationRunId: input.preparationRunId,
+      definitionDigest: input.definitionDigest,
+      clock: Date.now,
+    });
+    process.stdout.write(`${JSON.stringify({ ok: true, status: 'ok', evidence })}\n`);
+  } catch {
+    reject();
+  }
+});
+process.stdin.resume();

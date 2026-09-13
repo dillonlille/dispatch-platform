@@ -1,0 +1,4 @@
+#!/usr/bin/env -S node --no-warnings
+'use strict';
+process.umask(0o077);
+require('../src/service-cli').main().then(code => { if (Number.isInteger(code)) process.exitCode = code; });
