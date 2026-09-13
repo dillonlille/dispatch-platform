@@ -43,6 +43,7 @@ function dashboardProvider({paths,store,corePublic=path.resolve(__dirname,'../..
     }
    }
    value=cache.get(digest);
+   if(cache.size>8)cache.delete(cache.keys().next().value);
   }
   return identityOnly?{product:value.product,digest:value.digest}:value;
  };

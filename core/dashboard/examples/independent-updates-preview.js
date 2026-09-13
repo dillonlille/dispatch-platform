@@ -48,7 +48,15 @@ async function createPreview({ port = 0, automatic = true, versionedDashboards =
     const manifest = { schemaVersion: 1, product, version, channel: 'development', protocol: 1, minimumProtocol: 1,
       sourceDigest: 'a'.repeat(64), plugins: [], files: inventory(directory) };
     fs.writeFileSync(path.join(directory, 'release.json'), JSON.stringify(manifest));
-    const digest = hash(JSON.stringify(manifest)); await releases.stage(directory, digest); return digest;
+    const digest = hash(JSON.stringify(manifest)); await releases.stage(directory, digest);
+    const state=releases.state();
+    if(state.latest.core && state.latest.dsp){
+      const entry={version,components:{core:{digest:state.latest.core},dsp:{digest:state.latest.dsp}},
+        changes:{core:product==='core' ? 'Platform Owner dashboard and service improvements.' : 'No changes.',dsp:'DSP dashboard and runtime improvements.',plugins:'Paycom connection improvements.'},url:'https://example.test/releases/'+version};
+      const history=(state.platform?.history||[]).filter(row=>row.version!==version);history.push(entry);
+      state.platform={latest:version,history};releases.save(state);
+    }
+    return digest;
   }
   const core = await publish('core', '0.0.1'), dsp = await publish('dsp', '0.0.1');
   const state = releases.state(); state.active = { core, dsps: Object.fromEntries(dsps.map(id => [id, dsp])) }; releases.save(state);

@@ -67,7 +67,7 @@ class UpdateWorker {
     }
     if (this.clock() - this.lastRefresh >= 300000) {
       this.lastRefresh = this.clock();
-      for (const product of ['core', 'dsp']) {
+      for (const product of (this.feed.isUnified ? ['core'] : ['core', 'dsp'])) {
         try { await this.feed.refresh(product); }
         catch { this.commands.heartbeat('feed_unavailable'); }
       }

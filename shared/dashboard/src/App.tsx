@@ -348,7 +348,7 @@ export function App() {
     if(!session?.authenticated || !window.__dispatchDashboard)return;
     let cancelled=false;
     const check=async()=>{try{const current=await request<{product:string;digest:string}>("/api/dashboard?identity=1");
-      if(!cancelled)setDashboardChanged(current.digest!==window.__dispatchDashboard.digest);
+      if(!cancelled)setDashboardChanged(current.digest!==window.__dispatchDashboard?.digest);
     }catch{ /* Normal session/error handling owns authentication failures. */ }};
     void check(); const timer=window.setInterval(check,30000);
     return ()=>{cancelled=true;window.clearInterval(timer);};

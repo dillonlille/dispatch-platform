@@ -4,7 +4,7 @@ const {GitHubReleases,download,compareVersions}=require('./github');
 const {hash}=require('../../shared/releases/package');
 const REPOSITORY='dillonlille/dispatch-platform';
 class PlatformGitHubReleases extends GitHubReleases {
- constructor(options){super({...options,repositories:{core:REPOSITORY,dsp:REPOSITORY}});}
+ constructor(options){super({...options,repositories:{core:REPOSITORY,dsp:REPOSITORY}});this.isUnified=true;}
  async descriptor(release) {
   const asset=release.assets.filter(a=>a.name==='platform-release.json');
   const url=`https://github.com/${REPOSITORY}/releases/download/${release.tag_name}/platform-release.json`;
@@ -31,7 +31,8 @@ class PlatformGitHubReleases extends GitHubReleases {
   if(!items.length)throw Error('release_feed_empty');
   const descriptors=[];
   for(const item of items) {
-   const value=await this.descriptor(item);
+   const known=this.releases.state().platform?.history.find(row=>row.version===item.tag_name.slice(1));
+   const value=known && item!==items.at(-1) ? known : await this.descriptor(item);
    for(const track of ['core','dsp']) {
     const component=value.components[track];
     const source=items.find(row=>row.tag_name===`v${component.version}`);

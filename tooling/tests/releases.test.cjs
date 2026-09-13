@@ -84,3 +84,15 @@ test('unified feed reuses Core across a plugin-only release and resets only the 
  await feed.refresh('dsp');state=releases.state();assert.equal(state.latest.core,core.digest);assert.equal(state.latest.dsp,next.digest);assert.equal(state.tested,null);assert.equal(state.platform.latest,'0.0.2');
  const saved=JSON.stringify(state);deny=true;await assert.rejects(feed.refresh('core'),/untrusted/);assert.equal(JSON.stringify(releases.state()),saved);
 });
+test('migration freezes the verified old dashboard and refuses changed snapshots',t=>{
+ const root=fixture(t),paths={local:path.join(root,'local')};
+ const core=makeRelease(root,'core-baseline','0.0.5','dillonlille/dispatch-core');
+ fs.mkdirSync(path.join(core.directory,'code/dashboard/public'),{recursive:true});
+ fs.renameSync(path.join(core.directory,'dashboard/assets'),path.join(core.directory,'code/dashboard/public/assets'));
+ fs.rmSync(path.join(core.directory,'dashboard'),{recursive:true});
+ core.manifest.product='core';core.manifest.files=inventory(core.directory).filter(f=>f.path!=='release.json');fs.writeFileSync(path.join(core.directory,'release.json'),JSON.stringify(core.manifest));core.digest=hash(JSON.stringify(core.manifest));
+ const dsp=makeRelease(root,'legacy-dsp','0.0.1','dillonlille/dispatch-dsp');fs.rmSync(path.join(dsp.directory,'dashboard'),{recursive:true});dsp.manifest.files=inventory(dsp.directory).filter(f=>f.path!=='release.json');fs.writeFileSync(path.join(dsp.directory,'release.json'),JSON.stringify(dsp.manifest));dsp.digest=hash(JSON.stringify(dsp.manifest));
+ const state={active:{core:core.digest},releases:{core:{[core.digest]:core},dsp:{[dsp.digest]:dsp}}};
+ const {freezeLegacyDashboards}=from('core/updates/migration');assert.equal(freezeLegacyDashboards(paths,state).dashboards,1);assert.equal(freezeLegacyDashboards(paths,state).activation,false);
+ const saved=path.join(paths.local,'state/updates/dashboard-baselines',dsp.digest,'public/assets/frontend.js');fs.writeFileSync(saved,'tampered');assert.throws(()=>freezeLegacyDashboards(paths,state),/dashboard_invalid/);
+});
