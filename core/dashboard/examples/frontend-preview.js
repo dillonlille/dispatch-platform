@@ -299,7 +299,7 @@ async function main() {
     sendPasswordReset: async message => { process.send?.({ type: 'password-reset', message }); return { status: 'accepted' }; },
     sendPasswordResetConfirmation: async message => { process.send?.({ type: 'password-reset-confirmation', message }); return { status: 'accepted' }; },
   } : null;
-  const server = createDashboardServer({ client, access, updates, backups, paycomSetup, connections, plugins, releasePopup, turnstile, invitationDelivery,
+  const server = createDashboardServer({ dashboards:require('../../tooling/development-dashboard').developmentDashboards(), client, access, updates, backups, paycomSetup, connections, plugins, releasePopup, turnstile, invitationDelivery,
     pluginAssets: async ({ pluginId, revision }) => {
       if (pluginId !== 'paycom') throw new Error('plugin_unavailable');
       if (!paycomFixtureRoot) throw new Error('dsp_test_fixture_required');

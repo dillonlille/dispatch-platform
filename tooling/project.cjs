@@ -15,7 +15,7 @@ function assemble(output) {
  }
  copy(path.join(root,'plugins'),path.join(output,'dsp/plugins'));
  // The DSP dashboard has its own build and dependency lock, with common static assets.
- for(const name of ['index.html','assets/inter.woff2']) {
+ for(const name of ['assets/inter.woff2']) {
   const target=path.join(output,'dsp/dashboard/public',name);fs.mkdirSync(path.dirname(target),{recursive:true});
   fs.copyFileSync(path.join(root,'shared/dashboard/public',name),target);
  }

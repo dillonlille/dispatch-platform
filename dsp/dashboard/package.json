@@ -1,22 +1,14 @@
 {
-  "name": "dispatch-dashboard",
+  "name": "dispatch-dsp-dashboard",
   "version": "0.4.0",
   "private": true,
-  "description": "Authenticated tenant-scoped operations and private platform provisioning console for Dispatch",
+  "description": "DSP dashboard compiled and distributed with DSP releases",
   "type": "commonjs",
-  "main": "server/main.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "./scripts/build",
-    "test": "./scripts/test",
-    "start": "../bin/dispatch-dashboard",
-    "start:operator": "../bin/dispatch-dashboard --operator",
-    "start:private-operator": "../bin/dispatch-dashboard --operator --installation-operator",
-    "test:ui": "playwright test",
-    "preview:ui": "DISPATCH_FRONTEND_FIXTURE=1 node --no-warnings examples/frontend-preview.js",
-    "format": "prettier --write frontend/src"
+    "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

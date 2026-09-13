@@ -22,3 +22,14 @@ the hosted checks prepare these on an isolated runner. Tests use synthetic data.
 Use feature branches and PRs. The owner authorizes autonomous PR creation and
 merging after review and successful checks. Publication and installation remain
 separate. See RELEASES.md. Never develop in live/ or installed DSP directories.
+
+After building both dashboards, run plugin previews from the assembled Core tree:
+
+```sh
+/absolute/build/workspace/core/bin/dispatch create plugin sample-notes
+/absolute/build/workspace/core/bin/dispatch plugin dev /absolute/plugin/source
+```
+
+The preview serves each synthetic DSP's DSP dashboard and uses independent test
+accounts/state. An external DSP dashboard can be supplied through the explicit
+DISPATCH_DSP_DASHBOARD development setting. Production always uses release receipts.
