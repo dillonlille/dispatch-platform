@@ -1,5 +1,6 @@
 {
   "unit": [
+    "host/capacity/tests",
     "sdk/tests",
     "core/api/tests",
     "core/auth-broker/tests",

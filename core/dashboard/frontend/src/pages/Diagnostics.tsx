@@ -5,6 +5,8 @@ import { idempotent, queryClient, request } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { PageHeading, ErrorNotice, Loading, Notice } from "@/components/shared";
 
+import { DspResources } from "./DspResources";
+
 type DiagnosticsView = {
   enabled: boolean;
   dsps: {
@@ -21,14 +23,6 @@ export function Diagnostics() {
   const data = useQuery({
     queryKey: ["platform-diagnostics"],
     queryFn: () => request<DiagnosticsView>("/api/platform/diagnostics"),
-    refetchInterval: 5000,
-  });
-  const runtime = useQuery({
-    queryKey: ["platform-runtime"],
-    queryFn: () => request<{ enabled: boolean; storageAvailableBytes: number | null;
-      runtimes: { reference: string; name: string; status: string; memoryBytes: number | null; memoryLimitBytes: number | null; tasks: number | null;
-        storage: { limited: boolean | null; capacityBytes: number | null; availableBytes: number | null } }[]
-    }>("/api/platform/runtime"),
     refetchInterval: 5000,
   });
   async function deploy() {
@@ -53,27 +47,10 @@ export function Diagnostics() {
     <>
       <PageHeading
         title="Diagnostics"
-        description="Check runtime health and create test DSPs."
+        description="Monitor DSP resources and create test DSPs."
       />
-      <ErrorNotice error={error || data.error || runtime.error} />
-      {runtime.data?.enabled && (
-        <section aria-label="Runtime health" className="rounded-xl border bg-card p-6 mb-6 space-y-3">
-          <h2 className="text-lg font-semibold">Runtime health</h2>
-          <p className="text-sm text-muted-foreground">
-            Available storage: {((runtime.data.storageAvailableBytes ?? 0) / 1024 ** 3).toFixed(1)} GiB
-          </p>
-          {runtime.data.runtimes.map((item) => (
-            <div key={item.reference} className="flex flex-wrap justify-between gap-2 border-t pt-3 text-sm">
-              <span>{item.name}</span>
-              <span>{item.status} · {item.memoryBytes === null ? "—" : `${Math.round(item.memoryBytes / 1024 ** 2)} MiB`} · {item.tasks ?? 0} tasks
-                {item.storage?.limited ? ` · ${((item.storage.availableBytes ?? 0) / 1024 ** 3).toFixed(1)} GiB storage free`
-                  : item.storage?.limited === false ? " · Storage limit pending migration" : " · Storage unavailable"}
-              </span>
-            </div>
-          ))}
-          {!runtime.data.runtimes.length && <p className="text-sm text-muted-foreground">No DSP runtimes yet.</p>}
-        </section>
-      )}
+      <ErrorNotice error={error || data.error} />
+      <DspResources />
       {data.isPending ? (
         <Loading />
       ) : data.data ? (
