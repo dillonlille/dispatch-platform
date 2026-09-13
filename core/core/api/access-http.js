@@ -370,7 +370,7 @@ function createAccessHttp({
       const current = session(request);
       requireNoQuery(url);
       access.requirePlatform(current, 'platform.installations.manage');
-      if (current.user.platformRole !== 'owner') throw new AccessError('platform_forbidden', 403);
+      if (current.user.platformRole !== 'owner' || current.dspView) throw new AccessError('platform_forbidden', 403);
       sendJson(response, 200, { ok: true, status: 'found', data: platformRuntime?.()
         || { enabled: false, storageAvailableBytes: null, runtimes: [] }, error: null });
       return true;

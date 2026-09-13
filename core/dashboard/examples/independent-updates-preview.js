@@ -10,7 +10,7 @@ const { UpdateWorker } = require('../../core/updates/worker');
 const { createUpdatesService } = require('../../core/updates/service');
 const { hash, inventory } = require('../../shared/releases/package');
 const { createDashboardServer } = require('../server/server');
-async function createPreview({ port = 0, automatic = true, versionedDashboards = false } = {}) {
+async function createPreview({ port = 0, automatic = true, versionedDashboards = false, platformRuntime = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-independent-updates-'));
   const store = new AccessStore({ databaseRoot: path.join(root, 'access'), database: path.join(root, 'access/control.sqlite3') });
   const access = new AccessControlService(store, { installationOperatorEnabled: true, installationBackend: 'directory_service_v1' });
@@ -80,7 +80,7 @@ async function createPreview({ port = 0, automatic = true, versionedDashboards =
   await worker.initialize();
   const updates = createUpdatesService({ releases, commands, store, devDspId: dsps[0] });
   const unavailable = async () => ({ ok: false, status: 'installation_not_ready', data: null, error: { code: 'installation_not_ready' } });
-  const server = createDashboardServer({ access, updates, ...(versionedDashboards ? {dashboards:require('../../core/updates/dashboard').dashboardProvider({paths:{local:path.join(root,'local')},store})} : {}), plugins: { catalog: () => ({ items: [] }) },
+  const server = createDashboardServer({ access, updates, platformRuntime, ...(versionedDashboards ? {dashboards:require('../../core/updates/dashboard').dashboardProvider({paths:{local:path.join(root,'local')},store})} : {}), plugins: { catalog: () => ({ items: [] }) },
     client: { workforce: { day: unavailable }, sync: { status: unavailable, runNow: unavailable }, system: { status: unavailable } } });
   const original = server.listeners('request')[0]; server.removeAllListeners('request');
   server.on('request', async (request, response) => {
