@@ -1,0 +1,28 @@
+{
+  "github": {
+    "summary": "Fictional example: clearer platform maintenance windows."
+  },
+  "groups": [
+    {
+      "id": "platform-tools",
+      "title": "Platform tools",
+      "icon": "calendar-clock"
+    }
+  ],
+  "changelog": [
+    {
+      "kind": "improved",
+      "title": "Fictional maintenance window preview",
+      "description": "Platform owners can preview the next maintenance window before scheduling it.",
+      "group": "platform-tools",
+      "icon": "calendar-clock",
+      "details": "Fictional documentation fixture only: a preview shows the proposed window and affected platform services before it is saved.",
+      "audience": "platform",
+      "popup": {
+        "title": "Preview maintenance windows",
+        "description": "See the proposed window and affected services before saving."
+      }
+    }
+  ],
+  "afterUpdating": []
+}

@@ -1,0 +1,30 @@
+[Unit]
+Description=Dispatch Local Dashboard
+After=network-online.target dispatch-auth-broker.service dispatch-collection-manager.service
+Wants=network-online.target dispatch-auth-broker.service dispatch-collection-manager.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@/dashboard
+Environment=DISPATCH_PROJECT_ROOT=@PROJECT_ROOT@
+Environment=DISPATCH_LOCAL_ROOT=@LOCAL_ROOT@
+Environment=NODE_NO_WARNINGS=1
+Environment=PATH=@COMMAND_PATH@
+EnvironmentFile=-@LOCAL_ROOT@/config/dashboard.env
+ExecStart=@PROJECT_ROOT@/bin/dispatch-dashboard --operator --port 4310 --secure-cookies --public-origin ${DISPATCH_PUBLIC_ORIGIN}
+Restart=always
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

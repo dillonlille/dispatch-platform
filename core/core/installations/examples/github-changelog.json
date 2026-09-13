@@ -1,0 +1,128 @@
+{
+  "github": {
+    "summary": "Smarter scheduling, clearer workforce planning, and more useful dashboard snapshots.",
+    "previousTag": "0.0.0"
+  },
+  "groups": [
+    {
+      "id": "scheduling",
+      "title": "Scheduling",
+      "icon": "calendar-clock"
+    },
+    {
+      "id": "workforce",
+      "title": "Workforce",
+      "icon": "users"
+    },
+    {
+      "id": "dashboard",
+      "title": "Dashboard",
+      "icon": "chart-column"
+    },
+    {
+      "id": "maintenance",
+      "title": "Maintenance",
+      "icon": "refresh-cw"
+    }
+  ],
+  "changelog": [
+    {
+      "kind": "added",
+      "title": "Capacity-aware shift templates",
+      "description": "Preview conflicts while building shifts.",
+      "group": "scheduling",
+      "icon": "calendar-clock",
+      "details": "Build shifts with capacity context and spot conflicts before publishing.",
+      "audience": "dsp",
+      "popup": {
+        "title": "Build shifts with capacity context",
+        "description": "Preview conflicts while creating shift templates."
+      },
+      "github": {
+        "pullRequests": [{ "number": 101, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "improved",
+      "title": "Safer recurring schedule edits",
+      "description": "Keep exception dates intact when editing recurring schedules.",
+      "group": "scheduling",
+      "icon": "calendar-clock",
+      "details": "Recurring schedule changes preserve dates that were already customized.",
+      "audience": "dsp",
+      "github": {
+        "pullRequests": [{ "number": 102, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "added",
+      "title": "Skills and availability filters",
+      "description": "Find the right people faster when assigning work.",
+      "group": "workforce",
+      "icon": "users",
+      "details": "Filter assignments by the skills and availability needed for each shift.",
+      "audience": "dsp",
+      "popup": {
+        "title": "Find the right people faster",
+        "description": "Filter assignments by skills and availability."
+      },
+      "github": {
+        "pullRequests": [{ "number": 103, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "fixed",
+      "title": "Split-shift overtime totals",
+      "description": "Recalculate overtime totals after split shifts are edited.",
+      "group": "workforce",
+      "icon": "users",
+      "details": "Overtime totals now reflect edits made to each part of a split shift.",
+      "audience": "dsp",
+      "github": {
+        "pullRequests": [{ "number": 104, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "improved",
+      "title": "Staffing gap snapshots",
+      "description": "Surface staffing gaps earlier in team snapshots.",
+      "group": "dashboard",
+      "icon": "chart-column",
+      "details": "Team snapshots bring emerging staffing gaps into view sooner.",
+      "audience": "dsp",
+      "popup": {
+        "title": "See staffing gaps earlier",
+        "description": "Team snapshots now surface emerging staffing gaps sooner."
+      },
+      "github": {
+        "pullRequests": [{ "number": 105, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "fixed",
+      "title": "Timezone-accurate dashboard exports",
+      "description": "Match exported dates to the selected timezone.",
+      "group": "dashboard",
+      "icon": "chart-column",
+      "details": "Dashboard exports now use the timezone selected for the view.",
+      "audience": "dsp",
+      "github": {
+        "pullRequests": [{ "number": 106, "author": "example-author" }]
+      }
+    },
+    {
+      "kind": "changed",
+      "title": "Release verification diagnostics",
+      "description": "Refresh background-job diagnostics and test fixtures.",
+      "group": "maintenance",
+      "icon": "refresh-cw",
+      "details": "Background-job diagnostics and test fixtures now provide clearer release verification signals.",
+      "audience": "platform",
+      "github": {
+        "pullRequests": [{ "number": 107, "author": "example-author" }],
+        "maintenance": true
+      }
+    }
+  ],
+  "afterUpdating": []
+}

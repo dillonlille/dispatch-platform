@@ -1,0 +1,115 @@
+#!/usr/bin/env node
+'use strict';
+
+const path = require('node:path');
+const { AccessStore } = require('../../accounts/src/store');
+const { createRuntimeAgentCredentialManager } = require('../src/runtime-agent-credential');
+
+function fail(code = 'runtime_boundary_violation') {
+  throw Object.assign(new Error(code), { code });
+}
+
+function absoluteEnvironment(name) {
+  const value = process.env[name];
+  if (typeof value !== 'string' || !path.isAbsolute(value) || path.resolve(value) !== value
+      || /[\0\r\n]/.test(value)) fail();
+  return value;
+}
+
+function parse(argv) {
+  if (argv.length !== 2 || !['issue', 'rotate', 'revoke'].includes(argv[0])
+      || !/^[a-z][a-z0-9_-]{2,95}$/.test(argv[1])) fail('invalid_input');
+  return { operation: argv[0], organizationId: argv[1] };
+}
+
+function main() {
+  const { operation, organizationId } = parse(process.argv.slice(2));
+  const accessRoot = absoluteEnvironment('DISPATCH_ACCESS_CONTROL_DATABASE_ROOT');
+  const installationsRoot = absoluteEnvironment('DISPATCH_INSTALLATIONS_ROOT');
+  const store = new AccessStore({
+    databaseRoot: accessRoot,
+    database: path.join(accessRoot, 'access-control.sqlite3'),
+  });
+  try {
+    const control = store.installationControl(organizationId);
+    if (!control || control.runtimeKey === 'local') fail('installation_not_found');
+    const credentials = createRuntimeAgentCredentialManager({ installationsRoot });
+    const prior = store.runtimeAgentAuthority(control.runtimeKey);
+    let generation = prior?.generation ?? null;
+    let changed = false;
+    if (operation === 'revoke') {
+      if (prior?.status === 'active') {
+        store.transaction(() => store.revokeRuntimeAgentAuthority({
+          organizationId,
+          runtimeKey: control.runtimeKey,
+          expectedGeneration: prior.generation,
+          timestamp: Date.now(),
+        }));
+        generation = prior.generation + 1;
+        changed = true;
+      }
+      changed = credentials.revoke(control.runtimeKey, prior?.token_hash ?? null) || changed;
+    } else {
+      if (operation === 'rotate' && prior?.status !== 'active') fail('runtime_agent_unauthorized');
+      let credential = null;
+      try {
+        const authority = store.transaction(() => {
+          const current = store.runtimeAgentAuthority(control.runtimeKey);
+          if (operation === 'rotate' && (current?.status !== 'active'
+              || current.generation !== prior.generation)) fail('runtime_agent_authority_conflict');
+          if (operation === 'issue' && prior && (current?.status !== prior.status
+              || current.generation !== prior.generation)) fail('runtime_agent_authority_conflict');
+          credential = credentials.issue(control.runtimeKey, {
+            rotate: operation === 'rotate' || current?.status === 'revoked',
+          });
+          if (!current) return store.recordRuntimeAgentAuthority({
+            organizationId,
+            runtimeKey: control.runtimeKey,
+            tokenHash: credential.tokenHash,
+            timestamp: Date.now(),
+          });
+          if (operation === 'issue' && current.status === 'active'
+              && current.token_hash === credential.tokenHash) {
+            return store.recordRuntimeAgentAuthority({
+              organizationId,
+              runtimeKey: control.runtimeKey,
+              tokenHash: credential.tokenHash,
+              timestamp: Date.now(),
+            });
+          }
+          return store.replaceRuntimeAgentAuthority({
+            organizationId,
+            runtimeKey: control.runtimeKey,
+            tokenHash: credential.tokenHash,
+            expectedGeneration: current.generation,
+            expectedStatus: current.status,
+            timestamp: Date.now(),
+          });
+        });
+        generation = authority.generation;
+        changed = authority.changed || credential.changed;
+      } catch (error) {
+        if (credential?.tokenChanged) {
+          try { credentials.revoke(control.runtimeKey, credential.tokenHash); } catch {}
+        }
+        throw error;
+      }
+    }
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      status: operation === 'revoke' ? 'revoked' : operation === 'rotate' ? 'rotated' : 'issued',
+      changed,
+      generation,
+    })}\n`);
+    return 0;
+  } finally {
+    store.close();
+  }
+}
+
+try { process.exitCode = main(); }
+catch (error) {
+  const code = typeof error?.code === 'string' ? error.code : 'runtime_boundary_violation';
+  process.stdout.write(`${JSON.stringify({ ok: false, status: code })}\n`);
+  process.exitCode = 1;
+}

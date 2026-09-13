@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+node --no-warnings --check "$ROOT/../../shared/paths/runtime-paths.js"
+shopt -s globstar nullglob
+for file in "$ROOT"/{src,examples,tests}/**/*.js "$ROOT"/bin/*; do
+  node --no-warnings --check "$file"
+done
+for file in "$ROOT"/tooling/*; do
+  bash -n "$file"
+done
+node --no-warnings -e 'require(process.argv[1])' "$ROOT/src"
+printf '%s\n' '{"ok":true,"status":"built"}'

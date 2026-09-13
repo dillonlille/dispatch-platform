@@ -1,0 +1,112 @@
+{
+  "groups": [
+    {
+      "id": "backups",
+      "title": "Backups & recovery",
+      "icon": "database"
+    },
+    {
+      "id": "dsps",
+      "title": "DSP management",
+      "icon": "users"
+    },
+    {
+      "id": "onboarding",
+      "title": "Onboarding & support",
+      "icon": "user-plus"
+    },
+    {
+      "id": "updates",
+      "title": "Platform updates",
+      "icon": "refresh-cw"
+    }
+  ],
+  "changelog": [
+    {
+      "kind": "changed",
+      "title": "Remove and restore DSPs",
+      "description": "Remove active DSPs while retaining their data and backups, then restore them when needed.",
+      "group": "dsps",
+      "icon": "trash",
+      "details": "Remove DSP replaces the separate Suspend and Delete actions for active DSPs. Removal moves the DSP to Removed, signs its users out, blocks login, and stops its services and new backups while retaining its data and existing backups. Restore DSP brings it back into service."
+    },
+    {
+      "kind": "changed",
+      "title": "Permanent DSP deletion with password confirmation",
+      "description": "Permanently delete a Removed DSP with password confirmation after shutdown completes.",
+      "group": "dsps",
+      "icon": "lock",
+      "details": "Permanently delete DSP is available only in Removed after shutdown finishes. Confirm with your platform-owner password. Deletion removes the DSP's users, data, services, and backups; failed cleanup remains visible and can be retried. Users can belong to only one DSP."
+    },
+    {
+      "kind": "added",
+      "title": "Separate Core, DSP, and full-system backups",
+      "description": "Manage Core, DSP, and full-system backups separately with grouped recovery sets.",
+      "group": "backups",
+      "icon": "copy",
+      "details": "Create, restore, or delete a Core backup independently of DSP backups, or operate on one selected DSP. Full-system backups contain separate Core and DSP archives grouped into a recovery set. Removed DSPs are excluded from new backups and their existing archives remain retained. Deleting a backup does not delete live data."
+    },
+    {
+      "kind": "changed",
+      "title": "Independent backup schedules start turned off",
+      "description": "Core, DSP, and full-system backup schedules are independent and start disabled.",
+      "group": "backups",
+      "icon": "calendar-clock",
+      "details": "Core, every DSP, and full-system backups each have their own schedule, time zone, and retention policy. Only the platform owner can adjust them. All schedules start disabled, including after upgrading from the previous shared schedule. Enable the schedules you want after updating."
+    },
+    {
+      "kind": "added",
+      "title": "Backup storage usage",
+      "description": "View measured offsite storage for Core, DSP, and retained removed-DSP backups.",
+      "group": "backups",
+      "icon": "chart-column",
+      "details": "The Backups Storage tab shows measured offsite storage for Core, each DSP, and retained backups belonging to removed DSPs. Full-system totals count their component archives once. Measurements show when they were taken and whether they are stale or unavailable."
+    },
+    {
+      "kind": "improved",
+      "title": "Scoped restore and recovery",
+      "description": "Restore Core or full-system backups with safety checks and export a recovery kit.",
+      "group": "backups",
+      "icon": "shield",
+      "details": "Core-only restore preserves DSP data and schedules, uses a verified safety backup, and checks Core health before completing. Full-system restore checks the complete recovery set and stops on a component failure. In-place full-system restore requires the same DSP inventory as the selected backup. Export a current recovery kit for replacement-server recovery."
+    },
+    {
+      "kind": "changed",
+      "title": "Full-system backup completeness",
+      "description": "See unavailable DSPs and incomplete full-system sets instead of skipped archives.",
+      "group": "backups",
+      "icon": "check-circle",
+      "details": "Full-system backups report unavailable DSPs instead of silently skipping them. Deleting an individual archive makes any full-system set that references it incomplete; the remaining component archives can still be used independently."
+    },
+    {
+      "kind": "improved",
+      "title": "Guided DSP invitation setup",
+      "description": "Guide DSP owners through invitations, account access, and dedicated setup.",
+      "group": "onboarding",
+      "icon": "send",
+      "details": "DSP owner invitations now guide new users through account creation and existing users through sign-in and acceptance, then collect the DSP name, abbreviation, station, and time zone in a dedicated setup step."
+    },
+    {
+      "kind": "added",
+      "title": "Platform-owner DSP support access",
+      "description": "View a DSP with owner permissions through attributed, time-limited support access.",
+      "group": "onboarding",
+      "icon": "shield",
+      "details": "Platform owners can use View to work inside a DSP with owner permissions without using the DSP owner's login. A persistent banner identifies the selected DSP, and changes are attributed to the platform account. Access is limited to the current tab, expires after 15 minutes, and includes an Exit view action."
+    },
+    {
+      "kind": "improved",
+      "title": "Clearer update rollout progress",
+      "description": "Track Core and DSP rollout progress, current activity, and reconnecting state.",
+      "group": "updates",
+      "icon": "refresh-cw",
+      "details": "Updates now shows animated Core and DSP progress, current activity, and reconnecting messages that preserve the last confirmed progress. Animations respect reduced-motion preferences and pause when progress is paused or the connection is lost."
+    }
+  ],
+  "afterUpdating": [
+    {
+      "title": "Backup schedules",
+      "description": "Enable the backup schedules you want to run."
+    }
+  ]
+}

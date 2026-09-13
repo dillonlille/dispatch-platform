@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+'use strict';
+
+const crypto = require('node:crypto');
+const path = require('node:path');
+const { installationFailure } = require('../../../shared/contracts/src');
+const { PROJECT_ROOT } = require('../../../shared/paths/runtime-paths');
+const { AccessStore } = require('../../accounts/src/store');
+const {
+  createAccessControlLiveAuthorityResolver,
+  createInstallationProvisioningReconciler,
+} = require('../../accounts/src/installation-provisioning');
+const { createAccessInstallationLifecycleAuthority } = require('../../accounts/src/installation-lifecycle');
+const { createDurableInstallationProvisioner } = require('../src/jobs');
+const { createInstallationLifecycleReconciler } = require('../src/lifecycle-reconcile');
+const { loadPrivateReleaseCatalog, loadPrivateOciReleaseCatalog } = require('../src/release-catalog');
+const { createRuntimeAgentCredentialManager } = require('../src/runtime-agent-credential');
+const { createOciRuntimeAgentCredentialPort } = require('../src/oci-runtime-agent-credential');
+const { createProtectedOciHostClient } = require('../src/oci-protected-client');
+const { createOciContainerAdapter } = require('../src/oci-adapter');
+const { createOciInstallationLifecycle } = require('../src/oci-lifecycle');
+const { createOciRuntimeLifecyclePort } = require('../src/oci-runtime-lifecycle-port');
+const { createRuntimeAgentDispatchClient, runtimeAgentControlInvoke } = require('../../agents/src');
+
+function absoluteEnvironment(name) {
+  const value = process.env[name];
+  if (typeof value !== 'string' || !path.isAbsolute(value) || path.resolve(value) !== value
+      || /[\0\r\n]/.test(value)) throw Object.assign(new Error('runtime_boundary_violation'), { code: 'runtime_boundary_violation' });
+  return value;
+}
+
+function parse(argv) {
+  if (argv.length > 1) throw Object.assign(new Error('invalid_input'), { code: 'invalid_input' });
+  if (argv.length === 0) return 20;
+  const match = /^--limit=([1-9]|[1-4][0-9]|50)$/.exec(argv[0]);
+  if (!match) throw Object.assign(new Error('invalid_input'), { code: 'invalid_input' });
+  return Number.parseInt(match[1], 10);
+}
+
+async function main() {
+  const limit = parse(process.argv.slice(2));
+  const accessRoot = absoluteEnvironment('DISPATCH_ACCESS_CONTROL_DATABASE_ROOT');
+  const stateRoot = absoluteEnvironment('DISPATCH_PROVISIONER_STATE_ROOT');
+  const installationsRoot = absoluteEnvironment('DISPATCH_INSTALLATIONS_ROOT');
+  const unitRoot = absoluteEnvironment('DISPATCH_SYSTEMD_UNIT_ROOT');
+  const runtimeAgentHubSocket = absoluteEnvironment('DISPATCH_RUNTIME_AGENT_HUB_SOCKET');
+  const releaseCatalog = loadPrivateReleaseCatalog(process.env.DISPATCH_RELEASE_CATALOG_FILE);
+  const ociReleaseCatalog = loadPrivateOciReleaseCatalog(process.env.DISPATCH_OCI_RELEASE_CATALOG_FILE);
+  const ociEnabled = process.env.DISPATCH_OCI_RELEASE_CATALOG_FILE !== undefined
+    || process.env.DISPATCH_OCI_RUNTIME_AGENT_CREDENTIAL_ROOT !== undefined;
+  if (ociEnabled && (process.env.DISPATCH_OCI_RELEASE_CATALOG_FILE === undefined
+      || process.env.DISPATCH_OCI_RUNTIME_AGENT_CREDENTIAL_ROOT === undefined)) {
+    throw Object.assign(new Error('runtime_boundary_violation'), { code: 'runtime_boundary_violation' });
+  }
+  if (!ociEnabled) throw Object.assign(new Error('installation_operation_not_allowed'), { code: 'installation_operation_not_allowed' });
+  const runtimeAgentCredentials = createRuntimeAgentCredentialManager({ installationsRoot });
+  let provisioner;
+  const ociRuntimeAgentCredentials = createOciRuntimeAgentCredentialPort({
+    credentialRoot: absoluteEnvironment('DISPATCH_OCI_RUNTIME_AGENT_CREDENTIAL_ROOT'),
+  });
+  const runtimeAgentControlSocket = absoluteEnvironment('DISPATCH_RUNTIME_AGENT_CONTROL_SOCKET');
+  const ociHost = createProtectedOciHostClient({ dispatchRequest: (request, dispatch) => {
+    const authority = Object.hasOwn(request.claim, 'generation') ? provisioner : null;
+    if (!authority) throw new Error('runtime_boundary_violation');
+    return authority.dispatchHostRequest(request, dispatch);
+  } });
+  const ociAdapter = createOciContainerAdapter({
+    hostRegistry: ociHost.hostRegistry,
+    hostExecutor: ociHost.hostExecutor,
+    releaseResolver: (releaseId, fixture) => {
+      const selected = ociReleaseCatalog[releaseId];
+      if (fixture || !selected) {
+        throw Object.assign(new Error('release_not_found'), { code: 'release_not_found' });
+      }
+      return selected;
+    },
+    credentialPort: ociRuntimeAgentCredentials,
+  });
+  const store = new AccessStore({
+    databaseRoot: accessRoot,
+    database: path.join(accessRoot, 'access-control.sqlite3'),
+  });
+  provisioner = createDurableInstallationProvisioner({
+    stateRoot,
+    installationsRoot,
+    unitRoot,
+    projectRoot: PROJECT_ROOT,
+    liveAuthorityResolver: createAccessControlLiveAuthorityResolver({ store }),
+    runtimeAgentHubSocket,
+    ociAdapter,
+  });
+  try {
+    const platformReleases = require('../src/platform-release-catalog')
+      .loadPlatformReleaseCatalog(process.env.DISPATCH_PLATFORM_RELEASE_CATALOG_FILE, ociReleaseCatalog);
+    const rolloutCoordinator = require('../../accounts/src/platform-updates').createPlatformUpdates({
+      store, releases: ociReleaseCatalog, platformReleases, enabled: true,
+    });
+    const before = require('../src/drain-worker').progressKey(store.db);
+    rolloutCoordinator.tick();
+    const corePending = store.db.prepare(`SELECT 1 FROM platform_rollouts r
+      LEFT JOIN platform_rollout_core c ON c.rollout_id=r.id
+      WHERE r.status!='completed' AND (c.status IS NULL OR c.status!='succeeded') LIMIT 1`).get();
+    const backupPhase = require('../../accounts/src/rollout-backups').rolloutBackupProgress(store.db,
+      store.db.prepare("SELECT id FROM platform_rollouts WHERE status!='completed' LIMIT 1").get()?.id || 'none');
+    if (corePending && (!backupPhase || backupPhase.status !== 'running')) {
+      process.stdout.write(`${JSON.stringify({ ok: true, status: 'waiting_for_core', pending: 1 })}\n`);
+      require('../../accounts/src/worker-wakeup').wake(['core'], { databaseRoot: accessRoot });
+      return { progressed: false, pending: 1, failed: 0 };
+    }
+    const backupWorker = require('../src/platform-backup-worker').createPlatformBackupWorker({
+      store, localRoot: path.resolve(accessRoot, '../..'),
+      archive: require('../src/backup-archive-status').backupArchiveStatus,
+      restartCore: async () => {
+        const fs=require('node:fs');
+        const deployment=JSON.parse(fs.readFileSync(path.resolve(PROJECT_ROOT,'../deployment.json')));
+        const result=require('node:child_process').spawnSync('/usr/bin/systemctl',['--user','restart','dispatch-dashboard.service'],{encoding:'utf8',timeout:60000,maxBuffer:4096});
+        if(result.status!==0)throw Error('core_service_failed');
+        const {readHealth}=require('../src/core-recovery-host');
+        for(let attempt=0;attempt<30;attempt++) {
+          try {const health=await readHealth(deployment);if(health.releaseId===deployment.releaseId&&health.sourceCommit===deployment.sourceCommit)return;}catch{}
+          await new Promise(resolve=>setTimeout(resolve,1000));
+        }
+        throw Error('core_health_failed');
+      },
+    });
+    await backupWorker.tick();
+    const workerId = `worker_${crypto.randomUUID().replaceAll('-', '')}`;
+    const result = corePending ? { processed: 0, completed: 0, failed: 0, pending: 0 } : createInstallationProvisioningReconciler({
+      store,
+      provisioner,
+      runtimeAgentCredentialFactory: backend => ['oci_container_v1', 'native_service_v1'].includes(backend)
+        ? ociRuntimeAgentCredentials : runtimeAgentCredentials,
+    })
+      .runPending(workerId, limit);
+    require('../../accounts/src/organization-profile').applyOrganizationProfiles(store);
+    const authorityFactory = (organizationId, authorityScope) =>
+      createAccessInstallationLifecycleAuthority({
+        store,
+        organizationId,
+        authorityScope,
+        releaseCatalog: [...new Set([...Object.keys(releaseCatalog), ...Object.keys(ociReleaseCatalog)])],
+      });
+    const lifecycle = await createInstallationLifecycleReconciler({
+      store,
+      authorityFactory,
+      concurrency: corePending ? 3 : 1,
+      backupOnly: Boolean(corePending),
+      runtimeFactory: (organizationId, authority) => {
+        // Every concurrent job owns its host dispatcher and fenced authority.
+        const lifecycleHost = createProtectedOciHostClient({ dispatchRequest: (request, dispatch) => authority.dispatchHostRequest(request, dispatch) });
+        const lifecycleAdapter = createOciContainerAdapter({ hostRegistry: lifecycleHost.hostRegistry,
+          hostExecutor: lifecycleHost.hostExecutor, credentialPort: ociRuntimeAgentCredentials,
+          releaseResolver: (releaseId, fixture) => {
+            if (fixture || !ociReleaseCatalog[releaseId]) throw Error('release_not_found');
+            return ociReleaseCatalog[releaseId];
+          } });
+        const backend = store.installationBackend(organizationId);
+        if (!['oci_container_v1', 'native_service_v1'].includes(backend)) throw Object.assign(new Error('installation_operation_not_allowed'), { code: 'installation_operation_not_allowed' });
+        return createOciInstallationLifecycle({
+          authority,
+          adapter: lifecycleAdapter,
+          hostExecutor: lifecycleHost.hostExecutor,
+          backupManagerFactory: (plan, claim) => lifecycleHost.createBackupManager(plan, claim),
+          runtimeFactory: plan => createOciRuntimeLifecyclePort({
+            client: createRuntimeAgentDispatchClient({
+              runtimeKey: plan.runtimeKey,
+              hub: {
+                invoke: (runtimeKey, action, input) =>
+                  runtimeAgentControlInvoke(runtimeAgentControlSocket, runtimeKey, action, input),
+              },
+            }),
+          }),
+        });
+      },
+    }).runPending(`lifecycle_${crypto.randomUUID().replaceAll('-', '')}`, limit);
+    await backupWorker.tick();
+    rolloutCoordinator.tick();
+    if (corePending) {
+      process.stdout.write(JSON.stringify({ ok: true, status: 'backing_up', lifecycle }) + '\n');
+      require('../../accounts/src/worker-wakeup').wake(['core'], { databaseRoot: accessRoot });
+      return { progressed: before !== require('../src/drain-worker').progressKey(store.db), pending: true, failed: lifecycle.failed };
+    }
+    const credentialsRetired = require('../src/retire-oci-credentials')
+      .retireOciCredentials({ store, credentialPort: ociRuntimeAgentCredentials });
+    const onboarding = await require('../src/owner-onboarding').createOwnerOnboardingWorker({
+      store, projectRoot: PROJECT_ROOT,
+      invoke: (runtimeKey, action, input) => runtimeAgentControlInvoke(runtimeAgentControlSocket, runtimeKey, action, input),
+    }).runPending(`onboard_${crypto.randomUUID().replaceAll('-', '')}`, limit);
+    const diagnostics = await require('../src/diagnostics-worker').createDiagnosticsWorker({
+      store, invoke: (runtimeKey, action, input) => runtimeAgentControlInvoke(runtimeAgentControlSocket, runtimeKey, action, input),
+    }).runPending(`diagnostics_${crypto.randomUUID().replaceAll('-', '')}`, limit);
+    const failed = result.failed + lifecycle.failed + onboarding.failed + diagnostics.failed;
+    const rollout = rolloutCoordinator.view().rollout;
+    const pending = result.pending + (lifecycle.pending ? 1 : 0) + (rollout?.status === 'running' ? 1 : 0);
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      status: pending ? 'pending' : failed ? 'failed' : 'settled',
+      ...result,
+      failed,
+      pending,
+      lifecycle,
+      rollout: rollout ? { status: rollout.status, total: rollout.total, updated: rollout.updated } : null,
+      onboarding,
+      diagnostics,
+      credentialsRetired,
+    })}\n`);
+    if (failed) process.exitCode = 1;
+    if (lifecycle.completed) require('../src/worker-notify').exportReady();
+    return { pending, failed, progressed: before !== require('../src/drain-worker').progressKey(store.db) || result.processed > 0 };
+  } finally {
+    provisioner.close();
+    store.close();
+  }
+}
+
+require('../src/drain-worker').drain(main).catch(error => {
+  const selected = installationFailure(error);
+  process.stdout.write(`${JSON.stringify({ ok: false, status: selected.code, failure: selected })}\n`);
+  process.exitCode = 1;
+});

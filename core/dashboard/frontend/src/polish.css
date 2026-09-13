@@ -1,0 +1,494 @@
+/* Shared presentation contract for the built-in theme and custom packs. */
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-family);
+}
+[data-slot="button"][data-size="default"],
+[data-slot="button"][data-size="icon"] {
+  min-height: var(--control-height);
+}
+[data-slot="button"][data-variant="destructive"] {
+  background: var(--danger-button);
+  color: #fff;
+}
+[data-slot="dialog-overlay"],
+[data-slot="sheet-overlay"] {
+  background: var(--overlay);
+}
+[data-slot="input"],
+[data-slot="native-select"] {
+  background: var(--background);
+  color: var(--foreground);
+  min-height: var(--control-height);
+}
+[data-slot="table-row"][data-state="selected"] {
+  background: var(--selection);
+}
+.nav-item,
+.identity-button,
+.theme-option {
+  transition:
+    background-color var(--motion-duration),
+    border-color var(--motion-duration),
+    color var(--motion-duration);
+}
+.nav-item:last-child {
+  margin-top: 40px;
+}
+.nav-item:last-child::after {
+  content: "";
+  position: absolute;
+  top: -20px;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border);
+}
+.dsp-avatar {
+  --identity-ink: var(--slate);
+  --identity-surface: var(--slate-surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--identity-ink);
+  background: var(--identity-surface);
+  letter-spacing: -0.2px;
+}
+.dsp-avatar.tone-1 {
+  --identity-ink: var(--sage);
+  --identity-surface: var(--sage-surface);
+}
+.dsp-avatar.tone-2 {
+  --identity-ink: var(--violet);
+  --identity-surface: var(--violet-surface);
+}
+.dsp-avatar.tone-3 {
+  --identity-ink: var(--slate);
+  --identity-surface: var(--slate-surface);
+}
+.dsp-avatar.tone-4 {
+  --identity-ink: var(--steel);
+  --identity-surface: var(--steel-surface);
+}
+.backup-avatar.dsp-avatar {
+  color: var(--identity-ink);
+  background: var(--identity-surface);
+}
+.dsp-identity-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.dsp-panel-identity,
+.backup-dsp-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.dsp-panel-identity .dsp-avatar {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+}
+.backup-dsp-identity {
+  white-space: normal;
+}
+.backup-dsp-identity .dsp-avatar {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  font-size: 11px;
+}
+.backup-fleet-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-block: 12px;
+}
+.backup-fleet-metric {
+  padding-inline: 24px;
+}
+.backup-fleet-metric > div {
+  flex-direction: column;
+  gap: 5px;
+}
+.backup-fleet-metric dd {
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.8px;
+  margin: 0;
+}
+.backup-fleet-metric dt {
+  font-size: 13px;
+}
+.backup-storage-metrics dd,
+.backup-storage-total {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.6px;
+}
+.backup-button,
+.primary-button,
+.secondary-button {
+  min-height: var(--control-height);
+  border-radius: var(--radius);
+}
+.primary-button,
+.backup-button-primary {
+  color: var(--primary-foreground);
+}
+.backup-inspector-heading > div {
+  gap: 12px;
+}
+.backup-workspace .backup-tabs a[aria-current="page"] {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.update-notes-panel {
+  padding: 0;
+}
+.update-group-count {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.update-feature-changes .update-note-icon {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+}
+.update-feature-changes strong {
+  font-size: 14px;
+}
+.update-feature-changes p {
+  margin-top: 4px;
+}
+.update-count-icon .update-note-icon {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}
+.update-feature-group {
+  background: var(--card);
+}
+
+/* Real radio inputs provide keyboard behavior; previews reuse palette tokens. */
+.theme-section {
+  padding: 32px 0;
+  max-width: 960px;
+}
+.theme-section fieldset {
+  min-width: 0;
+}
+.theme-section legend {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.theme-section p {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+.theme-pack-field {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr);
+  gap: 8px 32px;
+  max-width: 700px;
+  padding-bottom: 28px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+.theme-pack-field > label {
+  font-weight: 600;
+  align-self: center;
+}
+.theme-pack-field > select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  min-height: var(--control-height);
+}
+.theme-pack-field > p {
+  grid-column: 2;
+  margin-top: 0;
+}
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+.theme-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-content: start;
+  gap: 6px 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  cursor: pointer;
+}
+.theme-option:hover {
+  border-color: var(--input);
+}
+.theme-option:has(input:checked) {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.theme-option:has(input:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+.theme-option > input {
+  grid-column: 1;
+  grid-row: 2;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  accent-color: var(--primary);
+}
+.theme-option-label {
+  grid-column: 2;
+  grid-row: 2;
+  font-weight: 550;
+}
+.theme-option-description {
+  grid-column: 2;
+  grid-row: 3;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.theme-preview {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: block;
+  position: relative;
+  aspect-ratio: 1.65;
+  margin-bottom: 14px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.theme-preview-ui {
+  display: flex;
+  height: 100%;
+  background: var(--background);
+}
+.theme-preview-system > .theme-preview-ui:last-child {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 50%);
+}
+.theme-preview-sidebar {
+  width: 24%;
+  padding: 15px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+}
+.theme-preview-sidebar i {
+  display: block;
+  height: 4px;
+  background: var(--muted-foreground);
+  opacity: 0.45;
+  border-radius: 2px;
+}
+.theme-preview-sidebar i:first-child {
+  width: 12px;
+  height: 12px;
+  margin-bottom: 6px;
+  background: var(--primary);
+  opacity: 1;
+}
+.theme-preview-content {
+  display: block;
+  flex: 1;
+  padding: 20px 12px;
+}
+.theme-preview-heading,
+.theme-preview-subheading {
+  display: block;
+  border-radius: 2px;
+  height: 4px;
+  background: var(--muted-foreground);
+  width: 48%;
+}
+.theme-preview-subheading {
+  width: 70%;
+  height: 3px;
+  opacity: 0.45;
+  margin-top: 6px;
+}
+.theme-preview-table {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-top: 16px;
+}
+.theme-preview-table > span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 23px;
+  padding: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.theme-preview-table > span:last-child {
+  border: 0;
+}
+.theme-preview-table i {
+  height: 3px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--muted-foreground);
+  opacity: 0.45;
+}
+.theme-preview-table i:first-child {
+  flex: 0 0 8px;
+  height: 9px;
+}
+.theme-section .theme-persistence {
+  margin-top: 24px;
+}
+.theme-section .theme-storage-notice {
+  color: var(--warning);
+}
+@media (max-width: 1100px) {
+  .update-feature-changes,
+  .update-details-toggle,
+  .update-expanded-details {
+    margin-left: 0;
+  }
+}
+@media (max-width: 700px) {
+  .theme-options {
+    grid-template-columns: 1fr;
+  }
+  .theme-option {
+    grid-template-columns: 110px 18px minmax(0, 1fr);
+    gap: 5px 12px;
+    align-content: center;
+  }
+  .theme-preview {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    margin: 0;
+    align-self: center;
+  }
+  .theme-option > input {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .theme-option-label {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .theme-option-description {
+    grid-column: 3;
+    grid-row: 2 / 4;
+  }
+  .theme-preview-content {
+    padding: 8px 6px;
+  }
+  .theme-preview-heading {
+    height: 2px;
+  }
+  .theme-preview-subheading {
+    height: 2px;
+    margin-top: 3px;
+  }
+  .theme-preview-sidebar {
+    padding: 10px 5px;
+    gap: 5px;
+  }
+  .theme-preview-sidebar i:first-child {
+    width: 8px;
+    height: 8px;
+    margin-bottom: 0;
+  }
+  .theme-preview-table {
+    margin-top: 4px;
+  }
+  .theme-preview-table > span {
+    height: 7px;
+    padding: 2px;
+    gap: 4px;
+  }
+  .theme-preview-table i:first-child {
+    height: 5px;
+    flex-basis: 5px;
+  }
+  .theme-pack-field {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .theme-pack-field > p {
+    grid-column: 1;
+  }
+}
+@media (max-width: 600px) {
+  .page-heading {
+    margin-bottom: 24px;
+  }
+  .inline-summary {
+    margin-bottom: 20px;
+  }
+  .inline-summary > span {
+    padding-inline: 10px;
+  }
+  .inline-summary strong,
+  .backup-fleet-metric dd {
+    font-size: 26px;
+  }
+  .backup-fleet-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 20px;
+  }
+  .backup-fleet-metric:nth-child(odd) {
+    border-left: 0;
+    padding-left: 0 !important;
+  }
+  .backup-fleet-metric dt {
+    font-size: 12px;
+  }
+  .fleet-table .identity-button {
+    gap: 8px;
+    max-width: none;
+  }
+  .fleet-table .dsp-identity-copy strong {
+    max-width: 120px;
+  }
+  .fleet-table .dsp-avatar {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+    font-size: 10px;
+  }
+  .theme-option {
+    grid-template-columns: 86px 16px minmax(0, 1fr);
+    padding: 12px;
+    gap: 6px 9px;
+  }
+}

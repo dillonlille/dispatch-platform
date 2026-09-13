@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "example-notes",
+  "name": "Example Notes",
+  "version": "0.1.0",
+  "description": "DSP-owned entries with shared settings and validated operations.",
+  "frontend": "frontend/index.tsx",
+  "dashboard": null,
+  "runtime": "backend/index.js",
+  "published": null,
+  "pages": [
+    {
+      "id": "example-notes",
+      "label": "Example Notes",
+      "icon": "puzzle",
+      "permission": "dashboard.view"
+    }
+  ],
+  "actions": [
+    {
+      "id": "records.list",
+      "permission": "dashboard.view",
+      "summary": "List entries for the current DSP",
+      "input": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "id",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 100
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "records.add",
+      "permission": "organization.settings.manage",
+      "summary": "Add an entry for the current DSP",
+      "input": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "text",
+          "idempotencyKey"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "errors": [
+        "entries_paused",
+        "idempotency_conflict",
+        "invalid_input"
+      ]
+    }
+  ],
+  "httpPrefixes": [],
+  "gatewayActions": [],
+  "services": [],
+  "collectors": [],
+  "syncs": [],
+  "jobs": [],
+  "legacyProfile": null,
+  "settings": {
+    "version": 1,
+    "sections": [
+      {
+        "id": "general",
+        "label": "General"
+      }
+    ],
+    "fields": [
+      {
+        "id": "allow_entries",
+        "section": "general",
+        "label": "Allow new entries",
+        "type": "boolean",
+        "default": true,
+        "applies": "next_job"
+      }
+    ]
+  },
+  "package": {
+    "runtime": "backend/index.js",
+    "authentication": null,
+    "collections": null
+  }
+}

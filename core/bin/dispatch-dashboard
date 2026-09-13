@@ -1,0 +1,6 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+
+process.umask(0o077);
+const { main } = require('../dashboard/server/main');
+main().then(code => { process.exitCode = code; }).catch(() => { process.exitCode = 1; });

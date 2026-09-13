@@ -1,0 +1,290 @@
+.plugin-setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.875rem;
+}
+.plugin-setting-field > label,
+.plugin-setting-toggle label,
+.plugin-setting-multiple legend {
+  font-weight: 500;
+}
+.plugin-setting-field select,
+.plugin-setting-field > input {
+  width: 100%;
+  min-height: 2.5rem;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.75rem;
+}
+.plugin-setting-field p,
+.plugin-setting-toggle p,
+.plugin-setting-multiple > p {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  margin: 0.35rem 0 0;
+  line-height: 1.6;
+}
+.plugin-setting-toggle {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.plugin-setting-toggle input {
+  accent-color: var(--primary);
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+.plugin-setting-multiple {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.plugin-setting-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.plugin-setting-choice input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+.plugin-setting-choices {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+  overflow: hidden;
+}
+.plugin-setting-option {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.plugin-setting-option:last-child {
+  border-bottom: 0;
+}
+.plugin-setting-count {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.plugin-setting-order {
+  display: flex;
+  flex-shrink: 0;
+}
+.plugin-settings-page {
+  max-width: 56rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.plugin-settings-back {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  width: max-content;
+}
+.plugin-settings-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+.plugin-setting-wide {
+  grid-column: 1/-1;
+}
+.plugin-settings-defaults,
+.plugin-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.plugin-settings-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+.plugin-settings-footer > div {
+  display: flex;
+  gap: 0.5rem;
+}
+.plugin-settings-description {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  margin-top: 1rem;
+}
+@media (max-width: 580px) {
+  .plugin-settings-fields {
+    grid-template-columns: 1fr;
+  }
+  .plugin-settings-footer {
+    flex-wrap: wrap;
+  }
+  .plugin-settings-footer > div {
+    margin-left: auto;
+  }
+  .plugin-settings-page [role="tablist"] {
+    height: auto;
+    flex-wrap: wrap;
+  }
+  .plugin-settings-defaults {
+    align-items: flex-start;
+  }
+}
+@media (max-width: 480px) {
+  .plugin-setting-choice {
+    flex-wrap: wrap;
+  }
+  .plugin-setting-count {
+    margin-left: 1.6rem;
+  }
+  .plugin-setting-field select,
+  .plugin-setting-field > input {
+    font-size: 1rem;
+  }
+  .plugin-setting-option {
+    padding: 0.3rem 0.65rem;
+  }
+}
+
+.plugin-setting-toggle input {
+  appearance: none;
+  width: 2.5rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.plugin-setting-toggle input:after {
+  content: "";
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--foreground);
+  transition: transform 0.15s;
+}
+.plugin-setting-toggle input:checked {
+  background: var(--primary);
+}
+.plugin-setting-toggle input:checked:after {
+  background: var(--primary-foreground);
+  transform: translateX(1.1rem);
+}
+.plugin-setting-toggle input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.plugin-setting-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.plugin-setting-help {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.plugin-setting-field select:disabled,
+.plugin-setting-field input:disabled,
+.plugin-setting-multiple input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.plugin-settings-preview,
+.plugin-settings-rule,
+.plugin-settings-effect {
+  padding: 0.85rem 1rem;
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.plugin-settings-rule {
+  border-inline-start: 3px solid var(--primary);
+}
+.plugin-settings-history {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+}
+.plugin-settings-history h2 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.plugin-settings-history > p {
+  color: var(--muted-foreground);
+  margin: 0.5rem 0 1rem;
+}
+.plugin-settings-history > details {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+.plugin-settings-history summary {
+  cursor: pointer;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.plugin-settings-history ul {
+  list-style: disc;
+  margin: 0.75rem 0 0.75rem 1.25rem;
+}
+.plugin-settings-history li {
+  overflow-wrap: anywhere;
+  margin-bottom: 0.5rem;
+}
+.plugin-settings-history-actions,
+.plugin-settings-history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.plugin-settings-history-actions > details {
+  width: 100%;
+}
+.plugin-settings-page [role="tabpanel"] > button {
+  margin-top: 1rem;
+}
+@media (max-width: 580px) {
+  .plugin-settings-defaults {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .plugin-settings-defaults > span {
+    flex-basis: 100%;
+  }
+}

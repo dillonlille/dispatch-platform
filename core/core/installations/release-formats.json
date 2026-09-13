@@ -1,0 +1,29 @@
+{
+  "manifest": "dispatch-release.json",
+  "notes": "dispatch-release-notes.json",
+  "changelog": "CHANGELOG.md",
+  "ociRuntime": "runtime-image.tar",
+  "formats": {
+    "legacy": {
+      "schemaVersion": 1,
+      "ciSuffix": "",
+      "checksums": "SHA256SUMS",
+      "notesSidecar": true,
+      "assets": {
+        "core": "dispatch-core.json",
+        "bridge": "dispatch-bridge.json",
+        "runtime": "dispatch-runtime.tar.gz"
+      }
+    },
+    "split": {
+      "schemaVersion": 2,
+      "ciSuffix": "-split",
+      "checksums": null,
+      "notesSidecar": false,
+      "assets": {
+        "app": "dispatch-app.tar.gz",
+        "dependencies": "dispatch-dependencies.tar.gz"
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+#!/usr/bin/node --no-warnings
+'use strict';
+// Run as the dashboard service account, from a trusted release checkout.
+process.umask(0o077);
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const { privateJson } = require('../src/release-delivery-files');
+async function main() {
+  const [action, localRoot, rolloutId, locked] = process.argv.slice(2);
+  if (!['status', 'recover', 'watch'].includes(action) || !localRoot || !path.isAbsolute(localRoot)
+      || fs.realpathSync(localRoot) !== localRoot || !/^rollout_[a-f0-9]{32}$/.test(rolloutId)
+      || process.argv.length > 6 || (locked && locked !== '--locked') || process.geteuid() === 0) throw Error();
+  const lock = path.join(localRoot, 'data/access-control/platform-update.lock');
+  const fd = fs.openSync(lock, fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_NOFOLLOW, 0o600);
+  const stat = fs.fstatSync(fd);
+  if (!stat.isFile() || stat.uid !== process.geteuid() || stat.nlink !== 1 || (stat.mode & 0o7777) !== 0o600
+      || fs.realpathSync(lock) !== lock) throw Error();
+  if (!locked) {
+    const result = spawnSync('/usr/bin/flock', ['--nonblock', '--conflict-exit-code', '75', lock,
+      '/usr/bin/node', '--no-warnings', __filename, action, localRoot, rolloutId, '--locked'],
+    { stdio: ['ignore', 'inherit', 'inherit', fd] });
+    fs.closeSync(fd);
+    if (result.status === 75 && action !== 'watch') process.stderr.write('{"status":"updater_busy"}\n');
+    process.exitCode = result.status === 75 && action === 'watch' ? 0 : result.status ?? 1; return;
+  }
+  fs.closeSync(fd);
+  const journal = privateJson(path.join(localRoot, 'backups/platform-core', rolloutId, 'recovery.json'), process.geteuid());
+  const { rootArtifact, createHostRecovery } = require('../src/core-recovery-host');
+  const { root, config } = rootArtifact(journal.releaseId);
+  if (config.localRoot !== localRoot) throw Error();
+  const recovery = require('../src/core-recovery').createCoreRecovery({ localRoot,
+    context: { rolloutId, releaseId: journal.releaseId, attempt: journal.attempt }, adapter: createHostRecovery(config, root) });
+  if (action !== 'status') {
+    if (recovery.view().phase === 'promoted') await recovery.verify();
+    else await recovery.recover();
+    // A restore also restores the rollout tables. Reconcile them under the same
+    // updater lock so the older supervisor cannot immediately restart the update.
+    const store = require('../src/platform-update-store').openPlatformUpdateStore(path.join(localRoot, 'data/access-control'));
+    try {
+      store.transaction(() => {
+        const promoted = recovery.view().phase === 'promoted';
+        store.db.prepare('UPDATE platform_rollout_core SET status=?,failure_code=?,updated_at=? WHERE rollout_id=?')
+          .run(promoted ? 'succeeded' : 'failed', promoted ? null : 'core_apply_failed', Date.now(), rolloutId);
+        if (!promoted) store.db.prepare("UPDATE platform_rollouts SET status='paused',updated_at=? WHERE id=? AND status!='completed'").run(Date.now(), rolloutId);
+      });
+    } finally { store.close(); }
+    await createHostRecovery(config, root).disarmRecovery();
+  }
+  const state = recovery.view();
+  process.stdout.write(JSON.stringify({ status: state.phase, rolloutId, releaseId: state.releaseId,
+    priorReleaseId: state.prior.releaseId, attempt: state.attempt }) + '\n');
+}
+main().catch(error => { process.stderr.write(JSON.stringify({ status: ['core_recovery_required', 'core_backup_invalid',
+  'core_health_failed', 'core_service_failed'].includes(error?.code) ? error.code : 'core_recovery_unavailable' }) + '\n'); process.exitCode = 1; });
