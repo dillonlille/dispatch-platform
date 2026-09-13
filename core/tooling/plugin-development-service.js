@@ -68,7 +68,16 @@ async function main() {
   const client = { workforce: { day: async () => failure('capability_unavailable') },
     sync: { status: async () => failure('capability_unavailable'), runNow: async () => failure('capability_unavailable') },
     system: { status: async () => success('ready', {}) } };
-  const api = require('../core/api/server').createApiServer({ access, client, plugins,
+  const dashboardRoot=process.env.DISPATCH_DSP_DASHBOARD;
+  const dashboardReader=require('../core/updates/dashboard').readDashboard;
+  const coreDashboard=dashboardReader(path.resolve(__dirname,'../dashboard/public'),'core');
+  const dspDashboard=dashboardRoot ? dashboardReader(dashboardRoot,'dsp') : null;
+  const dashboards=(session,identity)=>{
+    const selected=session && (session.dspView || session.user.platformRole!=='owner') ? dspDashboard : coreDashboard;
+    if(!selected)throw new Error('release_dashboard_unavailable');
+    return identity?{product:selected.product,digest:selected.digest}:selected;
+  };
+  const api = require('../core/api/server').createApiServer({ access, client, plugins, dashboards,
     runtimeResolver: installation => ({ ...client, plugins: { invoke: async (id, action, input) => {
       if (id !== manifest.id || !dsps.has(installation.runtimeKey)) return failure('plugin_unavailable');
       try { return await dsps.get(installation.runtimeKey).runtime.invoke(action, input); }

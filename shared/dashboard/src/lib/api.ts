@@ -64,7 +64,7 @@ export async function request<T>(
     ...options,
     headers: {
       Accept: "application/json",
-      ...((window as any).__dispatchDashboard ? {"X-Dispatch-Dashboard": (window as any).__dispatchDashboard.digest} : {}),
+      ...(window.__dispatchDashboard ? {"X-Dispatch-Dashboard": window.__dispatchDashboard.digest} : {}),
       ...(options.body !== undefined
         ? { "Content-Type": "application/json" }
         : {}),

@@ -10,7 +10,7 @@ const { UpdateWorker } = require('../../core/updates/worker');
 const { createUpdatesService } = require('../../core/updates/service');
 const { hash, inventory } = require('../../shared/releases/package');
 const { createDashboardServer } = require('../server/server');
-async function createPreview({ port = 0, automatic = true } = {}) {
+async function createPreview({ port = 0, automatic = true, versionedDashboards = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-independent-updates-'));
   const store = new AccessStore({ databaseRoot: path.join(root, 'access'), database: path.join(root, 'access/control.sqlite3') });
   const access = new AccessControlService(store, { installationOperatorEnabled: true, installationBackend: 'directory_service_v1' });
@@ -27,15 +27,24 @@ async function createPreview({ port = 0, automatic = true } = {}) {
   }
   let failNext = false, events = [];
   const hooks = { drain: async c => { events.push(['drain', c.product, c.dspId]); },
-    snapshot: async () => ({ synthetic: true }), start: async () => {}, restore: async c => { events.push(['restore', c.dspId]); },
+    snapshot: async () => ({ synthetic: true }), start: async c => {
+      if(versionedDashboards && c.product==='dsp')require('../../core/installations/src/release-delivery-files').atomic(require('../../host/releases/runtime').fileFor({local:path.join(root,'local')},c.dspId),{schemaVersion:1,digest:c.digest});
+    }, restore: async c => { events.push(['restore', c.dspId]); },
     verify: async c => { if (failNext && c.dspId === [...dsps.slice(1)].sort()[0]) { failNext = false; return false; } return true; } };
-  const releases = new LocalReleases({ directory: path.join(root, 'updates'), devDspId: dsps[0], hooks, allowDevelopment: true });
+  const releases = new LocalReleases({ directory: path.join(root, 'local/state/updates'), devDspId: dsps[0], hooks, allowDevelopment: true });
   async function publish(product, version) {
     const directory = path.join(root, `${product}-${version}`); fs.mkdirSync(directory, { mode: 0o700 });
     fs.mkdirSync(path.join(directory, 'code')); fs.writeFileSync(path.join(directory, 'code/version.json'), JSON.stringify({ version }));
     fs.writeFileSync(path.join(directory, 'release-notes.md'), product === 'core'
       ? 'Independent platform updates\n\n• Manage Core releases separately from DSP releases.\n• See installation progress and recover interrupted updates.\n• Keep installed DSP runtimes and plugins unchanged.'
       : 'A better Paycom experience\n\n• Keep each DSP’s settings and credentials independent.\n• Display employee names as First Last by default.\n• Test plugin improvements on Dev before updating your fleet.');
+    if(versionedDashboards && product==='dsp'){
+      fs.cpSync(path.resolve(__dirname,'../../../dsp/dashboard/public'),path.join(directory,'dashboard'),{recursive:true});
+      if(version!=='0.0.1'){
+        const file=path.join(directory,'dashboard/assets/frontend.js');
+        fs.writeFileSync(file,fs.readFileSync(file,'utf8').replaceAll('Currently under development','Dev release preview'));
+      }
+    }
     const manifest = { schemaVersion: 1, product, version, channel: 'development', protocol: 1, minimumProtocol: 1,
       sourceDigest: 'a'.repeat(64), plugins: [], files: inventory(directory) };
     fs.writeFileSync(path.join(directory, 'release.json'), JSON.stringify(manifest));
@@ -43,8 +52,12 @@ async function createPreview({ port = 0, automatic = true } = {}) {
   }
   const core = await publish('core', '0.0.1'), dsp = await publish('dsp', '0.0.1');
   const state = releases.state(); state.active = { core, dsps: Object.fromEntries(dsps.map(id => [id, dsp])) }; releases.save(state);
+  if(versionedDashboards){
+    const {privateDirectory}=require('../../host/controller/operations'),{atomic}=require('../../core/installations/src/release-delivery-files');
+    for(const id of dsps){const file=require('../../host/releases/runtime').fileFor({local:path.join(root,'local')},id);privateDirectory(path.dirname(file));atomic(file,{schemaVersion:1,digest:dsp});}
+  }
   await publish('core', '0.0.2'); await publish('dsp', '0.0.2');
-  const commands = new UpdateCommands(path.join(root, 'updates'));
+  const commands = new UpdateCommands(path.join(root, 'local/state/updates'));
   const worker = new UpdateWorker({ releases, commands, feed: { refresh: async product => releases.state().latest[product] },
     authorize: actor => { const row = store.userById(actor); if (row?.platform_role !== 'owner' || row.status !== 'active') throw new Error('release_actor_forbidden'); },
     invoke: async (action, input) => {
@@ -59,7 +72,7 @@ async function createPreview({ port = 0, automatic = true } = {}) {
   await worker.initialize();
   const updates = createUpdatesService({ releases, commands, store, devDspId: dsps[0] });
   const unavailable = async () => ({ ok: false, status: 'installation_not_ready', data: null, error: { code: 'installation_not_ready' } });
-  const server = createDashboardServer({ access, updates, plugins: { catalog: () => ({ items: [] }) },
+  const server = createDashboardServer({ access, updates, ...(versionedDashboards ? {dashboards:require('../../core/updates/dashboard').dashboardProvider({paths:{local:path.join(root,'local')},store})} : {}), plugins: { catalog: () => ({ items: [] }) },
     client: { workforce: { day: unavailable }, sync: { status: unavailable, runNow: unavailable }, system: { status: unavailable } } });
   const original = server.listeners('request')[0]; server.removeAllListeners('request');
   server.on('request', async (request, response) => {
@@ -77,7 +90,7 @@ async function createPreview({ port = 0, automatic = true } = {}) {
 }
 if (require.main === module) {
   if (process.env.DISPATCH_INDEPENDENT_UPDATES_FIXTURE !== '1') throw new Error('fixture_opt_in_required');
-  createPreview({ port: Number(process.env.DISPATCH_UPDATES_PREVIEW_PORT || 0) }).then(app => {
+  createPreview({ port: Number(process.env.DISPATCH_UPDATES_PREVIEW_PORT || 0), versionedDashboards:process.env.DISPATCH_VERSIONED_DASHBOARD_FIXTURE==='1' }).then(app => {
     const close = () => app.close().catch(() => { process.exitCode = 1; });
     process.once('SIGTERM', close); process.once('SIGINT', close);
     process.stdout.write(`Synthetic updates preview: ${app.url}\n`);

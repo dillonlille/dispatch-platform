@@ -46,6 +46,7 @@ function sendStatic(response, files, requestPath, method, turnstile = null) {
   let bytes = definition.bytes;
   const headers = securityHeaders(contentType);
   if (contentType.startsWith('text/html')) {
+    headers['Content-Security-Policy'] = headers['Content-Security-Policy'].replace("font-src 'self'", "font-src 'self' data:");
     if (turnstile) headers['Content-Security-Policy'] = headers['Content-Security-Policy']
       .replace("script-src 'self'", "script-src 'self' https://challenges.cloudflare.com")
       + "; frame-src https://challenges.cloudflare.com";

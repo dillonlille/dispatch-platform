@@ -9,7 +9,7 @@ import { ManagedPage } from "./ManagedPage";
 type Product = "core" | "dsp";
 type Release = { id: string; digest: string; version: string; notes: string; publishedAt: string | null;
   url: string | null; source: { commit: string } | null };
-type Track = { latest: string | null; installedVersion: string | null; installedDigest: string | null;
+type Track = { installedLegacy?: boolean; latest: string | null; installedVersion: string | null; installedDigest: string | null;
   release: Release | null; history: { id: string; version: string }[]; tested: boolean; canUpdate: boolean };
 type UpdatesView = { platformRelease?: {version:string;changes:Record<"core"|"dsp"|"plugins",string>;url:string}; platformHistory?: {id:string;version:string}[]; latestPlatform?: string; mode: string; enabled: boolean; busy: boolean; worker: { available: boolean; status: string };
   dev: { name: string; available: boolean }; recoveryRequired: boolean;
@@ -92,7 +92,7 @@ export function Updates({ hash }: { hash: string }) {
             <section className="rounded-xl border bg-card p-6 space-y-5" aria-label={`${trackName === "core" ? "Core" : "DSP"} release`}>
               <div className="flex flex-wrap justify-between items-start gap-4">
                 <div className="space-y-1"><h2 className="text-xl font-semibold">{trackName === "core" ? "Core" : "DSP"}</h2>
-                  <p className="text-sm text-muted-foreground">{trackName === "core" ? "Installed" : `Installed on ${view.dev.name}`}: {track.installedVersion || "Not registered"}</p></div>
+                  <p className="text-sm text-muted-foreground">{trackName === "core" ? "Installed" : `Installed on ${view.dev.name}`}: {track.installedVersion || "Not registered"}{track.installedLegacy ? " (legacy release)" : ""}</p></div>
                 <Button disabled={sending || !track.canUpdate || !latestSelected || (trackName === "dsp" && (!view.dev.available || Boolean(rolling)))}
                   onClick={() => void command(action, track.latest, trackName)}><ArrowUpCircle aria-hidden="true" />{trackName === "core" && track.installedDigest === track.latest ? "Core up to date" : label}</Button>
               </div>

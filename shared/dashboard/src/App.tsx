@@ -294,7 +294,7 @@ export function App() {
     if (value.dspView || !value.authenticated) setViewEnded(false);
     if (!value.authenticated) setDspView(null);
     const target = value.authenticated && !isPlatform(value) ? "dsp" : "core";
-    if ((window as any).__dispatchDashboard && (window as any).__dispatchDashboard.product !== target) {
+    if (window.__dispatchDashboard && window.__dispatchDashboard.product !== target) {
       window.location.reload(); return;
     }
     setSession(value);
@@ -345,10 +345,10 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [session?.dspView?.expiresAt, refresh]);
   useEffect(() => {
-    if(!session?.authenticated || !(window as any).__dispatchDashboard)return;
+    if(!session?.authenticated || !window.__dispatchDashboard)return;
     let cancelled=false;
     const check=async()=>{try{const current=await request<{product:string;digest:string}>("/api/dashboard?identity=1");
-      if(!cancelled)setDashboardChanged(current.digest!==(window as any).__dispatchDashboard.digest);
+      if(!cancelled)setDashboardChanged(current.digest!==window.__dispatchDashboard.digest);
     }catch{ /* Normal session/error handling owns authentication failures. */ }};
     void check(); const timer=window.setInterval(check,30000);
     return ()=>{cancelled=true;window.clearInterval(timer);};

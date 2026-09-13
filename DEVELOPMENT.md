@@ -5,8 +5,8 @@ Use Node 22/24, npm, Python 3 and Linux. Build in a new directory outside source
 ```sh
 npm run bootstrap -- /absolute/build/workspace
 npm run check -- /absolute/build/workspace
-npm test -- /absolute/build/workspace
 npm run build -- /absolute/build/workspace
+npm test -- /absolute/build/workspace
 npm run test:integration -- /absolute/build/workspace
 ```
 

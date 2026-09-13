@@ -356,10 +356,10 @@ test('shell references content-addressed assets with matching GET and HEAD respo
   assert.ok(!page.headers.get('content-security-policy').includes("'unsafe-inline'"));
   const urls = [...html.matchAll(/(?:href|src)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
   assert.deepEqual(urls.map(url => url.split('/').pop().split('.')[0]), [
-    'styles', 'updates', 'backups', 'frontend',
+    'updates', 'backups', 'launcher',
   ]);
   for (const url of urls) {
-    assert.match(url, /^\/assets\/(frontend|updates|backups|styles)\.[a-f0-9]{64}\.(js|css)$/);
+    assert.match(url, /^\/assets\/(frontend|updates|backups|styles|launcher)\.[a-f0-9]{64}\.(js|css)$/);
     const response = await fetch(`${running.base}${url}`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'public, max-age=31536000, immutable');
@@ -386,12 +386,12 @@ test('deployments bypass previously cached assets and keep each running shell co
   const before = await runningServer({ publicRoot });
   t.after(before.close);
   const htmlBefore = await (await fetch(`${before.base}/`)).text();
-  const styleUrl = html => html.match(/href="([^\"]+\.css)"/)[1];
+  const styleUrl = html => html.match(/src="([^\"]*launcher[^\"]+\.js)"/)[1];
   const urlBefore = styleUrl(htmlBefore);
   const cssBefore = await (await fetch(`${before.base}${urlBefore}`)).text();
   // Model the still-fresh browser cache retained across a deployment.
-  const cache = new Map([['/assets/styles.css', cssBefore], [urlBefore, cssBefore]]);
-  fs.appendFileSync(path.join(publicRoot, 'assets/styles.css'), '\n.platform-stats { outline: 0; }\n');
+  const cache = new Map([['/assets/launcher.js', cssBefore], [urlBefore, cssBefore]]);
+  fs.appendFileSync(path.join(publicRoot, 'assets/launcher.js'), '\n// next launcher build\n');
   const normalizeNonce = value => value.replace(/(<meta name="dispatch-style-nonce" content=")[^"]+/, '$1NONCE');
   assert.equal(normalizeNonce(await (await fetch(`${before.base}/`)).text()), normalizeNonce(htmlBefore));
   assert.equal(await (await fetch(`${before.base}${urlBefore}`)).text(), cssBefore);
@@ -401,7 +401,7 @@ test('deployments bypass previously cached assets and keep each running shell co
   assert.notEqual(urlAfter, urlBefore);
   assert.equal(cache.has(urlAfter), false);
   const cssAfter = await (await fetch(`${after.base}${urlAfter}`)).text();
-  assert.equal(cssAfter, fs.readFileSync(path.join(publicRoot, 'assets/styles.css'), 'utf8'));
+  assert.equal(cssAfter, fs.readFileSync(path.join(publicRoot, 'assets/launcher.js'), 'utf8'));
 });
 
 test('shared login supports platform-only accounts and CLI recovery without a DSP or runtime', async t => {

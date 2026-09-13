@@ -5,3 +5,7 @@ __pycache__/
 .env.*
 playwright-report/
 test-results/
+core/dashboard/public/assets/frontend.js
+core/dashboard/public/assets/styles.css
+dsp/dashboard/public/assets/frontend.js
+dsp/dashboard/public/assets/styles.css

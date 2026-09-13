@@ -43,7 +43,7 @@ function createUpdatesService({ releases, commands, store, devDspId, enabled = t
           id: `${product}_${row.digest}`, digest: row.digest, version: row.version, publishedAt: row.publishedAt,
         }));
         const current = releasesFor[active];
-        return [product, { latest, installedVersion: current?.version || null, installedDigest: active || null,
+        return [product, { latest, installedLegacy: Boolean(current?.source?.repository && current.source.repository!=='dillonlille/dispatch-platform'), installedVersion: current?.version || null, installedDigest: active || null,
           release: item ? { id: `${product}_${item.digest}`, digest: item.digest, version: item.version,
             notes: item.notes || notes(item.directory), source: item.source, publishedAt: item.publishedAt, url: item.url } : null,
           history, tested: product === 'dsp' && Boolean(latest && state.tested === latest),
