@@ -29,12 +29,11 @@ test('independent Core update, new release Dev gate, failure pause and sequentia
   await page.getByLabel('Password', { exact: true }).fill('synthetic preview password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.locator('.desktop-sidebar').getByRole('link', { name: 'Updates', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Dispatch Core', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Core', exact: true })).toBeVisible();
   await expect(page.getByText('Installed: 0.0.1', { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath('core.png'), fullPage: true });
   await page.getByRole('button', { name: 'Update Core', exact: true }).click();
   await expect(page.getByText('Installed: 0.0.2', { exact: true })).toBeVisible({ timeout: 10000 });
-  await page.getByRole('tab', { name: 'DSPs', exact: true }).click();
   await expect(page.getByText('Installed on Dev DSP: 0.0.1', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Update Dev', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Rollout Update', exact: true })).toBeEnabled({ timeout: 10000 });
@@ -54,7 +53,6 @@ test('independent Core update, new release Dev gate, failure pause and sequentia
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('mobile.png'), fullPage: true });
-  await page.getByRole('tab', { name: 'Core', exact: true }).click();
   await expect(page.getByText('Installed: 0.0.2', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });

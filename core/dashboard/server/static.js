@@ -7,6 +7,7 @@ const DEFAULT_PUBLIC_ROOT = path.resolve(__dirname, '../public');
 const STATIC_FILES = Object.freeze({
   '/': ['index.html', 'text/html; charset=utf-8', 'no-store'],
   '/index.html': ['index.html', 'text/html; charset=utf-8', 'no-store'],
+  '/assets/launcher.js': ['assets/launcher.js', 'text/javascript; charset=utf-8', 'no-store'],
   '/assets/frontend.js': ['assets/frontend.js', 'text/javascript; charset=utf-8', 'no-store'],
   '/assets/inter.woff2': ['assets/inter.woff2', 'font/woff2', 'public, max-age=86400'],
   '/assets/updates.js': ['assets/updates.js', 'text/javascript; charset=utf-8', 'no-store'],

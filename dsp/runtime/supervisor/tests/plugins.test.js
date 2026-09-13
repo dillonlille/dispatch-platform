@@ -27,7 +27,7 @@ test('runtime host gates legacy and registered actions, retains explicit uninsta
   assert.equal((await host.authorize('workforce.day', { query: {} })).status, 'plugin_disabled');
   assert.equal((await host.invoke({ pluginId: 'paycom', action: 'workforce.day', input: { query: {} } })).status, 'plugin_disabled');
   assert.equal(invokes, 0);
-  const apply = (state, revision) => host.manage({ command: 'apply', pluginId: 'paycom', version: '0.18.8', state, revision });
+  const apply = (state, revision) => host.manage({ command: 'apply', pluginId: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version, state, revision });
   assert.equal((await apply('enabled', 1)).status, 'applied'); assert.equal(unlocks, 1);
   assert.equal(await host.authorize('workforce.day', { query: {} }), null);
   assert.equal((await host.invoke({ pluginId: 'paycom', action: 'workforce.day', input: { query: {} } })).ok, true);
@@ -50,8 +50,8 @@ test('credential-only legacy enrollment is adopted without unlocking or changing
   const host = createRuntimePlugins({ paths: { collection: f.paths } }, {
     auth: { profileStatus: async () => success('configured', { profile: { configured: true } }) },
   }, { createStore: () => new CollectionStore(f.paths), load: () => ({ enable: async () => { unlocks++; } }) });
-  assert.deepEqual((await host.manage({ command: 'status' })).data.items[0], { id: 'paycom', version: '0.18.8', state: 'enabled', revision: 0 });
-  await host.manage({ command: 'apply', pluginId: 'paycom', version: '0.18.8', state: 'enabled', revision: 1 });
+  assert.deepEqual((await host.manage({ command: 'status' })).data.items[0], { id: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version, state: 'enabled', revision: 0 });
+  await host.manage({ command: 'apply', pluginId: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version, state: 'enabled', revision: 1 });
   assert.equal(unlocks, 0);
 });
 
@@ -71,7 +71,7 @@ test('real Paycom lifecycle retains an existing authentication guard through rei
   });
   let revision = 0;
   for (const state of ['enabled', 'disabled', 'enabled', 'uninstalled', 'enabled']) {
-    assert.equal((await host.manage({ command: 'apply', pluginId: 'paycom', version: '0.18.8', state, revision: ++revision })).status, 'applied');
+    assert.equal((await host.manage({ command: 'apply', pluginId: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version, state, revision: ++revision })).status, 'applied');
     assert.deepEqual(fs.readFileSync(guard.file), before);
     assert.equal(guard.status('paycom-main'), 'manual_verification_required');
   }
@@ -84,7 +84,7 @@ test('first Paycom installation creates private feature state in a fresh DSP wit
   const featureRoot = path.join(f.root, 'plugins', 'paycom');
   assert.equal(fs.existsSync(path.dirname(featureRoot)), false);
   const host = createRuntimePlugins(configuration(f), {});
-  const request = { command: 'apply', pluginId: 'paycom', version: '0.18.8', state: 'enabled', revision: 1 };
+  const request = { command: 'apply', pluginId: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version, state: 'enabled', revision: 1 };
   assert.equal((await host.manage(request)).status, 'applied');
   assert.equal(host.enabled('paycom'), true);
   for (const directory of [path.dirname(featureRoot), featureRoot]) {
@@ -105,7 +105,7 @@ test('Paycom installation rejects unsafe feature parents without enabling the pl
     if (kind === 'symlink') fs.symlinkSync(other, parent);
     else { fs.mkdirSync(parent); fs.chmodSync(parent, 0o777); }
     const host = createRuntimePlugins(configuration(f), {});
-    assert.equal((await host.manage({ command: 'apply', pluginId: 'paycom', version: '0.18.8',
+    assert.equal((await host.manage({ command: 'apply', pluginId: 'paycom', version: require('../../../plugins/paycom/dispatch-plugin.json').version,
       state: 'enabled', revision: 1 })).status, 'plugin_unavailable');
     assert.equal(host.enabled('paycom'), false);
     assert.deepEqual(fs.readdirSync(other), []);

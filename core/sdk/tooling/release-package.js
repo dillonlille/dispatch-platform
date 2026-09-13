@@ -39,6 +39,7 @@ async function buildRelease({root,output,toolsRoot}) {
     fs.mkdirSync(path.join(code,'plugins',definition.id),{recursive:true,mode:0o755});
     fs.copyFileSync(file,path.join(code,'plugins',definition.id,'dispatch-plugin.json'));
   }
+  if(product==='dsp' && fs.existsSync(path.join(root,'dashboard/public'))) copy(path.join(root,'dashboard/public'),path.join(output,'dashboard'));
   const files=inventory(output);
   // A development artifact is never a published release. Promotion later requires
   // a reviewed main commit, the user's version, a rebuild and publication checks.

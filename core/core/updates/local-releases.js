@@ -30,7 +30,7 @@ class LocalReleases {
     return this.locked(state=>{
       if(state.operation)throw new Error('release_recovery_required');
       const releases=state.releases[manifest.product];
-      if(Object.values(releases).some(item=>item.version===manifest.version&&item.digest!==digest))throw new Error('release_version_immutable');
+      if(Object.values(releases).some(item=>item.version===manifest.version&&item.digest!==digest&&(item.source?.repository||null)===(metadata.source?.repository||null)))throw new Error('release_version_immutable');
       if(releases[digest])return {digest,staged:true};
       const target=path.join(privateDirectory(path.join(this.root,'packages',manifest.product)),digest);
       if(fs.existsSync(target))verifyRelease(target,digest);
@@ -42,7 +42,7 @@ class LocalReleases {
       verifyRelease(target,digest);
       releases[digest]={digest,version:manifest.version,protocol:manifest.protocol,directory:target,source:metadata.source||null,publishedAt:metadata.publishedAt||null,url:metadata.url||null};
       const latest=state.latest[manifest.product];
-      if(!latest||compareVersions(manifest.version,releases[latest].version)>0){
+      if(!latest||(metadata.source?.repository==='dillonlille/dispatch-platform' && releases[latest].source?.repository!=='dillonlille/dispatch-platform')||(metadata.source?.repository===releases[latest].source?.repository && compareVersions(manifest.version,releases[latest].version)>0)){
         state.latest[manifest.product]=digest;
         if(manifest.product==='dsp')state.tested=null;
       }

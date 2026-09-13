@@ -35,11 +35,11 @@ async function download(url, file, maximum, fetchImpl = fetch) {
   } finally { fs.closeSync(fd); }
 }
 class GitHubReleases {
-  constructor({ directory, releases, execute = run, fetchImpl = fetch }) {
-    this.root = privateDirectory(directory); this.releases = releases; this.execute = execute; this.fetch = fetchImpl;
+  constructor({ directory, releases, execute = run, fetchImpl = fetch, repositories = REPOSITORIES }) {
+    this.repositories = repositories; this.root = privateDirectory(directory); this.releases = releases; this.execute = execute; this.fetch = fetchImpl;
   }
   async catalog(product) {
-    const repository = REPOSITORIES[product];
+    const repository = this.repositories[product];
     if (!repository) throw new Error('release_product_invalid');
     const pages = JSON.parse(await this.execute('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`]));
     if (!Array.isArray(pages) || pages.length > 20) throw new Error('release_history_capacity');
@@ -47,8 +47,8 @@ class GitHubReleases {
       && VERSION.test(item.tag_name.slice(1)) && item.tag_name.startsWith('v'))
       .sort((a, b) => compareVersions(a.tag_name.slice(1), b.tag_name.slice(1)));
   }
-  async import(product, release) {
-    const repository = REPOSITORIES[product], version = release.tag_name.slice(1);
+  async import(product, release, manifestName = 'release.json', expectedDigest = null) {
+    const repository = this.repositories[product], version = release.tag_name.slice(1);
     if (!repository || !VERSION.test(version) || !Number.isSafeInteger(release.id)) throw new Error('release_identity_invalid');
     const archive = `dispatch-${product}-${version}.tar.gz`;
     const folder = fs.mkdtempSync(path.join(this.root, '.download-'));
@@ -62,7 +62,7 @@ class GitHubReleases {
       return target;
     };
     try {
-      const manifestFile = await asset('release.json', 16 * 1024 * 1024);
+      const manifestFile = await asset(manifestName, 16 * 1024 * 1024);
       const manifest = JSON.parse(fs.readFileSync(manifestFile));
       if (manifest.product !== product || manifest.channel !== 'release' || manifest.version !== version
           || manifest.source?.repository !== repository || manifest.source?.ref !== 'refs/heads/main'
@@ -78,6 +78,7 @@ class GitHubReleases {
       const extracted = path.join(folder, 'extracted');
       await this.execute('/usr/bin/python3', [path.join(__dirname, 'extract.py'), packed, extracted]);
       const digest = hash(JSON.stringify(manifest));
+      if(expectedDigest && digest!==expectedDigest)throw new Error('release_asset_changed');
       const checked = verifyRelease(extracted, digest);
       if (JSON.stringify(checked) !== JSON.stringify(manifest)) throw new Error('release_asset_changed');
       for (const item of manifest.plugins) {

@@ -10,7 +10,7 @@ const execute = (command, args, cwd) => execFileSync(command, args, { cwd, encod
 const validVersion = value => typeof value === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value) && value !== '0.0.0';
 
 function identity({ repository, commit, version, product }) {
-  if (!['core', 'dsp'].includes(product) || !new RegExp(`^[A-Za-z0-9_.-]+/dispatch-${product}$`).test(repository)
+  if (!['core', 'dsp'].includes(product) || !new RegExp(`^[A-Za-z0-9_.-]+/dispatch-(?:${product}|platform)$`).test(repository)
       || !/^[a-f0-9]{40}$/.test(commit) || !validVersion(version)) throw new Error('release_identity_invalid');
   return { repository, commit, ref: 'refs/heads/main' };
 }

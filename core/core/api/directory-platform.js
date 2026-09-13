@@ -114,7 +114,7 @@ async function startDirectoryApi({ paths, installation, host, port = 4310, addre
       const state = require('../installations/src/release-delivery-files').privateJson(path.join(paths.local, 'state/updates/releases.json'), process.geteuid(), true);
       return state?.operation?.product === 'core' ? { phase: 'updating', nonce: state.operation.preparation?.nonce } : null;
     };
-    server = serverFactory({ coreIdentity: installedCore, coreMaintenance, access, client, config, operator, paycomSetup, connections, plugins, pluginAssets, publicOrigin, secureCookies, updates, backups,
+    server = serverFactory({ dashboards: require('../updates/dashboard').dashboardProvider({paths,store}), coreIdentity: installedCore, coreMaintenance, access, client, config, operator, paycomSetup, connections, plugins, pluginAssets, publicOrigin, secureCookies, updates, backups,
       // Public installations require email setup before creating invitations.
       // Loopback-only development can still hand off invitation links manually.
       invitationDelivery,

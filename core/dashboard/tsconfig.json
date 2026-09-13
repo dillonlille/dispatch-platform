@@ -30,6 +30,9 @@
       ],
       "dispatch-sdk/*": [
         "../sdk/types/*.d.ts"
+      ],
+      "dispatch-sdk/settings-behavior": [
+        "../node_modules/dispatch-sdk/src/settings-behavior.d.ts"
       ]
     }
   },

@@ -2,7 +2,7 @@
 const fs = require('node:fs'), path = require('node:path');
 const { hash, inventory, secureCopy } = require('../../shared/releases/package');
 
-const runtimeFile = file => !file.path.startsWith('plugins/');
+const runtimeFile = file => !file.path.startsWith('plugins/') && !file.path.startsWith('dashboard/');
 
 // Keep the original release manifest and digest. The host has already verified
 // the complete published release before deriving this DSP-owned runtime copy.
@@ -11,7 +11,7 @@ const runtimeFile = file => !file.path.startsWith('plugins/');
 function copyRuntime(source, target) {
   fs.mkdirSync(target, { mode: 0o700 });
   for (const name of fs.readdirSync(source)) {
-    if (name === 'plugins') continue;
+    if (name === 'plugins' || name === 'dashboard') continue;
     const from = path.join(source, name), to = path.join(target, name);
     const stat = fs.lstatSync(from);
     if (stat.isDirectory()) secureCopy(from, to);

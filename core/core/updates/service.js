@@ -29,12 +29,15 @@ function createUpdatesService({ releases, commands, store, devDspId, enabled = t
     view(selectedId = null) {
       const state = releases?.state(), jobs = commands?.list() || [], worker = commands?.worker() || { available: false, status: 'offline' };
       const rows = enabled ? fleet() : [], labels = new Map(rows.map(item => [item.id, item.name]));
-      const selected = selectedId && /^(core|dsp)_([a-f0-9]{64})$/.exec(selectedId);
-      if (selectedId && (!selected || !state?.releases[selected[1]][selected[2]])) throw new AccessError('release_not_found', 404);
+      const platformVersion=selectedId?.startsWith('platform_') ? selectedId.slice(9) : state?.platform?.latest;
+      const platformRelease=state?.platform?.history.find(row=>row.version===platformVersion);
+      if(selectedId?.startsWith('platform_') && !platformRelease)throw new AccessError('release_not_found',404);
+      const selected = !selectedId?.startsWith('platform_') && selectedId && /^(core|dsp)_([a-f0-9]{64})$/.exec(selectedId);
+      if (selectedId && !selectedId.startsWith('platform_') && (!selected || !state?.releases[selected[1]][selected[2]])) throw new AccessError('release_not_found', 404);
       const busy = Boolean(state?.operation || jobs.some(job => ['queued', 'running'].includes(job.status)));
       const tracks = Object.fromEntries(['core', 'dsp'].map(product => {
         const releasesFor = state?.releases[product] || {}, latest = state?.latest[product];
-        const digest = selected?.[1] === product ? selected[2] : latest;
+        const digest = platformRelease?.components[product]?.digest || (selected?.[1] === product ? selected[2] : latest);
         const item = releasesFor[digest], active = product === 'core' ? state?.active.core : state?.active.dsps[devDspId];
         const history = Object.values(releasesFor).sort((a, b) => compareVersions(b.version, a.version)).map(row => ({
           id: `${product}_${row.digest}`, digest: row.digest, version: row.version, publishedAt: row.publishedAt,
@@ -50,7 +53,7 @@ function createUpdatesService({ releases, commands, store, devDspId, enabled = t
         }];
       }));
       const rollout = state?.rollout;
-      return { mode: 'independent', enabled, worker, busy, tracks,
+      return { mode: 'independent', platformRelease:platformRelease||null, platformHistory:state?.platform?.history.map(row=>({id:'platform_'+row.version,version:row.version}))||[], latestPlatform:state?.platform?.latest||null, enabled, worker, busy, tracks,
         dev: { id: devDspId || null, name: labels.get(devDspId) || 'Dev DSP', available: labels.has(devDspId) },
         recoveryRequired: Boolean(state?.operation),
         operation: state?.operation ? { product: state.operation.product, phase: state.operation.phase,

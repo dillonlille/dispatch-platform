@@ -25,6 +25,7 @@ function createApiHandler({
   platformRuntime = null,
   plugins = null,
   pluginAssets = null,
+  dashboards = null,
   runtimeResolver = null,
   coreIdentity = null, coreMaintenance = () => null,
   now = () => new Date(),
@@ -120,6 +121,15 @@ function createApiHandler({
         access.store.db.prepare('SELECT 1 FROM users LIMIT 1').get();
         sendJson(response, 200, { ok: true, status: 'ready', data: { service: 'dispatch-api' }, error: null });
         return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/dashboard') {
+        if (!dashboards || (url.search && url.search !== '?identity=1')) throw new AccessError('release_dashboard_unavailable', 503);
+        const current=accessHttp.session(request,{required:false});
+        sendJson(response,200,{ok:true,data:dashboards(current,url.search === '?identity=1'),error:null});return;
+      }
+      if (dashboards && !['GET','HEAD','OPTIONS'].includes(request.method) && request.headers['x-dispatch-dashboard']) {
+        const current=accessHttp.session(request,{required:false});
+        if(dashboards(current,true).digest!==request.headers['x-dispatch-dashboard']) throw new AccessError('dashboard_changed',409);
       }
       const pluginAsset = /^\/api\/plugin-assets\/([a-z][a-z0-9-]{0,63})\/([1-9][0-9]{0,14})$/.exec(url.pathname);
       if (pluginAsset && request.method === 'GET' && !url.search) {
