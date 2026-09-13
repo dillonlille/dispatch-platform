@@ -14,12 +14,19 @@ test('Dev gets its new dashboard while another DSP stays on its approved dashboa
   await expect(dev.getByRole('heading',{name:'Currently under development',exact:true})).toBeVisible();
   await expect(production.getByRole('heading',{name:'Currently under development',exact:true})).toBeVisible();
   await owner.getByRole('button',{name:'Update Dev',exact:true}).click();await expect(owner.getByRole('button',{name:'Rollout Update',exact:true})).toBeEnabled({timeout:15000});
+  const stale=await dev.evaluate(async()=>{const response=await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json','X-Dispatch-Dashboard':window.__dispatchDashboard.digest},body:'{}'});return {status:response.status,body:await response.json()};});
+  expect(stale.status).toBe(409);expect(stale.body.error.code).toBe('dashboard_changed');
   await dev.reload();await production.reload();
   await expect(dev.getByRole('heading',{name:'Dev release preview',exact:true})).toBeVisible();
   await expect(production.getByRole('heading',{name:'Currently under development',exact:true})).toBeVisible();
   expect(await production.evaluate(()=>window.__dispatchDashboard.digest)).not.toEqual(await dev.evaluate(()=>window.__dispatchDashboard.digest));
   await owner.getByRole('button',{name:'Rollout Update',exact:true}).click();await expect(owner.getByText('2 of 2 DSPs updated · completed',{exact:true})).toBeVisible({timeout:15000});
   await production.reload();await expect(production.getByRole('heading',{name:'Dev release preview',exact:true})).toBeVisible();
-  await expect(owner.getByRole('heading',{name:'Core',exact:true})).toBeVisible();expect(errors).toEqual([]);
+  await expect(owner.getByRole('heading',{name:'Core',exact:true})).toBeVisible();
+  await owner.locator('.desktop-sidebar').getByRole('link',{name:'DSPs',exact:true}).click();
+  await owner.getByRole('button',{name:'Actions for Dev DSP',exact:true}).click();await owner.getByRole('menuitem',{name:'View',exact:true}).click();
+  await expect(owner.getByRole('heading',{name:'Dev release preview',exact:true})).toBeVisible();
+  await owner.getByRole('button',{name:'Exit view',exact:true}).click();await expect(owner.locator('.desktop-sidebar').getByRole('link',{name:'Updates',exact:true})).toBeVisible();
+  expect(errors).toEqual([]);
  }finally{await Promise.all(contexts.map(c=>c.close()));}
 });

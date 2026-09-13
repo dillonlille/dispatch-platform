@@ -29,7 +29,7 @@ function createUpdatesService({ releases, commands, store, devDspId, enabled = t
     view(selectedId = null) {
       const state = releases?.state(), jobs = commands?.list() || [], worker = commands?.worker() || { available: false, status: 'offline' };
       const rows = enabled ? fleet() : [], labels = new Map(rows.map(item => [item.id, item.name]));
-      const platformVersion=selectedId?.startsWith('platform_') ? selectedId.slice(9) : state?.platform?.latest;
+      const platformVersion=selectedId ? (selectedId.startsWith('platform_') ? selectedId.slice(9) : null) : state?.platform?.latest;
       const platformRelease=state?.platform?.history.find(row=>row.version===platformVersion);
       if(selectedId?.startsWith('platform_') && !platformRelease)throw new AccessError('release_not_found',404);
       const selected = !selectedId?.startsWith('platform_') && selectedId && /^(core|dsp)_([a-f0-9]{64})$/.exec(selectedId);
