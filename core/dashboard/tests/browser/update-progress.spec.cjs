@@ -34,7 +34,11 @@ test('rollout feedback survives preparation, reload, progress, pause, failure an
  view.jobs[0].status='running';
  await expect(status).toContainText('Rollout in progress',{timeout:10000});
  await expect(page.getByRole('button',{name:'Preparing rollout…',exact:true})).toBeDisabled();
- await expect(status.locator('.motion-safe\\:animate-spin')).toHaveCount(1);
+ const spinner=status.locator('.motion-safe\\:animate-spin');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await expect.poll(()=>spinner.evaluate(node=>getComputedStyle(node).animationName)).not.toBe('none');
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await expect.poll(()=>spinner.evaluate(node=>getComputedStyle(node).animationName)).toBe('none');
  await page.screenshot({path:info.outputPath('preparing-desktop.png'),fullPage:true});
  await page.reload();await expect(status).toContainText('Rollout in progress');
  view.worker.available=false;
