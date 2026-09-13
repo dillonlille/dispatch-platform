@@ -55,7 +55,11 @@ class UpdateWorker {
     if (job) {
       job.status = 'running'; this.commands.save(job);
       try { await this.execute(job); job.status = 'completed'; job.failure = null; }
-      catch (error) { job.status = 'failed'; job.failure = /^release_[a-z_]+$/.test(error.message) ? error.message : 'release_operation_failed'; }
+      catch (error) {
+        job.status = 'failed';
+        const known = { directory_runtime_not_ready: 'release_runtime_not_ready', directory_backup_unsafe: 'release_backup_unsafe' };
+        job.failure = /^release_[a-z_]+$/.test(error.message) ? error.message : Object.hasOwn(known, error.message) ? known[error.message] : 'release_operation_failed';
+      }
       job.completedAt = this.clock(); this.commands.save(job); return;
     }
     const state = this.releases.state();

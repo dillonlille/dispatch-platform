@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpCircle, FlaskConical, Pause, Play, RefreshCw, Server } from "lucide-react";
+import { ArrowUpCircle, CheckCircle2, CircleAlert, LoaderCircle, Pause, Play, RefreshCw } from "lucide-react";
 import { idempotent, queryClient, request } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ErrorNotice, Loading, Notice, PageHeading } from "@/components/shared";
@@ -28,10 +28,25 @@ const failureText: Record<string, string> = {
   release_baseline_required: "The installed version must be registered before updates can begin.",
   release_fleet_changed: "The DSP list changed. Review it and start rollout again.",
   release_verification_failed: "The release could not be verified. Check the worker’s GitHub connection and retry.",
+  release_runtime_not_ready: "A DSP runtime did not pass its readiness check. Review its runtime status before retrying the update.",
+  release_backup_unsafe: "The DSP backup check found a file it could not safely copy. Resolve the backup issue before retrying.",
 };
+const actionNames: Record<string, string> = {
+  refresh: "Release check", update_core: "Core update", update_dev: "Dev update",
+  rollout: "Rollout", pause: "Pause request", resume: "Resume request", recover: "Update recovery",
+};
+const phases: Record<string, string> = {
+  preparing: "Preparing the update", draining: "Stopping services and backing up private data",
+  starting: "Installing the release and checking service health", restoring: "Restoring the previous version",
+  failed: "Recovery is required before updates can continue",
+};
+function Spinner() {
+  return <span className="inline-flex shrink-0 motion-safe:animate-spin" aria-hidden="true"><LoaderCircle className="size-4" /></span>;
+}
 export function Updates({ hash }: { hash: string }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [pending, setPending] = useState<{ action: string; product: Product; id?: string } | null>(null);
+  const sending = pending !== null;
   const [error, setError] = useState<unknown>(null);
   const query = useQuery({ queryKey: ["independent-updates", selected],
     queryFn: () => request<UpdatesView>(`/api/platform/updates${selected ? `?releaseId=${encodeURIComponent(selected)}` : ""}`),
@@ -39,6 +54,9 @@ export function Updates({ hash }: { hash: string }) {
   const view = query.data;
   const initialCore = useRef<string | null | undefined>(undefined);
   const coreDigest = view?.tracks?.core.installedDigest;
+  useEffect(() => {
+    if (pending?.id && view?.jobs?.some(job => job.id === pending.id)) setPending(null);
+  }, [pending, view?.jobs]);
   useEffect(() => {
     if (view?.mode !== "independent") return;
     const previous = initialCore.current;
@@ -48,28 +66,50 @@ export function Updates({ hash }: { hash: string }) {
   if (view && view.mode !== "independent") return <ManagedPage page="updates" hash={hash} />;
   async function command(action: string, digest: string | null = null, product: Product = "core") {
     if (sending) return;
-    setSending(true); setError(null);
+    setPending({ action, product }); setError(null);
     try {
-      await idempotent(`updates:${action}:${product}:${digest}`, "/api/platform/updates", { action, product, digest });
+      const updated = await idempotent<UpdatesView>(`updates:${action}:${product}:${digest}`, "/api/platform/updates", { action, product, digest });
+      const job = updated.jobs.find(item => item.action === action && item.product === product);
+      setPending(job ? { action, product, id: job.id } : null);
       await queryClient.invalidateQueries({ queryKey: ["independent-updates"] });
-    } catch (cause) { setError(cause); }
-    finally { setSending(false); }
+    } catch (cause) { setError(cause); setPending(null); }
   }
   const activeJob = view?.jobs.find(job => ["queued", "running"].includes(job.status));
-  const recentFailure = view?.jobs[0]?.status === "failed" ? view.jobs[0].failure : null;
+  const lastJob = view?.jobs[0];
   const updatingCore = activeJob?.action === "update_core" || view?.operation?.product === "core";
+  const rolloutActive = view?.rollout?.status === "running";
+  let status: { title: string; detail: string; tone: "working" | "success" | "attention" } | null = null;
+  if (pending) status = { title: pending.id ? "Request received" : `Sending ${actionNames[pending.action]?.toLowerCase() || "update request"}…`,
+    detail: pending.id ? "Waiting for the worker’s latest status. You can leave this page and return to check progress." : "Submitting your request. Please wait.", tone: "working" };
+  else if (view?.operation) status = { title: view.operation.product === "core" ? "Updating Core" : `Updating ${view.operation.dspName || view.dev.name}`,
+    detail: `${phases[view.operation.phase] || "Applying the update"}.${rolloutActive ? ` ${view.rollout!.updated} of ${view.rollout!.total} DSPs updated.` : ""}`,
+    tone: ["failed", "restoring"].includes(view.operation.phase) ? "attention" : "working" };
+  else if (activeJob) status = { title: `${actionNames[activeJob.action] || "Update"} ${activeJob.status === "queued" ? "queued" : "in progress"}`,
+    detail: activeJob.status === "queued" ? "Waiting for the update worker to start." : ["rollout", "update_dev", "update_core", "refresh"].includes(activeJob.action)
+      ? "Checking the release and preparing the update. This can take a few minutes. Progress updates automatically."
+      : "The worker is processing your request. Progress updates automatically.", tone: "working" };
+  else if (lastJob?.status === "failed") status = { title: `${actionNames[lastJob.action] || "Update"} failed`,
+    detail: failureText[lastJob.failure || ""] || "The request could not finish. Review the current state, then retry or recover.", tone: "attention" };
+  else if (view?.rollout && (view.rollout.status !== "completed" || !lastJob || ["rollout", "resume", "pause"].includes(lastJob.action))) status = { title: rolloutActive ? "Rolling out update" : view.rollout.status === "completed" ? "Rollout complete" : "Rollout paused",
+    detail: `${view.rollout.updated} of ${view.rollout.total} DSPs updated.${rolloutActive ? " DSPs update one at a time. You can leave this page and return to check progress." : view.rollout.status === "paused" ? " Review rollout progress below before resuming." : " All DSPs in this rollout are on the selected release."}`,
+    tone: rolloutActive ? "working" : view.rollout.status === "completed" ? "success" : "attention" };
+  else if (lastJob?.status === "completed") status = { title: `${actionNames[lastJob.action] || "Update"} complete`,
+    detail: lastJob.action === "update_dev" ? "Dev passed installation checks. Test the changes in Dev before choosing Rollout Update." : "The worker finished your request.", tone: "success" };
+  if (status?.tone === "working" && (query.isError || view && !view.worker.available)) status = { title: "Waiting for update status",
+    detail: updatingCore ? "Core is restarting. This page will reconnect automatically." : "The latest progress is temporarily unavailable. This page will keep checking; your update may still be running.", tone: "attention" };
   return <>
     <PageHeading title="Updates" description="Choose when Core and your DSPs receive new releases.">
       <Button variant="outline" disabled={sending || view?.busy || !view?.worker.available}
-        onClick={() => void command("refresh")}><RefreshCw aria-hidden="true" />Check for updates</Button>
+        onClick={() => void command("refresh")}>{(pending?.action || activeJob?.action) === "refresh" ? <Spinner /> : <RefreshCw aria-hidden="true" />}Check for updates</Button>
     </PageHeading>
     <ErrorNotice error={error || (!updatingCore ? query.error : null)} />
-    {updatingCore && <Notice>Core is updating. This page will reconnect when it’s ready.</Notice>}
+    {status && <section aria-label="Update status" role="status" aria-live="polite" aria-atomic="true" className="mb-5 flex items-start gap-3 rounded-xl border bg-card p-5">
+      <span className="mt-1 text-primary">{status.tone === "working" ? <Spinner /> : status.tone === "success" ? <CheckCircle2 className="size-5" aria-hidden="true" /> : <CircleAlert className="size-5" aria-hidden="true" />}</span>
+      <div className="min-w-0 space-y-1"><h2 className="font-semibold">{status.title}</h2><p className="text-sm text-muted-foreground">{status.detail}</p></div>
+    </section>}
     {query.isPending ? <Loading /> : view ? <div className="space-y-5" id="platform-updates-content">
       {!view.enabled && <Notice>Updates need initial setup. Your current services will continue running.</Notice>}
       {view.enabled && !view.worker.available && <Notice error>The update worker is offline. Releases remain available to read.</Notice>}
-      {recentFailure && <Notice error>{failureText[recentFailure] || "The update could not finish. Review the current state, then retry or recover."}</Notice>}
-      {view.operation && !updatingCore && <Notice>{view.operation.dspName || "Dev DSP"} is updating. Private data is being preserved.</Notice>}
       {view.recoveryRequired && !activeJob && <div className="rounded-xl border bg-card p-5 space-y-3">
         <p>Recover the interrupted update before installing another release.</p>
         <Button disabled={sending || !view.worker.available} onClick={() => void command("recover")}>Recover update</Button>
@@ -88,13 +128,18 @@ export function Updates({ hash }: { hash: string }) {
           const rolling = view.rollout && view.rollout.status !== "completed";
           const action = trackName === "core" ? "update_core" : track.tested ? "rollout" : "update_dev";
           const label = trackName === "core" ? "Update Core" : track.tested ? "Rollout Update" : "Update Dev";
+          const working = pending?.product === trackName && pending.action !== "refresh" || activeJob?.product === trackName && activeJob.action !== "refresh" || view.operation?.product === trackName || trackName === "dsp" && rolloutActive;
+          const workingLabel = pending?.product === trackName ? pending.id ? "Request received…" : "Sending request…"
+            : activeJob?.status === "queued" && activeJob.product === trackName ? "Update queued…"
+            : activeJob?.action === "pause" ? "Pausing rollout…" : activeJob?.action === "resume" ? "Resuming rollout…" : activeJob?.action === "recover" ? "Recovering update…"
+            : trackName === "core" ? "Updating Core…" : rolloutActive ? "Rolling out…" : activeJob?.action === "rollout" ? "Preparing rollout…" : "Updating Dev…";
           return <div key={trackName} className="space-y-5">
             <section className="rounded-xl border bg-card p-6 space-y-5" aria-label={`${trackName === "core" ? "Core" : "DSP"} release`}>
               <div className="flex flex-wrap justify-between items-start gap-4">
                 <div className="space-y-1"><h2 className="text-xl font-semibold">{trackName === "core" ? "Core" : "DSP"}</h2>
                   <p className="text-sm text-muted-foreground">{trackName === "core" ? "Installed" : `Installed on ${view.dev.name}`}: {track.installedVersion || "Not registered"}{track.installedLegacy ? " (legacy release)" : ""}</p></div>
-                <Button disabled={sending || !track.canUpdate || !latestSelected || (trackName === "dsp" && (!view.dev.available || Boolean(rolling)))}
-                  onClick={() => void command(action, track.latest, trackName)}><ArrowUpCircle aria-hidden="true" />{trackName === "core" && track.installedDigest === track.latest ? "Core up to date" : label}</Button>
+                <Button disabled={sending || view.busy || Boolean(working) || !track.canUpdate || !latestSelected || (trackName === "dsp" && (!view.dev.available || Boolean(rolling)))}
+                  onClick={() => void command(action, track.latest, trackName)}>{working ? <Spinner /> : <ArrowUpCircle aria-hidden="true" />}{working ? workingLabel : trackName === "core" && track.installedDigest === track.latest ? "Core up to date" : label}</Button>
               </div>
               <p className="text-sm text-muted-foreground">{trackName === "core"
                 ? "Updates the Platform Owner dashboard, shared API and Core services."
@@ -117,7 +162,7 @@ export function Updates({ hash }: { hash: string }) {
               <p className="text-sm text-muted-foreground">{view.rollout.updated} of {view.rollout.total} DSPs updated · {view.rollout.status}</p>
               {view.rollout.status === "paused" && <Notice>The rollout is paused. Resolve the affected DSP before resuming this version.</Notice>}
               <progress aria-label="DSPs updated" value={view.rollout.updated} max={Math.max(1, view.rollout.total)} className="w-full accent-primary" />
-              <ul className="divide-y">{view.rollout.members.map((member, index) => <li key={index} className="flex justify-between gap-4 py-3 text-sm"><span>{member.name}</span><span className="text-muted-foreground">{member.status}</span></li>)}</ul>
+              <ul className="divide-y">{view.rollout.members.map((member, index) => <li key={index} className="flex justify-between gap-4 py-3 text-sm"><span className="min-w-0 break-words">{member.name}</span><span className="flex shrink-0 items-center gap-2 text-muted-foreground">{member.status === "updating" && <Spinner />}{member.status === "updated" && <CheckCircle2 className="size-4" aria-hidden="true" />}{member.status}</span></li>)}</ul>
             </section>}
           </div>;
         })}

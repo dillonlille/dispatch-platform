@@ -32,6 +32,15 @@ test('rollout submission captures the fleet and rechecks the release before acti
   f.state.rollout = { status: 'running', actor: 'owner', digest: 'a'.repeat(64) };
   await f.worker.tick(); assert.equal(f.events.at(-1)[0], 'step');
 });
+test('runtime and backup failures reach the update status without exposing arbitrary errors', async t => {
+  const f=fixture(t);
+  for(const [error,expected] of [['directory_runtime_not_ready','release_runtime_not_ready'],['directory_backup_unsafe','release_backup_unsafe'],['private host detail','release_operation_failed']]) {
+    f.options.invoke=async()=>{throw new Error(error);};
+    const job=f.request('rollout','dsp','a'.repeat(64),expected);
+    await new UpdateWorker(f.options).tick();
+    assert.equal(f.commands.list().find(row=>row.id===job.id).failure,expected);
+  }
+});
 test('revoked owners cannot execute queued updates or advance a fleet', async t => {
   const f = fixture(t), job = f.request('update_core', 'core'); job.actor = 'revoked'; f.commands.save(job);
   await f.worker.tick(); assert.equal(f.commands.list()[0].failure, 'release_actor_forbidden'); assert.deepEqual(f.events, []);
