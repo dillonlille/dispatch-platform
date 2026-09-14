@@ -453,8 +453,11 @@ td small {
 }
 .row-menu .account-popover {
   position: fixed;
-  inset: auto 36px auto auto;
-  width: 200px;
+  inset: auto;
+  width: min(200px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  visibility: hidden;
 }
 .panel {
   border: 1px solid var(--border);

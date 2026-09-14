@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Plus, Search, Check, Copy, RefreshCw, Ellipsis, Eye, FlaskConical } from 'lucide-react';
+import { Plus, Search, Check, Copy, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type {
   DspSummary,
   AuditEvent,
@@ -9,6 +9,7 @@ import type {
 } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
 import { DspAvatar } from './brand.js';
+import { DspActionsMenu } from './dsp-actions-menu.js';
 import {
   Badge,
   Empty,
@@ -161,67 +162,62 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
                     </Badge>
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <details className="row-menu">
-                      <summary aria-label={`Actions for ${dsp.name}`}>
-                        <Ellipsis size={18} />
-                      </summary>
-                      <div className="account-popover">
-                        {dsp.profile.removed ? (
+                    <DspActionsMenu name={dsp.name}>
+                      {dsp.profile.removed ? (
+                        <button
+                          onClick={() =>
+                            void perform(async () => {
+                              await api(`/api/platform/dsps/${dsp.id}/restore`, {});
+                              refresh();
+                            }, 'DSP restored')
+                          }
+                        >
+                          Restore DSP
+                        </button>
+                      ) : dsp.status === 'active' ? (
+                        <button onClick={() => open(dsp)}>
+                          <Eye size={16} />
+                          View
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            void perform(async () => {
+                              await api(
+                                `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
+                                dsp.status === 'failed' ? {} : { status: 'active' },
+                              );
+                              refresh();
+                            }, 'DSP available')
+                          }
+                        >
+                          {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
+                        </button>
+                      )}
+                      {!dsp.permanent &&
+                        !dsp.profile.removed &&
+                        ['active', 'suspended'].includes(dsp.status) && (
                           <button
-                            onClick={() =>
-                              void perform(async () => {
-                                await api(`/api/platform/dsps/${dsp.id}/restore`, {});
-                                refresh();
-                              }, 'DSP restored')
-                            }
-                          >
-                            Restore DSP
-                          </button>
-                        ) : dsp.status === 'active' ? (
-                          <button onClick={() => open(dsp)}>
-                            <Eye size={16} />
-                            View
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() =>
-                              void perform(async () => {
-                                await api(
-                                  `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
-                                  dsp.status === 'failed' ? {} : { status: 'active' },
-                                );
-                                refresh();
-                              }, 'DSP available')
-                            }
-                          >
-                            {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
-                          </button>
-                        )}
-                        {!dsp.permanent &&
-                          !dsp.profile.removed &&
-                          ['active', 'suspended'].includes(dsp.status) && (
-                            <button
-                              onClick={(event) => {
-                                event.currentTarget.closest('details')?.removeAttribute('open');
-                                setRemoving(dsp);
-                              }}
-                            >
-                              Remove DSP
-                            </button>
-                          )}
-                        {dsp.status === 'active' && !dsp.permanent && (
-                          <button
-                            className="danger"
                             onClick={(event) => {
                               event.currentTarget.closest('details')?.removeAttribute('open');
-                              setSuspending(dsp);
+                              setRemoving(dsp);
                             }}
                           >
-                            Suspend DSP
+                            Remove DSP
                           </button>
                         )}
-                      </div>
-                    </details>
+                      {dsp.status === 'active' && !dsp.permanent && (
+                        <button
+                          className="danger"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            setSuspending(dsp);
+                          }}
+                        >
+                          Suspend DSP
+                        </button>
+                      )}
+                    </DspActionsMenu>
                   </td>
                 </tr>
               ))}
