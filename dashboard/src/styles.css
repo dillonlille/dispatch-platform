@@ -738,6 +738,9 @@ td small {
 .date-controls input {
   width: 160px;
 }
+.paycom-page {
+  max-width: none;
+}
 .paycom-page .page-heading {
   margin-bottom: 24px;
 }
