@@ -5,8 +5,9 @@ import { assert } from '../../shared/errors.js';
 import { sha256 } from '../../shared/crypto.js';
 import { privateDirectory, atomicPrivateWrite } from './paths.js';
 import { lockAlive, acquireLock } from './lock.js';
-export async function backupState(root: string, destination: string) {
+export async function backupState(root: string, destination: string, standalone = false) {
   root = fs.realpathSync(root);
+  const dataDirectory = standalone ? 'data' : 'local';
   destination = path.resolve(destination);
   assert(
     destination !== root && !destination.startsWith(root + path.sep),
@@ -14,14 +15,14 @@ export async function backupState(root: string, destination: string) {
   );
   for (const env of ['production', 'preview'])
     assert(
-      !lockAlive(path.join(root, 'local', env, 'api.lock')),
+      !lockAlive(path.join(root, dataDirectory, env, 'api.lock')),
       'stop_services_before_backup',
       409,
     );
   const locks: (() => void)[] = [];
   try {
     for (const env of ['production', 'preview'])
-      locks.push(acquireLock(path.join(root, 'local', env), 'api'));
+      locks.push(acquireLock(path.join(root, dataDirectory, env), 'api'));
     assert(!fs.existsSync(destination), 'backup_destination_exists', 409);
     privateDirectory(destination);
     const files: { path: string; sha256: string; size: number }[] = [];
@@ -56,7 +57,7 @@ export async function backupState(root: string, destination: string) {
         files.push({ path: relative, sha256: sha256(bytes), size: bytes.length });
       }
     }
-    for (const name of ['dsps', 'local'])
+    for (const name of ['dsps', dataDirectory])
       if (fs.existsSync(path.join(root, name))) await copy(path.join(root, name), name);
     atomicPrivateWrite(
       path.join(destination, 'backup.json'),
@@ -83,7 +84,7 @@ export function restoreState(source: string, target: string) {
     assert(
       !path.isAbsolute(file.path) &&
         file.path.split(path.sep).every((p) => p && p !== '.' && p !== '..') &&
-        ['dsps', 'local'].includes(file.path.split(path.sep)[0]!) &&
+        ['dsps', 'local', 'data'].includes(file.path.split(path.sep)[0]!) &&
         !seen.has(file.path),
       'invalid_backup_path',
     );
@@ -104,7 +105,8 @@ export function restoreState(source: string, target: string) {
     fs.chmodSync(dest, 0o600);
   }
   // Restoring data must never revive old web sessions, invitations or reset links.
-  const accounts = path.join(target, 'local', 'platform', 'accounts.sqlite');
+  const dataDirectory = fs.existsSync(path.join(target, 'data')) ? 'data' : 'local';
+  const accounts = path.join(target, dataDirectory, 'platform', 'accounts.sqlite');
   if (fs.existsSync(accounts)) {
     const db = new DatabaseSync(accounts);
     try {
@@ -116,7 +118,7 @@ export function restoreState(source: string, target: string) {
     }
   }
   for (const environment of ['production', 'preview']) {
-    const filename = path.join(target, 'local', environment, 'jobs.sqlite');
+    const filename = path.join(target, dataDirectory, environment, 'jobs.sqlite');
     if (fs.existsSync(filename)) {
       const db = new DatabaseSync(filename);
       try {

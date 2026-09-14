@@ -370,8 +370,43 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
   const { data, error, refresh } = useData<{
     releases: ReleaseSummary[];
     deploymentEnabled: boolean;
+    standalone?: boolean;
+    release: string;
+    update?: { status: string; commit?: string; updatedAt: string } | null;
   }>('/api/platform/releases', 5000);
   const [pending, setPending] = useState<{ digest: string; environment: string }>();
+  if (data?.standalone)
+    return (
+      <>
+        <Header
+          title="Dev builds"
+          subtitle="Merged changes are checked and installed automatically."
+        />
+        <ErrorBox message={error} />
+        <Section title="Running build">
+          <div className="build-details">
+            <p>This environment includes the owner dashboard and all of its test DSPs.</p>
+            <p>
+              Build: <code>{data.release.slice(0, 12)}</code>
+            </p>
+            {data.update?.commit && (
+              <p>
+                Commit: <code>{data.update.commit.slice(0, 12)}</code>
+              </p>
+            )}
+            {data.update && (
+              <p>
+                Update status: {title(data.update.status)} · {time(data.update.updatedAt)}
+              </p>
+            )}
+          </div>
+        </Section>
+        <div className="notice">
+          Feature PRs merge into dev when approved. Successful builds update this platform
+          automatically. Your accounts, DSPs and connection data are retained.
+        </div>
+      </>
+    );
   return (
     <>
       <Header

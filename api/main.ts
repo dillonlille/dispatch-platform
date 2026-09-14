@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { configuration } from '../services/config.js';
 import { acquireLock } from '../services/storage/lock.js';
-import { privateDirectory } from '../services/storage/paths.js';
+import { Paths } from '../services/storage/paths.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const releaseFile = path.join(here, '../release.json');
 const config = configuration({
@@ -19,13 +19,12 @@ const unlock = () => {
 };
 let closing = false;
 try {
-  locks.push(
-    acquireLock(privateDirectory(path.join(config.stateRoot, 'local', config.environment)), 'api'),
-  );
+  const paths = new Paths(config.stateRoot, config.standalone);
+  if (config.standalone && !fs.existsSync(path.join(paths.platform, 'accounts.sqlite')))
+    throw new Error('Platform accounts are missing. Run explicit bootstrap before starting.');
+  locks.push(acquireLock(paths.environment(config.environment), 'api'));
   if (config.environment === 'production' && process.env.DISPATCH_FIXTURE_PREVIEW === '1')
-    locks.push(
-      acquireLock(privateDirectory(path.join(config.stateRoot, 'local', 'preview')), 'api'),
-    );
+    locks.push(acquireLock(paths.environment('preview'), 'api'));
   const { app } = await createApp(config, {
     dashboardRoot: path.resolve(here, '../dashboard'),
     startWorkers: true,

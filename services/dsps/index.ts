@@ -23,7 +23,11 @@ export class Dsps {
       "INSERT INTO dsps(id,name,environment,status,timezone,permanent,created_at) VALUES (?,?,?,'provisioning',?,?,?)",
       dspId,
       name,
-      permanent ? 'preview' : 'production',
+      this.storage.config.standalone
+        ? this.storage.config.environment
+        : permanent
+          ? 'preview'
+          : 'production',
       timezone,
       Number(permanent),
       now,
@@ -120,7 +124,7 @@ export class Dsps {
   }
   members(dspId: string) {
     return this.storage.platform.all<Membership>(
-      'SELECT m.id,m.user_id userId,m.dsp_id dspId,u.email,u.name,m.role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? ORDER BY u.name',
+      "SELECT m.id,m.user_id userId,m.dsp_id dspId,u.email,u.first_name || ' ' || u.last_name name,m.role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? ORDER BY u.first_name,u.last_name",
       dspId,
     );
   }

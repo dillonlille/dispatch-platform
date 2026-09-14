@@ -86,7 +86,8 @@ test('create a DSP and accept its owner invitation while another account is sign
   const link = await page.getByLabel('Invitation link').inputValue();
   await page.goto(link);
   await expect(page.getByRole('heading', { name: 'Join your team' })).toBeVisible();
-  await page.getByLabel('Your name').fill('Invited owner');
+  await page.getByLabel('First name', { exact: true }).fill('Invited');
+  await page.getByLabel('Last name', { exact: true }).fill('Owner');
   await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(page.getByLabel('Email address')).toBeVisible();

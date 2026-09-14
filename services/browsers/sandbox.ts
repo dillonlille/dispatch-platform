@@ -4,6 +4,16 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { chromium } from 'playwright';
 import type { Config } from '../config.js';
 import { assert } from '../../shared/errors.js';
+function sandboxExecutable(config: Config) {
+  const executable = fs.realpathSync(config.sandboxExecutable || '/usr/bin/bwrap');
+  const info = fs.statSync(executable);
+  assert(
+    info.isFile() && info.uid === 0 && (info.mode & 0o022) === 0,
+    'trusted_browser_sandbox_required',
+    503,
+  );
+  return executable;
+}
 export function systemMounts(): string[] {
   const args = [
     '--ro-bind',
@@ -98,7 +108,7 @@ export function launchSandbox(
     '/app/auth-worker.js',
     executable,
   ];
-  return spawn('/usr/bin/bwrap', args, {
+  return spawn(sandboxExecutable(config), args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { PATH: '/usr/bin:/bin' },
   });
@@ -139,7 +149,7 @@ export function launchCollector(config: Config, run: string): ChildProcessWithou
     '--max-old-space-size=256',
     '/app/collection-worker.js',
   ];
-  return spawn('/usr/bin/bwrap', args, {
+  return spawn(sandboxExecutable(config), args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { PATH: '/usr/bin:/bin' },
   });

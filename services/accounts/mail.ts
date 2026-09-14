@@ -12,10 +12,15 @@ interface Mail {
 export class Mailer {
   private running = false;
   constructor(private storage: Storage) {}
-  available() {
+  private localDelivery() {
     return (
       this.storage.config.development ||
-      Boolean(this.storage.config.smtpUrl && this.storage.config.mailFrom)
+      (this.storage.config.standalone && this.storage.config.environment === 'preview')
+    );
+  }
+  available() {
+    return (
+      this.localDelivery() || Boolean(this.storage.config.smtpUrl && this.storage.config.mailFrom)
     );
   }
   enqueue(message: Mail) {
@@ -44,7 +49,7 @@ export class Mailer {
       for (const row of rows) {
         try {
           const message = decrypt<Mail>(this.storage.key, row.encrypted_message, row.id);
-          if (this.storage.config.development) {
+          if (this.localDelivery()) {
             const directory = privateDirectory(
               path.join(this.storage.paths.platform, 'development-mail'),
             );

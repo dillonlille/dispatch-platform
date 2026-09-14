@@ -4,16 +4,12 @@
 
 ```mermaid
 flowchart LR
-    U[User] --> D[Shared dashboard and login]
-    D --> A[API: session, membership, role and DSP view]
-    A --> P[Production services]
-    A -->|Authorized Dev DSP, signed request| V[Preview services]
-    P --> Q[Production job queue]
-    V --> R[Preview job queue]
+    U[Dev user] --> C[Cloudflare Tunnel]
+    C --> A[Independent Dev API and owner dashboard]
+    A --> P[Dev account and membership database]
+    A --> Q[Dev jobs and shared services]
     Q --> B[Private browser and collection workers]
-    R --> C[Private Preview workers]
-    B --> S[DSP private data directory]
-    C --> T[Dev DSP private data directory]
+    B --> S[Individual Dev DSP directories]
 ```
 
 The API authorizes every request. Login creates a hashed, revocable server-side
@@ -31,21 +27,22 @@ between their authorized workspaces.
 
 ```text
 dispatch-platform/
-  dev/                              Editable source repository
-  dashboard/ api/ services/ tooling/ Future built application directories
-  node_modules/                     One shared set of runtime dependencies
-  preview/                          Independently selected candidate artifact
-  dsps/dsp_<random-id>/
-    config/                         Reserved per-DSP configuration files
+  dev/live/                         Repository on dev; compiled runtime in .build/
+  dev/config/                       Private environment/tunnel configuration
+  dev/data/platform/                Accounts, memberships, audit, keys, update receipts
+  dev/data/preview/                 Dev jobs and worker runs
+  dev/dsps/dsp_<random-id>/
+    config/                         DSP configuration files
     data/dispatch.sqlite            Connection/schedule settings and workforce
     secrets/vault.key               Per-DSP credential encryption key
     secrets/paycom.enc               DSP-bound encrypted provider credentials
     state/browsers/paycom/           Persistent private provider browser profile
-  local/platform/                   Accounts, memberships, audit, release registry
-  local/production/                 Production jobs, worker runs, process lock
-  local/preview/                    Preview jobs, worker runs, process lock
   archive/                          Retained previous workspace
 ```
+
+The future Production environment uses the same layout under `public/`, with no
+shared private state. `live/` contains code only. Account identities have separate
+first and last names; there is no display-name field.
 
 DSP directories contain no executables, dashboard copies, plugin installations,
 package managers, or service definitions. DSP creation inserts a provisioning
@@ -74,21 +71,18 @@ after ten minutes; native collection has a thirty-minute deadline. A ready
 connection indicates the last successful verification, not a permanently running
 browser. Profile cookies are restored on the next temporary session.
 
-## Preview and promotion
+## Dev builds and releases
 
-The permanent Dev DSP belongs to Preview. The production gateway validates the
-user’s DSP view before signing and forwarding Dev API requests to Preview. A
-Dev workspace can load the candidate dashboard from `/preview/`; its assets are
-also served through the gateway. Production DSPs continue using the production
-artifact. Direct Preview requests require the gateway proof.
+The permanent Dev DSP and all test DSPs belong to the independent Dev platform.
+It owns its login, account schema, owner dashboard, jobs and provider sessions.
+`DISPATCH_STANDALONE=1` disables the older gateway and in-dashboard activation flow.
+The older code remains exercised by isolated compatibility tests only.
 
-Preview and Production have separate code, job databases, process locks, worker
-pools, and DSP profiles. They share the trusted account/membership registry and
-audit log; they are not separate trust domains for malicious application code.
-Provider/browser workers receive an OS-enforced boundary from that trusted code.
+Feature PRs merge into `dev` on the owner's instruction. Successful push checks
+upload one verified build; the Dev timer installs only the current merged commit's
+artifact. The runtime and checkout update together, with health verification,
+code rollback and interrupted-update recovery. Private state is never replaced.
 
-A candidate must be current on Preview and explicitly marked tested before
-Production can use it. Promotion activates the same immutable digest, rather than
-rebuilding. Shared production services then serve every production DSP. Process
-replacement entails a short maintenance window. Private state and archives are
-outside the managed code inventory and are never replaced by activation.
+The owner requests a release after testing. The final versioned candidate is
+verified, its source merges into `main`, and its exact artifact is published.
+Production publication/deployment automation is deferred to the Production setup.

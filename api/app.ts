@@ -38,7 +38,10 @@ export async function createApp(
   // The local fixture runner exercises separate queues and sessions for both
   // environments. Deployed Preview uses a separate API process and release.
   const preview =
-    options.fixturePreview && config.development && config.providerMode === 'fixture'
+    !config.standalone &&
+    options.fixturePreview &&
+    config.development &&
+    config.providerMode === 'fixture'
       ? new Runtime({ ...config, environment: 'preview' })
       : undefined;
   const forContext = (context: Context) => {
@@ -146,6 +149,8 @@ export async function createApp(
       environment: config.environment,
       release: config.release,
       separatePreview: Boolean(config.previewOrigin),
+      standalone: config.standalone,
+      providerMode: config.providerMode,
     };
   });
   app.post('/api/session/dsp', (request) => {
@@ -189,10 +194,10 @@ export async function createApp(
   });
   app.post('/api/invitations/:token/accept', async (request) => {
     runtime.accounts.throttle(`invite:${request.ip}`, 20, 3600_000);
-    const input = parse(z.object({ name, password }).strict(), request);
+    const input = parse(z.object({ firstName: name, lastName: name, password }).strict(), request);
     await runtime.accounts.acceptInvitation(
       z.string().length(43).parse(params(request).token),
-      input.name,
+      { firstName: input.firstName, lastName: input.lastName },
       input.password,
     );
     return { ok: true };
@@ -260,10 +265,24 @@ export async function createApp(
   });
   app.get('/api/platform/releases', (request) => {
     owner(request);
-    return { releases: releases.list(), deploymentEnabled: config.allowDeployment };
+    const statusFile = path.join(runtime.storage.paths.platform, 'dev-update.json');
+    let update: unknown = null;
+    if (config.standalone && fs.existsSync(statusFile)) {
+      const status = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+      update = { status: status.status, commit: status.commit, updatedAt: status.updatedAt };
+    }
+    return {
+      releases: releases.list(),
+      deploymentEnabled: config.allowDeployment,
+      standalone: config.standalone,
+      environment: config.environment,
+      release: config.release,
+      update,
+    };
   });
   app.post('/api/platform/releases/:digest/tested', (request) => {
     const a = owner(request, true);
+    assert(!config.standalone, 'github_manages_updates', 409);
     releases.markTested(params(request).digest!, a.user.id);
     return { ok: true };
   });

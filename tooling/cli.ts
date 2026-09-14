@@ -15,8 +15,13 @@ if (command === 'restore') {
 } else if (command === 'backup') {
   assert(args[0] && process.env.DISPATCH_STATE_ROOT, 'usage_backup_destination_and_state_root');
   process.stdout.write(
-    JSON.stringify(await backupState(process.env.DISPATCH_STATE_ROOT, path.resolve(args[0]))) +
-      '\n',
+    JSON.stringify(
+      await backupState(
+        process.env.DISPATCH_STATE_ROOT,
+        path.resolve(args[0]),
+        process.env.DISPATCH_STANDALONE === '1',
+      ),
+    ) + '\n',
   );
 } else if (
   [
@@ -35,12 +40,20 @@ if (command === 'restore') {
     if (command === 'seed') await seed(runtime);
     if (command === 'bootstrap') {
       assert(
-        args[0] && args[1] && !runtime.storage.platform.one('SELECT id FROM users LIMIT 1'),
-        'usage_bootstrap_email_name_empty_platform',
+        args[0] &&
+          args[1] &&
+          args[2] &&
+          !runtime.storage.platform.one('SELECT id FROM users LIMIT 1'),
+        'usage_bootstrap_email_first_last_empty_platform',
       );
       assert(!process.stdin.isTTY, 'password_required_on_stdin');
       const password = fs.readFileSync(0, 'utf8').replace(/\r?\n$/, '');
-      const owner = await runtime.accounts.createUser(args[0], args[1], password, true);
+      const owner = await runtime.accounts.createUser(
+        args[0],
+        { firstName: args[1], lastName: args[2] },
+        password,
+        true,
+      );
       runtime.dsps.create('Dev DSP', 'UTC', owner.id, true);
     }
     if (command === 'release-import') {
@@ -121,5 +134,5 @@ if (command === 'restore') {
   }
 } else
   process.stdout.write(
-    'dispatch seed | bootstrap EMAIL NAME < password-file | status | release-import ARTIFACT [NOTES] | release-plan DIGEST preview|production | initialize ARTIFACT OWNER_EMAIL | release-recover RECEIPT_DIRECTORY REQUEST_ID | backup DESTINATION | restore BACKUP EMPTY_TARGET\nSet DISPATCH_STATE_ROOT explicitly for operational commands. Activation requires DISPATCH_ENABLE_DEPLOYMENT=1.\n',
+    'dispatch seed | bootstrap EMAIL FIRST_NAME LAST_NAME < password-file | status | release-import ARTIFACT [NOTES] | release-plan DIGEST preview|production | initialize ARTIFACT OWNER_EMAIL | release-recover RECEIPT_DIRECTORY REQUEST_ID | backup DESTINATION | restore BACKUP EMPTY_TARGET\nSet DISPATCH_STATE_ROOT explicitly for operational commands. Activation requires DISPATCH_ENABLE_DEPLOYMENT=1.\n',
   );

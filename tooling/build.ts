@@ -31,6 +31,8 @@ fs.cpSync('integrations/paycom/provider', path.join(out, 'services/runtime/provi
 fs.mkdirSync(path.join(out, 'services/runtime/node_modules'), { recursive: true });
 for (const name of ['package.json', 'package-lock.json'])
   fs.copyFileSync(name, path.join(out, name));
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+fs.writeFileSync(path.join(out, 'tooling/build-info.json'), JSON.stringify({ commit }) + '\n');
 execFileSync(
   'npm',
   ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--bin-links=false'],

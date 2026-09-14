@@ -29,7 +29,7 @@ export class Runtime {
   }
   start() {
     this.runner.start();
-    if (this.config.environment === 'production') {
+    if (this.config.standalone || this.config.environment === 'production') {
       this.mailTimer = setInterval(() => void this.mail.tick(), 5000);
       this.mailTimer.unref();
     }

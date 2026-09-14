@@ -14,7 +14,7 @@ export class Audit {
   }
   list(dspId?: string, limit = 100): AuditEvent[] {
     return this.storage.platform.all<AuditEvent>(
-      `SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.name,'Scheduler') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id ${dspId ? 'WHERE a.dsp_id=?' : ''} ORDER BY a.id DESC LIMIT ?`,
+      `SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name || ' ' || u.last_name,'Scheduler') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id ${dspId ? 'WHERE a.dsp_id=?' : ''} ORDER BY a.id DESC LIMIT ?`,
       ...(dspId ? [dspId, limit] : [limit]),
     );
   }

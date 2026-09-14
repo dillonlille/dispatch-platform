@@ -1,89 +1,62 @@
-# Builds, release review and future operation
+# Releases and operation
 
-**This rebuild does not authorize live setup.** The commands below document the
-operator tooling for a later approved setup. Builds, imports and plans alone do
-not start services. There is no publishing or installation on Git merge.
+## Dev updates
 
-## Build and inspect
+Feature PRs target `dev`. The owner explicitly requests each feature merge.
+Successful merged-dev checks upload a compiled GitHub Actions artifact. Because
+the repository is public, artifacts contain **code only**, never state or
+credentials. The configured Dev updater downloads and verifies that artifact and
+updates the full test platform automatically. See [DEVELOPMENT.md](DEVELOPMENT.md).
 
-```bash
-npm run build
-npm run dispatch -- release-import /absolute/path/to/artifact "Release notes"
-npm run dispatch -- release-plan DIGEST preview
-```
+## Prepare a release
 
-Set `DISPATCH_STATE_ROOT` to a disposable development root while reviewing these
-commands. `.build/release.json` contains the version, compatibility schema, Node
-major, every runtime file hash/size and the aggregate immutable digest. Verification
-rejects missing, changed, extra, duplicate, traversing, symlink or hard-linked files.
-An import retains its own verified copy so editing the build directory cannot
-change a previously imported release.
+When the owner says **Prepare a release**:
 
-## Later first setup
+1. Summarize changes since the last published release and show known running versions.
+2. Ask for the version if it was not already supplied.
+3. Pin the accepted `dev` revision, apply versioning, and verify the final compiled
+   candidate in Dev. Unmerged PRs and unfinished edits stay out. Application changes
+   require revalidation.
+4. Merge the tested source into `main` through a release PR.
+5. Publish one immutable `vX.Y.Z` release containing the verified runtime artifact
+   and its `release.json` inventory/digest. Verify assets and source provenance.
 
-The future state root is `/home/thepickle/dispatch-platform`; built code is placed
-directly there. It must have private permissions. Configure Node, a compatible
-Chromium/bubblewrap host, canonical HTTPS origin and SMTP separately.
+The agreed future Production workflow automatically installs a published stable
+release into `public/live/`, preserving sibling `config/`, `data/` and `dsps/`.
+Drafts, prereleases and main merges do not trigger Production activation. The
+release request includes the resulting automatic update, without a separate
+Promote action.
 
-1. Set `DISPATCH_STATE_ROOT`, `NODE_ENV=production`, `DISPATCH_PROVIDER_MODE=native`
-   and `DISPATCH_ORIGIN=https://your-dashboard-host`.
-2. Bootstrap the owner with `dispatch bootstrap EMAIL NAME`, supplying the password
-   on stdin, not a command-line argument. This creates the permanent Dev DSP.
-3. After explicit setup approval, set `DISPATCH_ENABLE_DEPLOYMENT=1` and use
-   `dispatch initialize ARTIFACT OWNER_EMAIL`. It installs an initial baseline
-   into both runtime locations while the fleet is empty. It starts nothing.
-4. Run the built `tooling/supervisor.js` under the approved process manager. The
-   supervisor starts the two API processes, gives the gateway a private Preview
-   signing key, and processes approved release requests.
-5. Verify Dev authentication, workforce, native browser isolation and provider
-   collection before adding production DSPs. This host’s inner Chromium sandbox
-   compatibility remains an explicit acceptance item.
+**Production provisioning, release publishing automation and Production deployment
+are not installed by this Dev setup.** Implement and verify them when requested.
+The older gateway/Update Dev/Promote operator commands remain for compatibility
+tests; standalone Dev disables those activation controls.
 
-No systemd unit, proxy configuration, SMTP credentials, DNS record or live state
-is installed by repository scripts. The first-install command refuses an existing
-deployment or a fleet containing production DSPs.
+## Build integrity and rollback
 
-## Subsequent release flow
+`.build/release.json` records the version, Node major, compatibility schema, every
+runtime file hash/size and aggregate digest. `tooling/build-info.json` records the
+source commit. Symlinks, hardlinks, unexpected files and unsafe paths are rejected.
+The Dev updater additionally verifies the GitHub artifact archive digest and that
+its workflow succeeded for a push to the current `dev` head.
 
-1. Build once and finish repository checks. Import the verified artifact.
-2. Click **Update Dev** on Releases. Only Preview restarts with the candidate.
-3. Test the permanent Dev DSP, then click **Mark tested** on the current candidate.
-4. Click **Promote**. Only that exact tested digest can become Production.
-
-The supervisor stops the target API, allows graceful worker shutdown, replaces
-only its managed code directories, starts the selected artifact and checks its
-reported digest. A failed health check restores the previous code and restarts it.
-Production activation affects all production DSPs and causes a short maintenance
-window. DSP data, credentials, profiles, central state, `dev/` and `archive/` are
-outside the replacement list. An update never copies credentials from Dev.
-
-The managed list is `dashboard`, `api`, `services`, `integrations`, `shared`,
-`tooling`, `node_modules`, `package.json`, `package-lock.json` and `release.json`.
-Only entries present in an artifact are installed. Source modules may be bundled
-into the API or worker entrypoints rather than copied as separate runtime trees.
-
-## Interrupted activation
-
-Activation writes its intent receipt before the first directory rename. If the
-supervisor crashes during an activation, it refuses to restart an ambiguous
-running request automatically. With supervisor and both APIs stopped, inspect
-`local/platform/activation-backups/*/receipt.json` and the pending request. Recover
-with `dispatch release-recover RECEIPT_DIRECTORY REQUEST_ID` and the explicit
-deployment switch. It checks the request/receipt match, restores code from the
-recorded moves, and marks that request failed. Then restart the supervisor.
-
-Code rollback does not undo data migrations. This baseline uses schema version 1;
-future schema changes must retain rollback compatibility or provide an explicit
-offline migration/recovery plan before promotion.
+Updates serialize through a lock and write an activation receipt before replacing
+code. Failed health checks restore the prior artifact and source revision. Keep
+schema changes compatible with that artifact; code rollback does not undo data
+migrations. Recovery refuses to overwrite unrelated edits to the checkout.
 
 ## Backup and restore
 
+With the Dev service and updater timer stopped, load `config/platform.env` into the
+operator process environment and use the built CLI:
+
 ```text
-dispatch backup /absolute/private/backup-destination
-dispatch restore /absolute/private/backup /absolute/empty/restore-target
+node live/.build/tooling/cli.js backup /absolute/private/backup-destination
+node live/.build/tooling/cli.js restore /absolute/private/backup /absolute/empty/restore-target
 ```
 
-Stop services before backup. The command takes API locks so they cannot start
-during the snapshot. Restore verifies checksums, clears old authentication tokens,
-cancels pending jobs and clears release paths. Reimport an artifact and complete
-the later host setup before restarting a restored platform.
+Standalone backups include `data/` and `dsps/`. Keep a separate private backup of
+`config/`; environment configuration is not included in the state archive. Restore
+validates checksums, revokes old sessions/invitations/reset links, clears stale
+release state and cancels pending jobs. Configure and verify a compatible artifact
+before restarting a restored platform.

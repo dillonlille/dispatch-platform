@@ -589,6 +589,14 @@ td small {
 .panel .empty {
   border: 0;
 }
+.build-details {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+.panel + .notice {
+  margin-top: 16px;
+}
 .activity {
   padding: 0 22px;
 }

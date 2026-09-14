@@ -29,7 +29,7 @@ test(
     try {
       const owner = await runtime.accounts.createUser(
         'test-owner@dispatch.test',
-        'Test owner',
+        { firstName: 'Test', lastName: 'Owner' },
         'Artifact-test-password!',
         true,
       );

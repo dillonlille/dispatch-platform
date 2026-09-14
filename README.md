@@ -4,7 +4,8 @@ A shared platform for DSP operations. One login and dashboard serve every DSP.
 Application code and browser workers are installed centrally; each DSP owns only
 private configuration, credentials, browser state, and databases.
 
-**Repository rebuild only. Nothing deploys on install, build, push, or merge.**
+**Independent Dev environment.** After explicit host setup, successful merged
+`dev` builds automatically update the full test platform. Production setup is deferred.
 There is no Plugins page. Paycom is configured on a DSP’s **Connections** page.
 
 ## Develop
@@ -50,16 +51,18 @@ tests/              Service, security, browser, Preview and artifact integration
 docs/               Architecture, implementation record and design reference
 ```
 
-The repository is `/home/thepickle/dispatch-platform/dev` directly. The future
-working platform will use `/home/thepickle/dispatch-platform` directly, with
-`preview/`, `dsps/`, `local/`, and retained `archive/` alongside the centrally
-installed code. There is no `live/` directory and no nested repository directory.
+The persistent repository is `/home/thepickle/dispatch-platform/dev/live`, tracking
+`dev`. Its sibling `config/`, `data/` and `dsps/` directories contain private Dev
+state. Feature work uses separate worktrees. The future Production layout is
+`public/live` with its own sibling state directories. `archive/` is retained.
+See [Dev setup](docs/DEV-SETUP.md) for owner bootstrap, services and access.
 
 ## Verify
 
 ```bash
 npm run check
 npm test
+python3 -m unittest discover -s tests -p '*_test.py'
 npm run build
 npm run test:artifact
 npm run test:ui
@@ -74,11 +77,11 @@ an already-running development server. `test:artifact` exercises two temporary
 API processes on ports 5200/5201 and a supervisor entirely under `/tmp`.
 
 Native tests use local fixture pages, real Chromium, separate Linux namespaces,
-separate profiles, and the private CDP bridge. The fixture browser disables its
-inner Chromium sandbox because this host’s AppArmor policy prohibits nested user
-namespaces; the outer filesystem, process, and network isolation remains enabled.
-**Production never uses that exception.** Production Chromium sandbox acceptance
-and real Paycom acceptance require the later authorized host/connection setup.
+profiles and the private CDP bridge. Host verification with
+`npm run test:browser-host` additionally checks Chromium's internal namespace and
+seccomp sandboxes without using provider credentials. See the Dev setup guide for
+this host's scoped AppArmor configuration. Real Paycom acceptance requires the
+owner to configure a Dev DSP connection.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md),
 [security](docs/SECURITY.md), and [RELEASES.md](RELEASES.md).
