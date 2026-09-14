@@ -1,67 +1,79 @@
 # Development
 
-## Start and stop
+## Shared Dev platform
 
-`npm run dev` seeds three synthetic DSPs, starts the API on loopback 5180, and
-starts Vite on loopback 5173. The permanent Dev DSP uses Preview’s separate job
-database and browser manager. In this convenient local mode, both environments
-run the current source. Testing two different artifacts uses the separate
-Preview process and gateway, exercised by the operations and artifact tests.
+The persistent repository is `/home/thepickle/dispatch-platform/dev/live`, tracking
+`dev`. It runs the compiled `.build/` artifact. Configuration is in sibling
+`config/`, platform state in `data/`, and private DSP state in `dsps/`. This is an
+independent platform with its own login, owner dashboard, Dev DSP and test DSPs.
+Nothing depends on a Production account registry or gateway.
 
-No npm command installs a system service, changes a proxy, opens a public port,
-reads archived credentials, or changes the future live directories.
-`npm run build` writes only `.build/` inside this repository. It bundles API and
-worker code, installs locked production dependencies into the artifact, and
-writes a complete SHA-256 inventory. It does not activate the artifact.
+Use isolated feature worktrees from `dev`; target PRs at `dev`. Merge only when
+the owner explicitly requests it. After a verified merge, remove the clean feature
+worktree and local/remote feature branch, preserving any unmerged work. Never
+delete `dev`, `main`, or the persistent environment checkout.
 
-Use Ctrl+C to stop `npm run dev`. Remove its explicitly selected fixture state
-directory only after the process exits. The browser verification scripts remove
-their own temporary state automatically; `tooling/clean-test-output.mjs` removes
-the known screenshots and reports. Do not remove unrelated `/tmp` entries.
+Successful **push checks on dev** upload a compiled artifact identified by the
+commit SHA. A user-systemd timer checks every minute. It installs only the artifact
+for the current merged `dev` head, after verifying the GitHub download digest,
+runtime inventory and source commit. PR artifacts and failed/pending checks cannot
+update the environment. Unfinished edits in the running checkout block updates.
 
-## Workflows to exercise
+The updater stops Dev, swaps `.build/`, fast-forwards the source checkout, starts
+Dev and verifies its health/digest. A failed start restores the previous code and
+checkout. Accounts, configuration, credentials, DSP data and browser profiles stay
+in place. An interrupted activation is recovered on the next updater run. Changes
+to database schemas must preserve compatibility with the previous build; code
+rollback does not reverse data migrations.
 
-1. Sign in as the platform owner. Search DSPs and open Northline Logistics.
-2. Browse employees, search by name/code, open an employee, and inspect timecards.
-3. Open Connections, save synthetic Paycom credentials, and collect data.
-4. Use password `require-verification` to exercise the owner verification flow;
-   fixture code is `123456`. `invalid-password` exercises a failed connection.
-5. Enable a daily schedule in the DSP’s timezone. Check Jobs for completion.
-6. Create a DSP, generate an owner invitation, accept it, and test owner/manager/
-   member boundaries. Development mail is written privately to
-   `local/platform/development-mail` inside the selected fixture state root.
-7. Suspend and resume a DSP. The permanent Dev DSP cannot be suspended.
-8. Import a build into a disposable state root with the CLI and inspect Releases.
-   Deployment controls remain disabled unless an operator explicitly enables them.
+First setup and operating commands are in [Dev setup](docs/DEV-SETUP.md).
 
-Browser assistance is available for real native fixture/provider sessions that
-need verification. The fast in-memory fixtures support code verification and do
-not fabricate browser screenshots.
+## Feature development and fixtures
 
-## Checks
+Inside a feature worktree:
 
-`npm test` covers account/role/CSRF boundaries, DSP view tampering, provisioning,
-invitations, reset revocation, encrypted credential binding, schedules, durable
-jobs, failed-publication preservation, artifact integrity, private-state
-preservation, backup checksums, and separate Preview routing. Native and compiled
-supervisor tests are opt-in commands because they require a built artifact.
+```bash
+npm ci --ignore-scripts
+npm run dev
+```
 
-`npm run test:ui` checks the built API and dashboard together: owner login, DSP
-search, employee detail, punches, credentials, verification, collection results,
-restricted member navigation, mobile layout, and JavaScript errors.
+This optional local runner starts Vite at `http://127.0.0.1:5173` and a fixture API
+on 5180. Use a free API port via `PORT` and adjust the Vite proxy when the hosted
+Dev service occupies 5180. It seeds synthetic accounts/DSPs in a temporary state
+root; never point the fixture runner at the persistent Dev state. Frontend edits
+hot reload; restart this local API runner after backend changes. Feature work does
+not change the shared Dev environment before merge.
 
-CI runs typechecking, service tests, dependency audit, the build, the compiled
-supervisor simulation, and browser checks. It has read-only repository permission.
-There is no release-publishing or deployment workflow in this rebuild.
+`npm run build` writes only `.build/`. It bundles the API and browser workers,
+installs locked runtime dependencies, records the source commit, and produces the
+SHA-256 `release.json` inventory. Building alone does not activate it.
 
-## Changes and data compatibility
+Stop temporary servers before cleanup. Verification scripts remove their own
+temporary state; `node tooling/clean-test-output.mjs` removes known reports and
+screenshots. Remove only your own `/tmp` artifacts.
 
-Update shared contracts and both producer/consumer paths together. Validate
-provider data before publication and preserve the last successful dataset on
-failure. Never accept a DSP filesystem path from a request. Provider workers
-must not receive the platform state root or vault path.
+## Verification
 
-Shared account schemas are controlled by the production process. Preview refuses
-to migrate that shared database. Shared authentication, routing, or account-schema
-changes require an isolated full-platform staging run before promotion. A Dev
-DSP alone cannot validate a replacement for the gateway currently routing to it.
+```bash
+npm run check
+npm run format:check
+npm test
+python3 -m unittest discover -s tests -p '*_test.py'
+npm run build
+npm run test:artifact
+npm run test:ui
+npm run test:native
+```
+
+Checks cover login/role/CSRF boundaries, independent Dev accounts, provisioning,
+encrypted credentials, collection jobs, schedules, backups, archive verification,
+dirty-checkout protection, activation and rollback. Browser checks exercise the
+built dashboard/API together. Native verification uses local fixture pages and
+isolated Chromium profiles; real provider acceptance requires user-supplied DSP
+credentials. Legacy gateway/supervisor tests remain for compatibility and do not
+install or start Production.
+
+Update contracts and their producers/consumers together. Validate provider results
+before publication and preserve the last successful dataset on failure. Never
+accept a filesystem path from a DSP request. Collection workers receive no platform
+state root, vault path or other DSP's profile.

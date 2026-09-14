@@ -1,8 +1,8 @@
 # Security and operational boundaries
 
-- The API binds to loopback. Production configuration requires a canonical HTTPS
-  origin and native provider mode. TLS/reverse-proxy installation is a later host
-  setup step; it is not performed by this repository.
+- The API binds to loopback. The hosted Dev configuration requires a canonical HTTPS
+  origin and secure cookies. Cloudflare Tunnel exposes only the application, with
+  a catch-all 404. Dev accounts, configuration and state are independent.
 - Sessions use random opaque tokens, hashes at rest, HttpOnly/SameSite cookies,
   expiry and user-version revocation. Passwords use scrypt. Mutations require the
   expected Origin, JSON content and a session-bound CSRF token.
@@ -23,17 +23,18 @@
   socket. They receive no vault directory, profile mount or platform environment.
   CDP grants the authenticated browser session; it is not a general-purpose
   untrusted-code execution service.
-- Production Chromium retains its internal sandbox. This machine’s current
-  AppArmor policy prevents nested sandbox namespaces. Native fixture tests keep
-  the outer boundary but explicitly omit the inner sandbox for their local-only
-  browser. There is no automatic production fallback. A compatible production
-  browser host must be verified during the later host setup.
+- Native Chromium retains its internal namespace and seccomp sandboxes. On this
+  host, Dev uses a root-owned bubblewrap copy and a path-specific AppArmor profile
+  to permit nested namespaces. The system-wide user-namespace restriction remains
+  enabled. `npm run test:browser-host` verifies the real browser sandbox without
+  visiting a provider. Legacy local fixture tests can omit the inner sandbox;
+  native provider sessions have no fallback that disables it.
 - Audit records contain controlled action names and error codes, not provider
   passwords, OTPs, reset tokens, raw HTTP bodies or browser diagnostics. Native
   fixture diagnostics are available only to local tests.
-- Account changes in the trusted control plane require full staging validation.
-  Preview may not migrate the shared account schema. Schema rollback is never
-  inferred from a code rollback.
+- Standalone Dev controls its own account schema and can test complete account
+  changes independently. The legacy gateway Preview cannot migrate shared account
+  schemas. Schema rollback is never inferred from code rollback.
 
 ## Provider acceptance
 

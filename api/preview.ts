@@ -14,6 +14,7 @@ function proof(
 }
 export function previewRouting(app: FastifyInstance, runtime: Runtime) {
   const config = runtime.config;
+  if (config.standalone) return;
   app.addHook('preHandler', async (request, reply) => {
     if (request.url === '/api/health') return;
     if (config.environment === 'preview' && config.previewKey) {

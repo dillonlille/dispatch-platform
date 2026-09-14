@@ -68,13 +68,16 @@ export function keyFile(file: string) {
 export class Paths {
   readonly root: string;
   readonly platform: string;
-  constructor(root: string) {
+  readonly data: string;
+  constructor(root: string, standalone = false) {
     this.root = privateDirectory(root);
-    this.platform = privateDirectory(path.join(root, 'local', 'platform'));
+    this.data = privateDirectory(path.join(root, standalone ? 'data' : 'local'));
+    if (standalone) privateDirectory(path.join(root, 'config'));
+    this.platform = privateDirectory(path.join(this.data, 'platform'));
     privateDirectory(path.join(root, 'dsps'));
   }
   environment(environment: 'preview' | 'production') {
-    return privateDirectory(path.join(this.root, 'local', environment));
+    return privateDirectory(path.join(this.data, environment));
   }
   dsp(id: string) {
     assert(DSP_ID.test(id), 'invalid_dsp_id');

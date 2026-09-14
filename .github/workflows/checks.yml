@@ -2,7 +2,7 @@ name: Platform checks
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,6 +30,18 @@ jobs:
       - run: npm run test:artifact
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+      - run: python3 -m unittest discover -s tests -p '*_test.py'
+      - name: Package verified Dev build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        run: tar -czf dispatch-dev.tar.gz -C .build .
+      - name: Upload verified Dev build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dispatch-dev-${{ github.sha }}
+          path: dispatch-dev.tar.gz
+          if-no-files-found: error
+          retention-days: 14
       - name: Remove temporary verification data
         if: always()
         run: node tooling/clean-test-output.mjs

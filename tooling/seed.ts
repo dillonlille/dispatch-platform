@@ -23,7 +23,12 @@ export async function seed(runtime: Runtime) {
   );
   const owner =
     existing ??
-    (await runtime.accounts.createUser(demo.email, 'Platform owner', demo.password, true));
+    (await runtime.accounts.createUser(
+      demo.email,
+      { firstName: 'Platform', lastName: 'Owner' },
+      demo.password,
+      true,
+    ));
   const getDsp = (name: string, timezone: string, permanent = false) => {
     const row = runtime.storage.platform.one<{ id: string }>(
       'SELECT id FROM dsps WHERE name=?',
@@ -39,7 +44,12 @@ export async function seed(runtime: Runtime) {
   const member =
     runtime.storage.platform.one<{ id: string }>(
       "SELECT id FROM users WHERE email='member@dispatch.test'",
-    ) ?? (await runtime.accounts.createUser('member@dispatch.test', 'Jordan Ellis', demo.password));
+    ) ??
+    (await runtime.accounts.createUser(
+      'member@dispatch.test',
+      { firstName: 'Jordan', lastName: 'Ellis' },
+      demo.password,
+    ));
   runtime.storage.platform.run(
     'INSERT OR IGNORE INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,?)',
     id('mem'),

@@ -23,7 +23,8 @@ export interface Context extends Auth {
 export interface UserRow {
   id: string;
   email: string;
-  name: string;
+  first_name: string;
+  last_name: string;
   password: string;
   platform_owner: number;
   status: string;
@@ -52,7 +53,8 @@ export const publicDsp = (r: DspRow): Dsp => ({
 const publicUser = (r: UserRow): User => ({
   id: r.id,
   email: r.email,
-  name: r.name,
+  firstName: r.first_name,
+  lastName: r.last_name,
   platformOwner: Boolean(r.platform_owner),
 });
 const roles: Record<Role | 'platform_owner', readonly Permission[]> = {
@@ -69,22 +71,36 @@ export class Accounts {
   ) {}
   async createUser(
     email: string,
-    name: string,
+    person: { firstName: string; lastName: string },
     password: string,
     platformOwner = false,
   ): Promise<User> {
+    assert(
+      person.firstName.trim().length > 0 &&
+        person.lastName.trim().length > 0 &&
+        person.firstName.length <= 100 &&
+        person.lastName.length <= 100,
+      'first_and_last_name_required',
+    );
     const encoded = await hashPassword(password),
       userId = id('usr');
     this.storage.platform.run(
-      'INSERT INTO users(id,email,name,password,platform_owner,created_at) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO users(id,email,first_name,last_name,password,platform_owner,created_at) VALUES (?,?,?,?,?,?,?)',
       userId,
       email.trim().toLowerCase(),
-      name.trim(),
+      person.firstName.trim(),
+      person.lastName.trim(),
       encoded,
       Number(platformOwner),
       new Date().toISOString(),
     );
-    return { id: userId, email: email.trim().toLowerCase(), name: name.trim(), platformOwner };
+    return {
+      id: userId,
+      email: email.trim().toLowerCase(),
+      firstName: person.firstName.trim(),
+      lastName: person.lastName.trim(),
+      platformOwner,
+    };
   }
   throttle(key: string, maximum: number, windowMs: number) {
     const db = this.storage.platform,
@@ -250,7 +266,11 @@ export class Accounts {
     assert(row, 'invitation_expired', 404);
     return row;
   }
-  async acceptInvitation(raw: string, name: string, password: string) {
+  async acceptInvitation(
+    raw: string,
+    person: { firstName: string; lastName: string },
+    password: string,
+  ) {
     const invite = this.invitation(raw);
     const existing = this.storage.platform.one<UserRow>(
       'SELECT * FROM users WHERE email=?',
@@ -278,10 +298,11 @@ export class Accounts {
         );
       } else
         this.storage.platform.run(
-          'INSERT INTO users(id,email,name,password,created_at) VALUES (?,?,?,?,?)',
+          'INSERT INTO users(id,email,first_name,last_name,password,created_at) VALUES (?,?,?,?,?,?)',
           userId,
           invite.email,
-          name,
+          person.firstName.trim(),
+          person.lastName.trim(),
           encoded,
           new Date().toISOString(),
         );

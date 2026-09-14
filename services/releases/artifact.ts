@@ -27,7 +27,7 @@ const manifestSchema = z
     format: z.literal(1),
     version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/),
     nodeMajor: z.literal(22),
-    schema: z.literal(1),
+    schema: z.union([z.literal(1), z.literal(2)]),
     files: z.array(fileSchema).min(1),
     digest: z.string().regex(/^[a-f0-9]{64}$/),
   })
@@ -63,7 +63,7 @@ export function writeManifest(root: string, version: string): Artifact {
     format: 1 as const,
     version,
     nodeMajor: 22 as const,
-    schema: 1 as const,
+    schema: 2 as const,
     files: inventory(root),
   };
   const manifest = { ...value, digest: sha256(JSON.stringify(value)) };

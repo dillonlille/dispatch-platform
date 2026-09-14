@@ -41,7 +41,11 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
         setNotice('Password updated. Sign in with your new password.');
       }
       if (mode === 'invite') {
-        await api(`/api/invitations/${token}/accept`, { name: String(form.get('name')), password });
+        await api(`/api/invitations/${token}/accept`, {
+          firstName: String(form.get('firstName')),
+          lastName: String(form.get('lastName')),
+          password,
+        });
         window.location.hash = 'signin';
         setMode('login');
         setNotice('Invitation accepted. Sign in with your invited email address.');
@@ -107,10 +111,16 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
               </label>
             )}
             {mode === 'invite' && (
-              <label>
-                Your name
-                <input name="name" autoComplete="name" required maxLength={100} />
-              </label>
+              <>
+                <label>
+                  First name
+                  <input name="firstName" autoComplete="given-name" required maxLength={100} />
+                </label>
+                <label>
+                  Last name
+                  <input name="lastName" autoComplete="family-name" required maxLength={100} />
+                </label>
+              </>
             )}
             {mode !== 'forgot' && (
               <label>

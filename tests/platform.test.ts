@@ -94,14 +94,16 @@ test('invitations are single use, existing accounts require password, reset revo
   ).json().invitationUrl;
   const token = invitation.split('token=')[1];
   const accepted = await owner.post(`/api/invitations/${token}/accept`, {
-    name: 'New owner',
+    firstName: 'New',
+    lastName: 'Owner',
     password: 'New-owner-password!',
   });
   assert.equal(accepted.statusCode, 200, accepted.body);
   assert.equal(
     (
       await owner.post(`/api/invitations/${token}/accept`, {
-        name: 'Replay',
+        firstName: 'Replay',
+        lastName: 'Owner',
         password: 'New-owner-password!',
       })
     ).statusCode,

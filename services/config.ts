@@ -6,6 +6,7 @@ export interface Config {
   stateRoot: string;
   environment: Environment;
   development: boolean;
+  standalone: boolean;
   origin: string;
   host: string;
   port: number;
@@ -14,6 +15,7 @@ export interface Config {
   browserCapacity: number;
   jobLeaseMs: number;
   browserExecutable?: string;
+  sandboxExecutable?: string;
   runtimeBundle?: string;
   smtpUrl?: string;
   mailFrom?: string;
@@ -25,6 +27,7 @@ export function configuration(overrides: Partial<Config> = {}): Config {
   const development = process.env.NODE_ENV !== 'production';
   const config: Config = {
     development,
+    standalone: process.env.DISPATCH_STANDALONE === '1',
     stateRoot:
       process.env.DISPATCH_STATE_ROOT ||
       path.join(os.tmpdir(), `dispatch-development-${process.getuid?.() ?? 'local'}`),
@@ -37,6 +40,7 @@ export function configuration(overrides: Partial<Config> = {}): Config {
     browserCapacity: 2,
     jobLeaseMs: 120_000,
     browserExecutable: process.env.DISPATCH_BROWSER_EXECUTABLE,
+    sandboxExecutable: process.env.DISPATCH_BWRAP_EXECUTABLE,
     runtimeBundle: process.env.DISPATCH_RUNTIME_BUNDLE,
     smtpUrl: process.env.DISPATCH_SMTP_URL,
     mailFrom: process.env.DISPATCH_MAIL_FROM,
@@ -55,8 +59,15 @@ export function configuration(overrides: Partial<Config> = {}): Config {
     'canonical_origin_required',
   );
   assert(
-    config.development || (origin.protocol === 'https:' && config.providerMode === 'native'),
+    config.development ||
+      (origin.protocol === 'https:' &&
+        (config.providerMode === 'native' ||
+          (config.standalone && config.environment === 'preview'))),
     'production_configuration_required',
+  );
+  assert(
+    !config.standalone || (!config.previewOrigin && !config.previewKey && !config.allowDeployment),
+    'standalone_uses_independent_state_and_external_updates',
   );
   assert(
     Number.isInteger(config.browserCapacity) &&

@@ -32,6 +32,7 @@ import { Overview, EmployeesPage, TimecardsPage, ConnectionsPage, DspSettings } 
 import { Badge, Header, Loading, ErrorBox, Section, title } from './ui.js';
 import './styles.css';
 type Session = SessionView & { separatePreview?: boolean };
+const userFullName = (user: SessionView['user']) => `${user.firstName} ${user.lastName}`;
 function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
@@ -252,14 +253,14 @@ function App() {
           </a>
           <div className="user-summary">
             <span className="avatar">
-              {session.user.name
+              {userFullName(session.user)
                 .split(' ')
                 .map((s) => s[0])
                 .slice(0, 2)
                 .join('')}
             </span>
             <div>
-              <strong>{session.user.name}</strong>
+              <strong>{userFullName(session.user)}</strong>
               <small>
                 {session.user.platformOwner
                   ? 'Platform owner'
@@ -289,14 +290,16 @@ function App() {
             <strong>{page === 'dsps' ? 'DSPs' : title(page)}</strong>
           </div>
           <div className="topbar-right">
-            {session.development && (
+            {(session.development || (session.standalone && session.environment === 'preview')) && (
               <span className="dev-label">
                 <FlaskConical size={14} />
-                Development · synthetic data
+                {session.providerMode === 'fixture'
+                  ? 'Dev platform · synthetic data'
+                  : 'Dev platform'}
               </span>
             )}
-            <span className="avatar pale" title={session.user.name}>
-              {session.user.name
+            <span className="avatar pale" title={userFullName(session.user)}>
+              {userFullName(session.user)
                 .split(' ')
                 .map((s) => s[0])
                 .slice(0, 2)
@@ -331,7 +334,10 @@ function App() {
                 ) : page === 'timecards' ? (
                   <TimecardsPage timezone={view.dsp.timezone} />
                 ) : page === 'connections' && owner ? (
-                  <ConnectionsPage perform={perform} development={session.development} />
+                  <ConnectionsPage
+                    perform={perform}
+                    development={session.providerMode === 'fixture'}
+                  />
                 ) : page === 'jobs' ? (
                   <JobsPage platform={false} perform={perform} canCollect={canCollect} />
                 ) : page === 'settings' && owner ? (
@@ -354,8 +360,10 @@ function App() {
               />
               <Section title="Your account">
                 <dl className="details">
-                  <dt>Name</dt>
-                  <dd>{session.user.name}</dd>
+                  <dt>First name</dt>
+                  <dd>{session.user.firstName}</dd>
+                  <dt>Last name</dt>
+                  <dd>{session.user.lastName}</dd>
                   <dt>Email</dt>
                   <dd>{session.user.email}</dd>
                 </dl>
@@ -438,7 +446,11 @@ function App() {
         </main>
         <footer className="main-footer">
           <span>Dispatch</span>
-          <span>{session.development ? 'Development workspace' : 'Connected workspace'}</span>
+          <span>
+            {session.environment === 'preview' || session.development
+              ? 'Dev platform'
+              : 'Connected workspace'}
+          </span>
         </footer>
       </div>
     </div>

@@ -9,12 +9,12 @@ export class Storage {
   readonly jobs: Database;
   readonly key: Buffer;
   constructor(readonly config: Config) {
-    this.paths = new Paths(config.stateRoot);
+    this.paths = new Paths(config.stateRoot, config.standalone);
     this.key = keyFile(path.join(this.paths.platform, 'platform.key'));
     this.platform = new Database(
       path.join(this.paths.platform, 'accounts.sqlite'),
       platformSchema,
-      config.environment === 'production',
+      config.standalone || config.environment === 'production',
     );
     this.jobs = new Database(
       path.join(this.paths.environment(config.environment), 'jobs.sqlite'),

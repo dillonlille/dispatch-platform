@@ -18,6 +18,14 @@ CREATE TABLE deployment_requests (id TEXT PRIMARY KEY, environment TEXT NOT NULL
 CREATE UNIQUE INDEX one_deployment_request ON deployment_requests((1)) WHERE status IN ('queued','running');
 INSERT INTO deployments(environment,updated_at) VALUES ('production',strftime('%Y-%m-%dT%H:%M:%fZ','now')),('preview',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 `,
+  String.raw`
+ALTER TABLE users ADD COLUMN first_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN last_name TEXT NOT NULL DEFAULT '';
+UPDATE users SET
+  first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
+  last_name = CASE WHEN instr(trim(name), ' ') > 0 THEN trim(substr(trim(name), instr(trim(name), ' ') + 1)) ELSE '' END;
+ALTER TABLE users DROP COLUMN name;
+`,
 ];
 export const dspSchema = [
   String.raw`

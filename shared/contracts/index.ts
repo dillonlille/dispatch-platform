@@ -18,7 +18,8 @@ export type JobStatus =
 export interface User {
   id: string;
   email: string;
-  name: string;
+  firstName: string;
+  lastName: string;
   platformOwner: boolean;
 }
 export interface Dsp {
@@ -51,6 +52,8 @@ export interface SessionView {
   development: boolean;
   environment: Environment;
   release: string;
+  standalone?: boolean;
+  providerMode?: 'fixture' | 'native';
 }
 export interface DspView {
   dsp: Dsp;
