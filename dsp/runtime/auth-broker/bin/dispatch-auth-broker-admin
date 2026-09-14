@@ -1,4 +1,0 @@
-#!/usr/bin/env -S node --no-warnings
-'use strict';
-process.umask(0o077);
-process.exitCode = require('../src/admin-cli').main();

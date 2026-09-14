@@ -1,4 +1,0 @@
-# Keep generated bundles out of the default review diff. The bundled dialog
-# library contains CSS template literals whose whitespace is owned upstream.
-public/assets/frontend.js linguist-generated=true -whitespace
-public/assets/styles.css linguist-generated=true

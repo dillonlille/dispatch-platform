@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-if test "$#" -ne 1; then
-  echo 'Usage: runtime/tooling/build /absolute/new-output-directory' >&2
-  exit 2
-fi
-exec node --no-warnings "$ROOT/runtime/supervisor/examples/build-native-fixture.js" "$1"

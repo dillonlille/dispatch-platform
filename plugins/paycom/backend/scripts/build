@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-shopt -s nullglob
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-files=("$ROOT"/src/*.js "$ROOT"/tests/*.js "$ROOT"/bin/dispatch-paycom-collector "$ROOT"/bin/dispatch-paycom-activation-evidence "$ROOT"/bin/dispatch-paycom-publication-continuity)
-for file in "${files[@]}"; do node --check "$file" >/dev/null; done
-printf '%s\n' '{"ok":true,"status":"built"}'

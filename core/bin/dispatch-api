@@ -1,6 +1,0 @@
-#!/usr/bin/env -S node --no-warnings
-'use strict';
-process.umask(0o077);
-require('../core/api/main').main().then(code => { process.exitCode = code; }).catch(() => {
-  process.stderr.write('{"ok":false,"status":"api_startup_failed"}\n'); process.exitCode = 1;
-});

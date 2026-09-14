@@ -1,7 +1,0 @@
-{
-  "schemaVersion": 1,
-  "status": "source-development",
-  "version": "0.18.8",
-  "executable": "${DISPATCH_PROJECT_ROOT}/plugins/paycom/backend/bin/dispatch-paycom-collector",
-  "managedBy": "collection-manager"
-}

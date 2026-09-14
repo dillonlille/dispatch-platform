@@ -1,5 +1,0 @@
-{
-  "url": "https://github.com/dillonlille/dispatch-core/releases/download/v0.0.1/platform-packages.tar.gz",
-  "sha256": "b233ad949d4bfc931e19ef7e988c3e15e109241e9aa479cbdeb54404ac013990",
-  "description": "Use the verified platform package bundle published with Core 0.0.1 for DSP checks, builds, and releases. Upgrade the URL and SHA-256 together through a reviewed PR."
-}

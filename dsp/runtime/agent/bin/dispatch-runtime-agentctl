@@ -1,4 +1,0 @@
-#!/usr/bin/env -S node --no-warnings
-'use strict';
-process.umask(0o077);
-require('../src/control-cli').main().then(code => { process.exitCode = code; });

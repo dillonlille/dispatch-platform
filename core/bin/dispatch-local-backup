@@ -1,5 +1,0 @@
-#!/usr/bin/env -S node --no-warnings
-'use strict';
-process.umask(0o077);
-require('../host/storage/manual-backup-cli').main(process.argv.slice(2))
-  .then(code => { process.exitCode = code; });

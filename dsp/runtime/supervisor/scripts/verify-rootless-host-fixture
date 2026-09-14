@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-cd "$ROOT/../.."
-node --no-warnings runtime/supervisor/examples/rootless-host-fixture.js
