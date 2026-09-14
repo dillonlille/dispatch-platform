@@ -21,6 +21,16 @@ export function publicAddress(address: string): boolean {
   // The broker deliberately uses public IPv4 destinations; no mapped-address ambiguity.
   return false;
 }
+export function allowedHost(host: string, rules: readonly string[]) {
+  return (
+    /^[a-z0-9.-]+$/.test(host) &&
+    rules.some((rule) =>
+      rule.startsWith('*.')
+        ? host.endsWith(rule.slice(1)) && host.length > rule.length - 1
+        : host === rule,
+    )
+  );
+}
 export interface EgressPolicy {
   hosts: readonly string[];
   fixture?: { hostname: string; port: number };
@@ -102,7 +112,7 @@ export class Egress {
     )
       address = '127.0.0.1';
     else {
-      if (!connect || port !== 443 || !this.policy.hosts.includes(url.hostname))
+      if (!connect || port !== 443 || !allowedHost(url.hostname, this.policy.hosts))
         throw new AppError('egress_denied');
       const result = await lookup(url.hostname, { family: 4 });
       if (!publicAddress(result.address)) throw new AppError('egress_denied');

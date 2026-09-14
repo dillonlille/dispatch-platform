@@ -407,7 +407,7 @@ export async function createApp(
   app.post('/api/dsp/connections/paycom/check', async (request) => {
     const c = context(request, 'connections', true),
       r = forContext(c);
-    await r.broker.ensure(c.dsp);
+    await r.broker.ensure(c.dsp, true);
     runtime.accounts.revalidate(c, 'connections');
     return r.broker.connection(c.dsp.id);
   });
@@ -448,8 +448,8 @@ export async function createApp(
         z
           .object({
             kind: z.literal('click'),
-            x: z.number().min(0).max(1200),
-            y: z.number().min(0).max(800),
+            x: z.number().min(0).max(1600),
+            y: z.number().min(0).max(1100),
           })
           .strict(),
         z.object({ kind: z.literal('type'), text: z.string().max(256) }).strict(),

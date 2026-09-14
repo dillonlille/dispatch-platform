@@ -53,6 +53,15 @@ The tunnel credential and origin certificate must never enter Git or build artif
 
 ### Native browser host
 
+The archived Paycom flow needs root-owned Chrome, `/usr/bin/Xvfb`,
+`/usr/bin/python3`, and `/usr/bin/setpriv`, plus X11/XTest libraries (Ubuntu packages
+`xvfb`, `python3`, `util-linux`, `libx11-6`, and `libxtst6`). Native PIN entry uses a
+private Xvfb display; the host check verifies actual keyboard/mouse input as well
+as both layers of sandboxing. No graphical desktop or per-DSP installation is needed.
+
+Optional archived CAPTCHA assistance has separate private host configuration;
+see [its setup requirements](../services/browsers/assistance/README.md).
+
 Ubuntu's generic bubblewrap AppArmor profile strips capabilities needed by nested
 Chromium namespaces. The Dev-specific host configuration uses the same installed
 bubblewrap binary copied to a root-owned path, with a narrowly attached profile:

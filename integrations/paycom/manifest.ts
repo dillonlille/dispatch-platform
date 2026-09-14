@@ -15,6 +15,7 @@ export const paycom = Object.freeze({
     'www.paycomonline.net',
     'time-and-attendance.paycomonline.net',
     'paycomonline.net',
+    '*.paycomonline.net',
     'www.paycom.com',
     'fonts.googleapis.com',
     'fonts.gstatic.com',

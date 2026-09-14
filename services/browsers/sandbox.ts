@@ -14,6 +14,28 @@ function sandboxExecutable(config: Config) {
   );
   return executable;
 }
+// Check before entering the user namespace, where host UID 0 becomes unmapped.
+function trustedBrowserExecutable(file: string) {
+  const resolved = fs.realpathSync(file);
+  const executable = fs.statSync(resolved);
+  assert(
+    executable.isFile() &&
+      executable.uid === 0 &&
+      !(executable.mode & 0o022) &&
+      Boolean(executable.mode & 0o111),
+    'trusted_browser_executable_required',
+    503,
+  );
+  for (let directory = path.dirname(resolved); ; directory = path.dirname(directory)) {
+    const info = fs.statSync(directory);
+    assert(
+      info.isDirectory() && info.uid === 0 && !(info.mode & 0o022),
+      'trusted_browser_executable_required',
+      503,
+    );
+    if (directory === '/') break;
+  }
+}
 export function systemMounts(): string[] {
   const args = [
     '--ro-bind',
@@ -61,6 +83,10 @@ export function launchSandbox(
     'browser_sandbox_unavailable',
     503,
   );
+  const native = config.providerMode === 'native';
+  if (native)
+    for (const file of [executable, '/usr/bin/Xvfb', '/usr/bin/python3', '/usr/bin/setpriv'])
+      trustedBrowserExecutable(file);
   const args = [
     '--die-with-parent',
     '--new-session',
@@ -91,6 +117,7 @@ export function launchSandbox(
     '--setenv',
     'PATH',
     '/usr/bin:/bin',
+    ...(native ? ['--setenv', 'DISPATCH_ISOLATED_BROWSER', '1'] : []),
     '--setenv',
     'LANG',
     'C.UTF-8',

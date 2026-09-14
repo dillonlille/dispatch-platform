@@ -2,7 +2,15 @@ import { chromium, type BrowserContext, type Page } from 'playwright';
 import net from 'node:net';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import { login, verify, connectionState } from '../../integrations/paycom/native.js';
+import {
+  fixtureLogin,
+  fixtureVerify,
+  fixtureConnectionState,
+} from '../../integrations/paycom/native.js';
+import {
+  PaycomAuthentication,
+  authenticationError,
+} from '../../integrations/paycom/authentication.js';
 import { safeError, AppError } from '../../shared/errors.js';
 import type { BrowserCommand, BrowserEvent } from './protocol.js';
 let context: BrowserContext | undefined,
@@ -11,7 +19,9 @@ let context: BrowserContext | undefined,
   fixtureUrl: string | undefined,
   busy = false,
   cdp: net.Server | undefined,
-  wsPath = '';
+  wsPath = '',
+  browserPort = 0;
+let native: PaycomAuthentication | undefined;
 const send = (event: BrowserEvent) => process.stdout.write(JSON.stringify(event) + '\n');
 async function saveSession() {
   if (context) {
@@ -26,6 +36,7 @@ function shutdown() {
     try {
       await saveSession();
       await context?.close();
+      await native?.close();
     } finally {
       process.exit(0);
     }
@@ -39,15 +50,34 @@ const proxy = net.createServer((client) => {
   upstream.pipe(client);
   client.once('close', () => upstream.destroy());
 });
-await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
-async function report() {
-  const state = await connectionState(page!, fixtureUrl);
+await new Promise<void>((resolve) => proxy.listen(17891, '127.0.0.1', resolve));
+async function report(state = 'challenge') {
+  if (fixtureUrl) state = await fixtureConnectionState(page!);
   if (state === 'ready') await saveSession();
   send(
     state === 'ready'
       ? { type: 'ready' }
-      : { type: 'challenge', message: 'Complete the provider verification to continue.' },
+      : {
+          type: 'challenge',
+          message: 'Complete the provider verification to continue.',
+          ...(native?.assistancePath ? { assistancePath: native.assistancePath } : {}),
+        },
   );
+}
+async function exposeBrowser() {
+  cdp = net.createServer((client) => {
+    const upstream = net.connect(browserPort, '127.0.0.1');
+    client.on('error', () => upstream.destroy());
+    upstream.on('error', () => client.destroy());
+    client.pipe(upstream);
+    upstream.pipe(client);
+    client.once('close', () => upstream.destroy());
+  });
+  await new Promise<void>((resolve, reject) => {
+    cdp!.once('error', reject);
+    cdp!.listen('/run/dispatch/cdp.sock', resolve);
+  });
+  fs.chmodSync('/run/dispatch/cdp.sock', 0o600);
 }
 async function command(command: BrowserCommand) {
   if (command.action === 'close') {
@@ -58,6 +88,15 @@ async function command(command: BrowserCommand) {
     timezone = command.timezone;
     fixtureUrl = command.fixtureUrl;
     const address = proxy.address() as net.AddressInfo;
+    if (!fixtureUrl) {
+      native = new PaycomAuthentication('/profile', process.argv[2]!);
+      const state = await native.start(command.credentials, command.ownerRetry);
+      browserPort = Number(new URL(native.browser!.endpoint).port);
+      wsPath = new URL(native.browser!.browserWebSocketUrl).pathname;
+      await exposeBrowser();
+      await report(state);
+      return;
+    }
     // Fixture URLs can only be supplied by the local test harness. Production
     // always requires Chromium's internal sandbox as well as the outer namespace.
     context = await chromium.launchPersistentContext('/profile', {
@@ -79,30 +118,45 @@ async function command(command: BrowserCommand) {
       if (Array.isArray(state.cookies)) await context.addCookies(state.cookies);
     }
     const active = fs.readFileSync('/profile/DevToolsActivePort', 'utf8').trim().split('\n');
-    const port = Number(active[0]);
+    browserPort = Number(active[0]);
     wsPath = active[1]!;
-    cdp = net.createServer((client) => {
-      const upstream = net.connect(port, '127.0.0.1');
-      client.on('error', () => upstream.destroy());
-      upstream.on('error', () => client.destroy());
-      client.pipe(upstream);
-      upstream.pipe(client);
-      client.once('close', () => upstream.destroy());
-    });
-    await new Promise<void>((resolve, reject) => {
-      cdp!.once('error', reject);
-      cdp!.listen('/run/dispatch/cdp.sock', resolve);
-    });
-    fs.chmodSync('/run/dispatch/cdp.sock', 0o600);
+    await exposeBrowser();
     page = context.pages()[0] ?? (await context.newPage());
     page.setDefaultTimeout(20_000);
-    await login(page, command.credentials, fixtureUrl);
+    await fixtureLogin(page, command.credentials, fixtureUrl);
     await report();
     return;
   }
+  if (native) {
+    if (command.action === 'complete_assistance') await report(await native.continue());
+    if (command.action === 'check') {
+      const state = await native.check(command.credentials);
+      browserPort = Number(new URL(native.browser!.endpoint).port);
+      wsPath = new URL(native.browser!.browserWebSocketUrl).pathname;
+      await report(state);
+    }
+    if (command.action === 'verify') await report(await native.verify(command.code));
+    if (command.action === 'assist') await report(await native.assist(command.input));
+    if (command.action === 'screenshot')
+      send({ type: 'screenshot', image: await native.screenshot() });
+    if (command.action === 'collect') {
+      try {
+        await native.prepareCollection();
+      } catch (error) {
+        if ((error as AppError).code === 'verification_required') await report('challenge');
+        throw error;
+      }
+      send({
+        type: 'collection_access',
+        path: new URL(native.browser!.browserWebSocketUrl).pathname,
+      });
+    }
+    return;
+  }
   if (!page || !context) throw new AppError('browser_unavailable');
+  if (command.action === 'check') await report();
   if (command.action === 'verify') {
-    await verify(page, command.code, fixtureUrl);
+    await fixtureVerify(page, command.code);
     await report();
   }
   if (command.action === 'assist') {
@@ -118,7 +172,7 @@ async function command(command: BrowserCommand) {
       image: (await page.screenshot({ type: 'png', timeout: 5000 })).toString('base64'),
     });
   if (command.action === 'collect') {
-    if ((await connectionState(page, fixtureUrl)) !== 'ready')
+    if ((await fixtureConnectionState(page)) !== 'ready')
       throw new AppError('verification_required');
     send({ type: 'collection_access', path: wsPath });
   }
@@ -144,7 +198,13 @@ readline
     void command(request)
       .catch((error) => {
         if (fixtureUrl) process.stderr.write(String(error?.stack ?? error) + '\n');
-        send({ type: 'error', code: safeError(error) });
+        send({
+          type: 'error',
+          code:
+            native && !(error instanceof AppError)
+              ? authenticationError(error).code
+              : safeError(error),
+        });
       })
       .finally(() => {
         busy = false;

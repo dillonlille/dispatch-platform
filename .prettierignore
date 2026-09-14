@@ -6,3 +6,6 @@ docs/design/
 dashboard/src/archive/styles.css
 
 dashboard/src/archive/paycom-workforce.css
+tests/archived-paycom/
+
+services/browsers/assistance/vendor/

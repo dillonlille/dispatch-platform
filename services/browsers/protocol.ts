@@ -1,7 +1,15 @@
 import type { Credentials } from '../auth-broker/vault.js';
 import type { Workforce } from '../../shared/contracts/index.js';
 export type BrowserCommand =
-  | { action: 'start'; credentials: Credentials; timezone: string; fixtureUrl?: string }
+  | {
+      action: 'start';
+      credentials: Credentials;
+      timezone: string;
+      fixtureUrl?: string;
+      ownerRetry?: boolean;
+    }
+  | { action: 'complete_assistance' }
+  | { action: 'check'; credentials: Credentials }
   | { action: 'verify'; code: string }
   | {
       action: 'assist';
@@ -15,7 +23,7 @@ export type BrowserCommand =
   | { action: 'close' };
 export type BrowserEvent =
   | { type: 'ready' }
-  | { type: 'challenge'; message: string }
+  | { type: 'challenge'; message: string; assistancePath?: string }
   | { type: 'error'; code: string }
   | { type: 'screenshot'; image: string }
   | { type: 'collection_access'; path: string }

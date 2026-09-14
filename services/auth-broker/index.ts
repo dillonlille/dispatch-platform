@@ -65,19 +65,36 @@ export class AuthBroker {
     const profile = this.storage.paths.profile(dsp.id);
     fs.rmSync(profile, { recursive: true, force: true });
     this.audit.record(actorId, dsp.id, 'connection.credentials_saved');
-    return this.ensure(dsp);
+    return this.ensure(dsp, true);
   }
-  async ensure(dsp: Dsp): Promise<BrowserSession> {
+  async ensure(dsp: Dsp, ownerRetry = false): Promise<BrowserSession> {
     const connection = this.connection(dsp.id);
     assert(connection.enabled, 'connection_required', 409);
     const existing = this.browsers.sessions.get(dsp.id);
     if (existing && existing.status !== 'closed') {
       assert(existing.status !== 'starting', 'connection_busy', 409);
+      if (ownerRetry) {
+        assert(!existing.busy, 'connection_busy', 409);
+        this.state(dsp.id, 'signing_in');
+        try {
+          await existing.check(this.vault.read(dsp.id));
+          this.state(dsp.id, existing.status === 'ready' ? 'ready' : 'needs_verification');
+        } catch (error) {
+          await existing.close();
+          this.state(dsp.id, 'error', safeError(error));
+          throw error;
+        }
+      }
       return existing;
     }
     this.state(dsp.id, 'signing_in');
     try {
-      const session = await this.browsers.acquire(dsp, this.vault.read(dsp.id));
+      const session = await this.browsers.acquire(
+        dsp,
+        this.vault.read(dsp.id),
+        undefined,
+        ownerRetry,
+      );
       this.state(dsp.id, session.status === 'ready' ? 'ready' : 'needs_verification');
       session.on('event', (event) => {
         if (event.type === 'ready') this.state(dsp.id, 'ready');
