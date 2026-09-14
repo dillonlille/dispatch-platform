@@ -30,6 +30,15 @@ export function projectTimecards(record: ProviderTimecard, employeeCode: string)
         .filter((row) => row.date === day.date)
         .reduce((sum, row) => sum + (row.totalHours ?? row.hours ?? 0), 0),
   );
+  // Paycom can render the day's total on an additional pay-code row. That
+  // total already includes the leading row's hours; adding both counts twice.
+  const reportedTotals = record.days.map((day, index) => {
+    const totals = [
+      day.totalHours,
+      ...record.additionalRows.filter((row) => row.date === day.date).map((row) => row.totalHours),
+    ].filter((value): value is number => value !== null);
+    return totals.length ? totals.reduce((sum, value) => sum + value, 0) : rows[index]!;
+  });
   const matches = (hours: number[]) =>
     record.weeklyTotals.every(
       (value, index) =>
@@ -39,9 +48,15 @@ export function projectTimecards(record: ProviderTimecard, employeeCode: string)
     ) &&
     record.periodTotalHours !== null &&
     Math.abs(hours.reduce((sum, h) => sum + h, 0) - record.periodTotalHours) < 0.011;
-  // Some provider layouts put the day's aggregate in the leading row; others
-  // expose totals per pay-code row. Require agreement with both weekly totals.
-  const hours = matches(rows) ? rows : matches(base as number[]) ? (base as number[]) : null;
+  // Keep the existing row/leading-total layouts, then reconcile totals reported
+  // on additional rows. Every layout must agree with both weeks and the period.
+  const hours = matches(rows)
+    ? rows
+    : matches(base as number[])
+      ? (base as number[])
+      : matches(reportedTotals)
+        ? reportedTotals
+        : null;
   assert(hours, 'provider_hours_mismatch', 409);
   return record.days.map((day, index) => {
     const punches: Punch[] = [];
