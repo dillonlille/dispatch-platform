@@ -71,6 +71,7 @@ export interface DspView {
   role: Role | 'platform_owner';
 }
 export interface Connection {
+  verificationSessionId?: string;
   provider: 'paycom';
   enabled: boolean;
   status: ConnectionStatus;

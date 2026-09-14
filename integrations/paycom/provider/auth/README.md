@@ -31,11 +31,11 @@ Infrastructure adaptations:
   accepts Linux's unmapped owner ID for those read-only mounts and the worker UID
   for namespace-created parent directories. Ordinary host checks still require
   UID 0; neither Chromium nor the outer sandbox is disabled.
-- The dashboard retains its owner verification controls. The archived optional
-  Hermes CAPTCHA runner/queue/relay is in `services/browsers/assistance/vendor`.
-  Its browser access is temporary, scoped to one DSP, and revoked on completion or
-  cancellation. The Paycom adapter independently verifies the result and permits
-  only its original-document continuation. Agent text is never proof of login.
+- The dashboard opens an interactive window for user verification. Mouse, drag,
+  wheel and keyboard input stay in that DSP's existing browser; only the explicit
+  Submit action resumes authentication. The adapter independently verifies CAPTCHA
+  completion and permits only its original-document continuation. There is no bot
+  runner or external model access.
 
 Authentication attempts, diagnostics, cookies, and native display state belong in
 that DSP's private `state/browsers/paycom/authentication/` directory. Credentials

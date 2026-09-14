@@ -1,3 +1,4 @@
+import { browserInputSchema, browserSessionId } from '../shared/browser.js';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import staticFiles from '@fastify/static';
@@ -434,40 +435,35 @@ export async function createApp(
   app.get('/api/dsp/connections/paycom/screenshot', async (request) => {
     const c = context(request, 'connections'),
       r = forContext(c);
+    const { sessionId } = z.object({ sessionId: browserSessionId }).strict().parse(request.query);
     const session = r.browsers.sessions.get(c.dsp.id);
-    assert(session, 'assistance_unavailable', 409);
-    const image = await session.screenshot();
+    assert(session?.id === sessionId, 'verification_expired', 409);
+    const image = await session.screenshot(() => runtime.accounts.revalidate(c, 'connections'));
     runtime.accounts.revalidate(c, 'connections');
-    return { image };
+    return { image, sessionId: session.id };
   });
   app.post('/api/dsp/connections/paycom/assist', async (request) => {
     const c = context(request, 'connections', true),
       r = forContext(c);
-    const input = parse(
-      z.discriminatedUnion('kind', [
-        z
-          .object({
-            kind: z.literal('click'),
-            x: z.number().min(0).max(1600),
-            y: z.number().min(0).max(1100),
-          })
-          .strict(),
-        z.object({ kind: z.literal('type'), text: z.string().max(256) }).strict(),
-        z
-          .object({
-            kind: z.literal('key'),
-            key: z.enum(['Enter', 'Tab', 'Backspace', 'Escape', 'ArrowDown', 'ArrowUp']),
-          })
-          .strict(),
-      ]),
+    const { sessionId, input } = parse(
+      z.object({ sessionId: browserSessionId, input: browserInputSchema }).strict(),
       request,
     );
     const session = r.browsers.sessions.get(c.dsp.id);
-    assert(session, 'assistance_unavailable', 409);
-    await session.assist(input);
+    assert(session?.id === sessionId, 'verification_expired', 409);
+    await session.assist(input, () => runtime.accounts.revalidate(c, 'connections'));
     runtime.accounts.revalidate(c, 'connections');
-    runtime.audit.record(c.user.id, c.dsp.id, 'connection.assistance_used');
-    return r.broker.connection(c.dsp.id);
+    return { ok: true };
+  });
+  app.post('/api/dsp/connections/paycom/submit', async (request) => {
+    const c = context(request, 'connections', true),
+      r = forContext(c);
+    const { sessionId } = parse(z.object({ sessionId: browserSessionId }).strict(), request);
+    const result = await r.broker.submit(c.dsp, sessionId, c.user.id, () =>
+      runtime.accounts.revalidate(c, 'connections'),
+    );
+    runtime.accounts.revalidate(c, 'connections');
+    return result;
   });
   app.get('/api/dsp/jobs', (request) => {
     const c = context(request);

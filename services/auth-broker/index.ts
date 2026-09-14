@@ -25,6 +25,9 @@ export class AuthBroker {
         account_label: string | null;
       }>("SELECT * FROM connections WHERE provider='paycom'")!;
       return {
+        ...(this.browsers.sessions.get(dspId)?.interactive
+          ? { verificationSessionId: this.browsers.sessions.get(dspId)!.id }
+          : {}),
         provider: 'paycom',
         enabled: Boolean(row.enabled),
         status: row.status,
@@ -114,6 +117,34 @@ export class AuthBroker {
     const session = this.browsers.sessions.get(dsp.id);
     assert(session, 'verification_expired', 409);
     await session.verify(code);
+    this.audit.record(actorId, dsp.id, 'connection.verification_submitted');
+    return this.connection(dsp.id);
+  }
+  async submit(dsp: Dsp, sessionId: string, actorId: string, guard = () => {}) {
+    const session = this.browsers.sessions.get(dsp.id);
+    assert(session?.id === sessionId, 'verification_expired', 409);
+    if (session.status === 'ready') {
+      guard();
+      return this.connection(dsp.id);
+    }
+    try {
+      await session.submit(guard);
+    } catch (error) {
+      if (
+        safeError(error) === 'verification_expired' &&
+        this.browsers.sessions.get(dsp.id) === session &&
+        this.browsers.sessions.get(dsp.id)?.status === 'ready'
+      ) {
+        guard();
+        return this.connection(dsp.id);
+      }
+      if (!['verification_incomplete', 'connection_busy'].includes(safeError(error))) {
+        const current = this.browsers.sessions.get(dsp.id) === session;
+        await session.close();
+        if (current) this.state(dsp.id, 'error', safeError(error));
+      }
+      throw error;
+    }
     this.audit.record(actorId, dsp.id, 'connection.verification_submitted');
     return this.connection(dsp.id);
   }

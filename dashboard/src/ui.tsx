@@ -137,7 +137,7 @@ export function Modal({
   description?: string;
   children: ReactNode;
   onClose: () => void;
-  variant?: 'dialog' | 'sheet';
+  variant?: 'dialog' | 'sheet' | 'browser';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const headingId = useId();
@@ -151,11 +151,12 @@ export function Modal({
     document.body.style.overflow = 'hidden';
     ref.current?.querySelector<HTMLElement>('input,button,select')?.focus();
     const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') close.current();
       if (event.key === 'Tab') {
         const nodes = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),a[href]',
+            'button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]',
           ) ?? [],
         );
         const first = nodes[0],
@@ -185,7 +186,7 @@ export function Modal({
     >
       <div
         ref={ref}
-        className={`modal ${variant === 'sheet' ? 'side-sheet' : ''}`}
+        className={`modal ${variant === 'sheet' ? 'side-sheet' : variant === 'browser' ? 'browser-modal' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}

@@ -618,13 +618,6 @@ td small {
   margin: 8px 0 16px;
   font-size: 14px;
 }
-.browser-image {
-  display: block;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-block: 18px;
-}
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1246,4 +1239,112 @@ td small {
   border: 0;
   background: transparent;
   color: var(--muted-foreground);
+}
+
+/* Interactive provider verification keeps controls visible around the browser. */
+.modal.browser-modal {
+  width: 1240px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px;
+}
+.browser-modal .modal-heading {
+  flex: none;
+  margin-bottom: 10px;
+}
+.verification-instructions {
+  margin: 0 0 16px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+.verification-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.verification-toolbar > div {
+  display: flex;
+  gap: 8px;
+}
+.verification-toolbar button {
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.verification-screen {
+  overflow: auto;
+  min-height: 120px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overscroll-behavior: contain;
+}
+.verification-browser {
+  display: block;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 58dvh;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+.verification-browser:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+}
+.verification-screen.zoomed .verification-browser {
+  max-width: none;
+  max-height: none;
+}
+.verification-footer {
+  flex: none;
+  padding-top: 12px;
+}
+.verification-footer > p {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.browser-modal .verification-text {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+}
+.verification-text input {
+  flex: 1;
+  min-width: 0;
+}
+.verification-footer .form-actions {
+  margin-top: 14px;
+}
+.verification-footer .error {
+  margin-top: 12px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .modal.browser-modal {
+    padding: 16px;
+  }
+  .browser-modal .modal-heading h2 {
+    font-size: 17px;
+  }
+  .verification-instructions {
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .verification-toolbar {
+    font-size: 12px;
+    gap: 8px;
+  }
+  .verification-toolbar button {
+    font-size: 12px;
+  }
+  .verification-browser {
+    max-height: 48dvh;
+  }
 }

@@ -257,9 +257,6 @@ export class PaycomAuthentication {
     if (!this.assistance?.resumeLogin) this.scrub();
     return 'challenge';
   }
-  get assistancePath() {
-    return this.assistance && new URL(this.browser!.browserWebSocketUrl).pathname;
-  }
   async check(credentials: Credentials): Promise<'ready' | 'challenge'> {
     this.ownerRetry = true;
     this.submitted = false;
@@ -332,8 +329,41 @@ export class PaycomAuthentication {
   async assist(input: Extract<BrowserCommand, { action: 'assist' }>['input']) {
     await this.withPage(async (connection) => {
       if (input.kind === 'click') {
-        if (!this.browser!.nativeInput) throw new AppError('manual_verification_required', 409);
-        await this.browser!.nativeInput.click(connection, input.x, input.y, this.controller.signal);
+        await connection.command('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x: input.x,
+          y: input.y,
+          button: 'left',
+          buttons: 1,
+          clickCount: 1,
+        });
+        await connection.command('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: input.x,
+          y: input.y,
+          button: 'left',
+          buttons: 0,
+          clickCount: 1,
+        });
+      }
+      if (input.kind === 'pointer') {
+        await connection.command('Input.dispatchMouseEvent', {
+          type: { down: 'mousePressed', move: 'mouseMoved', up: 'mouseReleased' }[input.phase],
+          x: input.x,
+          y: input.y,
+          button: input.phase === 'move' && !input.pressed ? 'none' : 'left',
+          buttons: input.pressed ? 1 : 0,
+          clickCount: input.phase === 'move' ? 0 : 1,
+        });
+      }
+      if (input.kind === 'scroll') {
+        await connection.command('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: input.x,
+          y: input.y,
+          deltaX: input.deltaX,
+          deltaY: input.deltaY,
+        });
       }
       if (input.kind === 'type') {
         if (this.browser!.nativeInput && /^[\x20-\x7e]{1,64}$/.test(input.text))
@@ -348,6 +378,13 @@ export class PaycomAuthentication {
           Escape: 27,
           ArrowDown: 40,
           ArrowUp: 38,
+          ArrowLeft: 37,
+          ArrowRight: 39,
+          Delete: 46,
+          Home: 36,
+          End: 35,
+          PageUp: 33,
+          PageDown: 34,
         };
         const keyCode = keys[input.key];
         if (!keyCode) throw new AppError('invalid_input');
@@ -355,17 +392,19 @@ export class PaycomAuthentication {
           type: 'keyDown',
           key: input.key,
           windowsVirtualKeyCode: keyCode,
+          modifiers: input.shift ? 8 : 0,
           ...(input.key === 'Enter' ? { text: '\r' } : {}),
         });
         await connection.command('Input.dispatchKeyEvent', {
           type: 'keyUp',
           key: input.key,
           windowsVirtualKeyCode: keyCode,
+          modifiers: input.shift ? 8 : 0,
         });
       }
     });
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    return this.continue();
+    // User input never resumes login. Only the explicit Submit action does.
+    return;
   }
   async verify(code: string) {
     await this.withPage(async (connection) => {

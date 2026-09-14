@@ -60,7 +60,6 @@ async function report(state = 'challenge') {
       : {
           type: 'challenge',
           message: 'Complete the provider verification to continue.',
-          ...(native?.assistancePath ? { assistancePath: native.assistancePath } : {}),
         },
   );
 }
@@ -136,7 +135,10 @@ async function command(command: BrowserCommand) {
       await report(state);
     }
     if (command.action === 'verify') await report(await native.verify(command.code));
-    if (command.action === 'assist') await report(await native.assist(command.input));
+    if (command.action === 'assist') {
+      await native.assist(command.input);
+      send({ type: 'assisted' });
+    }
     if (command.action === 'screenshot')
       send({ type: 'screenshot', image: await native.screenshot() });
     if (command.action === 'collect') {
@@ -154,17 +156,26 @@ async function command(command: BrowserCommand) {
     return;
   }
   if (!page || !context) throw new AppError('browser_unavailable');
-  if (command.action === 'check') await report();
+  if (command.action === 'check' || command.action === 'complete_assistance') await report();
   if (command.action === 'verify') {
     await fixtureVerify(page, command.code);
     await report();
   }
   if (command.action === 'assist') {
     if (command.input.kind === 'click') await page.mouse.click(command.input.x, command.input.y);
+    if (command.input.kind === 'pointer') {
+      await page.mouse.move(command.input.x, command.input.y);
+      if (command.input.phase === 'down') await page.mouse.down();
+      if (command.input.phase === 'up') await page.mouse.up();
+    }
+    if (command.input.kind === 'scroll') {
+      await page.mouse.move(command.input.x, command.input.y);
+      await page.mouse.wheel(command.input.deltaX, command.input.deltaY);
+    }
     if (command.input.kind === 'type') await page.keyboard.insertText(command.input.text);
-    if (command.input.kind === 'key') await page.keyboard.press(command.input.key);
-    await page.waitForTimeout(250);
-    await report();
+    if (command.input.kind === 'key')
+      await page.keyboard.press((command.input.shift ? 'Shift+' : '') + command.input.key);
+    send({ type: 'assisted' });
   }
   if (command.action === 'screenshot')
     send({

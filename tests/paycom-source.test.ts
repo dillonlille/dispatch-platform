@@ -23,11 +23,6 @@ test('installed archived Paycom adapter and native input retain their source has
         : file;
     assert.equal(digest(original), source.sourceSha256, source.file);
   }
-  const runner = fs.readFileSync('services/browsers/assistance/vendor/hermes-session.py');
-  const source = JSON.parse(
-    fs.readFileSync('services/browsers/assistance/vendor/source-files.json', 'utf8'),
-  ).find((source: { file: string }) => source.file === 'hermes-session.py');
-  assert.equal(digest(runner), source.sourceSha256);
 });
 
 test('Paycom subdomain policy permits archived CAPTCHA assets and rejects lookalike hosts', () => {
