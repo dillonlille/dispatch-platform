@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import net from 'node:net';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fixture } from './helpers.js';
 import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
 import { Egress, publicAddress } from '../services/browsers/egress.js';
@@ -37,15 +38,22 @@ test('egress refuses loopback, private addresses and unapproved destinations', a
 });
 
 test(
-  'native Chromium in a private namespace logs in, verifies, collects and preserves only its DSP profile',
+  'saving credentials starts native Chromium in long state paths, verifies, collects and isolates DSP profiles',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
   async (t) => {
     assert(
       fs.existsSync('.build/services/runtime/auth-worker.js'),
       'Build before native verification',
     );
-    const f = await fixture({ runtimeBundle: path.resolve('.build/services/runtime') });
-    t.after(() => f.close());
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-native-'));
+    const f = await fixture({
+      runtimeBundle: path.resolve('.build/services/runtime'),
+      stateRoot: path.join(root, 'nested-platform-directory-'.repeat(4), 'dev'),
+    });
+    t.after(async () => {
+      await f.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    });
     const client = await f.client(),
       dsp = client.session.dsps.find((d) => d.name === 'Northline Logistics')!;
     let authenticatedRequests = 0;
@@ -93,25 +101,38 @@ test(
     );
     const url = `http://fixture.dispatch.invalid:${(server.address() as net.AddressInfo).port}`;
     let diagnostics = '';
-    const acquiring = f.runtime.browsers.acquire(
-      dsp,
-      { clientCode: 'test', username: 'test', password: 'test' },
-      url,
+    // Route the real API/broker/worker flow to the local provider fixture.
+    const acquire = f.runtime.browsers.acquire.bind(f.runtime.browsers);
+    t.mock.method(
+      f.runtime.browsers,
+      'acquire',
+      (...[target, credentials]: Parameters<typeof acquire>) => {
+        const pending = acquire(target, credentials, url);
+        f.runtime.browsers.sessions
+          .get(target.id)
+          ?.on('diagnostic', (text) => (diagnostics += String(text)));
+        return pending;
+      },
     );
-    f.runtime.browsers.sessions
-      .get(dsp.id)
-      ?.on('diagnostic', (text) => (diagnostics += String(text)));
-    let session;
-    try {
-      session = await acquiring;
-    } catch (error) {
-      throw new Error(`${(error as Error).message}\n${diagnostics}`);
-    }
+    await client.select(dsp.id);
+    const credentials = {
+      clientCode: 'test',
+      username: 'test',
+      password: 'test',
+      securityAnswers: ['one', 'two', 'three', 'four', 'five'],
+    };
+    const saved = await client.post('/api/dsp/connections/paycom', credentials);
+    assert.equal(saved.statusCode, 200, `${saved.body}\n${diagnostics}`);
+    assert.equal(saved.json().status, 'needs_verification');
+    assert.deepEqual(f.runtime.broker.vault.read(dsp.id), credentials);
+    const session = f.runtime.browsers.sessions.get(dsp.id)!;
     assert.equal(session.status, 'challenge');
     const screenshot = await session.screenshot();
     assert(screenshot.length > 1000);
     try {
-      await session.verify('123456');
+      const verified = await client.post('/api/dsp/connections/paycom/verify', { code: '123456' });
+      assert.equal(verified.statusCode, 200, verified.body);
+      assert.equal(verified.json().status, 'ready');
       assert.equal(session.status, 'ready');
       const data = await session.collect(() => {});
       assert.equal(data.employees.length, 12);
