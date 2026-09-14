@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { lookup } from 'node:dns/promises';
 import fs from 'node:fs';
+import path from 'node:path';
 import { AppError } from '../../shared/errors.js';
 export function publicAddress(address: string): boolean {
   if (net.isIP(address) === 4) {
@@ -27,6 +28,7 @@ export interface EgressPolicy {
 export class Egress {
   private sockets = new Set<net.Socket>();
   private server: net.Server;
+  private directoryFd?: number;
   constructor(
     readonly socketPath: string,
     private policy: EgressPolicy,
@@ -34,11 +36,26 @@ export class Egress {
     this.server = net.createServer((socket) => this.accept(socket));
   }
   async listen() {
-    await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject);
-      this.server.listen(this.socketPath, resolve);
-    });
-    fs.chmodSync(this.socketPath, 0o600);
+    // Linux socket addresses are limited to 107 bytes. Keep the socket in the
+    // private run directory, but bind through its short descriptor path. The
+    // worker reaches the same file through its /run/dispatch sandbox mount.
+    this.directoryFd = fs.openSync(
+      path.dirname(this.socketPath),
+      fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
+    );
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server.once('error', reject);
+        this.server.listen(
+          `/proc/self/fd/${this.directoryFd}/${path.basename(this.socketPath)}`,
+          resolve,
+        );
+      });
+      fs.chmodSync(this.socketPath, 0o600);
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
   }
   private track(socket: net.Socket) {
     this.sockets.add(socket);
@@ -122,7 +139,14 @@ export class Egress {
   }
   async close() {
     for (const socket of this.sockets) socket.destroy();
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
-    if (fs.existsSync(this.socketPath)) fs.unlinkSync(this.socketPath);
+    try {
+      // Keep the descriptor alive until Node has unlinked the socket on close.
+      await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    } finally {
+      if (this.directoryFd !== undefined) {
+        fs.closeSync(this.directoryFd);
+        this.directoryFd = undefined;
+      }
+    }
   }
 }
