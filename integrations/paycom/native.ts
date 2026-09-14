@@ -5,7 +5,6 @@ import type { Workforce, Employee, Timecard } from '../../shared/contracts/index
 import { projectTimecards, type ProviderTimecard } from './timecards.js';
 import { AppError, assert } from '../../shared/errors.js';
 import { dateInTimezone, workforceSchema } from './workforce.js';
-import { answerSecurityPins, securityPath } from './security-pins.js';
 const require = createRequire(import.meta.url);
 const periods = require('./provider/timecard-period.js') as {
   parsePeriodKey(value: string): Period;
@@ -44,84 +43,28 @@ interface RawEmployee {
   deliveryStationCode: string;
   isActive: boolean;
 }
-export async function connectionState(
-  page: Page,
-  fixtureUrl?: string,
-): Promise<'ready' | 'challenge' | 'login'> {
-  const url = new URL(page.url());
-  if (fixtureUrl) {
-    if (await page.locator('[data-authenticated="true"]').count()) return 'ready';
-    if (await page.locator('input[name="code"]').count()) return 'challenge';
-    return 'login';
-  }
-  if (url.protocol !== 'https:' || url.hostname !== 'www.paycomonline.net') return 'challenge';
-  if (await page.locator('input[name="password"]').count()) return 'login';
-  if (/security-question|two-factor|verification|captcha/i.test(url.pathname)) return 'challenge';
-  if (
-    url.pathname === '/v4/cl/cl-menu.php' ||
-    (url.pathname.startsWith('/v4/cl/web.php/') && !/login|security|two-factor/.test(url.pathname))
-  )
-    return 'ready';
-  return 'challenge';
+// Synthetic fixture login only. Real Paycom authentication lives in the archived adapter.
+export async function fixtureConnectionState(page: Page): Promise<'ready' | 'challenge' | 'login'> {
+  if (await page.locator('[data-authenticated="true"]').count()) return 'ready';
+  if (await page.locator('input[name="code"]').count()) return 'challenge';
+  return 'login';
 }
-export async function login(page: Page, credentials: Credentials, fixtureUrl?: string) {
-  await page.goto(
-    fixtureUrl ? `${fixtureUrl}/login` : 'https://www.paycomonline.net/v4/cl/cl-login.php',
-    { waitUntil: 'domcontentloaded', timeout: 60_000 },
-  );
-  if ((await connectionState(page, fixtureUrl)) === 'ready') return 'ready';
-  const fields = [
+export async function fixtureLogin(page: Page, credentials: Credentials, fixtureUrl: string) {
+  await page.goto(`${fixtureUrl}/login`);
+  if ((await fixtureConnectionState(page)) === 'ready') return 'ready';
+  for (const [name, value] of [
     ['clientcode', credentials.clientCode],
     ['username', credentials.username],
     ['password', credentials.password],
-  ] as const;
-  for (const [name, value] of fields) {
-    const input = page.locator(`input[name="${name}"]`);
-    assert(await input.count(), 'verification_required', 409);
-    await input.fill(value);
-  }
+  ])
+    await page.locator(`input[name="${name}"]`).fill(value!);
   await page.locator('input[name="password"]').press('Enter');
-  let pinsSubmitted = false;
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(250);
-    const state = await connectionState(page, fixtureUrl);
-    if (state === 'ready') return state;
-    if (state === 'challenge') {
-      if (!pinsSubmitted && !fixtureUrl && (await answerSecurityPins(page, credentials))) {
-        pinsSubmitted = true;
-        continue;
-      }
-      if (
-        pinsSubmitted &&
-        /security answers?.{0,40}(not correct|incorrect|invalid)/i.test(
-          await page.locator('body').innerText(),
-        )
-      )
-        throw new AppError('security_answers_rejected', 409);
-      // A slow POST can leave the original PIN form visible while Paycom responds.
-      if (pinsSubmitted && new URL(page.url()).pathname === securityPath) continue;
-      // Navigation may have completed while reading the previous challenge's text.
-      if (pinsSubmitted)
-        return (await connectionState(page, fixtureUrl)) === 'ready' ? 'ready' : 'challenge';
-      return state;
-    }
-    const text = await page.locator('body').innerText({ timeout: 5000 });
-    if (/invalid (credentials|password)|incorrect password|account.{0,20}locked/i.test(text))
-      throw new AppError('invalid_credentials', 409);
-  }
-  return 'challenge';
+  return fixtureConnectionState(page);
 }
-export async function verify(page: Page, code: string, fixtureUrl?: string) {
-  const field = page
-    .locator(
-      'input[autocomplete="one-time-code"],input[name="code"],input[name="verificationCode"]',
-    )
-    .first();
-  assert(await field.count(), 'manual_verification_required', 409);
-  await field.fill(code);
-  await field.press('Enter');
-  await page.waitForTimeout(500);
-  return connectionState(page, fixtureUrl);
+export async function fixtureVerify(page: Page, code: string) {
+  await page.locator('input[name="code"]').fill(code);
+  await page.locator('input[name="code"]').press('Enter');
+  return fixtureConnectionState(page);
 }
 export async function collect(
   context: BrowserContext,

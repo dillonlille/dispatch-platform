@@ -28,6 +28,9 @@ await build({
 fs.cpSync('integrations/paycom/provider', path.join(out, 'services/runtime/provider'), {
   recursive: true,
 });
+fs.cpSync('services/browsers/assistance/vendor', path.join(out, 'services/runtime/assistance'), {
+  recursive: true,
+});
 fs.mkdirSync(path.join(out, 'services/runtime/node_modules'), { recursive: true });
 for (const name of ['package.json', 'package-lock.json'])
   fs.copyFileSync(name, path.join(out, name));

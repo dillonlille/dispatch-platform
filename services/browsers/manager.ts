@@ -9,6 +9,7 @@ import type { Dsp, Workforce } from '../../shared/contracts/index.js';
 import type { BrowserCommand, BrowserEvent } from './protocol.js';
 import { AppError, assert } from '../../shared/errors.js';
 import { id } from '../../shared/crypto.js';
+import { BrowserAssistance } from './assistance/index.js';
 import { Egress } from './egress.js';
 import { launchSandbox, launchCollector } from './sandbox.js';
 import { paycom } from '../../integrations/paycom/manifest.js';
@@ -21,6 +22,9 @@ export class BrowserSession extends EventEmitter {
   private egress?: Egress;
   private closePromise?: Promise<void>;
   private deadline: ReturnType<typeof setTimeout>;
+  private assistanceTask?: Promise<void>;
+  private assistanceController = new AbortController();
+  private assistanceAttempted = false;
   private screenshotWaiter?: (image: string) => void;
   constructor(
     readonly manager: BrowserManager,
@@ -32,7 +36,7 @@ export class BrowserSession extends EventEmitter {
     this.deadline = setTimeout(() => void this.close('verification_expired'), 10 * 60_000);
     this.deadline.unref();
   }
-  async start(credentials: Credentials, fixtureUrl?: string) {
+  async start(credentials: Credentials, fixtureUrl?: string, ownerRetry = false) {
     this.fixtureUrl = fixtureUrl;
     if (this.fixture && !fixtureUrl) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -87,11 +91,12 @@ export class BrowserSession extends EventEmitter {
     );
     this.child.on('error', () => void this.close('browser_start_failed'));
     this.child.on('exit', () => void this.close('browser_lost'));
-    const waiting = this.waitFor(['ready', 'challenge'], 30_000);
+    const waiting = this.waitFor(['ready', 'challenge'], 180_000);
     this.send({
       action: 'start',
       credentials,
       timezone: this.dsp.timezone,
+      ownerRetry,
       ...(fixtureUrl ? { fixtureUrl } : {}),
     });
     await waiting;
@@ -105,6 +110,33 @@ export class BrowserSession extends EventEmitter {
       this.screenshotWaiter = undefined;
     }
     this.emit('event', event);
+    if (
+      event.type === 'challenge' &&
+      event.assistancePath &&
+      !this.assistanceAttempted &&
+      this.manager.assistance.enabled
+    ) {
+      this.assistanceAttempted = true;
+      this.assistanceTask = this.automateAssistance(event.assistancePath);
+    }
+  }
+  private async automateAssistance(browserPath: string) {
+    try {
+      await this.manager.assistance.solve(
+        this.dsp.id,
+        this.run,
+        browserPath,
+        this.assistanceController.signal,
+      );
+      if (this.status === 'closed') return;
+      const waiting = this.waitFor(['ready', 'challenge'], 180_000);
+      this.send({ action: 'complete_assistance' });
+      await waiting;
+    } catch {
+      /* A failed solver leaves owner verification available; never retry login here. */
+    } finally {
+      this.assistanceTask = undefined;
+    }
   }
   private send(command: BrowserCommand) {
     assert(
@@ -143,19 +175,21 @@ export class BrowserSession extends EventEmitter {
     });
   }
   async verify(code: string) {
+    assert(!this.assistanceTask, 'connection_busy', 409);
     assert(this.status === 'challenge', 'verification_not_requested', 409);
     if (this.fixture && !this.child) {
       assert(code === '123456', 'invalid_verification_code', 409);
       this.event({ type: 'ready' });
       return;
     }
-    const waiting = this.waitFor(['ready', 'challenge'], 30_000);
+    const waiting = this.waitFor(['ready', 'challenge'], 180_000);
     this.send({ action: 'verify', code });
     await waiting;
   }
   async assist(input: Extract<BrowserCommand, { action: 'assist' }>['input']) {
+    assert(!this.assistanceTask, 'connection_busy', 409);
     assert(this.status === 'challenge' && this.child, 'assistance_unavailable', 409);
-    const waiting = this.waitFor(['ready', 'challenge'], 30_000);
+    const waiting = this.waitFor(['ready', 'challenge'], 180_000);
     this.send({ action: 'assist', input });
     await waiting;
   }
@@ -166,6 +200,18 @@ export class BrowserSession extends EventEmitter {
     const result = await waiting;
     assert(result.type === 'screenshot', 'browser_protocol_failed');
     return result.image;
+  }
+  get busy() {
+    return this.status === 'starting' || Boolean(this.assistanceTask) || Boolean(this.collector);
+  }
+  async check(credentials: Credentials) {
+    assert(!this.busy, 'connection_busy', 409);
+    this.assistanceAttempted = false;
+    if (this.fixture && !this.child) return;
+    this.status = 'starting';
+    const waiting = this.waitFor(['ready', 'challenge'], 180_000);
+    this.send({ action: 'check', credentials });
+    await waiting;
   }
   async collect(onProgress: (progress: number, message: string) => void): Promise<Workforce> {
     assert(this.status === 'ready', 'verification_required', 409);
@@ -179,9 +225,20 @@ export class BrowserSession extends EventEmitter {
       return fixtureWorkforce(this.dsp);
     }
     assert(!this.collector, 'connection_busy', 409);
-    const access = this.waitFor(['collection_access']);
-    this.send({ action: 'collect' });
-    const grant = await access;
+    const access = async () => {
+      const waiting = this.waitFor(['collection_access']);
+      this.send({ action: 'collect' });
+      return waiting;
+    };
+    let grant: BrowserEvent;
+    try {
+      grant = await access();
+    } catch (error) {
+      if (!this.assistanceTask) throw error;
+      await this.assistanceTask;
+      if (this.status !== 'ready') throw error;
+      grant = await access();
+    }
     assert(grant.type === 'collection_access', 'browser_protocol_failed');
     const child = launchCollector(this.manager.storage.config, this.run);
     this.collector = child;
@@ -240,8 +297,10 @@ export class BrowserSession extends EventEmitter {
     if (this.closePromise) return this.closePromise;
     this.closePromise = (async () => {
       this.status = 'closed';
+      this.assistanceController.abort();
       clearTimeout(this.deadline);
       this.emit('closed', code);
+      await this.assistanceTask;
       if (
         this.collector &&
         this.collector.exitCode === null &&
@@ -274,8 +333,11 @@ export class BrowserSession extends EventEmitter {
 export class BrowserManager {
   readonly sessions = new Map<string, BrowserSession>();
   private starting = new Set<string>();
-  constructor(readonly storage: Storage) {}
-  async acquire(dsp: Dsp, credentials: Credentials, fixtureUrl?: string) {
+  readonly assistance: BrowserAssistance;
+  constructor(readonly storage: Storage) {
+    this.assistance = new BrowserAssistance(storage);
+  }
+  async acquire(dsp: Dsp, credentials: Credentials, fixtureUrl?: string, ownerRetry = false) {
     assert(dsp.environment === this.storage.config.environment, 'environment_mismatch', 403);
     const old = this.sessions.get(dsp.id);
     if (old && old.status !== 'closed') {
@@ -296,7 +358,7 @@ export class BrowserManager {
     );
     this.sessions.set(dsp.id, session);
     try {
-      await session.start(credentials, fixtureUrl);
+      await session.start(credentials, fixtureUrl, ownerRetry);
       return session;
     } catch (error) {
       await session.close();
@@ -313,6 +375,7 @@ export class BrowserManager {
   }
   async close() {
     await Promise.all([...this.sessions.values()].map((s) => s.close()));
+    await this.assistance.close();
   }
   health() {
     return { active: this.sessions.size, capacity: this.storage.config.browserCapacity };
