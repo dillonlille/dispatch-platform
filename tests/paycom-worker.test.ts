@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { fixture, until } from './helpers.js';
+import { fixture } from './helpers.js';
 import { configuration } from '../services/config.js';
 
 test(
@@ -84,64 +83,69 @@ test(
     );
     for (const secret of [credentials.password, ...credentials.securityAnswers])
       assert(!diagnostics.includes(secret));
-    // The archived host relay and continuation are exercised with a deterministic
-    // local solver. This never calls Hermes or a model provider.
-    const require = createRequire(import.meta.url);
-    const { browserRelay } = require('../services/browsers/assistance/vendor/relay.js');
-    const { CdpConnection } = require('../integrations/paycom/provider/auth/cdp.js');
-    let assistanceCalls = 0;
-    Object.defineProperty(f.runtime.browsers.assistance, 'enabled', { get: () => true });
-    t.mock.method(
-      f.runtime.browsers.assistance,
-      'solve',
-      async (_dspId: string, run: string, browserPath: string, signal: AbortSignal) => {
-        assistanceCalls++;
-        const relay = await browserRelay(path.join(run, 'cdp.sock'), browserPath);
-        let control: any;
-        try {
-          control = await CdpConnection.connect(relay.endpoint, { signal });
-          const { targetInfos } = await control.command('Target.getTargets');
-          const target = targetInfos.find(
-            (target: { type: string; url: string }) =>
-              target.type === 'page' && target.url.includes('/cl-login.php'),
-          );
-          assert(target, 'Solver must receive the original login challenge');
-          const { sessionId } = await control.command('Target.attachToTarget', {
-            targetId: target.targetId,
-            flatten: true,
-          });
-          // The flat target command is sent directly through the bounded CDP transport.
-          await new Promise<void>((resolve, reject) => {
-            const id = 9000;
-            const listener = (event: MessageEvent) => {
-              const reply = JSON.parse(String(event.data));
-              if (reply.id !== id) return;
-              control.socket.removeEventListener('message', listener);
-              reply.error ? reject(new Error('Fixture solver failed')) : resolve();
-            };
-            control.socket.addEventListener('message', listener);
-            control.socket.send(
-              JSON.stringify({
-                id,
-                sessionId,
-                method: 'Runtime.evaluate',
-                params: { expression: 'document.getElementById("solveCaptcha").click()' },
-              }),
-            );
-          });
-        } finally {
-          control?.close();
-          await relay.close();
-        }
-      },
-    );
-    fs.writeFileSync(path.join(bundle, 'captcha-mode'), 'enabled');
-    const challenged = await client.post('/api/dsp/connections/paycom', credentials);
-    assert.equal(challenged.statusCode, 200, challenged.body);
-    assert.equal(challenged.json().status, 'needs_verification');
-    await until(() => f.runtime.broker.connection(dsp.id).status === 'ready', 20_000);
-    assert.equal(assistanceCalls, 1);
-    assert.equal(events().filter((value) => value === 'primary').length, 1);
-    assert.equal(events().filter((value) => value === 'pins').length, 1);
+    // A human controls the same browser through the authenticated API. Solving
+    // the local challenge alone must not resume login until Submit is pressed.
+    for (const phase of ['before-login', 'after-pins']) {
+      fs.writeFileSync(path.join(bundle, 'captcha-mode'), phase);
+      const challenged = await client.post('/api/dsp/connections/paycom', credentials);
+      assert.equal(challenged.statusCode, 200, challenged.body);
+      assert.equal(challenged.json().status, 'needs_verification');
+      const sessionId = challenged.json().verificationSessionId;
+      assert.match(sessionId, /^run_[a-f0-9]{32}$/);
+      const beforeInput = events().filter((value) => value === 'primary').length;
+      const premature = await client.post('/api/dsp/connections/paycom/submit', { sessionId });
+      assert.equal(premature.statusCode, 409, premature.body);
+      assert.equal(premature.json().error, 'verification_incomplete');
+      assert.equal(events().filter((value) => value === 'primary').length, beforeInput);
+      assert.equal(events().filter((value) => value === 'pins').length, 0);
+      const frame = await client.get(
+        `/api/dsp/connections/paycom/screenshot?sessionId=${sessionId}`,
+      );
+      assert.equal(frame.statusCode, 200, frame.body.slice(0, 200));
+      assert.equal(frame.json().sessionId, sessionId);
+      assert(frame.json().image.length > 1000);
+      const wrongSession = await client.post('/api/dsp/connections/paycom/assist', {
+        sessionId: 'run_' + '0'.repeat(32),
+        input: { kind: 'click', x: 960, y: 470 },
+      });
+      assert.equal(wrongSession.statusCode, 409);
+      // Frame polling and ordered inputs share one worker without crossing replies.
+      const inputs = [
+        { kind: 'pointer', phase: 'down', pressed: true, x: 960, y: 470 },
+        { kind: 'pointer', phase: 'move', pressed: true, x: 965, y: 471 },
+        { kind: 'pointer', phase: 'up', pressed: false, x: 965, y: 471 },
+      ];
+      const responses = await Promise.all([
+        ...inputs.map((input) =>
+          client.post('/api/dsp/connections/paycom/assist', { sessionId, input }),
+        ),
+        client.get(`/api/dsp/connections/paycom/screenshot?sessionId=${sessionId}`),
+      ]);
+      for (const response of responses)
+        assert.equal(response.statusCode, 200, response.body.slice(0, 200));
+      assert.equal(f.runtime.broker.connection(dsp.id).status, 'needs_verification');
+      assert.equal(events().filter((value) => value === 'primary').length, beforeInput);
+      assert.equal(
+        events().filter((value) => value === 'pins').length,
+        0,
+        'Inputs must not submit retained PINs',
+      );
+      const completed = await client.post('/api/dsp/connections/paycom/submit', { sessionId });
+      assert.equal(completed.statusCode, 200, completed.body);
+      assert.equal(completed.json().status, 'ready');
+      assert.equal(events().filter((value) => value === 'primary').length, 1);
+      assert.equal(events().filter((value) => value === 'pins').length, 1);
+      assert.equal(
+        (await client.post('/api/dsp/connections/paycom/submit', { sessionId })).statusCode,
+        200,
+        'Submit is idempotent after success',
+      );
+      assert.equal(
+        (await client.post('/api/dsp/connections/paycom/assist', { sessionId, input: inputs[0] }))
+          .statusCode,
+        409,
+        'Completed windows cannot send more input',
+      );
+    }
   },
 );

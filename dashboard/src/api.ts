@@ -24,6 +24,9 @@ const labels: Record<string, string> = {
   stale_view: 'Your DSP access changed. Reopen the DSP to continue.',
   connection_required: 'Connect Paycom before starting a collection.',
   last_owner_required: 'Keep at least one DSP owner.',
+  verification_incomplete:
+    'Paycom still needs verification. Complete the CAPTCHA, then press Submit again.',
+  connection_busy: 'The browser is busy. Please try again in a moment.',
   verification_expired: 'Verification expired. Check the connection to start again.',
   browser_capacity: 'Browser capacity is full. Try again shortly.',
   preview_test_required: 'Test this release on the Dev DSP first.',

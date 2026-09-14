@@ -59,8 +59,8 @@ The archived Paycom flow needs root-owned Chrome, `/usr/bin/Xvfb`,
 private Xvfb display; the host check verifies actual keyboard/mouse input as well
 as both layers of sandboxing. No graphical desktop or per-DSP installation is needed.
 
-Optional archived CAPTCHA assistance has separate private host configuration;
-see [its setup requirements](../services/browsers/assistance/README.md).
+Paycom verification uses an interactive window in the dashboard. The user solves
+the CAPTCHA and presses Submit to resume login. No bot or model configuration is needed.
 
 Ubuntu's generic bubblewrap AppArmor profile strips capabilities needed by nested
 Chromium namespaces. The Dev-specific host configuration uses the same installed

@@ -1,3 +1,4 @@
+import { BrowserVerification } from './browser-verification.js';
 import { useState, type FormEvent } from 'react';
 import {
   ArrowLeft,
@@ -465,7 +466,7 @@ export function ConnectionsPage({
   const [credentialError, setCredentialError] = useState('');
   const [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(false),
-    [assistance, setAssistance] = useState(false);
+    [closedVerification, setClosedVerification] = useState<string>();
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -526,33 +527,41 @@ export function ConnectionsPage({
                 <div className="verification">
                   <h3>Paycom needs your verification</h3>
                   <p>
-                    Enter the code from your provider, or open browser assistance to complete its
-                    prompt.
+                    {data.verificationSessionId
+                      ? 'Complete the CAPTCHA in the verification window, then press Submit to continue.'
+                      : 'Enter the verification code from your provider.'}
                   </p>
-                  <form
-                    className="inline-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      const form = new FormData(event.currentTarget);
-                      void perform(async () => {
-                        await api('/api/dsp/connections/paycom/verify', { code: form.get('code') });
-                        refresh();
-                      }, 'Verification submitted');
-                    }}
-                  >
-                    <input
-                      name="code"
-                      aria-label="Verification code"
-                      autoComplete="one-time-code"
-                      required
-                      maxLength={128}
-                    />
-                    <button className="primary">Verify</button>
-                    <button type="button" onClick={() => setAssistance(true)}>
-                      Browser assistance
+                  {data.verificationSessionId ? (
+                    <button type="button" onClick={() => setClosedVerification(undefined)}>
+                      Open verification window
                     </button>
-                  </form>
-                  {development && <small>Synthetic fixture verification code: 123456.</small>}
+                  ) : (
+                    <form
+                      className="inline-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const form = new FormData(event.currentTarget);
+                        void perform(async () => {
+                          await api('/api/dsp/connections/paycom/verify', {
+                            code: form.get('code'),
+                          });
+                          refresh();
+                        }, 'Verification submitted');
+                      }}
+                    >
+                      <input
+                        name="code"
+                        aria-label="Verification code"
+                        autoComplete="one-time-code"
+                        required
+                        maxLength={128}
+                      />
+                      <button className="primary">Verify</button>
+                    </form>
+                  )}
+                  {development && !data.verificationSessionId && (
+                    <small>Synthetic fixture verification code: 123456.</small>
+                  )}
                 </div>
               )}
 
@@ -694,86 +703,19 @@ export function ConnectionsPage({
           </form>
         </Modal>
       )}
-      {assistance && (
-        <BrowserAssistance
-          perform={perform}
-          close={() => {
-            setAssistance(false);
-            refresh();
-          }}
-        />
-      )}
-    </section>
-  );
-}
-function BrowserAssistance({ perform, close }: { perform: Perform; close: () => void }) {
-  const { data, error, refresh } = useData<{ image: string }>(
-    '/api/dsp/connections/paycom/screenshot',
-    3000,
-  );
-  const [text, setText] = useState('');
-  return (
-    <Modal title="Private browser assistance" onClose={close}>
-      <p>
-        Complete the provider prompt in this DSP’s browser. Click the image to select a field, then
-        enter text below.
-      </p>
-      <ErrorBox message={error} />
-      {data && (
-        <img
-          className="browser-image"
-          alt="Current provider verification screen"
-          src={`data:image/png;base64,${data.image}`}
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            void perform(async () => {
-              await api('/api/dsp/connections/paycom/assist', {
-                kind: 'click',
-                x: ((event.clientX - rect.left) * 1200) / rect.width,
-                y: ((event.clientY - rect.top) * 800) / rect.height,
-              });
+      {data?.verificationSessionId &&
+        closedVerification !== data.verificationSessionId &&
+        !editing &&
+        !disconnecting && (
+          <BrowserVerification
+            key={data.verificationSessionId}
+            sessionId={data.verificationSessionId}
+            close={() => {
+              setClosedVerification(data.verificationSessionId);
               refresh();
-            });
-          }}
-        />
-      )}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void perform(async () => {
-            await api('/api/dsp/connections/paycom/assist', { kind: 'type', text });
-            setText('');
-            refresh();
-          });
-        }}
-      >
-        <label>
-          Text to enter
-          <input
-            type="password"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            maxLength={256}
+            }}
           />
-        </label>
-        <div className="form-actions">
-          <button>Type text</button>
-          <button
-            type="button"
-            onClick={() =>
-              void perform(async () => {
-                await api('/api/dsp/connections/paycom/assist', { kind: 'key', key: 'Enter' });
-                refresh();
-              })
-            }
-          >
-            Press Enter
-          </button>
-          <button type="button" className="primary" onClick={close}>
-            Done
-          </button>
-        </div>
-      </form>
-    </Modal>
+        )}
+    </section>
   );
 }

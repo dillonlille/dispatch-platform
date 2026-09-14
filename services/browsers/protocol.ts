@@ -1,3 +1,4 @@
+import type { BrowserInput } from '../../shared/browser.js';
 import type { Credentials } from '../auth-broker/vault.js';
 import type { Workforce } from '../../shared/contracts/index.js';
 export type BrowserCommand =
@@ -11,19 +12,14 @@ export type BrowserCommand =
   | { action: 'complete_assistance' }
   | { action: 'check'; credentials: Credentials }
   | { action: 'verify'; code: string }
-  | {
-      action: 'assist';
-      input:
-        | { kind: 'click'; x: number; y: number }
-        | { kind: 'type'; text: string }
-        | { kind: 'key'; key: string };
-    }
+  | { action: 'assist'; input: BrowserInput }
   | { action: 'screenshot' }
   | { action: 'collect' }
   | { action: 'close' };
 export type BrowserEvent =
   | { type: 'ready' }
-  | { type: 'challenge'; message: string; assistancePath?: string }
+  | { type: 'challenge'; message: string }
+  | { type: 'assisted' }
   | { type: 'error'; code: string }
   | { type: 'screenshot'; image: string }
   | { type: 'collection_access'; path: string }
