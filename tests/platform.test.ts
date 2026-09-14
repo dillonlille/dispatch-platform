@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fixture, until } from './helpers.js';
 import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
 import { sha256 } from '../shared/crypto.js';
-import { nextOccurrence } from '../services/jobs/schedule.js';
+import { nextOccurrence, nextScheduled } from '../services/jobs/schedule.js';
 import { privateFile } from '../services/storage/paths.js';
 
 test('authentication, CSRF, view tampering and role boundaries fail closed', async (t) => {
@@ -22,6 +22,8 @@ test('authentication, CSRF, view tampering and role boundaries fail closed', asy
   await member.select(north.id);
   assert.equal((await member.get('/api/dsp/employees')).json().total, 12);
   assert.equal((await member.get('/api/dsp/connections')).statusCode, 403);
+  assert.equal((await member.get('/api/dsp/invitations')).statusCode, 403);
+  assert.equal((await member.get('/api/dsp/audit')).statusCode, 403);
   assert.equal((await member.post('/api/dsp/jobs', { requestId: 'forbidden' })).statusCode, 403);
   const value = member.headers['x-dispatch-view']!;
   member.headers['x-dispatch-view'] = value.slice(0, -1) + (value.endsWith('x') ? 'y' : 'x');
@@ -73,6 +75,22 @@ test('DSP creation has only private state; permanent Dev cannot be suspended', a
     409,
   );
   await client.select(dsp.id);
+  const invitations = (await client.get('/api/dsp/invitations')).json();
+  assert.equal(invitations.length, 1);
+  assert.equal(invitations[0].email, 'fresh@example.test');
+  assert(!JSON.stringify(invitations).includes('hash'));
+  assert(!JSON.stringify(invitations).includes('token'));
+  assert(
+    (await client.get('/api/dsp/audit'))
+      .json()
+      .every((event: { dspId: string }) => event.dspId === dsp.id),
+  );
+  const summaries = (await client.get('/api/platform/dsps')).json();
+  assert.equal(
+    summaries.find((item: { id: string }) => item.id === dsp.id).ownerEmail,
+    'fresh@example.test',
+  );
+  assert.equal(summaries.find((item: { id: string }) => item.id === dsp.id).ownerStatus, 'invited');
   const old = client.headers['x-dispatch-view'];
   assert.equal(
     (await client.post('/api/dsp/settings', { name: 'Fresh Updated', timezone: 'UTC' })).statusCode,
@@ -260,5 +278,203 @@ test('development mail stays in private files even when an SMTP URL is inherited
   assert.equal(
     f.runtime.storage.platform.one<{ status: string }>('SELECT status FROM outbox')!.status,
     'sent',
+  );
+});
+
+test('archived Diagnostics provisions isolated synthetic DSPs without provider access', async (t) => {
+  const f = await fixture({ standalone: true, environment: 'preview' });
+  t.after(() => f.close());
+  const owner = await f.client(),
+    member = await f.client('member@dispatch.test');
+  assert.equal((await member.get('/api/platform/diagnostics')).statusCode, 403);
+  assert.equal((await member.post('/api/platform/diagnostics', {})).statusCode, 403);
+  const before = (await owner.get('/api/platform/dsps')).json() as { id: string }[];
+  const response = await owner.post('/api/platform/diagnostics', {});
+  assert.equal(response.statusCode, 200, response.body);
+  const created = response.json().dsps[0];
+  assert(created.id && created.status === 'active');
+  assert(!before.some((dsp) => dsp.id === created.id));
+  assert.equal(f.runtime.runner.workforce.employees(created.id).total, 12);
+  assert.equal(f.runtime.broker.connection(created.id).enabled, false);
+  assert.equal(f.runtime.runner.schedules.get(created.id).enabled, false);
+  assert.equal(f.runtime.runner.queue.list(created.id).length, 0);
+  assert.equal(
+    f.runtime.storage.platform.one<{ count: number }>(
+      'SELECT count(*) count FROM invitations WHERE dsp_id=?',
+      created.id,
+    )!.count,
+    0,
+  );
+});
+
+test('Paycom settings preserve tenant boundaries, reject stale writes, and apply view and interval preferences', async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const owner = await f.client(),
+    member = await f.client('member@dispatch.test');
+  const north = member.session.dsps[0]!,
+    dev = owner.session.dsps.find((dsp) => dsp.permanent)!;
+  await owner.select(north.id);
+  await member.select(north.id);
+  const initial = (await owner.get('/api/dsp/paycom/settings')).json();
+  const values = {
+    ...initial.values,
+    automatic_sync: true,
+    sync_interval_seconds: 1800,
+    name_order: 'last_first',
+    driver_departments: ['Delivery'],
+    columns: ['totalHours'],
+  };
+  assert.equal(
+    (await member.post('/api/dsp/paycom/settings', { revision: 0, values })).statusCode,
+    403,
+  );
+  const saved = await owner.post('/api/dsp/paycom/settings', {
+    revision: initial.revision,
+    values,
+  });
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.equal(saved.json().revision, 1);
+  assert.equal(
+    (await owner.post('/api/dsp/paycom/settings', { revision: 0, values })).statusCode,
+    409,
+  );
+  assert.equal(
+    (
+      await owner.post('/api/dsp/paycom/settings', {
+        revision: 1,
+        values: { ...values, sync_interval_seconds: 1 },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal((await member.get('/api/dsp/paycom/settings')).json().history.length, 0);
+  assert(
+    (await member.get('/api/dsp/employees'))
+      .json()
+      .employees.some((row: { name: string }) => row.name === 'Morgan, Avery'),
+  );
+  const date = fixtureWorkforce(north).to;
+  const daily = (
+    await member.get(`/api/dsp/timecards?date=${date}&sort=totalHours&direction=desc`)
+  ).json();
+  assert.equal(daily.rows.length, 11);
+  assert(!daily.rows.some((row: { employeeCode: string }) => row.employeeCode === 'E001'));
+  assert(daily.rows[0].hours >= daily.rows.at(-1).hours);
+  const schedule = f.runtime.runner.schedules.get(north.id);
+  assert.equal(schedule.intervalSeconds, 1800);
+  assert.equal(
+    nextScheduled(schedule, new Date('2026-01-01T12:00:00Z')),
+    '2026-01-01T12:30:00.000Z',
+  );
+  assert.equal(schedule.enabled, true);
+  assert(Math.abs(Date.parse(schedule.nextRun!) - Date.now() - 1800000) < 10000);
+  assert.equal(
+    (
+      await owner.post('/api/dsp/paycom/settings', {
+        revision: 1,
+        values: { ...values, columns: ['totalHours', 'condition'] },
+      })
+    ).statusCode,
+    200,
+  );
+  assert.equal(f.runtime.runner.schedules.get(north.id).nextRun, schedule.nextRun);
+  await owner.select(dev.id);
+  assert.equal((await owner.get('/api/dsp/paycom/settings')).json().revision, 0);
+  await owner.select(north.id);
+  assert.equal(
+    (
+      await owner.post('/api/dsp/paycom/settings', {
+        revision: 2,
+        values: { ...values, automatic_sync: false, driver_departments: [] },
+      })
+    ).statusCode,
+    200,
+  );
+  assert.equal(f.runtime.runner.schedules.get(north.id).nextRun, null);
+  assert.equal((await member.get(`/api/dsp/timecards?date=${date}`)).json().rows.length, 0);
+});
+
+test('owner-first onboarding and removed DSPs preserve access and retained data', async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const owner = await f.client(),
+    member = await f.client('member@dispatch.test');
+  const response = await owner.post('/api/platform/dsps', { ownerEmail: 'setup@example.test' });
+  assert.equal(response.statusCode, 201, response.body);
+  const { dsp } = response.json();
+  const view = await owner.select(dsp.id);
+  assert.equal(view.profile?.setupRequired, true);
+  assert.equal(
+    (
+      await owner.post('/api/dsp/profile', {
+        name: 'Configured DSP',
+        abbreviation: 'CFG',
+        stationCode: 'dmo1',
+        timezone: 'America/Chicago',
+      })
+    ).statusCode,
+    200,
+  );
+  const configured = await owner.select(dsp.id);
+  assert.equal(configured.profile?.setupRequired, false);
+  assert.equal(configured.profile?.stationCode, 'DMO1');
+  assert.equal(configured.dsp.name, 'Configured DSP');
+  const north = member.session.dsps[0]!;
+  await member.select(north.id);
+  assert.equal(
+    (
+      await member.post('/api/dsp/profile', {
+        name: 'No',
+        abbreviation: '',
+        stationCode: 'DMO1',
+        timezone: 'UTC',
+      })
+    ).statusCode,
+    403,
+  );
+  assert.equal((await member.post(`/api/platform/dsps/${north.id}/remove`, {})).statusCode, 403);
+  const total = f.runtime.runner.workforce.employees(north.id).total;
+  assert.equal((await owner.post(`/api/platform/dsps/${north.id}/remove`, {})).statusCode, 200);
+  const summaries = (await owner.get('/api/platform/dsps')).json();
+  assert.equal(summaries.find((row: { id: string }) => row.id === north.id).profile.removed, true);
+  assert.notEqual((await member.get('/api/dsp/employees')).statusCode, 200);
+  assert.equal(f.runtime.runner.workforce.employees(north.id).total, total);
+  assert.equal(
+    (await owner.post(`/api/platform/dsps/${north.id}/status`, { status: 'active' })).statusCode,
+    409,
+  );
+  assert.equal((await owner.post(`/api/platform/dsps/${north.id}/restore`, {})).statusCode, 200);
+  await member.select(north.id);
+  assert.equal((await member.get('/api/dsp/employees')).json().total, total);
+  const permanent = owner.session.dsps.find((dsp) => dsp.permanent)!;
+  assert.equal((await owner.post(`/api/platform/dsps/${permanent.id}/remove`, {})).statusCode, 409);
+});
+
+test('pending invitations can be revoked only by their DSP owner', async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const owner = await f.client(),
+    member = await f.client('member@dispatch.test');
+  const north = member.session.dsps[0]!;
+  await owner.select(north.id);
+  await member.select(north.id);
+  const invited = await owner.post('/api/dsp/members/invite', {
+    email: 'revoke@example.test',
+    role: 'member',
+  });
+  assert.equal(invited.statusCode, 200, invited.body);
+  assert.equal(
+    (await member.post('/api/dsp/invitations/revoke', { email: 'revoke@example.test' })).statusCode,
+    403,
+  );
+  assert.equal(
+    (await owner.post('/api/dsp/invitations/revoke', { email: 'revoke@example.test' })).statusCode,
+    200,
+  );
+  assert(
+    !(await owner.get('/api/dsp/invitations'))
+      .json()
+      .some((invite: { email: string }) => invite.email === 'revoke@example.test'),
   );
 });

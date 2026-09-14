@@ -10,6 +10,12 @@ import { configuration, type Config } from '../services/config.js';
 import type { Auth, Context } from '../services/accounts/index.js';
 import type { Permission, SessionView, PlatformHealth } from '../shared/contracts/index.js';
 import { dateSchema } from '../integrations/paycom/workforce.js';
+import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
+import {
+  readPaycomSettings,
+  writePaycomSettings,
+  preferencesSchema,
+} from '../integrations/paycom/preferences.js';
 import { ReleaseService } from '../services/releases/index.js';
 import { previewRouting } from './preview.js';
 const email = z.email().max(254),
@@ -156,7 +162,7 @@ export async function createApp(
   app.post('/api/session/dsp', (request) => {
     const a = mutation(request);
     const input = parse(z.object({ dspId: z.string() }).strict(), request);
-    return runtime.accounts.view(a, input.dspId);
+    return { ...runtime.accounts.view(a, input.dspId), profile: runtime.dsps.profile(input.dspId) };
   });
   app.post('/api/auth/password', async (request, reply) => {
     const a = mutation(request);
@@ -206,10 +212,18 @@ export async function createApp(
   app.post('/api/platform/dsps', (request, reply) => {
     const a = owner(request, true);
     const input = parse(
-      z.object({ name, timezone, ownerEmail: email.optional() }).strict(),
+      z
+        .object({
+          name: name.optional(),
+          timezone: timezone.default('UTC'),
+          ownerEmail: email.optional(),
+        })
+        .strict()
+        .refine((value) => Boolean(value.name || value.ownerEmail)),
       request,
     );
-    const dsp = runtime.dsps.create(input.name, input.timezone, a.user.id);
+    const dsp = runtime.dsps.create(input.name ?? 'New DSP', input.timezone, a.user.id);
+    if (!input.name) runtime.dsps.setProfile(dsp.id, { setupRequired: true });
     let invitationUrl: string | undefined;
     if (input.ownerEmail) {
       const token = runtime.accounts.invite(a, dsp.id, input.ownerEmail, 'owner');
@@ -232,6 +246,28 @@ export async function createApp(
     }
     return dsp;
   });
+  app.post('/api/platform/dsps/:id/remove', async (request) => {
+    const a = owner(request, true);
+    parse(z.object({}).strict(), request);
+    const dspId = params(request).id!;
+    runtime.dsps.setStatus(dspId, 'suspended', a.user.id);
+    runtime.dsps.setProfile(dspId, { removed: true });
+    await runtime.runner.revokeDsp(dspId);
+    await preview?.runner.revokeDsp(dspId);
+    runtime.audit.record(a.user.id, dspId, 'dsp.removed');
+    return { ok: true };
+  });
+  app.post('/api/platform/dsps/:id/restore', (request) => {
+    const a = owner(request, true);
+    parse(z.object({}).strict(), request);
+    const dspId = params(request).id!;
+    const dsp = runtime.dsps.get(dspId);
+    assert(!dsp.permanent && runtime.dsps.profile(dspId).removed, 'dsp_not_removed', 409);
+    runtime.dsps.setProfile(dspId, { removed: false });
+    const restored = runtime.dsps.setStatus(dspId, 'active', a.user.id);
+    runtime.audit.record(a.user.id, dspId, 'dsp.restored');
+    return restored;
+  });
   app.post('/api/platform/dsps/:id/retry', (request) => {
     owner(request, true);
     runtime.dsps.initialize(params(request).id!);
@@ -246,6 +282,41 @@ export async function createApp(
   app.get('/api/platform/audit', (request) => {
     owner(request);
     return runtime.audit.list();
+  });
+  const diagnostics = () => {
+    const space = fs.statfsSync(runtime.storage.paths.platform);
+    return {
+      enabled: config.development || config.environment === 'preview',
+      storageAvailableBytes: space.bavail * space.bsize,
+      runtime: {
+        name: 'Shared platform',
+        status: 'Running',
+        memoryBytes: process.memoryUsage().rss,
+        browsers: runtime.browsers.health().active,
+      },
+      dsps: runtime.storage.platform.all<{ id: string; name: string; status: string }>(
+        "SELECT d.id,d.name,d.status FROM dsps d WHERE EXISTS (SELECT 1 FROM audit a WHERE a.dsp_id=d.id AND a.action='diagnostics.fixtures_loaded') ORDER BY d.created_at DESC",
+      ),
+    };
+  };
+  app.get('/api/platform/diagnostics', (request) => {
+    owner(request);
+    return diagnostics();
+  });
+  app.post('/api/platform/diagnostics', (request) => {
+    const a = owner(request, true);
+    parse(z.object({}).strict(), request);
+    assert(config.development || config.environment === 'preview', 'test_dsps_unavailable', 409);
+    const dsp = runtime.dsps.create(
+      `Test DSP ${new Date().toISOString()}`,
+      'America/Chicago',
+      a.user.id,
+    );
+    // Publish synthetic data only into the newly created tenant. Do not save
+    // provider credentials, enable its connection, or enqueue collection work.
+    runtime.runner.workforce.publish(dsp.id, fixtureWorkforce(dsp));
+    runtime.audit.record(a.user.id, dsp.id, 'diagnostics.fixtures_loaded');
+    return diagnostics();
   });
   app.get('/api/platform/health', (request): PlatformHealth => {
     owner(request);
@@ -274,6 +345,7 @@ export async function createApp(
     return {
       releases: releases.list(),
       deploymentEnabled: config.allowDeployment,
+      version: config.version ?? null,
       standalone: config.standalone,
       environment: config.environment,
       release: config.release,
@@ -434,17 +506,67 @@ export async function createApp(
     runtime.audit.record(c.user.id, c.dsp.id, 'schedule.updated');
     return result;
   });
+  app.post('/api/dsp/profile', (request) => {
+    const c = context(request, 'settings', true);
+    const input = parse(
+      z
+        .object({
+          name,
+          timezone,
+          abbreviation: z.string().trim().max(16),
+          stationCode: z.string().regex(/^[A-Za-z0-9]{3,8}$/),
+        })
+        .strict(),
+      request,
+    );
+    runtime.dsps.update(c, input.name, input.timezone);
+    runtime.dsps.setProfile(c.dsp.id, {
+      abbreviation: input.abbreviation,
+      stationCode: input.stationCode.toUpperCase(),
+      setupRequired: false,
+    });
+    runtime.audit.record(c.user.id, c.dsp.id, 'dsp.profile_completed');
+    return { ok: true };
+  });
+  app.get('/api/dsp/paycom/settings', (request) => {
+    const c = context(request);
+    const result = readPaycomSettings(forContext(c).storage, c.dsp.id);
+    if (!['owner', 'platform_owner'].includes(c.role)) result.history = [];
+    return result;
+  });
+  app.post('/api/dsp/paycom/settings', (request) => {
+    const c = context(request, 'settings', true);
+    const input = parse(
+      z.object({ revision: z.number().int().min(0), values: preferencesSchema }).strict(),
+      request,
+    );
+    return writePaycomSettings(
+      forContext(c).storage,
+      runtime.audit,
+      c.dsp.id,
+      c.user.id,
+      input.revision,
+      input.values,
+    );
+  });
   app.get('/api/dsp/employees', (request) => {
     const c = context(request),
       input = z
         .object({
           q: z.string().max(100).default(''),
+          direction: z.enum(['asc', 'desc']).default('asc'),
           offset: z.coerce.number().int().min(0).max(100000).default(0),
           limit: z.coerce.number().int().min(1).max(100).default(50),
         })
         .strict()
         .parse(request.query);
-    return forContext(c).runner.workforce.employees(c.dsp.id, input.q, input.offset, input.limit);
+    return forContext(c).runner.workforce.employees(
+      c.dsp.id,
+      input.q,
+      input.offset,
+      input.limit,
+      input.direction,
+    );
   });
   app.get('/api/dsp/employees/:code', (request) => {
     const c = context(request);
@@ -461,7 +583,18 @@ export async function createApp(
       input = z
         .object({
           date: dateSchema,
-          sort: z.enum(['name', 'hours']).default('name'),
+          sort: z
+            .enum([
+              'name',
+              'hours',
+              'inDay',
+              'outLunch',
+              'inLunch',
+              'outDay',
+              'totalHours',
+              'condition',
+            ])
+            .default('name'),
           direction: z.enum(['asc', 'desc']).default('asc'),
         })
         .strict()
@@ -471,6 +604,28 @@ export async function createApp(
   app.get('/api/dsp/members', (request) => {
     const c = context(request, 'members');
     return runtime.dsps.members(c.dsp.id);
+  });
+  app.get('/api/dsp/invitations', (request) => {
+    const c = context(request, 'members');
+    return runtime.storage.platform.all(
+      'SELECT email,role,expires_at expiresAt,used_at IS NOT NULL accepted FROM invitations WHERE dsp_id=? ORDER BY expires_at DESC LIMIT 100',
+      c.dsp.id,
+    );
+  });
+  app.post('/api/dsp/invitations/revoke', (request) => {
+    const c = context(request, 'members', true),
+      input = parse(z.object({ email }).strict(), request);
+    runtime.storage.platform.run(
+      'DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL',
+      c.dsp.id,
+      input.email,
+    );
+    runtime.audit.record(c.user.id, c.dsp.id, 'invitation.revoked', input.email);
+    return { ok: true };
+  });
+  app.get('/api/dsp/audit', (request) => {
+    const c = context(request, 'settings');
+    return runtime.audit.list(c.dsp.id);
   });
   app.post('/api/dsp/members/invite', (request) => {
     const c = context(request, 'members', true),

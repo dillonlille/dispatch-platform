@@ -7,6 +7,7 @@ import type {
   Connection,
   Dsp,
   DspSummary,
+  DspProfile,
   Membership,
   Role,
 } from '../../shared/contracts/index.js';
@@ -93,12 +94,61 @@ export class Dsps {
             db.one<{ at: string }>('SELECT collected_at at FROM publications WHERE active=1')?.at ??
             null;
         });
-      return { ...dsp, role, paycom, lastCollection };
+      const owner = this.storage.platform.one<{ email: string }>(
+        "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? AND m.role='owner' AND u.status='active' ORDER BY u.email LIMIT 1",
+        dsp.id,
+      );
+      const invitation = this.storage.platform.one<{ email: string }>(
+        "SELECT email FROM invitations WHERE dsp_id=? AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1",
+        dsp.id,
+        Date.now(),
+      );
+      const platformOwner = dsp.permanent
+        ? this.storage.platform.one<{ email: string }>(
+            "SELECT email FROM users WHERE platform_owner=1 AND status='active' ORDER BY email LIMIT 1",
+          )
+        : undefined;
+      return {
+        ...dsp,
+        profile: ['active', 'suspended'].includes(dsp.status)
+          ? this.profile(dsp.id)
+          : { abbreviation: '', stationCode: '', setupRequired: false, removed: false },
+        role,
+        paycom,
+        lastCollection,
+        ownerEmail: owner?.email ?? invitation?.email ?? platformOwner?.email ?? null,
+        ownerStatus: owner || platformOwner ? 'active' : invitation ? 'invited' : 'missing',
+      };
     });
+  }
+  profile(dspId: string): DspProfile {
+    return this.storage.dsp(dspId, (db) => {
+      const stored = db.one<{ value: string }>(
+        "SELECT value FROM settings WHERE key='dsp.profile'",
+      );
+      return {
+        abbreviation: '',
+        stationCode: '',
+        setupRequired: false,
+        removed: false,
+        ...(stored ? JSON.parse(stored.value) : {}),
+      };
+    });
+  }
+  setProfile(dspId: string, changes: Partial<DspProfile>) {
+    const profile = { ...this.profile(dspId), ...changes };
+    this.storage.dsp(dspId, (db) =>
+      db.run(
+        "INSERT INTO settings(key,value) VALUES ('dsp.profile',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        JSON.stringify(profile),
+      ),
+    );
+    return profile;
   }
   setStatus(dspId: string, status: 'active' | 'suspended', actorId: string) {
     const dsp = this.get(dspId);
     assert(!dsp.permanent, 'permanent_dev_required', 409);
+    assert(status !== 'active' || !this.profile(dspId).removed, 'restore_removed_dsp_first', 409);
     assert(['active', 'suspended'].includes(dsp.status), 'dsp_unavailable', 409);
     this.storage.platform.run(
       'UPDATE dsps SET status=?,revision=revision+1 WHERE id=?',

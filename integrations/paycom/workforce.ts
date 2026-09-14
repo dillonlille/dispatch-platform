@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { Storage } from '../../services/storage/index.js';
 import type { Workforce, Employee, Timecard } from '../../shared/contracts/index.js';
+import { readPaycomSettings } from './preferences.js';
+import { employeeName, type PaycomColumn } from '../../shared/paycom.js';
 import { id } from '../../shared/crypto.js';
 import { assert } from '../../shared/errors.js';
 export const dateSchema = z
@@ -116,35 +118,49 @@ export class WorkforceStore {
       collectedAt: value.collectedAt,
     };
   }
-  employees(dspId: string, query = '', offset = 0, limit = 50) {
+  employees(dspId: string, query = '', offset = 0, limit = 50, direction: 'asc' | 'desc' = 'asc') {
+    const preferences = readPaycomSettings(this.storage, dspId).values;
     return this.storage.dsp(dspId, (db) => {
       const pub = db.one<{ id: string; collected_at: string }>(
         'SELECT * FROM publications WHERE active=1',
       );
       if (!pub) return { employees: [], total: 0, collectedAt: null };
-      const escaped = `%${query.toLowerCase().replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
-      const where = `publication_id=? AND (lower(name) LIKE ? ESCAPE '\\' OR lower(code) LIKE ? ESCAPE '\\')`;
-      const total = db.one<{ n: number }>(
-        `SELECT count(*) n FROM employees WHERE ${where}`,
-        pub.id,
-        escaped,
-        escaped,
-      )!.n;
-      const employees = db
-        .all<
-          Omit<Employee, 'active'> & { active: number }
-        >(`SELECT code,name,department,position,station,active FROM employees WHERE ${where} ORDER BY name COLLATE NOCASE,code LIMIT ? OFFSET ?`, pub.id, escaped, escaped, limit, offset)
-        .map((row) => ({ ...row, active: Boolean(row.active) }));
-      return { employees, total, collectedAt: pub.collected_at };
+      const rows = db
+        .all<Omit<Employee, 'active'> & { active: number }>(
+          'SELECT code,name,department,position,station,active FROM employees WHERE publication_id=?',
+          pub.id,
+        )
+        .map((row) => ({
+          ...row,
+          active: Boolean(row.active),
+          name: employeeName(row.name, preferences.name_order),
+        }))
+        .filter(
+          (row) =>
+            (!preferences.department || row.department === preferences.department) &&
+            (!preferences.station || row.station === preferences.station) &&
+            `${row.name} ${row.code}`.toLowerCase().includes(query.toLowerCase()),
+        )
+        .sort(
+          (a, b) =>
+            (a.name.localeCompare(b.name) || a.code.localeCompare(b.code)) *
+            (direction === 'desc' ? -1 : 1),
+        );
+      return {
+        employees: rows.slice(offset, offset + limit),
+        total: rows.length,
+        collectedAt: pub.collected_at,
+      };
     });
   }
   daily(
     dspId: string,
     date: string,
-    sort: 'name' | 'hours' = 'name',
+    sort: 'name' | 'hours' | PaycomColumn = 'name',
     direction: 'asc' | 'desc' = 'asc',
   ) {
     dateSchema.parse(date);
+    const preferences = readPaycomSettings(this.storage, dspId).values;
     return this.storage.dsp(dspId, (db) => {
       const pub = db.one<{ id: string; collected_at: string }>(
         'SELECT * FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC LIMIT 1',
@@ -152,16 +168,53 @@ export class WorkforceStore {
         date,
       );
       if (!pub) return { rows: [], collectedAt: null, available: false };
-      const order = sort === 'hours' ? 't.hours' : 'e.name COLLATE NOCASE';
       const rows = db
-        .all<
-          Timecard & { name: string; punches: string }
-        >(`SELECT t.employee_code employeeCode,e.name,t.date,t.hours,t.status,t.punches FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code WHERE t.publication_id=? AND t.date=? ORDER BY ${order} ${direction === 'desc' ? 'DESC' : 'ASC'},e.code`, pub.id, date)
-        .map((row) => ({ ...row, punches: JSON.parse(row.punches) as Timecard['punches'] }));
+        .all<Timecard & { name: string; department: string; station: string; punches: string }>(
+          'SELECT t.employee_code employeeCode,e.name,e.department,e.station,t.date,t.hours,t.status,t.punches FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code WHERE t.publication_id=? AND t.date=?',
+          pub.id,
+          date,
+        )
+        .filter(
+          (row) =>
+            (!preferences.department || row.department === preferences.department) &&
+            (!preferences.station || row.station === preferences.station) &&
+            (preferences.driver_departments === null ||
+              preferences.driver_departments.includes(row.department)),
+        )
+        .map(({ department: _department, station: _station, ...row }) => ({
+          ...row,
+          name: employeeName(row.name, preferences.name_order),
+          punches: JSON.parse(row.punches) as Timecard['punches'],
+        }));
+      const key = (row: (typeof rows)[number]): string | number =>
+        sort === 'name'
+          ? row.name
+          : sort === 'hours' || sort === 'totalHours'
+            ? row.hours
+            : sort === 'condition'
+              ? row.status
+              : sort === 'inDay'
+                ? (row.punches[0]?.in ?? '')
+                : sort === 'outDay'
+                  ? (row.punches.at(-1)?.out ?? '')
+                  : sort === 'outLunch'
+                    ? ((row.punches.length > 1 ? row.punches[0]?.out : '') ?? '')
+                    : ((row.punches.length > 1 ? row.punches[1]?.in : '') ?? '');
+      rows.sort((a, b) => {
+        const x = key(a),
+          y = key(b);
+        return (
+          (typeof x === 'number' && typeof y === 'number'
+            ? x - y
+            : String(x).localeCompare(String(y))) * (direction === 'desc' ? -1 : 1) ||
+          a.employeeCode.localeCompare(b.employeeCode)
+        );
+      });
       return { rows, collectedAt: pub.collected_at, available: true };
     });
   }
   employee(dspId: string, code: string) {
+    const preferences = readPaycomSettings(this.storage, dspId).values;
     return this.storage.dsp(dspId, (db) => {
       const row = db.one<Omit<Employee, 'active'> & { active: number; publication_id: string }>(
         'SELECT e.* FROM employees e JOIN publications p ON p.id=e.publication_id WHERE e.code=? ORDER BY p.collected_at DESC LIMIT 1',
@@ -176,7 +229,7 @@ export class WorkforceStore {
       return {
         employee: {
           code: row.code,
-          name: row.name,
+          name: employeeName(row.name, preferences.name_order),
           department: row.department,
           position: row.position,
           station: row.station,

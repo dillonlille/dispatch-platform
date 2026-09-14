@@ -11,6 +11,7 @@ export interface Config {
   host: string;
   port: number;
   release: string;
+  version?: string;
   providerMode: 'fixture' | 'native';
   browserCapacity: number;
   jobLeaseMs: number;
