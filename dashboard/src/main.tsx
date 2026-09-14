@@ -24,6 +24,8 @@ import {
 import { EmployeesPage, TimecardsPage, ConnectionsPage } from './dsp.js';
 import { Badge, Header, Loading, ErrorBox } from './ui.js';
 import './styles.css';
+import { DspOnboarding } from './onboarding.js';
+import { PaycomSettingsPage } from './paycom-settings.js';
 import { Shell } from './shell.js';
 import { SettingsPage } from './settings.js';
 import { PaycomPage, HomePage, TeamPage } from './workspace.js';
@@ -177,6 +179,7 @@ function App() {
     return <AuthScreen onLogin={() => load(true)} />;
   const owner = view?.role === 'owner' || view?.role === 'platform_owner',
     canCollect = owner || view?.role === 'manager';
+  if (view?.profile?.setupRequired && owner) return <DspOnboarding complete={reopen} />;
   const nav = dspId
     ? [
         { id: 'overview', label: 'Home Page', icon: House },
@@ -228,6 +231,8 @@ function App() {
               <HomePage />
             ) : page === 'paycom' ? (
               <PaycomPage view={view} perform={perform} canCollect={canCollect} />
+            ) : page === 'paycom-settings' && owner ? (
+              <PaycomSettingsPage dspId={view.dsp.id} perform={perform} />
             ) : page === 'team' && owner ? (
               <TeamPage view={view} perform={perform} reopen={reopen} />
             ) : page === 'employees' ? (

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Plus, Search, Check, Copy, RefreshCw, Ellipsis, Eye } from 'lucide-react';
+import { Plus, Search, Check, Copy, RefreshCw, Ellipsis, Eye, FlaskConical } from 'lucide-react';
 import type {
   DspSummary,
   AuditEvent,
@@ -28,16 +28,21 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     [filter, setFilter] = useState('all'),
     [creating, setCreating] = useState(false),
     [suspending, setSuspending] = useState<DspSummary>(),
+    [removing, setRemoving] = useState<DspSummary>(),
+    [detail, setDetail] = useState<DspSummary>(),
     [link, setLink] = useState(''),
     [busy, setBusy] = useState(false);
   const dsps = data ?? [],
     visible = dsps.filter(
       (d) =>
         `${d.name} ${d.ownerEmail ?? ''}`.toLowerCase().includes(query.toLowerCase()) &&
-        (filter === 'all' ||
-          (filter === 'running' && d.status === 'active') ||
-          (filter === 'onboarding' && d.ownerStatus !== 'active') ||
-          (filter === 'suspended' && d.status === 'suspended')),
+        (filter === 'removed'
+          ? d.profile.removed
+          : !d.profile.removed &&
+            (filter === 'all' ||
+              (filter === 'running' && d.status === 'active') ||
+              (filter === 'onboarding' &&
+                (d.ownerStatus !== 'active' || d.profile.setupRequired)))),
     );
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,9 +50,7 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     setBusy(true);
     const ok = await perform(async () => {
       const result = await api<{ invitationUrl?: string }>('/api/platform/dsps', {
-        name: form.get('name'),
-        timezone: form.get('timezone'),
-        ...(form.get('ownerEmail') ? { ownerEmail: form.get('ownerEmail') } : {}),
+        ownerEmail: form.get('ownerEmail'),
       });
       setLink(result.invitationUrl ?? '');
       refresh();
@@ -66,13 +69,21 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
       <ErrorBox message={error} />
       <div className="inline-summary" aria-label="DSP summary">
         <span>
-          <strong>{dsps.length}</strong>DSPs
+          <strong>{dsps.filter((d) => !d.profile.removed).length}</strong>DSPs
         </span>
         <span>
           <strong>{dsps.filter((d) => d.status === 'active').length}</strong>running
         </span>
         <span>
-          <strong>{dsps.filter((d) => d.ownerStatus !== 'active').length}</strong>onboarding
+          <strong>
+            {
+              dsps.filter(
+                (d) =>
+                  !d.profile.removed && (d.ownerStatus !== 'active' || d.profile.setupRequired),
+              ).length
+            }
+          </strong>
+          onboarding
         </span>
       </div>
       <Tabs
@@ -82,7 +93,7 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
           ['all', 'All DSPs'],
           ['running', 'Running'],
           ['onboarding', 'Onboarding'],
-          ['suspended', 'Suspended'],
+          ['removed', 'Removed'],
         ]}
         label="DSP filters"
       />
@@ -120,28 +131,30 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
               {visible.map((dsp) => (
                 <tr key={dsp.id}>
                   <td>
-                    <button
-                      className="identity-button"
-                      disabled={dsp.status !== 'active'}
-                      onClick={() => open(dsp)}
-                    >
+                    <button className="identity-button" onClick={() => setDetail(dsp)}>
                       <DspAvatar name={dsp.name} />
                       <span className="dsp-identity-copy">
                         <strong>{dsp.name}</strong>
-                        <span>{dsp.permanent ? 'DEV' : dsp.timezone}</span>
+                        <span>{dsp.profile.abbreviation || (dsp.permanent ? 'DEV' : '')}</span>
                       </span>
                     </button>
                   </td>
                   <td className="muted">{dsp.ownerEmail ?? 'No owner assigned'}</td>
                   <td>
                     <Badge value={dsp.status}>
-                      {dsp.status === 'active' ? 'Running' : title(dsp.status)}
+                      {dsp.profile.removed
+                        ? 'Stopped'
+                        : dsp.status === 'active'
+                          ? 'Running'
+                          : title(dsp.status)}
                     </Badge>
                   </td>
                   <td>
                     <Badge value={dsp.ownerStatus === 'active' ? 'neutral' : 'pending'}>
                       {dsp.ownerStatus === 'active'
-                        ? 'Complete'
+                        ? dsp.profile.setupRequired
+                          ? 'Details needed'
+                          : 'Complete'
                         : dsp.ownerStatus === 'invited'
                           ? 'Invitation pending'
                           : 'Invite needed'}
@@ -153,7 +166,18 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
                         <Ellipsis size={18} />
                       </summary>
                       <div className="account-popover">
-                        {dsp.status === 'active' ? (
+                        {dsp.profile.removed ? (
+                          <button
+                            onClick={() =>
+                              void perform(async () => {
+                                await api(`/api/platform/dsps/${dsp.id}/restore`, {});
+                                refresh();
+                              }, 'DSP restored')
+                            }
+                          >
+                            Restore DSP
+                          </button>
+                        ) : dsp.status === 'active' ? (
                           <button onClick={() => open(dsp)}>
                             <Eye size={16} />
                             View
@@ -173,6 +197,18 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
                             {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
                           </button>
                         )}
+                        {!dsp.permanent &&
+                          !dsp.profile.removed &&
+                          ['active', 'suspended'].includes(dsp.status) && (
+                            <button
+                              onClick={(event) => {
+                                event.currentTarget.closest('details')?.removeAttribute('open');
+                                setRemoving(dsp);
+                              }}
+                            >
+                              Remove DSP
+                            </button>
+                          )}
                         {dsp.status === 'active' && !dsp.permanent && (
                           <button
                             className="danger"
@@ -200,25 +236,23 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
         {visible.length} DSP{visible.length === 1 ? '' : 's'}
       </p>
       {creating && (
-        <Modal title="Create new DSP" variant="sheet" onClose={() => setCreating(false)}>
-          <p className="muted">Create a workspace with its own private data and connections.</p>
-          <form onSubmit={(e) => void create(e)}>
+        <Modal
+          title="Create new DSP"
+          description="Invite an owner. Their workspace will be prepared while they finish setup."
+          variant="sheet"
+          onClose={() => setCreating(false)}
+        >
+          <form onSubmit={(event) => void create(event)}>
             <label>
-              DSP name
-              <input name="name" required maxLength={100} placeholder="Company name" />
-            </label>
-            <label>
-              Timezone
+              Owner email
               <input
-                name="timezone"
+                name="ownerEmail"
+                type="email"
+                autoComplete="off"
+                maxLength={254}
                 required
-                defaultValue="America/Chicago"
-                placeholder="America/Chicago"
+                disabled={busy}
               />
-            </label>
-            <label>
-              Owner email <span className="muted">(optional)</span>
-              <input name="ownerEmail" type="email" placeholder="owner@company.com" />
             </label>
             <div className="form-actions">
               <button type="button" onClick={() => setCreating(false)}>
@@ -229,6 +263,107 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {detail && (
+        <Modal
+          variant="sheet"
+          title={
+            <span className="dsp-panel-identity">
+              <DspAvatar name={detail.name} />
+              <span>{detail.name}</span>
+            </span>
+          }
+          description="DSP ownership and runtime status."
+          onClose={() => setDetail(undefined)}
+        >
+          <dl className="detail-list dsp-detail-list">
+            {[
+              ['Owner', detail.ownerEmail || 'Not assigned'],
+              [
+                'Runtime',
+                detail.profile.removed
+                  ? 'Stopped'
+                  : detail.status === 'active'
+                    ? 'Running'
+                    : title(detail.status),
+              ],
+              [
+                'Onboarding',
+                detail.ownerStatus === 'active'
+                  ? detail.profile.setupRequired
+                    ? 'Details needed'
+                    : 'Complete'
+                  : detail.ownerStatus === 'invited'
+                    ? 'Invitation pending'
+                    : 'Invite needed',
+              ],
+              ['Station', detail.profile.stationCode || '—'],
+              ['Timezone', detail.timezone],
+            ].map(([key, value]) => (
+              <div key={key}>
+                <dt>{key}</dt>
+                <dd>
+                  {key === 'Runtime' ? (
+                    <Badge value={detail.profile.removed ? 'suspended' : detail.status}>
+                      {value}
+                    </Badge>
+                  ) : (
+                    value
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="dsp-detail-actions">
+            <button
+              className="primary"
+              disabled={detail.status !== 'active' || detail.profile.removed}
+              onClick={() => {
+                setDetail(undefined);
+                open(detail);
+              }}
+            >
+              <Eye size={16} />
+              View
+            </button>
+            {detail.status === 'active' && !detail.permanent && (
+              <button
+                onClick={() => {
+                  setDetail(undefined);
+                  setSuspending(detail);
+                }}
+              >
+                Suspend DSP ↗
+              </button>
+            )}
+            {(detail.status !== 'active' || detail.profile.removed) && (
+              <p className="muted">Viewing is unavailable for suspended or removed DSPs.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+      {removing && (
+        <Modal title="Remove DSP" onClose={() => setRemoving(undefined)}>
+          <p>
+            Remove {removing.name}. Access and collection will stop immediately. Existing data will
+            be retained so you can restore this DSP later.
+          </p>
+          <div className="form-actions">
+            <button onClick={() => setRemoving(undefined)}>Cancel</button>
+            <button
+              className="primary"
+              onClick={() =>
+                void perform(async () => {
+                  await api(`/api/platform/dsps/${removing.id}/remove`, {});
+                  setRemoving(undefined);
+                  refresh();
+                }, 'DSP removed')
+              }
+            >
+              Remove DSP
+            </button>
+          </div>
         </Modal>
       )}
       {link && <InvitationLink link={link} close={() => setLink('')} />}
@@ -408,25 +543,74 @@ export function JobsPage({
   );
 }
 export function DiagnosticsPage({ perform }: { perform: Perform }) {
-  const [tab, setTab] = useState('overview');
+  const { data, error, refresh } = useData<{
+    enabled: boolean;
+    storageAvailableBytes: number;
+    runtime: { name: string; status: string; memoryBytes: number; browsers: number };
+    dsps: { id: string; name: string; status: string }[];
+  }>('/api/platform/diagnostics', 5000);
+  const [busy, setBusy] = useState(false);
   return (
     <>
-      <Header title="Diagnostics" subtitle="Platform health and collection activity." />
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        items={[
-          ['overview', 'Overview'],
-          ['collections', 'Collections'],
-        ]}
-        label="Diagnostics"
-      />
-      {tab === 'overview' ? (
-        <HealthPanel />
+      <Header title="Diagnostics" subtitle="Check runtime health and create test DSPs." />
+      <ErrorBox message={error} />
+      {!data ? (
+        <Loading />
       ) : (
-        <div className="diagnostics-jobs">
-          <JobsPage platform perform={perform} canCollect={false} />
-        </div>
+        <>
+          <section aria-label="Runtime health" className="archived-card diagnostics-health">
+            <h2>Runtime health</h2>
+            <p className="muted">
+              Available storage: {(data.storageAvailableBytes / 1024 ** 3).toFixed(1)} GiB
+            </p>
+            <div className="runtime-row">
+              <span>{data.runtime.name}</span>
+              <span>
+                {data.runtime.status} · {Math.round(data.runtime.memoryBytes / 1024 ** 2)} MiB ·{' '}
+                {data.runtime.browsers} active browsers
+              </span>
+            </div>
+          </section>
+          <section className="archived-card" aria-labelledby="test-dsp-title">
+            <h2 id="test-dsp-title">Test DSP</h2>
+            <p className="muted">
+              Deploy a DSP with synthetic employees and timecards. Provider collection stays
+              stopped, and no invitation email is sent.
+            </p>
+            <button
+              className="primary"
+              disabled={busy || !data.enabled}
+              onClick={() => {
+                setBusy(true);
+                void perform(async () => {
+                  await api('/api/platform/diagnostics', {});
+                  refresh();
+                }, 'Test DSP ready').finally(() => setBusy(false));
+              }}
+            >
+              <FlaskConical size={16} />
+              {busy ? 'Requesting test DSP…' : 'Deploy test DSP'}
+            </button>
+            {!data.enabled && (
+              <div className="notice">Test DSP deployment is unavailable on this installation.</div>
+            )}
+          </section>
+          <section aria-label="Test DSP deployments" className="test-dsp-list" aria-live="polite">
+            {data.dsps.map((dsp) => (
+              <div key={dsp.id} className="archived-card">
+                <h3>{dsp.name}</h3>
+                <p className="muted">
+                  {dsp.status === 'active'
+                    ? 'Synthetic data prepared · Available'
+                    : title(dsp.status)}
+                </p>
+              </div>
+            ))}
+          </section>
+          <a href="#dsps" className="underlined-link">
+            Manage test DSPs in DSPs
+          </a>
+        </>
       )}
     </>
   );
@@ -446,6 +630,7 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
     releases: ReleaseSummary[];
     deploymentEnabled: boolean;
     standalone?: boolean;
+    version?: string | null;
     release: string;
     update?: { status: string; commit?: string; updatedAt: string } | null;
   }>('/api/platform/releases', 5000);
@@ -453,35 +638,58 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
   if (data?.standalone)
     return (
       <>
-        <Header
-          title="Updates"
-          subtitle="Merged changes are checked and installed automatically."
-        />
+        <Header title="Updates" subtitle="Review releases for your platform and DSPs.">
+          <button onClick={refresh}>
+            <RefreshCw size={16} />
+            Refresh
+          </button>
+        </Header>
         <ErrorBox message={error} />
-        <Section title="Current version">
-          <div className="build-details">
-            <p>This environment includes the owner dashboard and all of its test DSPs.</p>
-            <p>
-              Build: <code>{data.release.slice(0, 12)}</code>
-            </p>
-            {data.update?.commit && (
-              <p>
-                Commit: <code>{data.update.commit.slice(0, 12)}</code>
+        <div id="platform-updates-content" className="archived-updates">
+          {data.update && (
+            <section
+              className="archived-card update-status"
+              role="status"
+              aria-label="Update status"
+            >
+              <h2>{title(data.update.status)}</h2>
+              <p className="muted">Last update status {time(data.update.updatedAt)}</p>
+            </section>
+          )}
+          {['Core', 'DSP'].map((product) => (
+            <section
+              key={product}
+              className="archived-card archived-release-card"
+              aria-label={`${product} release`}
+            >
+              <div className="release-card-heading">
+                <div>
+                  <h2>{product}</h2>
+                  <p className="muted">Installed: {data.version ?? data.release.slice(0, 12)}</p>
+                </div>
+                <span className="muted">Updates automatically</span>
+              </div>
+              <p className="muted">
+                {product === 'Core'
+                  ? 'The Platform Owner dashboard, shared API and Core services.'
+                  : 'All DSPs use the same installed services and dashboard.'}
               </p>
-            )}
-            {data.update && (
-              <p>
-                Update status: {title(data.update.status)} · {time(data.update.updatedAt)}
-              </p>
-            )}
-          </div>
-        </Section>
-        <div className="notice">
-          Feature PRs merge into dev when approved. Successful builds update this platform
-          automatically. Your accounts, DSPs and connection data are retained.
+              <div className="release-card-notes">
+                <h3>{data.version ? `Version ${data.version}` : 'Current build'}</h3>
+                <p className="muted">
+                  Successful merged-dev builds update the complete Dev platform together.
+                </p>
+                <p className="muted">
+                  Build {data.release.slice(0, 12)}
+                  {data.update?.commit ? ` · Commit ${data.update.commit.slice(0, 12)}` : ''}
+                </p>
+              </div>
+            </section>
+          ))}
         </div>
       </>
     );
+
   return (
     <>
       <Header

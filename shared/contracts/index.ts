@@ -32,7 +32,14 @@ export interface Dsp {
   revision: number;
   createdAt: string;
 }
+export interface DspProfile {
+  abbreviation: string;
+  stationCode: string;
+  setupRequired: boolean;
+  removed: boolean;
+}
 export interface DspSummary extends Dsp {
+  profile: DspProfile;
   ownerEmail: string | null;
   ownerStatus: 'active' | 'invited' | 'missing';
   paycom: ConnectionStatus;
@@ -58,6 +65,7 @@ export interface SessionView {
   providerMode?: 'fixture' | 'native';
 }
 export interface DspView {
+  profile?: DspProfile;
   dsp: Dsp;
   token: string;
   role: Role | 'platform_owner';
@@ -91,6 +99,7 @@ export interface Job {
   actorId: string | null;
 }
 export interface Schedule {
+  intervalSeconds?: number;
   enabled: boolean;
   localTime: string;
   timezone: string;

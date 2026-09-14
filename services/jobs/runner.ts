@@ -4,7 +4,7 @@ import { publicDsp } from '../accounts/index.js';
 import type { Audit } from '../audit/index.js';
 import type { AuthBroker } from '../auth-broker/index.js';
 import { Queue } from './queue.js';
-import { nextOccurrence, Schedules } from './schedule.js';
+import { nextScheduled, Schedules } from './schedule.js';
 import { WorkforceStore } from '../../integrations/paycom/workforce.js';
 import { AppError, assert, safeError } from '../../shared/errors.js';
 import { id } from '../../shared/crypto.js';
@@ -87,17 +87,14 @@ export class Runner {
       for (const row of dsps) {
         const schedule = this.schedules.get(row.id);
         if (!schedule.enabled) continue;
-        const next = schedule.nextRun ?? nextOccurrence(schedule.localTime, schedule.timezone);
+        const next = schedule.nextRun ?? nextScheduled(schedule);
         if (!schedule.nextRun)
           this.storage.dsp(row.id, (db) => db.run('UPDATE schedules SET next_run=?', next));
         if (next > new Date().toISOString()) continue;
         try {
           this.queue.enqueue(row.id, null, `schedule:${next}`);
           this.storage.dsp(row.id, (db) =>
-            db.run(
-              'UPDATE schedules SET next_run=?',
-              nextOccurrence(schedule.localTime, schedule.timezone),
-            ),
+            db.run('UPDATE schedules SET next_run=?', nextScheduled(schedule)),
           );
         } catch (error) {
           if (!(error instanceof AppError)) throw error;

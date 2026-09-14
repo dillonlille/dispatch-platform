@@ -6,17 +6,16 @@
 `archive/2026-09-14T004629Z/worktrees/platform-monorepo/plugins/paycom/frontend/`.
 The matching Inter font and its license are in `dashboard/public/assets/`.
 
-This preserves the archived Precision theme, typography, responsive rules and
-component presentation without bringing back the archived server or private data.
-The current API, authentication and tenant boundaries remain authoritative.
-Application-specific adjustments belong in `../styles.css`, not this reference file.
+The archived UI is the presentation reference. Plugins and Backups pages are
+intentionally excluded. The shell, authentication, DSP directory and detail
+sheets, owner onboarding, Home Page, Paycom tables and settings, Connections,
+Team & Roles, Theme, Diagnostics and Updates restore the archived layouts.
+Application-specific adjustments belong in `../styles.css`, not the reference CSS.
 
-The restored shell, sign-in, DSP directory, Home Page, Paycom tabs, Team & Roles,
-and Settings follow the archived layouts. First/last names remain separate and
-Plugins stays removed, as requested. The rebuilt platform's connection assistance
-and collection controls remain available within Paycom and Settings.
-
-Legacy per-DSP installation/update controls and the archived Backups manager are
-not part of this presentation change. Suspended DSPs use the existing suspension
-workflow; they are not labeled as removed. Owner/onboarding labels come from real
-memberships and invitations, rather than placeholder archived data.
+The rebuilt shared services remain authoritative. Updates show the shared build
+and automatic deployment status instead of per-DSP installations. First and last
+names remain separate. Browser assistance uses the current isolated browser service.
+DSP removal suspends access and retains data for restoration. Diagnostics creates
+isolated synthetic test DSPs without provider credentials or collection jobs.
+Paycom preferences, scheduling and revision history are private to each DSP.
+No archived server, credentials, databases or customer data are imported.

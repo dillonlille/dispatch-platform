@@ -28,6 +28,7 @@ export function Shell({
   const label =
     navigation.find((item) => item.id === page)?.label ??
     ({
+      'paycom-settings': 'Paycom',
       employees: 'Paycom',
       timecards: 'Paycom',
       connections: 'Settings',
@@ -118,7 +119,7 @@ export function Shell({
               className="nav-item"
               aria-current={
                 page === id ||
-                (id === 'paycom' && ['employees', 'timecards'].includes(page)) ||
+                (id === 'paycom' && ['employees', 'timecards', 'paycom-settings'].includes(page)) ||
                 (id === 'settings' && page === 'connections')
                   ? 'page'
                   : undefined

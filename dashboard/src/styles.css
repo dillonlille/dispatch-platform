@@ -49,7 +49,7 @@ button.text-button {
 button.danger {
   color: var(--destructive);
 }
-input,
+input:where(:not([type='checkbox']):not([type='radio'])),
 select,
 textarea {
   width: 100%;
@@ -64,9 +64,12 @@ textarea {
 input::placeholder {
   color: var(--muted-foreground);
 }
-input[type='checkbox'] {
+input[type='checkbox']:not([role='switch']),
+input[type='radio'] {
   width: 16px;
+  height: 16px;
   min-height: 16px;
+  padding: 0;
   accent-color: var(--primary);
 }
 label {
@@ -952,7 +955,7 @@ td small {
   color: var(--muted-foreground);
 }
 .paycom-day-table {
-  min-width: 840px;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 .table-sort {
@@ -980,14 +983,17 @@ td small {
   padding: 0;
 }
 .modal.side-sheet {
-  width: 480px;
+  width: 440px;
   max-width: 100%;
   height: 100dvh;
   max-height: 100dvh;
   border-radius: 0;
   border: 0;
   border-left: 1px solid var(--border);
-  padding: 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .diagnostics-jobs > .page-heading {
@@ -1021,4 +1027,220 @@ td small {
   .paycom-data-table td {
     padding: 12px;
   }
+}
+
+.archived-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+.archived-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.archived-card h3 {
+  font-weight: 500;
+}
+.diagnostics-health {
+  margin-bottom: 24px;
+  gap: 12px;
+}
+.runtime-row {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  width: 100%;
+}
+.test-dsp-list {
+  display: grid;
+  gap: 12px;
+  margin-block: 24px;
+}
+.test-dsp-list .archived-card {
+  padding: 16px;
+  gap: 4px;
+}
+.underlined-link {
+  text-decoration: underline;
+}
+
+.archived-updates {
+  display: grid;
+  gap: 20px;
+}
+.archived-release-card {
+  gap: 20px;
+}
+.release-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+}
+.release-card-heading h2 {
+  font-size: 20px;
+}
+.release-card-heading p {
+  margin-top: 4px;
+}
+.release-card-notes {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  width: 100%;
+}
+.release-card-notes h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.connections-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-block: 24px;
+}
+.connections-view h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.connection-cards {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.archived-connection-card {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding-block: 24px;
+  background: var(--card);
+}
+.archived-connection-card > header,
+.archived-connection-content,
+.archived-connection-card > footer {
+  padding-inline: 24px;
+}
+.archived-connection-card h3,
+.connection-permissions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.archived-connection-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.archived-connection-card header p {
+  margin-top: 8px;
+}
+.archived-connection-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.archived-connection-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+.archived-connection-card .verification {
+  margin: 0;
+}
+@media (max-width: 1023px) {
+  .connection-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.plugin-settings-fields select {
+  width: 100%;
+  margin-top: 8px;
+}
+.plugin-settings-fields small {
+  display: block;
+  margin-top: 8px;
+}
+
+.dsp-detail-list {
+  margin-top: 24px;
+}
+.dsp-detail-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+.onboarding-step {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.role-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.role-heading > span {
+  font-size: 12px;
+}
+
+.plugin-setting-choice {
+  flex-direction: row;
+}
+
+.side-sheet .modal-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 30px 24px 20px;
+  margin: 0;
+}
+.side-sheet .modal-heading h2 {
+  font-size: 16px;
+}
+.side-sheet .panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.side-sheet .panel-body > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin-top: 0;
+}
+.side-sheet .panel-body > form > .form-actions {
+  margin-top: auto;
+  padding-top: 24px;
+}
+.side-sheet .dsp-detail-list {
+  margin-top: 0;
+}
+.sheet-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
 }

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Wrench, Plug, ArrowRight, RefreshCw, Plus, Search, Ellipsis } from 'lucide-react';
-import type { Connection, DspView, Membership } from '../../shared/contracts/index.js';
+import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
+import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } from './ui.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
-import { InvitationLink, JobsPage, type Perform } from './platform.js';
+import { InvitationLink, type Perform } from './platform.js';
 
 export function HomePage() {
   return (
@@ -30,10 +31,15 @@ export function PaycomPage({
   canCollect: boolean;
 }) {
   const [tab, setTab] = useState('timecards');
-  const overview = useData<{ connection: Connection; workforce: { collectedAt: string | null } }>(
-    '/api/dsp/overview',
-    5000,
-  );
+  const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
+  useEffect(() => {
+    if (preferences.data) setTab(preferences.data.values.opening_page);
+  }, [preferences.data]);
+  const overview = useData<{
+    connection: Connection;
+    workforce: { collectedAt: string | null };
+    jobs: Job[];
+  }>('/api/dsp/overview', 5000);
   const { error, refresh } = overview;
   const data = overview.data?.connection;
   const owner = ['owner', 'platform_owner'].includes(view.role);
@@ -51,7 +57,7 @@ export function PaycomPage({
         <div className="paycom-settings-button">
           <button
             onClick={() => {
-              location.hash = `dsp/${view.dsp.id}/settings?tab=connections`;
+              location.hash = `dsp/${view.dsp.id}/paycom-settings`;
             }}
           >
             Paycom settings
@@ -61,7 +67,7 @@ export function PaycomPage({
       {owner && <ErrorBox message={error} />}
       {owner && !data && !error ? (
         <Loading />
-      ) : owner && data && !data.enabled ? (
+      ) : owner && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
         <section className="paycom-connection" aria-labelledby="paycom-connection-title">
           <header className="paycom-connection-header">
             <div className="paycom-connection-identity">
@@ -91,13 +97,26 @@ export function PaycomPage({
         <>
           {canCollect && (
             <div className="paycom-sync-status">
-              <Badge value={data?.status ?? 'idle'} />
+              <span role="status" aria-label="Paycom sync">
+                {overview.data?.jobs[0]?.status === 'succeeded'
+                  ? 'Sync complete'
+                  : overview.data?.jobs[0]?.status === 'failed'
+                    ? 'Last collection failed'
+                    : ['queued', 'running', 'waiting_verification'].includes(
+                          overview.data?.jobs[0]?.status ?? '',
+                        )
+                      ? title(overview.data!.jobs[0]!.status)
+                      : data?.enabled
+                        ? 'Waiting for next sync'
+                        : 'Sync paused'}
+              </span>
               {overview.data?.workforce.collectedAt && (
                 <span className="muted">
                   Last successful sync {time(overview.data.workforce.collectedAt)}
                 </span>
               )}
               <button
+                disabled={!data?.enabled}
                 onClick={() =>
                   void perform(async () => {
                     await api('/api/dsp/jobs', { requestId: crypto.randomUUID() });
@@ -116,17 +135,18 @@ export function PaycomPage({
             items={[
               ['timecards', 'Timecard'],
               ['employees', 'Employees'],
-              ...(canCollect ? [['collections', 'Collections']] : []),
             ]}
             label="Paycom"
           />
           <div className="embedded-page">
             {tab === 'employees' ? (
-              <EmployeesPage />
-            ) : tab === 'collections' ? (
-              <JobsPage platform={false} perform={perform} canCollect={canCollect} />
+              <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />
             ) : (
-              <TimecardsPage timezone={view.dsp.timezone} />
+              <TimecardsPage
+                key={preferences.data?.revision ?? 'loading'}
+                timezone={view.dsp.timezone}
+                preferences={preferences.data?.values ?? paycomDefaults}
+              />
             )}
           </div>
         </>
@@ -152,6 +172,7 @@ export function TeamPage({
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
   const [link, setLink] = useState('');
+  const [revoking, setRevoking] = useState<Invitation>();
   const members =
     data?.filter((member) =>
       `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase()),
@@ -251,69 +272,111 @@ export function TeamPage({
         </>
       )}
       {tab === 'roles' && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Role</th>
-                <th>Access</th>
-                <th>Members</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                ['owner', 'Manage members, settings, connections and collections'],
-                ['manager', 'View workforce and manage collections'],
-                ['member', 'View workforce and timecards'],
-              ].map(([role, description]) => (
-                <tr key={role}>
-                  <td>
-                    <strong>{title(role!)}</strong>
-                  </td>
-                  <td>{description}</td>
-                  <td>{data?.filter((member) => member.role === role).length ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="table-toolbar">
+            <p className="muted">Standard roles for your DSP.</p>
+          </div>
+          <div className="role-list">
+            {[
+              ['owner', 'Manage members, settings, connections and collections'],
+              ['manager', 'View workforce and manage collections'],
+              ['member', 'View workforce and timecards'],
+            ].map(([role, description]) => (
+              <section className="role-row" key={role}>
+                <div>
+                  <div className="role-heading">
+                    <h2>{title(role!)}</h2>
+                    <span className="muted">Standard role</span>
+                  </div>
+                  <p>{description}</p>
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       )}
       {tab === 'invitations' && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Email address</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Expires</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invitations.data?.map((invitation, index) => (
-                <tr key={`${invitation.email}:${index}`}>
-                  <td>{invitation.email}</td>
-                  <td>{title(invitation.role)}</td>
-                  <td>
-                    {invitation.accepted
-                      ? 'Accepted'
-                      : invitation.expiresAt < Date.now()
-                        ? 'Expired'
-                        : 'Pending'}
-                  </td>
-                  <td>{time(new Date(invitation.expiresAt).toISOString())}</td>
+        <>
+          <div className="table-toolbar">
+            <p className="muted">Pending invitations to your DSP.</p>
+            <button
+              className="icon-button"
+              aria-label="Refresh invitations"
+              onClick={invitations.refresh}
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Email address</th>
+                  <th>Role</th>
+                  <th>Expires</th>
+                  <th>
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {invitations.data?.length === 0 && (
-            <Empty title="No invitations">Invite a team member to get started.</Empty>
-          )}
-        </div>
+              </thead>
+              <tbody>
+                {invitations.data
+                  ?.filter(
+                    (invitation) => !invitation.accepted && invitation.expiresAt > Date.now(),
+                  )
+                  .map((invitation, index) => (
+                    <tr key={`${invitation.email}:${index}`}>
+                      <td>{invitation.email}</td>
+                      <td>{title(invitation.role)}</td>
+                      <td>{time(new Date(invitation.expiresAt).toISOString())}</td>
+                      <td>
+                        <button
+                          className="text-button"
+                          aria-label={`Revoke invitation for ${invitation.email}`}
+                          onClick={() => setRevoking(invitation)}
+                        >
+                          Revoke
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {(invitations.data?.filter(
+              (invitation) => !invitation.accepted && invitation.expiresAt > Date.now(),
+            ).length ?? 0) === 0 && (
+              <Empty title="No invitations">Invite a team member to get started.</Empty>
+            )}
+          </div>
+        </>
+      )}
+      {revoking && (
+        <Modal title="Revoke invitation" onClose={() => setRevoking(undefined)}>
+          <p>Revoke the pending invitation for {revoking.email}? Its link will stop working.</p>
+          <div className="form-actions">
+            <button onClick={() => setRevoking(undefined)}>Cancel</button>
+            <button
+              className="primary"
+              onClick={() =>
+                void perform(async () => {
+                  await api('/api/dsp/invitations/revoke', { email: revoking.email });
+                  setRevoking(undefined);
+                  invitations.refresh();
+                }, 'Invitation revoked')
+              }
+            >
+              Revoke invitation
+            </button>
+          </div>
+        </Modal>
       )}
       {inviting && (
-        <Modal variant="sheet" title="Invite member" onClose={() => setInviting(false)}>
-          <p className="muted">Give someone access to {view.dsp.name}.</p>
+        <Modal
+          variant="sheet"
+          title="Invite member"
+          description={`Give someone access to ${view.dsp.name}.`}
+          onClose={() => setInviting(false)}
+        >
           <form
             onSubmit={(event) => {
               event.preventDefault();

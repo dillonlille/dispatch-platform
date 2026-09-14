@@ -1,6 +1,20 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
-import type { Connection, Schedule, Employee, Timecard } from '../../shared/contracts/index.js';
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+  Plug,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
+import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
+import {
+  paycomDefaults,
+  paycomColumns,
+  type PaycomPreferences,
+  type PaycomColumn,
+} from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Header, Loading, Modal, Section, time, title } from './ui.js';
 import { type Perform } from './platform.js';
@@ -10,12 +24,18 @@ type Daily = {
   collectedAt: string | null;
   available: boolean;
 };
-export function EmployeesPage() {
+export function EmployeesPage({
+  preferences = paycomDefaults,
+}: {
+  preferences?: PaycomPreferences;
+}) {
+  const limit = preferences.rows_per_page;
+  const [direction, setDirection] = useState('asc');
   const [query, setQuery] = useState(''),
     [offset, setOffset] = useState(0),
     [employee, setEmployee] = useState<string>();
   const { data, error } = useData<Employees>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`,
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&direction=${direction}`,
   );
   if (employee) return <EmployeeDetail code={employee} close={() => setEmployee(undefined)} />;
   return (
@@ -48,7 +68,18 @@ export function EmployeesPage() {
             <table aria-label="Employee directory">
               <thead>
                 <tr>
-                  <th>Employee</th>
+                  <th aria-sort={direction === 'asc' ? 'ascending' : 'descending'}>
+                    <button
+                      className="table-sort"
+                      onClick={() => {
+                        setDirection(direction === 'asc' ? 'desc' : 'asc');
+                        setOffset(0);
+                      }}
+                    >
+                      Employee
+                      <ArrowUpDown size={14} />
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -71,15 +102,18 @@ export function EmployeesPage() {
                 : 'Employees will appear after the first collection finishes.'}
             </Empty>
           )}
-          {(offset > 0 || data.total > 25) && (
+          {(offset > 0 || data.total > limit) && (
             <div className="paycom-pagination">
               <span>
-                {offset + 1}–{Math.min(offset + 25, data.total)} of {data.total}
+                {offset + 1}–{Math.min(offset + limit, data.total)} of {data.total}
               </span>
-              <button disabled={!offset} onClick={() => setOffset((v) => Math.max(0, v - 25))}>
+              <button disabled={!offset} onClick={() => setOffset((v) => Math.max(0, v - limit))}>
                 Previous
               </button>
-              <button disabled={offset + 25 >= data.total} onClick={() => setOffset((v) => v + 25)}>
+              <button
+                disabled={offset + limit >= data.total}
+                onClick={() => setOffset((v) => v + limit)}
+              >
                 Next
               </button>
             </div>
@@ -161,33 +195,46 @@ function EmployeeDetail({ code, close }: { code: string; close: () => void }) {
     </div>
   );
 }
-function PunchCells({ card }: { card: Timecard }) {
+function PunchCells({
+  card,
+  columns = paycomColumns.map(([key]) => key),
+}: {
+  card: Timecard;
+  columns?: PaycomColumn[];
+}) {
+  const values: Record<PaycomColumn, string> = {
+    inDay: card.punches[0]?.in ?? '—',
+    outLunch:
+      card.punches.length > 1
+        ? card.punches
+            .slice(0, -1)
+            .map((p) => p.out ?? '—')
+            .join(', ')
+        : '—',
+    inLunch:
+      card.punches.length > 1
+        ? card.punches
+            .slice(1)
+            .map((p) => p.in ?? '—')
+            .join(', ')
+        : '—',
+    outDay: card.punches.at(-1)?.out ?? '—',
+    totalHours: card.hours.toFixed(2),
+    condition: card.status,
+  };
   return (
     <>
-      <td>{card.punches[0]?.in ?? '—'}</td>
-      <td>
-        {card.punches.length > 1
-          ? card.punches
-              .slice(0, -1)
-              .map((p) => p.out ?? '—')
-              .join(', ')
-          : '—'}
-      </td>
-      <td>
-        {card.punches.length > 1
-          ? card.punches
-              .slice(1)
-              .map((p) => p.in ?? '—')
-              .join(', ')
-          : '—'}
-      </td>
-      <td>{card.punches.at(-1)?.out ?? '—'}</td>
-      <td>{card.hours.toFixed(2)}</td>
-      <td>
-        <Badge value={card.status.toLowerCase() === 'complete' ? 'ready' : 'pending'}>
-          {card.status}
-        </Badge>
-      </td>
+      {columns.map((key) => (
+        <td key={key}>
+          {key === 'condition' ? (
+            <Badge value={card.status.toLowerCase() === 'complete' ? 'ready' : 'pending'}>
+              {card.status}
+            </Badge>
+          ) : (
+            values[key]
+          )}
+        </td>
+      ))}
     </>
   );
 }
@@ -202,10 +249,19 @@ function today(timezone: string) {
     .map((name) => parts.find((p) => p.type === name)!.value)
     .join('-');
 }
-export function TimecardsPage({ timezone }: { timezone: string }) {
+export function TimecardsPage({
+  timezone,
+  preferences = paycomDefaults,
+}: {
+  timezone: string;
+  preferences?: PaycomPreferences;
+}) {
+  const [offset, setOffset] = useState(0);
   const businessToday = today(timezone);
   const [date, setDate] = useState(businessToday),
-    [sort, setSort] = useState('name'),
+    [sort, setSort] = useState(
+      preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
+    ),
     [direction, setDirection] = useState('asc'),
     [selected, setSelected] = useState<Daily['rows'][number]>();
   const { data, error } = useData<Daily>(
@@ -215,11 +271,15 @@ export function TimecardsPage({ timezone }: { timezone: string }) {
     const value = new Date(`${date}T12:00:00Z`);
     value.setUTCDate(value.getUTCDate() + days);
     const next = value.toISOString().slice(0, 10);
-    if (next <= businessToday) setDate(next);
+    if (next <= businessToday) {
+      setDate(next);
+      setOffset(0);
+    }
   }
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
     setSort(key);
+    setOffset(0);
   }
   return (
     <div className="paycom-data-view">
@@ -295,29 +355,23 @@ export function TimecardsPage({ timezone }: { timezone: string }) {
                         <ArrowUpDown size={14} />
                       </button>
                     </th>
-                    <th>Clock in</th>
-                    <th>Lunch out</th>
-                    <th>Lunch in</th>
-                    <th>Clock out</th>
-                    <th
-                      aria-sort={
-                        sort === 'hours'
-                          ? direction === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : 'none'
-                      }
-                    >
-                      <button className="table-sort" onClick={() => order('hours')}>
-                        Hours
-                        <ArrowUpDown size={14} />
-                      </button>
-                    </th>
-                    <th>Punch status</th>
+                    {preferences.columns.map((key) => (
+                      <th
+                        key={key}
+                        aria-sort={
+                          sort === key ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'
+                        }
+                      >
+                        <button className="table-sort" onClick={() => order(key)}>
+                          {paycomColumns.find(([value]) => value === key)![1]}
+                          <ArrowUpDown size={14} />
+                        </button>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.map((card) => (
+                  {data.rows.slice(offset, offset + preferences.rows_per_page).map((card) => (
                     <tr key={card.employeeCode}>
                       <td>
                         <button
@@ -328,12 +382,43 @@ export function TimecardsPage({ timezone }: { timezone: string }) {
                           {card.name}
                         </button>
                       </td>
-                      <PunchCells card={card} />
+                      <PunchCells card={card} columns={preferences.columns} />
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {(offset > 0 || data.rows.length > preferences.rows_per_page) && (
+              <div className="paycom-pagination">
+                <span>
+                  {offset + 1}–{Math.min(offset + preferences.rows_per_page, data.rows.length)} of{' '}
+                  {data.rows.length}
+                </span>
+                <button
+                  disabled={!offset}
+                  onClick={() => setOffset(Math.max(0, offset - preferences.rows_per_page))}
+                >
+                  Previous
+                </button>
+                <button
+                  disabled={offset + preferences.rows_per_page >= data.rows.length}
+                  onClick={() => setOffset(offset + preferences.rows_per_page)}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+            {!data.rows.length && (
+              <Empty
+                title={
+                  preferences.driver_departments?.length === 0
+                    ? 'No driver departments selected'
+                    : 'No employees match your Timecard settings'
+                }
+              >
+                Your DSP owner can choose which departments appear in Paycom settings.
+              </Empty>
+            )}
           </div>
           <p className="paycom-source-note">
             Last collected {time(data.collectedAt)}. Times reflect the last collection, and hours
@@ -375,14 +460,15 @@ export function ConnectionsPage({
   perform: Perform;
   development: boolean;
 }) {
-  const { data, error, refresh } = useData<Connection>('/api/dsp/connections', 4000),
-    schedule = useData<Schedule>('/api/dsp/schedule');
+  const { data, error, refresh } = useData<Connection>('/api/dsp/connections', 4000);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(false),
     [assistance, setAssistance] = useState(false);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    event.currentTarget.reset();
     setBusy(true);
     const ok = await perform(async () => {
       await api('/api/dsp/connections/paycom', {
@@ -396,149 +482,143 @@ export function ConnectionsPage({
     if (ok) setEditing(false);
   }
   return (
-    <>
-      <Header
-        title="Connections"
-        subtitle="Connect your providers and manage collection schedules."
-      />
+    <section className="connections-view" aria-labelledby="connections-heading">
+      <div>
+        <h2 id="connections-heading">Connections</h2>
+        <p className="muted">
+          Connect the services your DSP uses. All supported features share these connections.
+        </p>
+      </div>
       <ErrorBox message={error} />
-      <Section title="Paycom" action={data && <Badge value={data.status} />}>
-        <div className="connection-body">
-          <div className="provider-logo">P</div>
-          <div className="connection-description">
-            <h3>Workforce & timecards</h3>
-            <p>Collect employees, daily hours, and time punches for this DSP.</p>
-            {data?.accountLabel && (
-              <small>
-                Account {data.accountLabel} · Verified {time(data.lastVerifiedAt)}
-              </small>
-            )}
-            {data?.error && <ErrorBox message={title(data.error)} />}
-          </div>
-          <div className="row-actions">
-            <button className="primary" onClick={() => setEditing(true)}>
-              {data?.enabled ? 'Update credentials' : 'Connect Paycom'}
-            </button>
-            {data?.enabled && (
-              <button
-                onClick={() =>
-                  void perform(async () => {
-                    await api('/api/dsp/connections/paycom/check', {});
-                    refresh();
-                  }, 'Connection checked')
-                }
-              >
-                Check connection
+      {!data ? (
+        <Loading />
+      ) : (
+        <div className="connection-cards">
+          <article className="archived-connection-card">
+            <header>
+              <h3>
+                <Plug size={20} />
+                Paycom
+              </h3>
+              <p className="muted">Workforce and timecards</p>
+            </header>
+            <div className="archived-connection-content">
+              <div role="status">
+                <Badge value={data.status} />
+              </div>
+              <p className="muted">
+                {data.status === 'ready'
+                  ? 'Your Paycom connection is ready to use.'
+                  : data.enabled
+                    ? 'Test your connection or update the saved credentials.'
+                    : 'Connect your Paycom account to get started.'}
+              </p>
+              {data.error && <ErrorBox message={title(data.error)} />}
+              {data?.status === 'needs_verification' && (
+                <div className="verification">
+                  <h3>Paycom needs your verification</h3>
+                  <p>
+                    Enter the code from your provider, or open browser assistance to complete its
+                    prompt.
+                  </p>
+                  <form
+                    className="inline-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const form = new FormData(event.currentTarget);
+                      void perform(async () => {
+                        await api('/api/dsp/connections/paycom/verify', { code: form.get('code') });
+                        refresh();
+                      }, 'Verification submitted');
+                    }}
+                  >
+                    <input
+                      name="code"
+                      aria-label="Verification code"
+                      autoComplete="one-time-code"
+                      required
+                      maxLength={128}
+                    />
+                    <button className="primary">Verify</button>
+                    <button type="button" onClick={() => setAssistance(true)}>
+                      Browser assistance
+                    </button>
+                  </form>
+                  {development && <small>Synthetic fixture verification code: 123456.</small>}
+                </div>
+              )}
+
+              {data.lastVerifiedAt && (
+                <p className="muted">Last checked: {time(data.lastVerifiedAt)}</p>
+              )}
+            </div>
+            <footer>
+              <button className="primary" disabled={busy} onClick={() => setEditing(true)}>
+                {data.enabled ? 'Update credentials' : 'Connect Paycom'}
               </button>
-            )}
-          </div>
+              {data.enabled && (
+                <>
+                  <button
+                    disabled={
+                      busy || data.status === 'signing_in' || data.status === 'needs_verification'
+                    }
+                    onClick={() =>
+                      void perform(async () => {
+                        await api('/api/dsp/connections/paycom/check', {});
+                        refresh();
+                      }, 'Connection checked')
+                    }
+                  >
+                    <RefreshCw size={16} />
+                    Test connection
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => setDisconnecting(true)}
+                  >
+                    Disconnect
+                  </button>
+                </>
+              )}
+            </footer>
+          </article>
         </div>
-        {data?.status === 'needs_verification' && (
-          <div className="verification">
-            <h3>Paycom needs your verification</h3>
-            <p>
-              Enter the code from your provider, or open browser assistance to complete its prompt.
-            </p>
-            <form
-              className="inline-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                void perform(async () => {
-                  await api('/api/dsp/connections/paycom/verify', { code: form.get('code') });
-                  refresh();
-                }, 'Verification submitted');
-              }}
-            >
-              <input
-                name="code"
-                aria-label="Verification code"
-                autoComplete="one-time-code"
-                required
-                maxLength={128}
-              />
-              <button className="primary">Verify</button>
-              <button type="button" onClick={() => setAssistance(true)}>
-                Browser assistance
-              </button>
-            </form>
-            {development && <small>Synthetic fixture verification code: 123456.</small>}
-          </div>
-        )}
-        {data?.enabled && (
-          <div className="panel-footer">
+      )}
+      <p className="connection-permissions muted">
+        <ShieldCheck size={16} />
+        DSP owners and platform owners can manage these credentials.
+      </p>
+      {disconnecting && (
+        <Modal title="Disconnect Paycom?" onClose={() => setDisconnecting(false)}>
+          <p>
+            Features will lose access to this service until you reconnect. Previously collected data
+            will remain available.
+          </p>
+          <div className="form-actions">
+            <button onClick={() => setDisconnecting(false)}>Cancel</button>
             <button
-              className="text-button danger"
-              onClick={() =>
+              className="primary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
                 void perform(async () => {
                   await api('/api/dsp/connections/paycom/disable', { removeCredentials: true });
                   refresh();
-                  schedule.refresh();
-                }, 'Paycom disconnected')
-              }
+                  setDisconnecting(false);
+                }, 'Paycom disconnected').finally(() => setBusy(false));
+              }}
             >
-              Disconnect and remove saved credentials
+              Disconnect
             </button>
-            <small>Automatic collections stop when disconnected.</small>
           </div>
-        )}
-      </Section>
-      <Section title="Collection schedule">
-        {schedule.data && (
-          <form
-            className="settings-form"
-            key={JSON.stringify(schedule.data)}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              void perform(async () => {
-                await api('/api/dsp/schedule', {
-                  enabled: form.get('enabled') === 'on',
-                  localTime: form.get('localTime'),
-                });
-                schedule.refresh();
-              }, 'Schedule saved');
-            }}
-          >
-            <label className="checkbox-label">
-              <input
-                name="enabled"
-                type="checkbox"
-                defaultChecked={schedule.data.enabled}
-                disabled={!data?.enabled}
-              />
-              Collect automatically each day
-            </label>
-            <div className="inline-form">
-              <label>
-                Collection time
-                <input
-                  name="localTime"
-                  type="time"
-                  required
-                  defaultValue={schedule.data.localTime}
-                />
-              </label>
-              <span className="muted">{schedule.data.timezone}</span>
-            </div>
-            <p className="muted">
-              Next collection:{' '}
-              {schedule.data.nextRun ? time(schedule.data.nextRun) : 'Not scheduled'}
-            </p>
-            <button className="primary" disabled={!data?.enabled}>
-              Save schedule
-            </button>
-          </form>
-        )}
-        <ErrorBox message={schedule.error} />
-      </Section>
+        </Modal>
+      )}
       {editing && (
-        <Modal
-          title={data?.enabled ? 'Update Paycom credentials' : 'Connect Paycom'}
-          onClose={() => setEditing(false)}
-        >
+        <Modal title="Paycom credentials" onClose={() => setEditing(false)}>
           <p className="muted">
-            Credentials are private to this DSP. Replacing them starts a fresh browser session.
+            Enter the account your DSP uses. Saved credentials are encrypted and are never displayed
+            here.
           </p>
           {development && (
             <div className="notice">
@@ -576,7 +656,7 @@ export function ConnectionsPage({
                 Cancel
               </button>
               <button className="primary" disabled={busy}>
-                {busy ? 'Connecting…' : 'Save and connect'}
+                {busy ? 'Saving…' : 'Save credentials'}
               </button>
             </div>
           </form>
@@ -591,7 +671,7 @@ export function ConnectionsPage({
           }}
         />
       )}
-    </>
+    </section>
   );
 }
 function BrowserAssistance({ perform, close }: { perform: Perform; close: () => void }) {

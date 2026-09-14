@@ -16,11 +16,13 @@ export function applyAppearance(mode: Appearance) {
       : mode;
 }
 export function saveAppearance(userId: string, mode: Appearance) {
+  let saved = true;
   try {
     localStorage.setItem(`dispatch-appearance:${userId}`, mode);
   } catch {
-    /* In-memory appearance still works. */
+    saved = false;
   }
   applyAppearance(mode);
   window.dispatchEvent(new Event('dispatch-appearance'));
+  return saved;
 }

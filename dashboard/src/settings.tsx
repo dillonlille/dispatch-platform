@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { displayTimezone, saveTimezone } from './preferences.js';
-import { Monitor, Moon, Sun } from 'lucide-react';
 import type { DspView, SessionView, AuditEvent } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
 import { Header, Tabs, ErrorBox, time } from './ui.js';
 import { ConnectionsPage } from './dsp.js';
 import { type Perform } from './platform.js';
-import { readAppearance, saveAppearance, type Appearance } from './appearance.js';
+import { ThemeSection } from './theme.js';
 
 export function SettingsPage({
   session,
@@ -22,7 +21,6 @@ export function SettingsPage({
   const [requestedTab, setTab] = useState(
     new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'general',
   );
-  const [mode, setMode] = useState<Appearance>(() => readAppearance(session.user.id));
   const [timezone, setTimezone] = useState(() => displayTimezone() ?? '');
   const timezones = ['UTC', ...Intl.supportedValuesOf('timeZone')];
   const [passwordError, setPasswordError] = useState('');
@@ -33,7 +31,7 @@ export function SettingsPage({
     ['security', 'Security'],
     ...(owner ? [['connections', 'Connections']] : []),
     ['theme', 'Theme'],
-    ...(session.user.platformOwner || owner ? [['audit', 'Audit log']] : []),
+    ...(owner ? [['audit', 'Audit log']] : []),
   ];
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
   return (
@@ -127,46 +125,24 @@ export function SettingsPage({
                 <h2>Workspace</h2>
                 <p>Your current DSP context.</p>
               </div>
-              {owner ? (
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    void perform(async () => {
-                      await api('/api/dsp/settings', {
-                        name: form.get('name'),
-                        timezone: form.get('timezone'),
-                      });
-                      await reopen?.();
-                    }, 'Workspace saved');
-                  }}
-                >
-                  <label>
-                    DSP name
-                    <input name="name" defaultValue={view.dsp.name} required maxLength={100} />
-                  </label>
-                  <label>
-                    Business timezone
-                    <input name="timezone" defaultValue={view.dsp.timezone} required />
-                  </label>
-                  <button className="primary">Save details</button>
-                </form>
-              ) : (
-                <dl className="detail-list">
-                  <div>
-                    <dt>DSP</dt>
-                    <dd>{view.dsp.name}</dd>
-                  </div>
-                  <div>
-                    <dt>Business timezone</dt>
-                    <dd>{view.dsp.timezone}</dd>
-                  </div>
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{view.dsp.status}</dd>
-                  </div>
-                </dl>
-              )}
+              <dl className="detail-list">
+                <div>
+                  <dt>DSP</dt>
+                  <dd>{view.dsp.name}</dd>
+                </div>
+                <div>
+                  <dt>Station</dt>
+                  <dd>{view.profile?.stationCode || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Business timezone</dt>
+                  <dd>{view.dsp.timezone}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{view.dsp.status}</dd>
+                </div>
+              </dl>
             </section>
           )}
         </>
@@ -245,47 +221,7 @@ export function SettingsPage({
           <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
         </div>
       )}
-      {tab === 'theme' && (
-        <>
-          <section className="settings-section">
-            <div>
-              <h2>Appearance</h2>
-              <p>Choose how Dispatch looks on this browser.</p>
-            </div>
-            <div className="theme-mode-options">
-              {(
-                [
-                  ['light', 'Light', Sun],
-                  ['dark', 'Dark', Moon],
-                  ['system', 'System', Monitor],
-                ] as const
-              ).map(([value, label, Icon]) => (
-                <button
-                  key={value}
-                  aria-pressed={mode === value}
-                  onClick={() => {
-                    setMode(value);
-                    saveAppearance(session.user.id, value);
-                  }}
-                >
-                  <Icon size={18} />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </section>
-          <section className="settings-section">
-            <div>
-              <h2>Theme</h2>
-              <p>The visual style of your workspace.</p>
-            </div>
-            <div>
-              <h3>Precision</h3>
-              <p className="muted">Clear typography, quiet surfaces, and a cobalt accent.</p>
-            </div>
-          </section>
-        </>
-      )}
+      {tab === 'theme' && <ThemeSection userId={session.user.id} />}
       {tab === 'audit' && <SettingsAudit view={view} />}
     </>
   );

@@ -8,6 +8,9 @@ import { Paths } from '../services/storage/paths.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const releaseFile = path.join(here, '../release.json');
 const config = configuration({
+  version: fs.existsSync(releaseFile)
+    ? JSON.parse(fs.readFileSync(releaseFile, 'utf8')).version
+    : undefined,
   release: fs.existsSync(releaseFile)
     ? JSON.parse(fs.readFileSync(releaseFile, 'utf8')).digest
     : process.env.DISPATCH_RELEASE || 'development',

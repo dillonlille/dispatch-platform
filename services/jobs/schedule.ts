@@ -15,6 +15,11 @@ export function nextOccurrence(localTime: string, timezone: string, after = new 
     if (formatter.format(time) === localTime) return new Date(time).toISOString();
   throw new Error('schedule_unresolvable');
 }
+export function nextScheduled(schedule: Schedule, after = new Date()): string {
+  return schedule.intervalSeconds
+    ? new Date(+after + schedule.intervalSeconds * 1000).toISOString()
+    : nextOccurrence(schedule.localTime, schedule.timezone, after);
+}
 export class Schedules {
   constructor(private storage: Storage) {}
   get(dspId: string): Schedule {
@@ -25,7 +30,11 @@ export class Schedules {
         timezone: string;
         next_run: string | null;
       }>("SELECT * FROM schedules WHERE provider='paycom'")!;
+      const interval = db.one<{ value: string }>(
+        "SELECT value FROM settings WHERE key='paycom.syncIntervalSeconds'",
+      );
       return {
+        ...(interval ? { intervalSeconds: Number(interval.value) } : {}),
         enabled: Boolean(row.enabled),
         localTime: row.local_time,
         timezone: row.timezone,
@@ -36,13 +45,16 @@ export class Schedules {
   set(dspId: string, enabled: boolean, localTime: string, timezone: string) {
     const next = enabled ? nextOccurrence(localTime, timezone) : null;
     this.storage.dsp(dspId, (db) =>
-      db.run(
-        "UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",
-        Number(enabled),
-        localTime,
-        timezone,
-        next,
-      ),
+      db.transaction(() => {
+        db.run("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'");
+        db.run(
+          "UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",
+          Number(enabled),
+          localTime,
+          timezone,
+          next,
+        );
+      }),
     );
     return this.get(dspId);
   }

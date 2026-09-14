@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useId, type ReactNode } from 'react';
 import { X, LoaderCircle, ArrowUpRight, Inbox } from 'lucide-react';
 import { displayTimezone } from './preferences.js';
 export const time = (value: string | null | undefined) =>
@@ -131,24 +131,31 @@ export function Modal({
   children,
   onClose,
   variant = 'dialog',
+  description,
 }: {
-  title: string;
+  title: ReactNode;
+  description?: string;
   children: ReactNode;
   onClose: () => void;
   variant?: 'dialog' | 'sheet';
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const headingId = useId();
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     const body = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     ref.current?.querySelector<HTMLElement>('input,button,select')?.focus();
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') close.current();
       if (event.key === 'Tab') {
         const nodes = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled),input,select,textarea,a[href]',
+            'button:not(:disabled),input:not(:disabled):not([type=hidden]),select:not(:disabled),textarea:not(:disabled),a[href]',
           ) ?? [],
         );
         const first = nodes[0],
@@ -168,7 +175,7 @@ export function Modal({
       document.removeEventListener('keydown', key);
       before?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div
       className={`modal-backdrop ${variant === 'sheet' ? 'sheet-backdrop' : ''}`}
@@ -181,15 +188,23 @@ export function Modal({
         className={`modal ${variant === 'sheet' ? 'side-sheet' : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-label={label}
+        aria-labelledby={headingId}
       >
-        <div className="modal-heading">
-          <h2>{label}</h2>
-          <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
-            <X size={20} />
-          </button>
+        <div className="modal-heading" data-slot={variant === 'sheet' ? 'sheet-header' : undefined}>
+          <h2 id={headingId}>{label}</h2>
+          {description && <p className="muted">{description}</p>}
+          {variant !== 'sheet' && (
+            <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
+              <X size={20} />
+            </button>
+          )}
         </div>
-        {children}
+        {variant === 'sheet' ? <div className="panel-body">{children}</div> : children}
+        {variant === 'sheet' && (
+          <button className="sheet-close" aria-label="Close dialog" onClick={onClose}>
+            <X size={16} />
+          </button>
+        )}
       </div>
     </div>
   );
