@@ -464,6 +464,8 @@ export function ConnectionsPage({
   const { data, error, refresh } = useData<Connection>('/api/dsp/connections', 4000);
   const [disconnecting, setDisconnecting] = useState(false);
   const [credentialError, setCredentialError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(false),
     [closedVerification, setClosedVerification] = useState<string>();
@@ -476,19 +478,31 @@ export function ConnectionsPage({
       return;
     }
     setCredentialError('');
+    setSaveError('');
     event.currentTarget.reset();
+    setEditing(false);
+    setClosedVerification(data?.verificationSessionId);
+    setSaving(true);
     setBusy(true);
-    const ok = await perform(async () => {
-      await api('/api/dsp/connections/paycom', {
-        clientCode: form.get('clientCode'),
-        username: form.get('username'),
-        password: form.get('password'),
-        securityAnswers,
-      });
+    try {
+      await perform(async () => {
+        try {
+          await api('/api/dsp/connections/paycom', {
+            clientCode: form.get('clientCode'),
+            username: form.get('username'),
+            password: form.get('password'),
+            securityAnswers,
+          });
+        } catch (error) {
+          setSaveError((error as Error).message);
+          throw error;
+        }
+      }, 'Connection saved');
+    } finally {
+      setSaving(false);
+      setBusy(false);
       refresh();
-    }, 'Connection saved');
-    setBusy(false);
-    if (ok) setEditing(false);
+    }
   }
   return (
     <section className="connections-view" aria-labelledby="connections-heading">
@@ -513,17 +527,19 @@ export function ConnectionsPage({
             </header>
             <div className="archived-connection-content">
               <div role="status">
-                <Badge value={data.status} />
+                <Badge value={saving ? 'signing_in' : data.status} />
               </div>
               <p className="muted">
-                {data.status === 'ready'
-                  ? 'Your Paycom connection is ready to use.'
-                  : data.enabled
-                    ? 'Test your connection or update the saved credentials.'
-                    : 'Connect your Paycom account to get started.'}
+                {saving
+                  ? 'Signing in to Paycom…'
+                  : data.status === 'ready'
+                    ? 'Your Paycom connection is ready to use.'
+                    : data.enabled
+                      ? 'Test your connection or update the saved credentials.'
+                      : 'Connect your Paycom account to get started.'}
               </p>
-              {data.error && <ErrorBox message={title(data.error)} />}
-              {data?.status === 'needs_verification' && (
+              {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
+              {!saving && data.status === 'needs_verification' && (
                 <div className="verification">
                   <h3>Paycom needs your verification</h3>
                   <p>
@@ -586,12 +602,13 @@ export function ConnectionsPage({
                     disabled={
                       busy || data.status === 'signing_in' || data.status === 'needs_verification'
                     }
-                    onClick={() =>
+                    onClick={() => {
+                      setSaveError('');
                       void perform(async () => {
                         await api('/api/dsp/connections/paycom/check', {});
                         refresh();
-                      }, 'Connection checked')
-                    }
+                      }, 'Connection checked');
+                    }}
                   >
                     <RefreshCw size={16} />
                     Test connection
@@ -625,6 +642,7 @@ export function ConnectionsPage({
               className="primary"
               disabled={busy}
               onClick={() => {
+                setSaveError('');
                 setBusy(true);
                 void perform(async () => {
                   await api('/api/dsp/connections/paycom/disable', { removeCredentials: true });
@@ -706,6 +724,7 @@ export function ConnectionsPage({
       {data?.verificationSessionId &&
         closedVerification !== data.verificationSessionId &&
         !editing &&
+        !saving &&
         !disconnecting && (
           <BrowserVerification
             key={data.verificationSessionId}
