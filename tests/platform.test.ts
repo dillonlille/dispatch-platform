@@ -155,6 +155,7 @@ test('credential ciphertext is DSP-bound and disconnect removes credentials and 
     clientCode: 'TEST',
     username: 'private-user',
     password: 'require-verification',
+    securityAnswers: ['00A!2', 'second-answer', 'third-answer', 'fourth-answer', ' 5Z?# '],
   });
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().status, 'needs_verification');
@@ -184,6 +185,64 @@ test('credential ciphertext is DSP-bound and disconnect removes credentials and 
   const link = path.join(secrets, 'dangling');
   fs.symlinkSync('/tmp/does-not-exist-dispatch', link);
   assert.throws(() => privateFile(link));
+});
+
+test('Paycom PINs require five distinct exact values and remain private to their DSP', async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const owner = await f.client(),
+    member = await f.client('member@dispatch.test');
+  const dsp = owner.session.dsps.find((d) => d.name === 'Northline Logistics')!;
+  await owner.select(dsp.id);
+  await member.select(dsp.id);
+  const credentials = {
+    clientCode: 'TEST',
+    username: 'private-user',
+    password: 'synthetic-password',
+    securityAnswers: ['00123!', 'PIN-two', 'PIN-three', 'PIN-four', '  fifth PIN  '],
+  };
+  const before = f.runtime.broker.vault.read(dsp.id);
+  for (const invalid of [
+    undefined,
+    [],
+    ['a', 'b', 'c', 'd'],
+    ['a', 'b', 'c', 'd', 'e', 'f'],
+    ['a', 'b', 'c', 'd', 'a'],
+    ['', 'b', 'c', 'd', 'e'],
+    ['a\nb', 'b', 'c', 'd', 'e'],
+    ['a'.repeat(65), 'b', 'c', 'd', 'e'],
+  ]) {
+    const response = await owner.post('/api/dsp/connections/paycom', {
+      ...credentials,
+      securityAnswers: invalid,
+    });
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(f.runtime.broker.vault.read(dsp.id), before);
+    assert(!response.body.includes('private-user'));
+  }
+  assert.equal((await member.post('/api/dsp/connections/paycom', credentials)).statusCode, 403);
+  const saved = await owner.post('/api/dsp/connections/paycom', credentials);
+  assert.equal(saved.statusCode, 200, saved.body);
+  assert.deepEqual(
+    f.runtime.broker.vault.read(dsp.id).securityAnswers,
+    credentials.securityAnswers,
+  );
+  const ciphertext = fs.readFileSync(
+    path.join(f.runtime.storage.paths.dspArea(dsp.id, 'secrets'), 'paycom.enc'),
+    'utf8',
+  );
+  const publicData = JSON.stringify([
+    (await owner.get('/api/dsp/connections')).json(),
+    (await owner.get('/api/platform/dsps')).json(),
+    f.runtime.audit.list(),
+  ]);
+  for (const pin of credentials.securityAnswers) {
+    assert(!ciphertext.includes(pin));
+    assert(!saved.body.includes(pin));
+    assert(!publicData.includes(pin));
+  }
+  const other = owner.session.dsps.find((d) => d.permanent)!;
+  assert.equal(f.runtime.broker.vault.read(other.id).securityAnswers, undefined);
 });
 
 test('jobs publish atomically, cancel safely, and remain isolated between production and Dev', async (t) => {

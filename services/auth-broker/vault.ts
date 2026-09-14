@@ -8,6 +8,7 @@ export interface Credentials {
   clientCode: string;
   username: string;
   password: string;
+  /** PIN 1 through PIN 5, in configured order. Older saved credentials may omit these. */
   securityAnswers?: string[];
 }
 export class Vault {

@@ -69,6 +69,7 @@ test('standalone Dev owns all accounts and DSPs, runs jobs locally, and isolates
         clientCode: 'fixture',
         username: 'fixture',
         password: 'synthetic-password',
+        securityAnswers: ['one', 'two', 'three', 'four', 'five'],
       })
     ).statusCode,
     200,
