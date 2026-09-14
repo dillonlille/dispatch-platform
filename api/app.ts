@@ -11,6 +11,7 @@ import type { Auth, Context } from '../services/accounts/index.js';
 import type { Permission, SessionView, PlatformHealth } from '../shared/contracts/index.js';
 import { dateSchema } from '../integrations/paycom/workforce.js';
 import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
+import { securityAnswersSchema } from '../integrations/paycom/security-pins.js';
 import {
   readPaycomSettings,
   writePaycomSettings,
@@ -391,6 +392,7 @@ export async function createApp(
           clientCode: z.string().trim().min(1).max(80),
           username: z.string().trim().min(1).max(200),
           password: z.string().min(1).max(256),
+          securityAnswers: securityAnswersSchema,
         })
         .strict(),
       request,

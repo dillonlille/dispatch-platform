@@ -48,6 +48,11 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByLabel('Client code').fill('DEMO1');
   await page.getByLabel('Username', { exact: true }).fill('test-user');
   await page.getByLabel('Password', { exact: true }).fill('require-verification');
+  for (const number of [1, 2, 3, 4, 5]) {
+    const field = page.getByLabel(`PIN ${number}`, { exact: true });
+    await expect(field).toHaveAttribute('type', 'password');
+    await field.fill(`test-pin-${number}`);
+  }
   await page.getByRole('button', { name: 'Save credentials' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByLabel('Verification code').fill('123456');

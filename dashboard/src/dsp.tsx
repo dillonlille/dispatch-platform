@@ -462,12 +462,19 @@ export function ConnectionsPage({
 }) {
   const { data, error, refresh } = useData<Connection>('/api/dsp/connections', 4000);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [credentialError, setCredentialError] = useState('');
   const [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(false),
     [assistance, setAssistance] = useState(false);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const securityAnswers = [1, 2, 3, 4, 5].map((number) => String(form.get(`pin${number}`) ?? ''));
+    if (new Set(securityAnswers).size !== 5) {
+      setCredentialError('Enter five distinct security PINs in their original Paycom numbering.');
+      return;
+    }
+    setCredentialError('');
     event.currentTarget.reset();
     setBusy(true);
     const ok = await perform(async () => {
@@ -475,6 +482,7 @@ export function ConnectionsPage({
         clientCode: form.get('clientCode'),
         username: form.get('username'),
         password: form.get('password'),
+        securityAnswers,
       });
       refresh();
     }, 'Connection saved');
@@ -553,7 +561,14 @@ export function ConnectionsPage({
               )}
             </div>
             <footer>
-              <button className="primary" disabled={busy} onClick={() => setEditing(true)}>
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() => {
+                  setCredentialError('');
+                  setEditing(true);
+                }}
+              >
                 {data.enabled ? 'Update credentials' : 'Connect Paycom'}
               </button>
               {data.enabled && (
@@ -626,7 +641,7 @@ export function ConnectionsPage({
               “require-verification” to exercise verification.
             </div>
           )}
-          <form onSubmit={(event) => void save(event)}>
+          <form onSubmit={(event) => void save(event)} onInput={() => setCredentialError('')}>
             <label>
               Client code
               <input
@@ -651,6 +666,23 @@ export function ConnectionsPage({
                 autoComplete="new-password"
               />
             </label>
+            {[1, 2, 3, 4, 5].map((number) => (
+              <label key={number}>
+                PIN {number}
+                <input
+                  name={`pin${number}`}
+                  type="password"
+                  required
+                  maxLength={64}
+                  autoComplete="off"
+                />
+              </label>
+            ))}
+            <p className="muted">
+              Enter all five distinct security answers in the order configured for your Paycom
+              account.
+            </p>
+            <ErrorBox message={credentialError} />
             <div className="form-actions">
               <button type="button" onClick={() => setEditing(false)}>
                 Cancel

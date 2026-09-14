@@ -5,6 +5,7 @@ import type { Workforce, Employee, Timecard } from '../../shared/contracts/index
 import { projectTimecards, type ProviderTimecard } from './timecards.js';
 import { AppError, assert } from '../../shared/errors.js';
 import { dateInTimezone, workforceSchema } from './workforce.js';
+import { answerSecurityPins, securityPath } from './security-pins.js';
 const require = createRequire(import.meta.url);
 const periods = require('./provider/timecard-period.js') as {
   parsePeriodKey(value: string): Period;
@@ -80,11 +81,30 @@ export async function login(page: Page, credentials: Credentials, fixtureUrl?: s
     await input.fill(value);
   }
   await page.locator('input[name="password"]').press('Enter');
+  let pinsSubmitted = false;
   for (let i = 0; i < 40; i++) {
     await page.waitForTimeout(250);
     const state = await connectionState(page, fixtureUrl);
     if (state === 'ready') return state;
-    if (state === 'challenge') return state;
+    if (state === 'challenge') {
+      if (!pinsSubmitted && !fixtureUrl && (await answerSecurityPins(page, credentials))) {
+        pinsSubmitted = true;
+        continue;
+      }
+      if (
+        pinsSubmitted &&
+        /security answers?.{0,40}(not correct|incorrect|invalid)/i.test(
+          await page.locator('body').innerText(),
+        )
+      )
+        throw new AppError('security_answers_rejected', 409);
+      // A slow POST can leave the original PIN form visible while Paycom responds.
+      if (pinsSubmitted && new URL(page.url()).pathname === securityPath) continue;
+      // Navigation may have completed while reading the previous challenge's text.
+      if (pinsSubmitted)
+        return (await connectionState(page, fixtureUrl)) === 'ready' ? 'ready' : 'challenge';
+      return state;
+    }
     const text = await page.locator('body').innerText({ timeout: 5000 });
     if (/invalid (credentials|password)|incorrect password|account.{0,20}locked/i.test(text))
       throw new AppError('invalid_credentials', 409);
