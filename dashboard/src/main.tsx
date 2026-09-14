@@ -1,19 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Layers3,
+  House,
+  CalendarDays,
+  ArrowUpFromLine,
   Building2,
-  ListTodo,
-  GitBranch,
-  History,
   Settings,
   Users,
-  Clock3,
-  Link2,
-  LayoutDashboard,
-  ChevronDown,
-  LogOut,
-  Menu,
   X,
   FlaskConical,
 } from 'lucide-react';
@@ -25,26 +18,49 @@ import {
   JobsPage,
   AuditPage,
   ReleasesPage,
-  HealthPanel,
+  DiagnosticsPage,
   type Perform,
 } from './platform.js';
-import { Overview, EmployeesPage, TimecardsPage, ConnectionsPage, DspSettings } from './dsp.js';
-import { Badge, Header, Loading, ErrorBox, Section, title } from './ui.js';
+import { EmployeesPage, TimecardsPage, ConnectionsPage } from './dsp.js';
+import { Badge, Header, Loading, ErrorBox } from './ui.js';
 import './styles.css';
+import { Shell } from './shell.js';
+import { SettingsPage } from './settings.js';
+import { PaycomPage, HomePage, TeamPage } from './workspace.js';
 type Session = SessionView & { separatePreview?: boolean };
-const userFullName = (user: SessionView['user']) => `${user.firstName} ${user.lastName}`;
+import { readAppearance, applyAppearance } from './appearance.js';
+import { initializePreferences } from './preferences.js';
 function App() {
+  const [, setPreferencesRevision] = useState(0);
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [route, setRoute] = useState(window.location.hash.slice(1) || 'dsps'),
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
-    [mobile, setMobile] = useState(false),
     [switching, setSwitching] = useState(false);
+  useEffect(() => {
+    const id = session?.user.id ?? 'signed-out';
+    initializePreferences(id);
+    const apply = () => applyAppearance(readAppearance(id));
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    apply();
+    media.addEventListener('change', apply);
+    window.addEventListener('dispatch-appearance', apply);
+    return () => {
+      media.removeEventListener('change', apply);
+      window.removeEventListener('dispatch-appearance', apply);
+    };
+  }, [session?.user.id]);
+  useEffect(() => {
+    const changed = () => setPreferencesRevision((value) => value + 1);
+    window.addEventListener('dispatch-preferences', changed);
+    return () => window.removeEventListener('dispatch-preferences', changed);
+  }, []);
   const load = useCallback(async (afterLogin = false) => {
     try {
       const next = await api<Session>('/api/session');
       credentials(next.csrf);
+      initializePreferences(next.user.id);
       setSession(next);
       if (
         !next.user.platformOwner &&
@@ -64,14 +80,13 @@ function App() {
     void load();
     const changed = () => {
       setRoute(window.location.hash.slice(1) || 'dsps');
-      setMobile(false);
       setError('');
     };
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, [load]);
   const dspId = route.startsWith('dsp/') ? route.split('/')[1] : undefined,
-    page = dspId ? route.split('/')[2] || 'overview' : route;
+    page = (dspId ? route.split('/')[2] || 'overview' : route).split('?')[0]!;
   const reopen = useCallback(async () => {
     if (!session || !dspId) return;
     const next = await api<DspView>('/api/session/dsp', { dspId });
@@ -164,20 +179,18 @@ function App() {
     canCollect = owner || view?.role === 'manager';
   const nav = dspId
     ? [
-        { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        { id: 'employees', label: 'Employees', icon: Users },
-        { id: 'timecards', label: 'Timecards', icon: Clock3 },
-        ...(owner ? [{ id: 'connections', label: 'Connections', icon: Link2 }] : []),
-        { id: 'jobs', label: 'Jobs', icon: ListTodo },
-        ...(owner ? [{ id: 'settings', label: 'DSP settings', icon: Settings }] : []),
+        { id: 'overview', label: 'Home Page', icon: House },
+        { id: 'paycom', label: 'Paycom', icon: CalendarDays },
+        ...(owner ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
+        { id: 'settings', label: 'Settings', icon: Settings },
       ]
     : [
         { id: 'dsps', label: 'DSPs', icon: Building2 },
         ...(session.user.platformOwner
           ? [
-              { id: 'jobs', label: 'Jobs', icon: ListTodo },
-              { id: 'releases', label: 'Releases', icon: GitBranch },
-              { id: 'audit', label: 'Audit log', icon: History },
+              { id: 'releases', label: 'Updates', icon: ArrowUpFromLine },
+              { id: 'jobs', label: 'Diagnostics', icon: FlaskConical },
+              { id: 'account', label: 'Settings', icon: Settings },
             ]
           : []),
       ];
@@ -189,271 +202,83 @@ function App() {
     window.location.hash = '';
   }
   return (
-    <div className="app">
-      <button
-        className={`sidebar-scrim ${mobile ? 'shown' : ''}`}
-        aria-label="Close navigation"
-        onClick={() => setMobile(false)}
-      />
-      <aside className={`sidebar ${mobile ? 'shown' : ''}`}>
-        <a
-          className="brand"
-          href="#dsps"
-          onClick={(event) => {
-            event.preventDefault();
-            platform();
-          }}
-        >
-          <Layers3 size={25} />
-          Dispatch
-        </a>
-        <div className="workspace-switch">
-          <label htmlFor="dsp-switch">WORKSPACE</label>
-          <div>
-            <select
-              id="dsp-switch"
-              aria-label="Switch DSP"
-              value={dspId ?? ''}
-              onChange={(event) => {
-                const dsp = session.dsps.find((d) => d.id === event.target.value);
-                if (dsp) open(dsp);
-                else platform();
-              }}
-            >
-              <option value="">
-                {session.user.platformOwner ? 'Platform' : 'Your workspaces'}
-              </option>
-              {session.dsps
-                .filter((d) => d.status === 'active')
-                .map((dsp) => (
-                  <option value={dsp.id} key={dsp.id}>
-                    {dsp.name}
-                  </option>
-                ))}
-            </select>
-            <ChevronDown size={15} />
-          </div>
-        </div>
-        <nav aria-label="Main navigation">
-          {nav.map((item) => (
-            <a
-              key={item.id}
-              className={page === item.id ? 'active' : ''}
-              href={`#${dspId ? `dsp/${dspId}/` : ''}${item.id}`}
-            >
-              <item.icon size={18} />
-              {item.label}
-            </a>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <a href="#account" className={page === 'account' ? 'active' : ''}>
-            <Settings size={18} />
-            Account settings
-          </a>
-          <div className="user-summary">
-            <span className="avatar">
-              {userFullName(session.user)
-                .split(' ')
-                .map((s) => s[0])
-                .slice(0, 2)
-                .join('')}
-            </span>
-            <div>
-              <strong>{userFullName(session.user)}</strong>
-              <small>
-                {session.user.platformOwner
-                  ? 'Platform owner'
-                  : view
-                    ? title(view.role)
-                    : 'Team member'}
-              </small>
-            </div>
-            <button aria-label="Sign out" onClick={() => void perform(logout)}>
-              <LogOut size={17} />
-            </button>
-          </div>
-        </div>
-      </aside>
-      <div className="main">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            aria-label="Open navigation"
-            onClick={() => setMobile(true)}
-          >
-            <Menu size={21} />
+    <Shell
+      session={session}
+      view={view}
+      page={page}
+      navigation={nav}
+      logout={() => void perform(logout)}
+      exitView={platform}
+    >
+      <ErrorBox message={error} />
+      {notice && (
+        <div className="toast" role="status">
+          {notice}
+          <button aria-label="Dismiss notification" onClick={() => setNotice('')}>
+            <X size={16} />
           </button>
-          <div className="breadcrumbs">
-            <span>{view?.dsp.name ?? 'Platform'}</span>
-            <span>/</span>
-            <strong>{page === 'dsps' ? 'DSPs' : title(page)}</strong>
-          </div>
-          <div className="topbar-right">
-            {(session.development || (session.standalone && session.environment === 'preview')) && (
-              <span className="dev-label">
-                <FlaskConical size={14} />
-                {session.providerMode === 'fixture'
-                  ? 'Dev platform · synthetic data'
-                  : 'Dev platform'}
-              </span>
-            )}
-            <span className="avatar pale" title={userFullName(session.user)}>
-              {userFullName(session.user)
-                .split(' ')
-                .map((s) => s[0])
-                .slice(0, 2)
-                .join('')}
-            </span>
-          </div>
-        </header>
-        <main className="content" key={dspId ?? 'platform'}>
-          <ErrorBox message={error} />
-          {notice && (
-            <div className="toast" role="status">
-              {notice}
-              <button aria-label="Dismiss notification" onClick={() => setNotice('')}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {dspId ? (
-            switching ? (
-              <Loading />
-            ) : view ? (
-              <div key={`${view.dsp.id}:${view.dsp.revision}`}>
-                {page === 'overview' ? (
-                  <Overview
-                    view={view}
-                    perform={perform}
-                    navigate={navigate}
-                    canCollect={canCollect}
-                  />
-                ) : page === 'employees' ? (
-                  <EmployeesPage />
-                ) : page === 'timecards' ? (
-                  <TimecardsPage timezone={view.dsp.timezone} />
-                ) : page === 'connections' && owner ? (
-                  <ConnectionsPage
-                    perform={perform}
-                    development={session.providerMode === 'fixture'}
-                  />
-                ) : page === 'jobs' ? (
-                  <JobsPage platform={false} perform={perform} canCollect={canCollect} />
-                ) : page === 'settings' && owner ? (
-                  <DspSettings
-                    view={view}
-                    perform={perform}
-                    reopen={reopen}
-                    onSuspended={platform}
-                  />
-                ) : (
-                  <ErrorBox message="This page is not available for your role." />
-                )}
-              </div>
-            ) : null
-          ) : page === 'account' ? (
-            <>
-              <Header
-                title="Account settings"
-                subtitle="Manage your account and sign-in details."
-              />
-              <Section title="Your account">
-                <dl className="details">
-                  <dt>First name</dt>
-                  <dd>{session.user.firstName}</dd>
-                  <dt>Last name</dt>
-                  <dd>{session.user.lastName}</dd>
-                  <dt>Email</dt>
-                  <dd>{session.user.email}</dd>
-                </dl>
-              </Section>
-              <Section title="Change password">
-                <form
-                  className="settings-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    void perform(async () => {
-                      await api('/api/auth/password', {
-                        currentPassword: form.get('currentPassword'),
-                        password: form.get('password'),
-                      });
-                      credentials('');
-                      setSession(null);
-                      setView(undefined);
-                      window.location.hash = '';
-                    }, 'Password changed. Sign in again.');
-                  }}
-                >
-                  <label>
-                    Current password
-                    <input
-                      name="currentPassword"
-                      type="password"
-                      autoComplete="current-password"
-                      required
-                    />
-                  </label>
-                  <label>
-                    New password
-                    <input
-                      name="password"
-                      type="password"
-                      autoComplete="new-password"
-                      minLength={12}
-                      maxLength={128}
-                      required
-                    />
-                  </label>
-                  <p className="muted">Changing your password signs out all existing sessions.</p>
-                  <button className="primary">Update password</button>
-                </form>
-              </Section>
-              {session.user.platformOwner && <HealthPanel />}
-            </>
-          ) : session.user.platformOwner ? (
-            page === 'dsps' ? (
-              <DspList open={open} perform={perform} />
+        </div>
+      )}
+      {dspId ? (
+        switching ? (
+          <Loading />
+        ) : view ? (
+          <div key={`${view.dsp.id}:${view.dsp.revision}`}>
+            {page === 'overview' ? (
+              <HomePage />
+            ) : page === 'paycom' ? (
+              <PaycomPage view={view} perform={perform} canCollect={canCollect} />
+            ) : page === 'team' && owner ? (
+              <TeamPage view={view} perform={perform} reopen={reopen} />
+            ) : page === 'employees' ? (
+              <EmployeesPage />
+            ) : page === 'timecards' ? (
+              <TimecardsPage timezone={view.dsp.timezone} />
+            ) : page === 'connections' && owner ? (
+              <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
             ) : page === 'jobs' ? (
-              <JobsPage platform perform={perform} canCollect={false} />
-            ) : page === 'releases' ? (
-              <ReleasesPage perform={perform} />
-            ) : page === 'audit' ? (
-              <AuditPage />
+              <JobsPage platform={false} perform={perform} canCollect={canCollect} />
+            ) : page === 'settings' ? (
+              <SettingsPage session={session} view={view} perform={perform} reopen={reopen} />
             ) : (
-              <ErrorBox message="Page not found." />
-            )
-          ) : (
-            <>
-              <Header title="Your DSPs" subtitle="Choose a workspace to continue." />
-              <div className="workspace-grid">
-                {session.dsps
-                  .filter((d) => d.status === 'active')
-                  .map((dsp) => (
-                    <button className="workspace-card" key={dsp.id} onClick={() => open(dsp)}>
-                      <Building2 />
-                      <strong>{dsp.name}</strong>
-                      <Badge value={dsp.environment} />
-                    </button>
-                  ))}
-              </div>
-              {!session.dsps.length && (
-                <p>Your account has no DSP memberships. Ask your DSP owner for an invitation.</p>
-              )}
-            </>
+              <ErrorBox message="This page is not available for your role." />
+            )}
+          </div>
+        ) : null
+      ) : page === 'account' ? (
+        <SettingsPage session={session} perform={perform} />
+      ) : session.user.platformOwner ? (
+        page === 'dsps' ? (
+          <DspList open={open} perform={perform} />
+        ) : page === 'jobs' ? (
+          <DiagnosticsPage perform={perform} />
+        ) : page === 'releases' ? (
+          <ReleasesPage perform={perform} />
+        ) : page === 'audit' ? (
+          <AuditPage />
+        ) : (
+          <ErrorBox message="Page not found." />
+        )
+      ) : (
+        <>
+          <Header title="Your DSPs" subtitle="Choose a workspace to continue." />
+          <div className="workspace-grid">
+            {session.dsps
+              .filter((d) => d.status === 'active')
+              .map((dsp) => (
+                <button className="workspace-card" key={dsp.id} onClick={() => open(dsp)}>
+                  <Building2 />
+                  <strong>{dsp.name}</strong>
+                  <Badge value={dsp.environment} />
+                </button>
+              ))}
+          </div>
+          {!session.dsps.length && (
+            <p>Your account has no DSP memberships. Ask your DSP owner for an invitation.</p>
           )}
-        </main>
-        <footer className="main-footer">
-          <span>Dispatch</span>
-          <span>
-            {session.environment === 'preview' || session.development
-              ? 'Dev platform'
-              : 'Connected workspace'}
-          </span>
-        </footer>
-      </div>
-    </div>
+        </>
+      )}
+    </Shell>
   );
 }
 createRoot(document.getElementById('root')!).render(<App />);

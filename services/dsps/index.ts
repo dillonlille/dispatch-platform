@@ -93,7 +93,28 @@ export class Dsps {
             db.one<{ at: string }>('SELECT collected_at at FROM publications WHERE active=1')?.at ??
             null;
         });
-      return { ...dsp, role, paycom, lastCollection };
+      const owner = this.storage.platform.one<{ email: string }>(
+        "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? AND m.role='owner' AND u.status='active' ORDER BY u.email LIMIT 1",
+        dsp.id,
+      );
+      const invitation = this.storage.platform.one<{ email: string }>(
+        "SELECT email FROM invitations WHERE dsp_id=? AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1",
+        dsp.id,
+        Date.now(),
+      );
+      const platformOwner = dsp.permanent
+        ? this.storage.platform.one<{ email: string }>(
+            "SELECT email FROM users WHERE platform_owner=1 AND status='active' ORDER BY email LIMIT 1",
+          )
+        : undefined;
+      return {
+        ...dsp,
+        role,
+        paycom,
+        lastCollection,
+        ownerEmail: owner?.email ?? invitation?.email ?? platformOwner?.email ?? null,
+        ownerStatus: owner || platformOwner ? 'active' : invitation ? 'invited' : 'missing',
+      };
     });
   }
   setStatus(dspId: string, status: 'active' | 'suspended', actorId: string) {

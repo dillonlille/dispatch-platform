@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X, LoaderCircle, ArrowUpRight, Inbox } from 'lucide-react';
+import { displayTimezone } from './preferences.js';
 export const time = (value: string | null | undefined) =>
   value
     ? new Intl.DateTimeFormat('en-US', {
@@ -7,6 +8,7 @@ export const time = (value: string | null | undefined) =>
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
+        timeZone: displayTimezone(),
       }).format(new Date(value))
     : 'Never';
 export const title = (value: string) =>
@@ -14,12 +16,53 @@ export const title = (value: string) =>
     .replaceAll('_', ' ')
     .replaceAll('.', ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
-export function Badge({ value }: { value: string }) {
+export function Badge({ value, children }: { value: string; children?: ReactNode }) {
   return (
-    <span className={`badge ${value}`}>
+    <span className={`status-indicator ${value}`}>
       <i />
-      {title(value === 'ready' ? 'connected' : value)}
+      {children ?? title(value === 'ready' ? 'connected' : value)}
     </span>
+  );
+}
+export function Tabs({
+  value,
+  onChange,
+  items,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  items: string[][];
+  label: string;
+}) {
+  return (
+    <div className="restored-tabs" role="tablist" aria-label={label}>
+      {items.map(([id, text], index) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={value === id}
+          tabIndex={value === id ? 0 : -1}
+          onKeyDown={(event) => {
+            const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+            if (!offset && !['Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? items.length - 1
+                  : (index + offset + items.length) % items.length;
+            onChange(items[next]![0]!);
+            (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
+          }}
+          onClick={() => onChange(id!)}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
   );
 }
 export function Header({
@@ -87,10 +130,12 @@ export function Modal({
   title: label,
   children,
   onClose,
+  variant = 'dialog',
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  variant?: 'dialog' | 'sheet';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -126,12 +171,18 @@ export function Modal({
   }, [onClose]);
   return (
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop ${variant === 'sheet' ? 'sheet-backdrop' : ''}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-label={label}>
+      <div
+        ref={ref}
+        className={`modal ${variant === 'sheet' ? 'side-sheet' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+      >
         <div className="modal-heading">
           <h2>{label}</h2>
           <button className="icon-button" aria-label="Close dialog" onClick={onClose}>

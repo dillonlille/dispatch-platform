@@ -472,6 +472,17 @@ export async function createApp(
     const c = context(request, 'members');
     return runtime.dsps.members(c.dsp.id);
   });
+  app.get('/api/dsp/invitations', (request) => {
+    const c = context(request, 'members');
+    return runtime.storage.platform.all(
+      'SELECT email,role,expires_at expiresAt,used_at IS NOT NULL accepted FROM invitations WHERE dsp_id=? ORDER BY expires_at DESC LIMIT 100',
+      c.dsp.id,
+    );
+  });
+  app.get('/api/dsp/audit', (request) => {
+    const c = context(request, 'settings');
+    return runtime.audit.list(c.dsp.id);
+  });
   app.post('/api/dsp/members/invite', (request) => {
     const c = context(request, 'members', true),
       input = parse(z.object({ email, role }).strict(), request);

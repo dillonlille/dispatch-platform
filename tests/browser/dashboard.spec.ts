@@ -20,24 +20,29 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page
     .getByRole('row')
     .filter({ hasText: 'Northline Logistics' })
-    .getByRole('button', { name: 'Open' })
+    .getByRole('button', { name: /Northline Logistics/ })
     .click();
   await expect(
-    page.getByRole('heading', { name: 'Northline Logistics', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'Employees', exact: true }).click();
+  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Avery Morgan' })).toBeVisible();
   await page.getByLabel('Search employees').fill('Avery');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Avery Morgan' }).click();
-  await expect(page.getByRole('dialog')).toContainText('Collected timecards');
-  await page.getByLabel('Close dialog').click();
-  await page.getByRole('link', { name: 'Timecards', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'View punches' })).toHaveCount(12);
-  await page.getByRole('button', { name: 'View punches' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Employee timecard', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to employees' }).click();
+  await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+  await expect(page.getByRole('button', { name: /View punches for/ })).toHaveCount(12);
+  await page
+    .getByRole('button', { name: /View punches for/ })
+    .first()
+    .click();
   await expect(page.getByRole('dialog')).toContainText('08:00');
   await page.getByLabel('Close dialog').click();
-  await page.getByRole('link', { name: 'Connections', exact: true }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Connections', exact: true }).click();
   await page.getByRole('button', { name: 'Update credentials' }).click();
   await page.getByLabel('Client code').fill('DEMO1');
   await page.getByLabel('Username', { exact: true }).fill('test-user');
@@ -47,8 +52,9 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByLabel('Verification code').fill('123456');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
-  await page.getByRole('link', { name: 'Overview', exact: true }).click();
-  await page.getByRole('button', { name: 'Collect data', exact: true }).click();
+  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('button', { name: 'Sync now', exact: true }).click();
+  await page.getByRole('tab', { name: 'Collections', exact: true }).click();
   await expect(page.getByText('Succeeded', { exact: true }).first()).toBeVisible({
     timeout: 15000,
   });
@@ -63,12 +69,13 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'member@dispatch.test');
   await expect(
-    page.getByRole('heading', { name: 'Northline Logistics', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await expect(page.getByRole('link', { name: 'Connections', exact: true })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Employees', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Employees', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
+  await expect(page.getByLabel('Search employees')).toBeVisible();
   await page.screenshot({ path: '/tmp/dispatch-dashboard-mobile.png', fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -79,7 +86,7 @@ test('create a DSP and accept its owner invitation while another account is sign
   page,
 }) => {
   await login(page);
-  await page.getByRole('button', { name: 'Create DSP', exact: true }).click();
+  await page.getByRole('button', { name: 'Create new DSP', exact: true }).click();
   await page.getByLabel('DSP name').fill('Invitation Test DSP');
   await page.getByLabel('Owner email').fill('invited-owner@dispatch.test');
   await page.getByRole('dialog').getByRole('button', { name: 'Create DSP', exact: true }).click();
@@ -95,6 +102,29 @@ test('create a DSP and accept its owner invitation while another account is sign
   await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Invitation Test DSP', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
+});
+
+test('archived account tabs preserve names, appearance and display timezone preferences', async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByText('First name', { exact: true })).toBeVisible();
+  await expect(page.getByText('Last name', { exact: true })).toBeVisible();
+  await page.getByLabel('Display timezone').selectOption('America/Los_Angeles');
+  await page.getByRole('tab', { name: 'Theme', exact: true }).click();
+  await page.getByRole('button', { name: 'Dark', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('tab', { name: 'General', exact: true }).click();
+  await expect(page.getByLabel('Display timezone')).toHaveValue('America/Los_Angeles');
+  await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
+  await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
+  await page.getByLabel('Confirm new password', { exact: true }).fill('Different-password-2!');
+  await page.getByRole('button', { name: 'Change password', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('The new passwords must match.');
 });

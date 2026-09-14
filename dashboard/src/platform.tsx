@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Plus, Search, Building2, FlaskConical, Check, Copy } from 'lucide-react';
+import { Plus, Search, Check, Copy, RefreshCw, Ellipsis, Eye } from 'lucide-react';
 import type {
   DspSummary,
   AuditEvent,
@@ -8,6 +8,7 @@ import type {
   PlatformHealth,
 } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
+import { DspAvatar } from './brand.js';
 import {
   Badge,
   Empty,
@@ -15,25 +16,28 @@ import {
   Header,
   Loading,
   Modal,
-  OpenButton,
   Section,
   time,
   title,
+  Tabs,
 } from './ui.js';
 export type Perform = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; perform: Perform }) {
-  const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000),
-    activity = useData<AuditEvent[]>('/api/platform/audit', 10000);
+  const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000);
   const [query, setQuery] = useState(''),
-    [environment, setEnvironment] = useState('all'),
+    [filter, setFilter] = useState('all'),
     [creating, setCreating] = useState(false),
+    [suspending, setSuspending] = useState<DspSummary>(),
     [link, setLink] = useState(''),
     [busy, setBusy] = useState(false);
   const dsps = data ?? [],
     visible = dsps.filter(
       (d) =>
-        d.name.toLowerCase().includes(query.toLowerCase()) &&
-        (environment === 'all' || d.environment === environment),
+        `${d.name} ${d.ownerEmail ?? ''}`.toLowerCase().includes(query.toLowerCase()) &&
+        (filter === 'all' ||
+          (filter === 'running' && d.status === 'active') ||
+          (filter === 'onboarding' && d.ownerStatus !== 'active') ||
+          (filter === 'suspended' && d.status === 'suspended')),
     );
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,60 +57,60 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
   }
   return (
     <>
-      <Header title="DSPs" subtitle="Manage access, connections, and collection activity.">
+      <Header title="DSPs" subtitle="Manage your DSPs and onboarding.">
         <button className="primary" onClick={() => setCreating(true)}>
           <Plus size={17} />
-          Create DSP
+          Create new DSP
         </button>
       </Header>
       <ErrorBox message={error} />
-      <div className="summary-strip">
-        <div>
-          <span>Total DSPs</span>
-          <strong>{dsps.length}</strong>
-        </div>
-        <div>
-          <span>Production</span>
-          <strong>{dsps.filter((d) => d.environment === 'production').length}</strong>
-        </div>
-        <div>
-          <span>Preview</span>
-          <strong>{dsps.filter((d) => d.environment === 'preview').length}</strong>
-        </div>
+      <div className="inline-summary" aria-label="DSP summary">
+        <span>
+          <strong>{dsps.length}</strong>DSPs
+        </span>
+        <span>
+          <strong>{dsps.filter((d) => d.status === 'active').length}</strong>running
+        </span>
+        <span>
+          <strong>{dsps.filter((d) => d.ownerStatus !== 'active').length}</strong>onboarding
+        </span>
       </div>
-      <div className="toolbar">
+      <Tabs
+        value={filter}
+        onChange={setFilter}
+        items={[
+          ['all', 'All DSPs'],
+          ['running', 'Running'],
+          ['onboarding', 'Onboarding'],
+          ['suspended', 'Suspended'],
+        ]}
+        label="DSP filters"
+      />
+      <div className="table-toolbar">
         <label className="search">
-          <Search size={18} />
+          <Search size={16} />
           <input
             aria-label="Search DSPs"
-            placeholder="Search DSPs…"
+            placeholder="Search DSPs or owner email"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <select
-          aria-label="Filter environment"
-          value={environment}
-          onChange={(e) => setEnvironment(e.target.value)}
-        >
-          <option value="all">All environments</option>
-          <option value="production">Production</option>
-          <option value="preview">Preview</option>
-        </select>
-        <span className="muted result-count">{visible.length} DSPs</span>
+        <button className="icon-button" aria-label="Refresh DSPs" onClick={refresh}>
+          <RefreshCw size={16} />
+        </button>
       </div>
       {!data ? (
         <Loading />
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="fleet-table">
             <thead>
               <tr>
-                <th>DSP</th>
-                <th>Environment</th>
-                <th>Status</th>
-                <th>Paycom</th>
-                <th>Last collection</th>
+                <th style={{ width: '28%' }}>DSP</th>
+                <th>Owner</th>
+                <th>Runtime</th>
+                <th>Onboarding</th>
                 <th>
                   <span className="sr-only">Actions</span>
                 </th>
@@ -116,45 +120,72 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
               {visible.map((dsp) => (
                 <tr key={dsp.id}>
                   <td>
-                    <div className="identity">
-                      <span className={`entity-icon ${dsp.permanent ? 'preview-icon' : ''}`}>
-                        {dsp.permanent ? <FlaskConical size={20} /> : <Building2 size={20} />}
-                      </span>
-                      <div>
+                    <button
+                      className="identity-button"
+                      disabled={dsp.status !== 'active'}
+                      onClick={() => open(dsp)}
+                    >
+                      <DspAvatar name={dsp.name} />
+                      <span className="dsp-identity-copy">
                         <strong>{dsp.name}</strong>
-                        <small>{dsp.permanent ? 'Development & testing' : dsp.timezone}</small>
+                        <span>{dsp.permanent ? 'DEV' : dsp.timezone}</span>
+                      </span>
+                    </button>
+                  </td>
+                  <td className="muted">{dsp.ownerEmail ?? 'No owner assigned'}</td>
+                  <td>
+                    <Badge value={dsp.status}>
+                      {dsp.status === 'active' ? 'Running' : title(dsp.status)}
+                    </Badge>
+                  </td>
+                  <td>
+                    <Badge value={dsp.ownerStatus === 'active' ? 'neutral' : 'pending'}>
+                      {dsp.ownerStatus === 'active'
+                        ? 'Complete'
+                        : dsp.ownerStatus === 'invited'
+                          ? 'Invitation pending'
+                          : 'Invite needed'}
+                    </Badge>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <details className="row-menu">
+                      <summary aria-label={`Actions for ${dsp.name}`}>
+                        <Ellipsis size={18} />
+                      </summary>
+                      <div className="account-popover">
+                        {dsp.status === 'active' ? (
+                          <button onClick={() => open(dsp)}>
+                            <Eye size={16} />
+                            View
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() =>
+                              void perform(async () => {
+                                await api(
+                                  `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
+                                  dsp.status === 'failed' ? {} : { status: 'active' },
+                                );
+                                refresh();
+                              }, 'DSP available')
+                            }
+                          >
+                            {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
+                          </button>
+                        )}
+                        {dsp.status === 'active' && !dsp.permanent && (
+                          <button
+                            className="danger"
+                            onClick={(event) => {
+                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              setSuspending(dsp);
+                            }}
+                          >
+                            Suspend DSP
+                          </button>
+                        )}
                       </div>
-                    </div>
-                  </td>
-                  <td>
-                    <Badge value={dsp.environment} />
-                  </td>
-                  <td>
-                    <Badge value={dsp.status} />
-                  </td>
-                  <td>
-                    <Badge value={dsp.paycom} />
-                  </td>
-                  <td className="muted">{time(dsp.lastCollection)}</td>
-                  <td>
-                    {dsp.status === 'active' ? (
-                      <OpenButton onClick={() => open(dsp)} />
-                    ) : (
-                      <button
-                        className="text-button"
-                        onClick={() =>
-                          void perform(async () => {
-                            await api(
-                              `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
-                              dsp.status === 'failed' ? {} : { status: 'active' },
-                            );
-                            refresh();
-                          }, 'DSP available')
-                        }
-                      >
-                        {dsp.status === 'failed' ? 'Retry' : 'Resume'}
-                      </button>
-                    )}
+                    </details>
                   </td>
                 </tr>
               ))}
@@ -165,11 +196,11 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
           )}
         </div>
       )}
-      <Section title="Recent activity">
-        <Activity events={activity.data?.slice(0, 5) ?? []} />
-      </Section>
+      <p className="table-count">
+        {visible.length} DSP{visible.length === 1 ? '' : 's'}
+      </p>
       {creating && (
-        <Modal title="Create DSP" onClose={() => setCreating(false)}>
+        <Modal title="Create new DSP" variant="sheet" onClose={() => setCreating(false)}>
           <p className="muted">Create a workspace with its own private data and connections.</p>
           <form onSubmit={(e) => void create(e)}>
             <label>
@@ -201,6 +232,26 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
         </Modal>
       )}
       {link && <InvitationLink link={link} close={() => setLink('')} />}
+      {suspending && (
+        <Modal title={`Suspend ${suspending.name}?`} onClose={() => setSuspending(undefined)}>
+          <p>Members lose access and active collections are cancelled until you resume this DSP.</p>
+          <div className="form-actions">
+            <button onClick={() => setSuspending(undefined)}>Cancel</button>
+            <button
+              className="danger"
+              onClick={() =>
+                void perform(async () => {
+                  await api(`/api/platform/dsps/${suspending.id}/status`, { status: 'suspended' });
+                  setSuspending(undefined);
+                  refresh();
+                }, 'DSP suspended')
+              }
+            >
+              Suspend DSP
+            </button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
@@ -356,6 +407,30 @@ export function JobsPage({
     </>
   );
 }
+export function DiagnosticsPage({ perform }: { perform: Perform }) {
+  const [tab, setTab] = useState('overview');
+  return (
+    <>
+      <Header title="Diagnostics" subtitle="Platform health and collection activity." />
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={[
+          ['overview', 'Overview'],
+          ['collections', 'Collections'],
+        ]}
+        label="Diagnostics"
+      />
+      {tab === 'overview' ? (
+        <HealthPanel />
+      ) : (
+        <div className="diagnostics-jobs">
+          <JobsPage platform perform={perform} canCollect={false} />
+        </div>
+      )}
+    </>
+  );
+}
 export function AuditPage() {
   const { data, error } = useData<AuditEvent[]>('/api/platform/audit', 10000);
   return (
@@ -379,11 +454,11 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
     return (
       <>
         <Header
-          title="Dev builds"
+          title="Updates"
           subtitle="Merged changes are checked and installed automatically."
         />
         <ErrorBox message={error} />
-        <Section title="Running build">
+        <Section title="Current version">
           <div className="build-details">
             <p>This environment includes the owner dashboard and all of its test DSPs.</p>
             <p>

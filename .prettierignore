@@ -3,3 +3,6 @@ node_modules/
 integrations/paycom/provider/
 package-lock.json
 docs/design/
+dashboard/src/archive/styles.css
+
+dashboard/src/archive/paycom-workforce.css

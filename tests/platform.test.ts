@@ -22,6 +22,8 @@ test('authentication, CSRF, view tampering and role boundaries fail closed', asy
   await member.select(north.id);
   assert.equal((await member.get('/api/dsp/employees')).json().total, 12);
   assert.equal((await member.get('/api/dsp/connections')).statusCode, 403);
+  assert.equal((await member.get('/api/dsp/invitations')).statusCode, 403);
+  assert.equal((await member.get('/api/dsp/audit')).statusCode, 403);
   assert.equal((await member.post('/api/dsp/jobs', { requestId: 'forbidden' })).statusCode, 403);
   const value = member.headers['x-dispatch-view']!;
   member.headers['x-dispatch-view'] = value.slice(0, -1) + (value.endsWith('x') ? 'y' : 'x');
@@ -73,6 +75,22 @@ test('DSP creation has only private state; permanent Dev cannot be suspended', a
     409,
   );
   await client.select(dsp.id);
+  const invitations = (await client.get('/api/dsp/invitations')).json();
+  assert.equal(invitations.length, 1);
+  assert.equal(invitations[0].email, 'fresh@example.test');
+  assert(!JSON.stringify(invitations).includes('hash'));
+  assert(!JSON.stringify(invitations).includes('token'));
+  assert(
+    (await client.get('/api/dsp/audit'))
+      .json()
+      .every((event: { dspId: string }) => event.dspId === dsp.id),
+  );
+  const summaries = (await client.get('/api/platform/dsps')).json();
+  assert.equal(
+    summaries.find((item: { id: string }) => item.id === dsp.id).ownerEmail,
+    'fresh@example.test',
+  );
+  assert.equal(summaries.find((item: { id: string }) => item.id === dsp.id).ownerStatus, 'invited');
   const old = client.headers['x-dispatch-view'];
   assert.equal(
     (await client.post('/api/dsp/settings', { name: 'Fresh Updated', timezone: 'UTC' })).statusCode,

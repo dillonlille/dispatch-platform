@@ -33,6 +33,8 @@ export interface Dsp {
   createdAt: string;
 }
 export interface DspSummary extends Dsp {
+  ownerEmail: string | null;
+  ownerStatus: 'active' | 'invited' | 'missing';
   paycom: ConnectionStatus;
   lastCollection: string | null;
   role: Role | 'platform_owner';
