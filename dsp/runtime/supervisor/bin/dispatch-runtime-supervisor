@@ -1,4 +1,0 @@
-#!/usr/bin/env node
-'use strict';
-process.umask(0o077);
-require('../src/supervisor').main().then(code => { process.exitCode = Number.isInteger(code) ? code : 1; });

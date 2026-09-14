@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-export NODE_NO_WARNINGS=1
-"$ROOT/tooling/build" >/dev/null
-"$ROOT/tooling/test" >/dev/null
-exec "$ROOT/bin/dispatch-collectionctl" status

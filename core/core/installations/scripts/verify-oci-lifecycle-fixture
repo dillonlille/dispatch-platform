@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-DISPATCH_RUN_OCI_LIFECYCLE_FIXTURE=1 node --no-warnings "$ROOT/examples/oci-lifecycle-host-fixture.js"

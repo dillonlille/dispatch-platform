@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-export NODE_NO_WARNINGS=1
-python3 -I "$ROOT/tests/native-runtime-archive.test.py"
-python3 -I "$ROOT/tests/release-package.test.py"
-exec node --test "$ROOT"/tests/*.test.js
