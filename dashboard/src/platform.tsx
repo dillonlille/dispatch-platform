@@ -384,20 +384,22 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
         />
         <ErrorBox message={error} />
         <Section title="Running build">
-          <p>This environment includes the owner dashboard and all of its test DSPs.</p>
-          <p>
-            Build: <code>{data.release.slice(0, 12)}</code>
-          </p>
-          {data.update?.commit && (
+          <div className="build-details">
+            <p>This environment includes the owner dashboard and all of its test DSPs.</p>
             <p>
-              Commit: <code>{data.update.commit.slice(0, 12)}</code>
+              Build: <code>{data.release.slice(0, 12)}</code>
             </p>
-          )}
-          {data.update && (
-            <p>
-              Update status: {title(data.update.status)} · {time(data.update.updatedAt)}
-            </p>
-          )}
+            {data.update?.commit && (
+              <p>
+                Commit: <code>{data.update.commit.slice(0, 12)}</code>
+              </p>
+            )}
+            {data.update && (
+              <p>
+                Update status: {title(data.update.status)} · {time(data.update.updatedAt)}
+              </p>
+            )}
+          </div>
         </Section>
         <div className="notice">
           Feature PRs merge into dev when approved. Successful builds update this platform
