@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
-  group: platform-checks-${{ github.ref }}
+  group: platform-checks-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   platform:
@@ -17,20 +18,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Select validation
+        id: validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tooling/ci-plan.py plan
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.2
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run check
-      - run: npm run format:check
-      - run: npm test
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm run build
-      - run: npm run test:artifact
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:ui
-      - run: python3 -m unittest discover -s tests -p '*_test.py'
+      - name: Validate and build
+        run: npm run check:ci -- ${{ steps.validation.outputs.mode }}
+      - name: Record PR validation
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        run: python3 tooling/ci-plan.py receipt --scope '${{ steps.validation.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
+      - name: Upload PR validation
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dispatch-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validation.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Package verified Dev build
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: tar -czf dispatch-dev.tar.gz -C .build .

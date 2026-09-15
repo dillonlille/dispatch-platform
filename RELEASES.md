@@ -2,11 +2,15 @@
 
 ## Dev updates
 
-Feature PRs target `dev`. The owner explicitly requests each feature merge.
+Feature PRs target `dev`. The owner gives standing approval to merge completed,
+reviewed feature PRs with passing checks unless they ask to hold a PR.
 Successful merged-dev checks upload a compiled GitHub Actions artifact. Because
 the repository is public, artifacts contain **code only**, never state or
 credentials. The configured Dev updater downloads and verifies that artifact and
-updates the full test platform automatically. See [DEVELOPMENT.md](DEVELOPMENT.md).
+updates the full test platform automatically, checking every 10 seconds. Exact
+merge-tree validation can be reused from a successful PR; a new build and smoke
+check still run against the merged commit. Release/manual checks always run the
+full suite. See [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Prepare a release
 

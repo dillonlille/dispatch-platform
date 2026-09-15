@@ -82,8 +82,13 @@ test(
       fs.writeFileSync(path.join(candidate, 'api/main.js'), 'process.exit(1);\n');
       const broken = writeManifest(candidate, '0.1.0-dev.2').digest;
       releases.register(candidate);
+      const failedAt = Date.now();
       const failed = releases.request(broken, 'preview', owner.id);
       await until(() => done(failed.id).status === 'failed', 60000);
+      assert(
+        Date.now() - failedAt < 10000,
+        'An exited process must fail without the health timeout',
+      );
       assert.equal(
         JSON.parse(fs.readFileSync(path.join(root, 'preview', 'release.json'), 'utf8')).digest,
         digest,
