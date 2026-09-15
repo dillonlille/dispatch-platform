@@ -32,6 +32,9 @@ First setup and operating commands are in [Dev setup](docs/DEV-SETUP.md).
 
 Inside a feature worktree:
 
+Install Rust via rustup (including its PATH setup) and a C compiler. The pinned
+toolchain is selected automatically; `npm run dev` compiles the Rust service first.
+
 ```bash
 npm ci --ignore-scripts
 npm run dev
@@ -44,7 +47,8 @@ root; never point the fixture runner at the persistent Dev state. Frontend edits
 hot reload; restart this local API runner after backend changes. Feature work does
 not change the shared Dev environment before merge.
 
-`npm run build` writes only `.build/`. It bundles the API and browser workers,
+`npm run build` writes the deployable artifact to `.build/`. It bundles the API and browser workers,
+compiles the Rust backend (using Cargo's ignored `target/` cache),
 installs locked runtime dependencies, records the source commit, and produces the
 SHA-256 `release.json` inventory. Building alone does not activate it.
 
@@ -56,6 +60,9 @@ screenshots. Remove only your own `/tmp` artifacts.
 
 ```bash
 npm run check
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 npm run format:check
 npm test
 python3 -m unittest discover -s tests -p '*_test.py'

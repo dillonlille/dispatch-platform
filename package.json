@@ -20,7 +20,11 @@
     "test:browser-host": "tsx tooling/browser-preflight.ts",
     "test:artifact": "DISPATCH_TEST_ARTIFACT=1 tsx --test tests/artifact.test.ts",
     "verify": "npm run check && npm test && npm run build",
-    "dispatch": "tsx tooling/cli.ts"
+    "dispatch": "tsx tooling/cli.ts",
+    "predev": "cargo build --locked",
+    "pretest": "cargo build --locked",
+    "test:rust": "cargo test --locked",
+    "benchmark:rust": "cargo build --release --locked && tsx tooling/benchmark-rust.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

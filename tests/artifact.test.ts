@@ -9,6 +9,7 @@ import { configuration } from '../services/config.js';
 import { ReleaseService } from '../services/releases/index.js';
 import { writeManifest } from '../services/releases/artifact.js';
 import { until } from './helpers.js';
+import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
 test(
   'built supervisor updates Preview, promotes the exact artifact, and restores code after failed health check',
   { skip: process.env.DISPATCH_TEST_ARTIFACT !== '1', timeout: 120000 },
@@ -33,7 +34,11 @@ test(
         'Artifact-test-password!',
         true,
       );
-      runtime.dsps.create('Dev DSP', 'UTC', owner.id, true);
+      const dsp = runtime.dsps.create('Dev DSP', 'UTC', owner.id, true);
+      const workforce = fixtureWorkforce(dsp);
+      runtime.runner.workforce.publish(dsp.id, workforce);
+      // The real updater discards executable bits when extracting tar archives.
+      fs.chmodSync(path.resolve('.build/services/rust/dispatch-backend'), 0o600);
       releases.initialize(path.resolve('.build'), owner.id);
       fs.writeFileSync(path.join(root, 'dsps', 'sentinel'), 'private DSP state', { mode: 0o600 });
       supervisor = spawn(process.execPath, [path.resolve('.build/tooling/supervisor.js')], {
@@ -75,11 +80,43 @@ test(
         release: string;
       };
       assert.equal(health.release, digest);
+      const origin = 'http://127.0.0.1:5200';
+      const login = await fetch(`${origin}/api/auth/login`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: owner.email, password: 'Artifact-test-password!' }),
+      });
+      assert.equal(login.status, 200);
+      const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+      const session = (await fetch(`${origin}/api/session`, { headers: { cookie } }).then((r) =>
+        r.json(),
+      )) as { csrf: string };
+      const view = (await fetch(`${origin}/api/session/dsp`, {
+        method: 'POST',
+        headers: {
+          cookie,
+          origin,
+          'content-type': 'application/json',
+          'x-csrf-token': session.csrf,
+        },
+        body: JSON.stringify({ dspId: dsp.id }),
+      }).then((r) => r.json())) as { token: string };
+      const detail = await fetch(`${origin}/api/dsp/employees/${workforce.employees[0]!.code}`, {
+        headers: { cookie, 'x-dispatch-view': view.token },
+      });
+      assert.equal(detail.status, 200);
+      assert.deepEqual(
+        await detail.json(),
+        runtime.runner.workforce.employee(dsp.id, workforce.employees[0]!.code),
+      );
       assert.equal(
         fs.readFileSync(path.join(root, 'dsps', 'sentinel'), 'utf8'),
         'private DSP state',
       );
-      fs.writeFileSync(path.join(candidate, 'api/main.js'), 'process.exit(1);\n');
+      fs.writeFileSync(
+        path.join(candidate, 'services/rust/dispatch-backend'),
+        'invalid executable\n',
+      );
       const broken = writeManifest(candidate, '0.1.0-dev.2').digest;
       releases.register(candidate);
       const failed = releases.request(broken, 'preview', owner.id);

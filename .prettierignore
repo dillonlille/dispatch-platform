@@ -7,3 +7,5 @@ dashboard/src/archive/styles.css
 
 dashboard/src/archive/paycom-workforce.css
 tests/archived-paycom/
+target/
+Cargo.lock
