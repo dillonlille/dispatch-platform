@@ -125,11 +125,10 @@ export async function createApp(
       request.headers['x-dispatch-view'],
       permission,
     );
-  app.get('/api/health', () => ({
-    status: 'ready',
-    environment: config.environment,
-    release: config.release,
-  }));
+  app.get('/api/health', async () => {
+    await runtime.rust.healthy();
+    return { status: 'ready', environment: config.environment, release: config.release };
+  });
   app.post('/api/auth/login', async (request, reply) => {
     const input = parse(z.object({ email, password: z.string().max(128) }).strict(), request);
     const result = await runtime.accounts.login(input.email, input.password, request.ip);
@@ -566,15 +565,17 @@ export async function createApp(
       input.direction,
     );
   });
-  app.get('/api/dsp/employees/:code', (request) => {
+  app.get('/api/dsp/employees/:code', async (request) => {
     const c = context(request);
-    return forContext(c).runner.workforce.employee(
+    const detail = await forContext(c).rust.employee(
       c.dsp.id,
       z
         .string()
         .regex(/^[A-Za-z0-9_-]{1,32}$/)
         .parse(params(request).code),
     );
+    runtime.accounts.revalidate(c, 'read');
+    return detail;
   });
   app.get('/api/dsp/timecards', (request) => {
     const c = context(request),
@@ -668,6 +669,16 @@ export async function createApp(
   app.addHook('onClose', async () => {
     await preview?.close();
     await runtime.close();
+  });
+  app.addHook('onReady', async () => {
+    try {
+      await runtime.rust.healthy();
+      await preview?.rust.healthy();
+    } catch (error) {
+      await preview?.close();
+      await runtime.close();
+      throw error;
+    }
   });
   if (options.startWorkers) {
     runtime.start();

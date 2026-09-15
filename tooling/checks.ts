@@ -43,6 +43,7 @@ if (mode === 'reuse') {
   if (mode === 'full') {
     checks.push(
       npm('test'),
+      npm('check:rust'),
       run('dependency audit', 'npm', ['audit', '--omit=dev', '--audit-level=high']),
       run('Python tests', 'python3', [
         '-m',

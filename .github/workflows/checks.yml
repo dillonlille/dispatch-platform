@@ -29,6 +29,7 @@ jobs:
           node-version: 22.23.2
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: rustup show active-toolchain
       - name: Validate and build
         run: npm run check:ci -- ${{ steps.validation.outputs.mode }}
       - name: Record PR validation

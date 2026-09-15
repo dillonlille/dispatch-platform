@@ -7,6 +7,7 @@ import { BrowserManager } from './browsers/manager.js';
 import { AuthBroker } from './auth-broker/index.js';
 import { Runner } from './jobs/runner.js';
 import type { Config } from './config.js';
+import { RustBackend } from './rust.js';
 export class Runtime {
   readonly storage: Storage;
   readonly accounts: Accounts;
@@ -16,7 +17,9 @@ export class Runtime {
   readonly browsers: BrowserManager;
   readonly broker: AuthBroker;
   readonly runner: Runner;
+  readonly rust: RustBackend;
   private mailTimer?: ReturnType<typeof setInterval>;
+  private closed = false;
   constructor(readonly config: Config) {
     this.storage = new Storage(config);
     this.audit = new Audit(this.storage);
@@ -26,6 +29,7 @@ export class Runtime {
     this.browsers = new BrowserManager(this.storage);
     this.broker = new AuthBroker(this.storage, this.audit, this.browsers);
     this.runner = new Runner(this.storage, this.broker, this.audit);
+    this.rust = new RustBackend(config);
   }
   start() {
     this.runner.start();
@@ -35,8 +39,11 @@ export class Runtime {
     }
   }
   async close() {
+    if (this.closed) return;
+    this.closed = true;
     if (this.mailTimer) clearInterval(this.mailTimer);
     await this.runner.close();
+    await this.rust.close();
     this.storage.close();
   }
 }

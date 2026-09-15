@@ -8,6 +8,12 @@ const root = process.cwd(),
   out = path.join(root, '.build');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
+execFileSync('cargo', ['build', '--release', '--locked'], { stdio: 'inherit' });
+fs.mkdirSync(path.join(out, 'services/rust'), { recursive: true });
+fs.copyFileSync(
+  'target/release/dispatch-backend',
+  path.join(out, 'services/rust/dispatch-backend'),
+);
 await viteBuild();
 await build({
   entryPoints: {
@@ -24,6 +30,7 @@ await build({
   target: 'node22',
   packages: 'external',
   sourcemap: false,
+  define: { 'process.env.DISPATCH_BUNDLED': '"1"' },
 });
 fs.cpSync('integrations/paycom/provider', path.join(out, 'services/runtime/provider'), {
   recursive: true,

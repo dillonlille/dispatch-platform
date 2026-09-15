@@ -10,7 +10,8 @@ There is no Plugins page. Paycom is configured on a DSP’s **Connections** page
 
 ## Develop
 
-Requires Node **22.23.2**, npm, and Linux for native browser workers.
+Requires Node **22.23.2**, npm, Rust via rustup (pinned in `rust-toolchain.toml`),
+a C compiler, and Linux for native services and browser workers.
 
 ```bash
 npm ci --ignore-scripts
@@ -35,6 +36,7 @@ Stop the development runner with Ctrl+C before removing its state directory.
 ```text
 dashboard/          React dashboard, responsive layouts, forms and tables
 api/                HTTP API, signed DSP views, Preview gateway, server entrypoint
+backend/            Rust service; employee-detail reads over a private Unix socket
 services/
   accounts/         Accounts, sessions, invitations, password recovery, mail outbox
   dsps/             Provisioning, memberships, settings, suspension
@@ -85,3 +87,5 @@ owner to configure a Dev DSP connection.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md),
 [security](docs/SECURITY.md), and [RELEASES.md](RELEASES.md).
+The [Rust migration](docs/RUST-MIGRATION.md) describes the first backend slice,
+verification, measurements and remaining migration work.

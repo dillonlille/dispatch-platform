@@ -18,6 +18,7 @@ export interface Config {
   browserExecutable?: string;
   sandboxExecutable?: string;
   runtimeBundle?: string;
+  rustBackendPath?: string;
   smtpUrl?: string;
   mailFrom?: string;
   previewOrigin?: string;

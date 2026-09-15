@@ -53,7 +53,11 @@ test('credentials close before login finishes, errors stay on the card, and CAPT
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByRole('button', { name: /Northline Logistics/ }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
-    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('link', { name: 'Settings', exact: true });
+    // Both platform and DSP navigation have Settings. Wait for the selected DSP
+    // view before clicking, including when its session request is still loading.
+    await expect(settings).toHaveAttribute('href', /^#dsp\/dsp_[a-f0-9]{32}\/settings$/);
+    await settings.click();
     await page.getByRole('tab', { name: 'Connections', exact: true }).click();
     const card = page
       .getByRole('article')
