@@ -315,18 +315,6 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
           </p>
         </>
       )}
-      {tab === 'drivers' && (
-        <p className="plugin-settings-preview">
-          Timecard coverage:{' '}
-          {base.options.departments
-            .filter(
-              (d) =>
-                draft.driver_departments === null || draft.driver_departments.includes(d.value),
-            )
-            .reduce((sum, d) => sum + d.count, 0)}{' '}
-          employees
-        </p>
-      )}
       {tab === 'sync' && (
         <div className="paycom-settings-status">
           <p>
@@ -366,42 +354,46 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
           </div>
         </div>
       )}
-      <button disabled={busy} onClick={restoreSection}>
-        Restore {sections.find(([key]) => key === tab)![1]} defaults
-      </button>
-      <div className="plugin-settings-defaults">
-        <button className="text-button" disabled={busy} onClick={() => setReset(true)}>
-          Restore defaults
-        </button>
-        <button
-          className="text-button"
-          aria-expanded={history}
-          onClick={() => setHistory(!history)}
-        >
-          Change history
-        </button>
-        <span>Settings apply to this DSP.</span>
-      </div>
-      {history && (
-        <section aria-label="Settings change history">
-          {base.history.length ? (
-            base.history.map((entry) => (
-              <div className="runtime-row" key={entry.revision}>
-                <span>
-                  Revision {entry.revision} · {time(entry.at)}
-                </span>
-                <button
-                  disabled={busy || newer}
-                  onClick={() => setDraft(structuredClone(entry.values))}
-                >
-                  Restore
-                </button>
-              </div>
-            ))
-          ) : (
-            <p className="muted">No previous settings yet.</p>
+      {tab !== 'drivers' && (
+        <>
+          <button disabled={busy} onClick={restoreSection}>
+            Restore {sections.find(([key]) => key === tab)![1]} defaults
+          </button>
+          <div className="plugin-settings-defaults">
+            <button className="text-button" disabled={busy} onClick={() => setReset(true)}>
+              Restore defaults
+            </button>
+            <button
+              className="text-button"
+              aria-expanded={history}
+              onClick={() => setHistory(!history)}
+            >
+              Change history
+            </button>
+            <span>Settings apply to this DSP.</span>
+          </div>
+          {history && (
+            <section aria-label="Settings change history">
+              {base.history.length ? (
+                base.history.map((entry) => (
+                  <div className="runtime-row" key={entry.revision}>
+                    <span>
+                      Revision {entry.revision} · {time(entry.at)}
+                    </span>
+                    <button
+                      disabled={busy || newer}
+                      onClick={() => setDraft(structuredClone(entry.values))}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="muted">No previous settings yet.</p>
+              )}
+            </section>
           )}
-        </section>
+        </>
       )}
       <footer className="plugin-settings-footer">
         <span role="status">
