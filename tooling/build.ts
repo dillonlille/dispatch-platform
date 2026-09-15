@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { build as viteBuild } from 'vite';
-import { writeManifest, verifyArtifact } from '../services/releases/artifact.js';
+import { writeManifest, verifyArtifact } from './artifact.js';
 const root = process.cwd(),
   out = path.join(root, '.build');
 fs.rmSync(out, { recursive: true, force: true });
@@ -17,9 +17,6 @@ fs.copyFileSync(
 await viteBuild();
 await build({
   entryPoints: {
-    'api/main': 'api/main.ts',
-    'tooling/cli': 'tooling/cli.ts',
-    'tooling/supervisor': 'tooling/supervisor.ts',
     'services/runtime/auth-worker': 'services/browsers/auth-worker.ts',
     'services/runtime/collection-worker': 'services/browsers/collection-worker.ts',
   },
@@ -37,7 +34,8 @@ fs.cpSync('integrations/paycom/provider', path.join(out, 'services/runtime/provi
 });
 fs.mkdirSync(path.join(out, 'services/runtime/node_modules'), { recursive: true });
 for (const name of ['package.json', 'package-lock.json'])
-  fs.copyFileSync(name, path.join(out, name));
+  fs.copyFileSync(path.join('tooling/worker-runtime', name), path.join(out, name));
+fs.mkdirSync(path.join(out, 'tooling'), { recursive: true });
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 fs.writeFileSync(path.join(out, 'tooling/build-info.json'), JSON.stringify({ commit }) + '\n');
 execFileSync(

@@ -5,88 +5,51 @@ import path from 'node:path';
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
-import { fixture } from './helpers.js';
-import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
-import { Egress, publicAddress } from '../services/browsers/egress.js';
-
-test('egress refuses loopback, private addresses and unapproved destinations', async (t) => {
-  for (const address of [
-    '127.0.0.1',
-    '10.1.1.1',
-    '172.16.0.1',
-    '192.168.0.1',
-    '169.254.169.254',
-    '100.64.1.1',
-    '::ffff:127.0.0.1',
-    '::1',
-  ])
-    assert.equal(publicAddress(address), false);
-  const f = await fixture();
-  t.after(() => f.close());
-  const proxy = new Egress(path.join(f.root, 'egress.sock'), { hosts: [] });
-  await proxy.listen();
-  t.after(() => proxy.close());
-  const response = await new Promise<string>((resolve) => {
-    const socket = net.connect(proxy.socketPath);
-    let data = '';
-    socket.on('data', (chunk) => (data += chunk.toString()));
-    socket.once('close', () => resolve(data));
-    socket.on('error', () => {});
-    socket.write('CONNECT 127.0.0.1:80 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
-  });
-  assert.equal(response, '');
-});
+import { chromium } from 'playwright';
+import { fixture, until } from './rust-support.js';
+import { fixtureWorkforce } from './paycom-fixture.js';
 
 test(
-  'saving credentials starts native Chromium in long state paths, verifies, collects and isolates DSP profiles',
+  'Rust browser broker verifies and collects in long state paths with separate DSP profiles',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
   async (t) => {
-    assert(
-      fs.existsSync('.build/services/runtime/auth-worker.js'),
-      'Build before native verification',
-    );
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-native-'));
-    const f = await fixture({
-      runtimeBundle: path.resolve('.build/services/runtime'),
-      stateRoot: path.join(root, 'nested-platform-directory-'.repeat(4), 'dev'),
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-rust-browser-'));
+    const stateRoot = path.join(root, 'nested-platform-directory-'.repeat(4), 'dev');
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    let authenticatedRequests = 0,
+      loginRequests = 0;
+    const workforce = fixtureWorkforce({
+      id: 'fixture',
+      name: 'Fixture',
+      environment: 'preview',
+      status: 'active',
+      timezone: 'UTC',
+      permanent: false,
+      revision: 1,
+      createdAt: new Date().toISOString(),
     });
-    t.after(async () => {
-      await f.close();
-      fs.rmSync(root, { recursive: true, force: true });
-    });
-    const client = await f.client(),
-      dsp = client.session.dsps.find((d) => d.name === 'Northline Logistics')!;
-    let authenticatedRequests = 0;
-    const requests: string[] = [];
     const server = http.createServer((req, res) => {
-      requests.push(`${req.method} ${req.url}`);
       const logged = req.headers.cookie?.includes('fixture_session=one');
       res.setHeader('Content-Type', 'text/html');
-      if (req.url === '/login' && logged) {
-        res.end('<main data-authenticated="true">Connected</main>');
-        return;
-      }
+      if (req.url === '/login' && logged)
+        return res.end('<main data-authenticated="true">Connected</main>');
       if (req.url === '/login') {
-        res.end(
+        loginRequests++;
+        return res.end(
           '<form method="post" action="/challenge"><input name="clientcode"><input name="username"><input name="password" type="password"><button>Sign in</button></form>',
         );
-        return;
       }
-      if (req.url === '/challenge') {
-        res.end(
+      if (req.url === '/challenge')
+        return res.end(
           '<form method="post" action="/verified"><input name="code" autocomplete="one-time-code"><button>Verify</button></form>',
         );
-        return;
-      }
       if (req.url === '/verified') {
         res.setHeader('Set-Cookie', 'fixture_session=one; Path=/; Max-Age=3600; HttpOnly');
-        res.end('<main data-authenticated="true">Connected</main>');
-        return;
+        return res.end('<main data-authenticated="true">Connected</main>');
       }
       if (req.url === '/workforce' && logged) {
         authenticatedRequests++;
-        res.end(`<pre>${JSON.stringify(fixtureWorkforce(dsp))}</pre>`);
-        return;
+        return res.end(`<pre>${JSON.stringify(workforce)}</pre>`);
       }
       res.writeHead(403);
       res.end('Not authenticated');
@@ -100,65 +63,86 @@ test(
         }),
     );
     const url = `http://fixture.dispatch.invalid:${(server.address() as net.AddressInfo).port}`;
-    let diagnostics = '';
-    // Route the real API/broker/worker flow to the local provider fixture.
-    const acquire = f.runtime.browsers.acquire.bind(f.runtime.browsers);
-    t.mock.method(
-      f.runtime.browsers,
-      'acquire',
-      (...[target, credentials]: Parameters<typeof acquire>) => {
-        const pending = acquire(target, credentials, url);
-        f.runtime.browsers.sessions
-          .get(target.id)
-          ?.on('diagnostic', (text) => (diagnostics += String(text)));
-        return pending;
+    const f = await fixture({
+      env: {
+        DISPATCH_STATE_ROOT: stateRoot,
+        DISPATCH_RUNTIME_BUNDLE: path.resolve('.build/services/runtime'),
+        DISPATCH_FIXTURE_PROVIDER_URL: url,
+        DISPATCH_BROWSER_EXECUTABLE: chromium.executablePath(),
       },
+    });
+    t.after(f.close);
+    const owner = await f.client();
+    const north = owner.session.dsps.find(
+      (d: { name: string }) => d.name === 'Northline Logistics',
     );
-    await client.select(dsp.id);
+    const summit = owner.session.dsps.find((d: { name: string }) => d.name === 'Summit Delivery');
+    await owner.select(north.id);
     const credentials = {
       clientCode: 'test',
       username: 'test',
       password: 'test',
       securityAnswers: ['one', 'two', 'three', 'four', 'five'],
     };
-    const saved = await client.post('/api/dsp/connections/paycom', credentials);
-    assert.equal(saved.statusCode, 200, `${saved.body}\n${diagnostics}`);
-    assert.equal(saved.json().status, 'needs_verification');
-    assert.deepEqual(f.runtime.broker.vault.read(dsp.id), credentials);
-    const session = f.runtime.browsers.sessions.get(dsp.id)!;
-    assert.equal(session.status, 'challenge');
-    const screenshot = await session.screenshot();
-    assert(screenshot.length > 1000);
-    try {
-      const verified = await client.post('/api/dsp/connections/paycom/verify', { code: '123456' });
-      assert.equal(verified.statusCode, 200, verified.body);
-      assert.equal(verified.json().status, 'ready');
-      assert.equal(session.status, 'ready');
-      const data = await session.collect(() => {});
-      assert.equal(data.employees.length, 12);
-      assert.equal(authenticatedRequests, 1);
-    } catch (error) {
-      fs.writeFileSync('/tmp/dispatch-native-failure.png', Buffer.from(screenshot, 'base64'));
-      throw new Error(
-        `${(error as Error).message}\nRequests: ${requests.join(', ')}\n${diagnostics}`,
-      );
-    }
-    await session.close();
-    const next = await f.runtime.browsers.acquire(
-      dsp,
-      { clientCode: 'ignored', username: 'ignored', password: 'ignored' },
-      url,
+    const saved = await owner.post('/api/dsp/connections/paycom', credentials);
+    assert.equal(saved.status, 200, saved.body);
+    assert.equal(saved.value.status, 'needs_verification');
+    const sessionId = saved.value.verificationSessionId;
+    assert.match(sessionId, /^run_[a-f0-9]{32}$/);
+    const frame = await owner.get(`/api/dsp/connections/paycom/screenshot?sessionId=${sessionId}`);
+    assert.equal(frame.status, 200, frame.body);
+    assert(frame.value.image.length > 1000);
+    const member = await f.client('member@dispatch.test');
+    await member.select(north.id);
+    assert.equal(
+      (await member.get(`/api/dsp/connections/paycom/screenshot?sessionId=${sessionId}`)).status,
+      403,
     );
-    assert.equal(next.status, 'ready');
-    await next.close();
-    const other = client.session.dsps.find((d) => d.name === 'Summit Delivery')!;
-    const separate = await f.runtime.browsers.acquire(
-      other,
-      { clientCode: 'test', username: 'test', password: 'test' },
-      url,
+    assert.equal(
+      (
+        await f.request(
+          '/api/dsp/connections/paycom/assist',
+          { sessionId, input: { kind: 'click', x: 10, y: 10 } },
+          { ...owner.headers, 'x-csrf-token': 'wrong' },
+        )
+      ).status,
+      403,
     );
-    assert.equal(separate.status, 'challenge');
-    await separate.close();
-    assert.equal(f.runtime.browsers.health().active, 0);
+    await owner.select(summit.id);
+    assert.equal(
+      (await owner.get(`/api/dsp/connections/paycom/screenshot?sessionId=${sessionId}`)).status,
+      409,
+    );
+    await owner.select(north.id);
+    assert.equal(
+      (
+        await owner.post('/api/dsp/connections/paycom/assist', {
+          sessionId,
+          input: { kind: 'click', x: 1e9, y: 10 },
+        })
+      ).status,
+      400,
+    );
+    const verified = await owner.post('/api/dsp/connections/paycom/verify', { code: '123456' });
+    assert.equal(verified.status, 200, verified.body);
+    assert.equal(verified.value.status, 'ready');
+    const job = await owner.post('/api/dsp/jobs', { requestId: 'native-collection' });
+    assert.equal(job.status, 202);
+    await until(async () => {
+      const value = (await owner.get('/api/dsp/jobs')).value[0];
+      assert.notEqual(value.status, 'failed', JSON.stringify(value));
+      return value.status === 'succeeded';
+    }, 45000);
+    assert.equal(authenticatedRequests, 1);
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 12);
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    await owner.select(summit.id);
+    const second = await owner.post('/api/dsp/connections/paycom', credentials);
+    assert.equal(second.value.status, 'needs_verification', second.body);
+    assert.equal(loginRequests, 2);
+    const profile = (id: string) => path.join(stateRoot, 'dsps', id, 'state/browsers/paycom');
+    assert.notEqual(fs.statSync(profile(north.id)).ino, fs.statSync(profile(summit.id)).ino);
+    assert.equal(fs.statSync(profile(north.id)).mode & 0o077, 0);
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 0);
   },
 );

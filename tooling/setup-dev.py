@@ -48,7 +48,8 @@ def main():
     commit = updates.command("git", "rev-parse", "HEAD", cwd=live)
     updates.require(commit == updates.command("git", "rev-parse", "origin/dev", cwd=live),
                     "Setup requires merged dev HEAD")
-    updates.verify_artifact(live / ".build", commit)
+    manifest = updates.verify_artifact(live / ".build", commit)
+    updates.require(manifest["format"] == 2, "Rust core artifact required")
     accounts = root / "data/platform/accounts.sqlite"
     updates.require(not accounts.exists() and not (root / "config/platform.env").exists(),
                     "Dev already configured; preserve existing accounts and configuration")
@@ -60,6 +61,7 @@ def main():
         "DISPATCH_ORIGIN": args.origin,
         "DISPATCH_PROVIDER_MODE": args.provider,
         "PORT": "5180",
+        "DISPATCH_WORKER_NODE": str(Path(shutil.which("node")).resolve()),
     }
     if args.sandbox_executable:
         executable = args.sandbox_executable.resolve()
@@ -68,10 +70,12 @@ def main():
                         "Root-owned sandbox executable required")
         env["DISPATCH_BWRAP_EXECUTABLE"] = str(executable)
     password = secrets.token_urlsafe(30)
-    subprocess.run([shutil.which("node"), str(live / ".build/tooling/cli.js"), "bootstrap",
+    binary = live / ".build/services/rust/dispatch-backend"
+    binary.chmod(0o700)
+    subprocess.run([str(binary), "bootstrap",
                     args.owner_email, args.first_name, args.last_name],
                    input=password + "\n", text=True, check=True,
-                   env={**os.environ, **env}, cwd=live)
+                   env={**os.environ, **env}, cwd=live / ".build")
     # systemd EnvironmentFile is not a shell; JSON quoting handles spaces/backslashes.
     filename = root / "config/platform.env"
     with filename.open("x") as output:

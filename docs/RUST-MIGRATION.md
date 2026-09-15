@@ -1,91 +1,134 @@
-# Rust backend migration
+# Rust platform core
 
-## First slice
+## Scope
 
-Employee detail (`GET /api/dsp/employees/:code`) now reads through the Rust
-`dispatch-backend` executable. The React dashboard and public response contract
-are unchanged. The Fastify gateway checks the session and signed DSP view before
-calling Rust, then rechecks permission before returning the asynchronous result.
+The Node platform core is retired. One Rust executable serves the HTTP API and
+static React dashboard and owns accounts, sessions, authorization, DSP lifecycle,
+credential encryption, browser orchestration, jobs, schedules, mail, audit,
+workforce publication, backup and restore. Systemd starts it directly on loopback.
+The Node API, Preview gateway, supervisor, platform services and deployed Node CLI
+are removed from both source and build artifacts.
 
-Rust uses Axum/Tokio for a private HTTP service and rusqlite with bundled SQLite.
-Each API runtime owns one child process and a Unix socket in a private temporary
-directory (0700 directory, 0600 socket). Rust opens no TCP listener. The gateway
-passes a validated DSP identity and employee code, never a request-supplied path.
-This socket is a trusted internal interface: possession of the Unix account's
-permissions grants access; it is not a public authenticated API.
+The isolated Paycom authentication and collection workers remain Node/Playwright.
+They retain the archived provider flow, private profiles, manual verification,
+native input, nested Chromium sandbox and narrowly scoped CDP access. There is no
+always-running Node parent process. Browser workers start when needed and close
+when their work ends; ready sessions idle for 60 seconds are closed. Node is also
+used for frontend development, build tools and test harnesses.
 
-SQLite connections are read-only and use a transaction to read preferences, the
-latest publication containing that employee, and its timecards consistently.
-The existing TypeScript publisher remains the sole writer. Schema version 1 is
-required; unsupported schemas fail closed. Tenant path checks reject symlinks,
-hardlinked database files and non-private permissions. Browser namespaces and
-credential vault access are unchanged.
+## Runtime
 
-Blocking database work runs outside Tokio's HTTP threads with at most eight
-concurrent database reads. The gateway admits at most 32 pending calls, with a
-five-second deadline and a 16 MiB response ceiling. Overload/unavailability returns 503. Database errors return a generic 500 without private details. Readiness requires
-the Rust protocol health check; a missing or unusable executable fails startup and
-therefore the existing deployment health check. A crashed process can restart on
-the next request after a one-second cooldown. There is no silent TypeScript fallback.
-Shutdown closes the pipe and terminates the child, escalating after two seconds.
-The child also exits when its parent pipe disappears unexpectedly.
+- Axum/Tokio handles HTTP, worker I/O, deadlines and cancellation.
+- Four blocking database workers have a 64-operation admission bound and a
+  two-second admission timeout. Reads can overlap; state transitions serialize.
+- Reused SQLite connections use WAL, full synchronous durability, prepared
+  statements and bounded page caches. A worker caches at most four DSP databases.
+- Employee filtering, Unicode collation and pagination run in SQLite. Timecard
+  ordering borrows values instead of cloning punch arrays during comparisons.
+- Argon2id password verification runs outside the database transition lock and
+  admits at most two simultaneous verifications. Sessions and signed DSP views
+  revalidate account and membership versions on every request.
+- Browser capacity is two per environment, with at most 32 queued commands per
+  session. Authority is checked again after a command waits. Revision-aware
+  cleanup prevents an old job from closing a newer connection.
+- Collection validates the complete dataset and commits a publication atomically.
+  Cancellation, suspension, revoked authority and credential changes prevent late
+  publication. Startup recovers jobs before serving requests and removes orphan
+  ephemeral browser runs while holding the environment lock. An essential
+  background task failure shuts down the core so systemd can restart it.
 
-The TypeScript employee reader remains as a compatibility oracle for tests and
-benchmarks. Employee lists, daily timecards, accounts, jobs, publication, credential
-handling and browser workers have not migrated yet.
+Private directories require mode 0700 and files have private modes. The core
+rejects symlinks, hardlinks and incompatible account schema versions. The account
+database is version 3; provider secrets use a new authenticated-encryption binding.
+A Node state directory cannot be opened as a Rust platform accidentally.
 
-## Build and verification
+## Artifact and operations
 
-Install Rust with rustup and add its `bin` directory to PATH. `rust-toolchain.toml`
-pins the compiler, formatter and Clippy; commit Cargo.lock. Linux and a C compiler
-are required for this initial native build. CI builds on Ubuntu 24.04 x86_64; the
-artifact requires a compatible Linux x86_64 host with glibc 2.39 or newer. Other
-architectures need their own verified artifact.
+`npm run build` produces a format-2, schema-3 artifact containing:
 
-```bash
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-npm test
-npm run build
-npm run test:artifact
-npm run test:ui
+```text
+services/rust/dispatch-backend
+services/runtime/auth-worker.js
+services/runtime/collection-worker.js
+services/runtime/provider/
+dashboard/
+node_modules/                     Playwright and Zod for isolated workers
+package.json / package-lock.json
+tooling/build-info.json
+release.json                     Full inventory, source metadata and digest
 ```
 
-`npm test` and `npm run dev` build the debug executable first. `npm run build`
-compiles a release executable into `.build/services/rust/dispatch-backend` and
-includes it in the existing SHA-256 inventory. Installed environments need no Rust
-toolchain. After verified archive extraction, the bundled gateway restores owner
-execute permission on that specific binary; tar-supplied permissions remain ignored.
-The database and artifact formats do not change, allowing code rollback.
+The external Python updater verifies the exact successful merged-dev artifact,
+restores executable permissions after extraction, and rolls back compatible code
+on startup failure. The initial Node-to-Rust transition requires the explicitly
+authorized [fresh Dev cutover](DEV-SETUP.md#fresh-state-cutover-from-the-node-core).
+It bootstraps and verifies a new owner and empty permanent Dev DSP before erasing
+old state. Archive, Production and unrelated configuration remain outside its scope.
 
-Tests compare real Rust HTTP results with the existing reader, including historical
-publications, Unicode names, inactive employees, timecard ordering and multiple
-DSPs. They exercise authentication, permission revocation during a read, unsafe
-paths, incompatible schemas, missing executables, child crashes and parent loss.
-The artifact test checks the built endpoint and rollback after a broken Rust binary.
+Installed operational commands are direct Rust commands. Load the appropriate
+private environment first:
 
-Run `npm run benchmark:rust` for a repeatable synthetic microbenchmark. It compares
-direct TypeScript reads with Rust calls including Unix HTTP overhead, checks response
-equality, and reports latency plus the Rust process's resident memory before/after
-500 reads. The Node harness measurement includes fixtures and test tooling.
-It does not measure browser collection memory or predict whole-platform savings.
+```text
+dispatch-backend serve
+dispatch-backend bootstrap EMAIL FIRST LAST < private-password-file
+dispatch-backend status
+dispatch-backend backup /absolute/private/backup
+dispatch-backend restore /absolute/private/backup /absolute/empty/target
+```
 
-**This phase adds a Rust process while Node still runs the platform, so total idle
-memory may increase.** Lower overall memory becomes a measurable objective as more
-services migrate and the Node core can be removed. No savings percentage is claimed.
+Bootstrap accepts a password only through stdin. Backup requires the serving
+process to be stopped; the exclusive environment lock prevents mixed snapshots.
+Restore verifies checksums and revokes web capabilities and pending jobs. Status
+uses a read-only database connection and works while the service is running.
 
-## Next slices
+## Verification
 
-1. Move employee lists and daily timecards, preserving preferences, pagination,
-   locale-sensitive sorting and historical-publication behavior with parity tests.
-2. Move queue claiming, scheduling, cancellation and recovery, with one authoritative
-   scheduler and writer at each cutover. Test crashes and credential-generation changes.
-3. Move accounts, sessions, DSP authorization, audit and the public gateway. Preserve
-   existing session/credential formats or explicitly plan their transition.
-4. Move publication and operational tooling, then retire the Node core. Keep the
-   isolated Node/Playwright provider workers until there is a measured reason to port them.
+Rust unit/integration tests cover crypto binding, storage permissions, incompatible
+schema refusal, publication validation/atomicity, queue limits, authority changes,
+DST scheduling and the actual egress proxy. TypeScript tests exercise a real Rust
+TCP server for onboarding, sessions, roles, invitations, password recovery,
+credential verification, jobs, cancellation, recovery, workforce settings,
+Unicode ordering, database contention, backup and independent platform isolation.
 
-At each cutover, compare representative idle/load memory, p95 latency, failures and
-long-running recovery behavior in Dev. Keep SQLite and private-state layout stable
-until a separate storage decision is justified by measured contention or scale.
+The installed artifact test checks a fresh owner login, empty DSP, dashboard,
+release digest and the absence of a Node core process or entrypoint. Python tests
+cover immutable artifacts, dirty checkout protection, normal Rust code rollback
+and fresh-state reset recovery. Existing dashboard tests run against the built
+Rust artifact. Native tests exercise the real isolated worker and local provider
+fixtures, including CAPTCHA assistance, PIN handling and collection. Host checks
+verify nested namespaces, seccomp and native OS input.
+
+Legacy gateway and pilot socket tests were replaced by direct Rust API and
+external-updater tests. Their production features were removed, not retained as a
+fallback. Real Paycom account behavior still requires testing with the owner's
+credentials; synthetic/native fixture results do not measure provider latency.
+
+## Reproduce the performance comparison
+
+```bash
+DISPATCH_BENCHMARK_BASELINE=/absolute/previous-node-artifact npm run benchmark:rust
+```
+
+The baseline path supplies code only. The script creates separate temporary state,
+seeds 3,000 employees and 90,000 timecards identically in both implementations, and
+uses real local TCP requests with login and signed DSP views. Each concurrency
+level runs 240 requests across employee list/search/detail, daily timecards and
+session routes. Response content is validated throughout. Memory includes each
+core process and descendants; Chromium and provider networking are excluded.
+Temporary state and processes are removed at completion.
+
+Measurements are stored in [core-benchmark.json](core-benchmark.json). They describe
+one Linux host and a synthetic workload; they are not production capacity limits.
+Rust lowers baseline memory and supports overlapping reads, but horizontal scaling
+still requires a design for shared state, distributed job ownership and tenant
+placement. SQLite remains local to each independent platform.
+
+Measured on the local Linux host (decimal MB):
+
+| Metric                                  | Previous Node core | Rust core |
+| --------------------------------------- | -----------------: | --------: |
+| Idle core + descendants                 |           187.3 MB |   11.3 MB |
+| Peak during workload                    |           276.2 MB |   94.2 MB |
+| Throughput, 16 concurrent requests      |           35 req/s | 156 req/s |
+| p95 latency, 16 concurrent requests     |         1224.05 ms | 174.42 ms |
+| Errors across all 960 measured requests |                  0 |         0 |

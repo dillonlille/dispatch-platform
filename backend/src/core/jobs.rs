@@ -1,0 +1,325 @@
+use super::{
+    Error, Result, State, crypto,
+    db::{Store, at, flag, iso, n, now, s},
+    ensure,
+};
+use rusqlite::params;
+use serde_json::{Value, json};
+use std::{sync::Arc, time::Duration};
+impl Store {
+    pub fn public_job(&self, row: &Value) -> Result<Value> {
+        Ok(
+            json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":self.get_dsp(s(row,"dsp_id"))?["name"],"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"]}),
+        )
+    }
+    pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
+        let rows = self.jobs.all(
+            "SELECT * FROM jobs WHERE (? IS NULL OR dsp_id=?) ORDER BY created_at DESC LIMIT 200",
+            params![id, id],
+        )?;
+        Ok(json!(
+            rows.iter()
+                .map(|r| self.public_job(r))
+                .collect::<Result<Vec<_>>>()?
+        ))
+    }
+    pub fn job(&self, id: &str, dsp: Option<&str>) -> Result<Value> {
+        self.jobs
+            .one(
+                "SELECT * FROM jobs WHERE id=? AND (? IS NULL OR dsp_id=?)",
+                params![id, dsp, dsp],
+            )?
+            .ok_or_else(|| Error::new("job_not_found", 404))
+    }
+    pub fn enqueue(&self, id: &str, actor: Option<&str>, key: &str) -> Result<Value> {
+        let dsp = self.get_dsp(id)?;
+        ensure(
+            s(&dsp, "status") == "active" && s(&dsp, "environment") == self.config.environment,
+            "dsp_unavailable",
+            409,
+        )?;
+        let connection = self
+            .dsp(id)?
+            .one(
+                "SELECT enabled,revision FROM connections WHERE provider='paycom'",
+                [],
+            )?
+            .unwrap();
+        ensure(flag(&connection, "enabled"), "connection_required", 409)?;
+        self.jobs.transaction(||{
+            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {return self.public_job(&row);}
+            ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
+            let job=crypto::id("job")?;
+            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key) VALUES (?,?,?,'paycom.collect','queued',?,?,?,?,?,?)",params![job,id,self.config.environment,now(),iso(),self.config.release,actor,n(&connection,"revision"),key])?;
+            self.public_job(&self.job(&job,None)?)
+        })
+    }
+    pub fn cancel_job(&self, id: &str, dsp: &str) -> Result<Value> {
+        self.job(id, Some(dsp))?;
+        self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE id=? AND dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id,dsp])?;
+        self.public_job(&self.job(id, Some(dsp))?)
+    }
+    pub fn cancel_dsp(&self, id: &str) -> Result<()> {
+        self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id])?;
+        Ok(())
+    }
+    pub fn guard_job(&self, id: &str, owner: &str) -> Result<Value> {
+        let row = self.job(id, None)?;
+        ensure(
+            s(&row, "lease_owner") == owner
+                && ["running", "waiting_verification"].contains(&s(&row, "status"))
+                && n(&row, "lease_until") > now(),
+            "job_cancelled",
+            409,
+        )?;
+        let dsp = self.get_dsp(s(&row, "dsp_id"))?;
+        ensure(
+            s(&dsp, "status") == "active" && s(&dsp, "environment") == self.config.environment,
+            "dsp_unavailable",
+            409,
+        )?;
+        if let Some(actor) = row["actor_id"].as_str() {
+            let user=self.platform.one("SELECT u.status,u.platform_owner,m.role FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.dsp_id=? WHERE u.id=?",[s(&row,"dsp_id"),actor])?.ok_or_else(||Error::new("permission_denied",403))?;
+            ensure(
+                s(&user, "status") == "active"
+                    && (flag(&user, "platform_owner")
+                        || ["owner", "manager"].contains(&s(&user, "role"))),
+                "permission_denied",
+                403,
+            )?;
+        }
+        let connection = self
+            .dsp(s(&row, "dsp_id"))?
+            .one(
+                "SELECT enabled,revision FROM connections WHERE provider='paycom'",
+                [],
+            )?
+            .unwrap();
+        ensure(
+            flag(&connection, "enabled") && connection["revision"] == row["connection_revision"],
+            "connection_changed",
+            409,
+        )?;
+        Ok(dsp)
+    }
+    pub fn recover_jobs(&self, all: bool) -> Result<()> {
+        self.jobs.exec("UPDATE jobs SET status=CASE WHEN attempt>=max_attempts THEN 'failed' ELSE 'queued' END,message='Recovered interrupted collection',error='worker_interrupted',available_at=?,completed_at=CASE WHEN attempt>=max_attempts THEN ? ELSE NULL END,lease_owner=NULL,lease_until=NULL WHERE status IN ('running','waiting_verification') AND (? OR lease_until<?)",params![now(),iso(),all,now()])?;
+        Ok(())
+    }
+    pub fn claim(&self, owner: &str, eligible: impl Fn(&str) -> bool) -> Result<Option<Value>> {
+        self.jobs.transaction(|| {
+            if n(&self.jobs.one("SELECT count(*) n FROM jobs WHERE status IN ('running','waiting_verification')",[])?.unwrap(),"n")>=self.config.browser_capacity as i64 {return Ok(None);}
+            let rows=self.jobs.all("SELECT * FROM jobs j WHERE j.status='queued' AND j.available_at<=? AND NOT EXISTS (SELECT 1 FROM jobs active WHERE active.dsp_id=j.dsp_id AND active.status IN ('running','waiting_verification')) ORDER BY (SELECT COALESCE(MAX(completed_at),'') FROM jobs previous WHERE previous.dsp_id=j.dsp_id),j.created_at LIMIT 200",[now()])?;
+            let Some(row)=rows.into_iter().find(|r|eligible(s(r,"dsp_id"))) else {return Ok(None);};
+            self.jobs.exec("UPDATE jobs SET status='running',attempt=attempt+1,started_at=?,lease_owner=?,lease_until=?,message='Starting collection' WHERE id=?",params![iso(),owner,now()+120000,s(&row,"id")])?;
+            Ok(Some(self.job(s(&row,"id"),None)?))
+        })
+    }
+    pub fn progress(
+        &self,
+        id: &str,
+        owner: &str,
+        progress: i64,
+        message: &str,
+        status: &str,
+    ) -> Result<()> {
+        let count=self.jobs.exec("UPDATE jobs SET progress=?,message=?,status=? WHERE id=? AND lease_owner=? AND status IN ('running','waiting_verification')",params![progress.clamp(0,99),message,status,id,owner])?;
+        ensure(count == 1, "job_cancelled", 409)
+    }
+    pub fn finish(&self, id: &str, owner: &str, error: Option<&str>) -> Result<()> {
+        let row = self.job(id, None)?;
+        if s(&row, "lease_owner") != owner
+            || !["running", "waiting_verification"].contains(&s(&row, "status"))
+        {
+            return Ok(());
+        }
+        let retry = error.is_some_and(|e| {
+            ["browser_lost", "provider_timeout", "provider_unavailable"].contains(&e)
+        }) && n(&row, "attempt") < n(&row, "max_attempts");
+        self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+30000*2_i64.pow(n(&row,"attempt").clamp(0,8) as u32),id])?;
+        Ok(())
+    }
+    pub fn schedule(&self, id: &str) -> Result<Value> {
+        let db = self.dsp(id)?;
+        let r = db
+            .one("SELECT * FROM schedules WHERE provider='paycom'", [])?
+            .unwrap();
+        let mut value = json!({"enabled":flag(&r,"enabled"),"localTime":r["local_time"],"timezone":r["timezone"],"nextRun":r["next_run"]});
+        let interval = db.setting("paycom.syncIntervalSeconds", Value::Null)?;
+        if !interval.is_null() {
+            value["intervalSeconds"] = interval;
+        }
+        Ok(value)
+    }
+    pub fn set_schedule(&self, id: &str, enabled: bool, time: &str, tz: &str) -> Result<Value> {
+        let next = next_occurrence(time, tz, now())?;
+        let db = self.dsp(id)?;
+        db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
+        self.schedule(id)
+    }
+    pub fn schedule_tick(&self) -> Result<()> {
+        for dsp in self.platform.all(
+            "SELECT id FROM dsps WHERE status='active' AND environment=?",
+            [&self.config.environment],
+        )? {
+            let id = s(&dsp, "id");
+            let schedule = self.schedule(id)?;
+            if !flag(&schedule, "enabled") {
+                continue;
+            }
+            let next = if schedule["nextRun"].is_null() {
+                let next = next_scheduled(&schedule, now())?;
+                self.dsp(id)?
+                    .exec("UPDATE schedules SET next_run=?", [&next])?;
+                next
+            } else {
+                s(&schedule, "nextRun").to_owned()
+            };
+            if next > iso() {
+                continue;
+            }
+            if self.enqueue(id, None, &format!("schedule:{next}")).is_ok() {
+                self.dsp(id)?.exec(
+                    "UPDATE schedules SET next_run=?",
+                    [next_scheduled(&schedule, now())?],
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+pub fn next_occurrence(time: &str, tz: &str, after: i64) -> Result<String> {
+    ensure(
+        time.len() == 5 && chrono::NaiveTime::parse_from_str(time, "%H:%M").is_ok(),
+        "invalid_schedule_time",
+        400,
+    )?;
+    let tz: chrono_tz::Tz = tz
+        .parse()
+        .map_err(|_| Error::new("invalid_timezone", 400))?;
+    let start = after / 60000 * 60000 + 60000;
+    for minute in 0..3 * 24 * 60 {
+        let ms = start + minute * 60000;
+        let instant = chrono::DateTime::from_timestamp_millis(ms)
+            .ok_or_else(|| Error::new("invalid_schedule", 400))?;
+        if instant.with_timezone(&tz).format("%H:%M").to_string() == time {
+            return Ok(at(ms));
+        }
+    }
+    Err(Error::new("schedule_unresolvable", 400))
+}
+fn next_scheduled(schedule: &Value, after: i64) -> Result<String> {
+    if n(schedule, "intervalSeconds") > 0 {
+        Ok(at(after + n(schedule, "intervalSeconds") * 1000))
+    } else {
+        next_occurrence(s(schedule, "localTime"), s(schedule, "timezone"), after)
+    }
+}
+pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<()> {
+    let owner = crypto::id("worker")?;
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut timer = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        tokio::select! {
+            _=super::cancelled(&mut stop)=>break,
+            _=tasks.join_next(),if !tasks.is_empty()=>{},
+            _=timer.tick()=>{
+                state.expire_browsers().await;
+                let result=state.run(|db|{db.recover_jobs(false)?;db.schedule_tick()}).await;
+                if let Err(error)=result {eprintln!("scheduler_tick_failed: {}",error.code);}
+                while tasks.len()<state.config.browser_capacity {
+                    let pool=state.clone();let claim_owner=owner.clone();
+                    let job=state.run(move|db|db.claim(&claim_owner,|id|pool.browsers.get(id).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||pool.browsers.active()<pool.config.browser_capacity))).await;
+                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();tasks.spawn(async move{execute(state,job,owner).await;});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
+                }
+            }
+        }
+    }
+    state.browsers.close().await;
+    while tasks.join_next().await.is_some() {}
+    Ok(())
+}
+async fn execute(state: Arc<State>, job: Value, owner: String) {
+    let id = s(&job, "id").to_owned();
+    let dsp = s(&job, "dsp_id").to_owned();
+    let task = async {
+        let jid = id.clone();
+        let worker = owner.clone();
+        state.run(move |db| db.guard_job(&jid, &worker)).await?;
+        let session = state.ensure_browser(&dsp, false).await?;
+        if session.challenge() {
+            let jid = id.clone();
+            let worker = owner.clone();
+            state
+                .run(move |db| {
+                    db.progress(
+                        &jid,
+                        &worker,
+                        5,
+                        "Waiting for owner verification",
+                        "waiting_verification",
+                    )
+                })
+                .await?;
+            while !session.ready() {
+                ensure(!session.closed(), "verification_expired", 409)?;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+        let jid = id.clone();
+        let worker = owner.clone();
+        state
+            .run(move |db| {
+                db.guard_job(&jid, &worker)?;
+                db.progress(&jid, &worker, 10, "Collecting workforce", "running")
+            })
+            .await?;
+        let data = session.collect(&state, &id, &owner).await?;
+        let jid = id.clone();
+        let worker = owner.clone();
+        let tenant = dsp.clone();
+        state
+            .run(move |db| {
+                db.guard_job(&jid, &worker)?;
+                db.publish(&tenant, &data)?;
+                db.finish(&jid, &worker, None)
+            })
+            .await
+    };
+    let mut task = Box::pin(task);
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+    let result = loop {
+        tokio::select! {
+            result=&mut task=>break result,
+            _=heartbeat.tick()=>{
+                let jid=id.clone();let worker=owner.clone();
+                let guard=state.run(move|db|{db.guard_job(&jid,&worker)?;db.jobs.exec("UPDATE jobs SET lease_until=? WHERE id=? AND lease_owner=?",params![now()+120000,jid,worker])?;Ok(())}).await;
+                if let Err(error)=guard{break Err(error);}
+            }
+        }
+    };
+    drop(task);
+    state
+        .browsers
+        .revoke_revision(&dsp, n(&job, "connection_revision"))
+        .await;
+    let error = result.err().map(|e| e.code);
+    let actor = job["actor_id"].as_str().map(str::to_owned);
+    let _ = state
+        .run(move |db| {
+            if let Some(ref error) = error {
+                db.finish(&id, &owner, Some(error))?;
+            }
+            db.audit(
+                actor.as_deref(),
+                Some(&dsp),
+                if error.is_some() {
+                    "collection.failed"
+                } else {
+                    "collection.completed"
+                },
+                error.as_deref().unwrap_or(""),
+            )
+        })
+        .await;
+}

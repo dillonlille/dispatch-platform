@@ -4,7 +4,7 @@
   origin and secure cookies. Cloudflare Tunnel exposes only the application, with
   a catch-all 404. Dev accounts, configuration and state are independent.
 - Sessions use random opaque tokens, hashes at rest, HttpOnly/SameSite cookies,
-  expiry and user-version revocation. Passwords use scrypt. Mutations require the
+  expiry and user-version revocation. Fresh Rust passwords use Argon2id. Mutations require the
   expected Origin, JSON content and a session-bound CSRF token.
 - DSP views are server-authorized and signed. IDs never become arbitrary paths;
   storage checks ownership, permissions, symlinks and hard links. Directories
@@ -33,8 +33,8 @@
   passwords, OTPs, reset tokens, raw HTTP bodies or browser diagnostics. Native
   fixture diagnostics are available only to local tests.
 - Standalone Dev controls its own account schema and can test complete account
-  changes independently. The legacy gateway Preview cannot migrate shared account
-  schemas. Schema rollback is never inferred from code rollback.
+  changes independently. Schema rollback is never inferred from code rollback;
+  the initial Rust credential-format change requires explicit fresh Dev state.
 
 ## Provider acceptance
 
@@ -48,12 +48,12 @@ the provider does not explicitly supply are shown as unavailable, not invented.
 
 ## Recovery
 
-An offline backup takes both API locks and copies consistent SQLite snapshots and
+An offline backup takes the exclusive platform lock and copies consistent SQLite snapshots and
 private DSP/platform files with a checksum manifest. It excludes transient worker
 runs, release artifacts and activation backups. Restore requires an empty target,
 verifies all listed files, revokes sessions/invitations/reset links, cancels pending
-collections and clears release references so stale absolute paths are not reused.
+collections. Rust state contains no legacy in-dashboard deployment registry.
 
 Keep backups private and protect their encryption keys together with their data.
-Reimport the desired code artifact and explicitly configure the restored host
+Install the desired compatible Rust code artifact and explicitly configure the restored host
 before resuming work. Backup does not include the archived legacy platform.

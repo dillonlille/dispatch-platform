@@ -5,14 +5,17 @@
 ```mermaid
 flowchart LR
     U[Dev user] --> C[Cloudflare Tunnel]
-    C --> A[Independent Dev API and owner dashboard]
+    C --> A[Rust API and static React dashboard]
     A --> P[Dev account and membership database]
     A --> Q[Dev jobs and shared services]
     Q --> B[Private browser and collection workers]
     B --> S[Individual Dev DSP directories]
 ```
 
-The API authorizes every request. Login creates a hashed, revocable server-side
+A single Rust process serves the Axum/Tokio API and static dashboard. Rust owns
+accounts, sessions, DSPs, credential encryption, browser orchestration, jobs,
+scheduling, publication, mail and operational commands. Only isolated provider
+workers use Node/Playwright. The API authorizes every request. Login creates a hashed, revocable server-side
 session. A selected DSP receives a session-bound signed view token containing its
 identity and authorization generation. Membership changes, DSP suspension and
 settings revisions invalidate old views. The UI switches workspaces without
@@ -68,21 +71,33 @@ provision can be retried. Browser binaries and provider logic are shared.
 
 Default capacity is two browser sessions per environment. Verification expires
 after ten minutes; native collection has a thirty-minute deadline. A ready
-connection indicates the last successful verification, not a permanently running
-browser. Profile cookies are restored on the next temporary session.
+connection records the last successful verification. Ready browsers idle for
+sixty seconds are closed. Profile cookies are restored on the next temporary session.
 
 ## Dev builds and releases
 
 The permanent Dev DSP and all test DSPs belong to the independent Dev platform.
 It owns its login, account schema, owner dashboard, jobs and provider sessions.
-`DISPATCH_STANDALONE=1` disables the older gateway and in-dashboard activation flow.
-The older code remains exercised by isolated compatibility tests only.
+Only independent platforms are supported (`DISPATCH_STANDALONE=1`). The Node
+gateway, API, supervisor and operational CLI have been removed.
 
 Feature PRs merge into `dev` on the owner's instruction. Successful push checks
 upload one verified build; the Dev timer installs only the current merged commit's
 artifact. The runtime and checkout update together, with health verification,
-code rollback and interrupted-update recovery. Private state is never replaced.
+code rollback and interrupted-update recovery. Normal updates preserve private state. The initial Rust schema transition has an
+explicit, authorized fresh-state reset with rollback before final verification.
 
 The owner requests a release after testing. The final versioned candidate is
 verified, its source merges into `main`, and its exact artifact is published.
 Production publication/deployment automation is deferred to the Production setup.
+
+## Efficiency and limits
+
+Four database workers share a bounded queue of 64 operations with a two-second
+admission timeout. Writes serialize short state transitions; reads can run
+concurrently. Each worker reuses platform/job connections, caches prepared
+statements and retains at most four DSP database connections with 512 KiB SQLite
+page caches. Employee filtering, Unicode ordering and pagination run in SQLite.
+Password verification has a separate two-operation limit. Each browser session
+accepts at most 32 pending commands; commands revalidate authority after waiting.
+See [Rust migration](RUST-MIGRATION.md) for repeatable measurements and limitations.

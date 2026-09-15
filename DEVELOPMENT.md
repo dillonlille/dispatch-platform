@@ -67,8 +67,7 @@ root; never point the fixture runner at the persistent Dev state. Frontend edits
 hot reload; restart this local API runner after backend changes. Feature work does
 not change the shared Dev environment before merge.
 
-`npm run build` writes the deployable artifact to `.build/`. It bundles the API and browser workers,
-compiles the Rust backend (using Cargo's ignored `target/` cache),
+`npm run build` writes the deployable artifact to `.build/`. It compiles the Rust platform API and CLI, bundles the isolated browser workers (using Cargo's ignored `target/` cache),
 installs locked runtime dependencies, records the source commit, and produces the
 SHA-256 `release.json` inventory. Building alone does not activate it.
 
@@ -112,8 +111,9 @@ encrypted credentials, collection jobs, schedules, backups, archive verification
 dirty-checkout protection, activation and rollback. Browser checks exercise the
 built dashboard/API together. Native verification uses local fixture pages and
 isolated Chromium profiles; real provider acceptance requires user-supplied DSP
-credentials. Legacy gateway/supervisor tests remain for compatibility and do not
-install or start Production.
+credentials. The Node API, gateway and supervisor have been retired; integration
+tests launch the real Rust API. Python tests cover both the previous artifact
+format and the explicit fresh-state Rust cutover.
 
 Update contracts and their producers/consumers together. Validate provider results
 before publication and preserve the last successful dataset on failure. Never

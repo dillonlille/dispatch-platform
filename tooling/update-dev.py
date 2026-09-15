@@ -104,9 +104,13 @@ def verify_artifact(directory, commit=None):
     directory = Path(directory)
     require(directory.resolve() == directory.absolute(), "Artifact symlink denied")
     manifest = json.loads((directory / "release.json").read_text())
-    require(set(manifest) == {"format", "version", "nodeMajor", "schema", "files", "digest"}
-            and manifest["format"] == 1 and manifest["nodeMajor"] == 22
-            and manifest["schema"] in (1, 2), "Unsupported artifact format/schema")
+    legacy = (set(manifest) == {"format", "version", "nodeMajor", "schema", "files", "digest"}
+              and manifest["format"] == 1 and manifest["nodeMajor"] == 22
+              and manifest["schema"] in (1, 2))
+    rust = (set(manifest) == {"format", "version", "runtime", "workerNodeMajor", "schema", "files", "digest"}
+            and manifest["format"] == 2 and manifest["runtime"] == "rust"
+            and manifest["workerNodeMajor"] == 22 and manifest["schema"] == 3)
+    require(legacy or rust, "Unsupported artifact format/schema")
     require(re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", manifest["version"]),
             "Invalid artifact version")
     payload = {key: value for key, value in manifest.items() if key != "digest"}
@@ -133,8 +137,13 @@ def verify_artifact(directory, commit=None):
         require(name in files and info.st_size == files[name]["size"] and
                 hashlib.sha256(item.read_bytes()).hexdigest() == files[name]["sha256"],
                 "Artifact file verification failed")
-    require(actual == set(files) and {"api/main.js", "dashboard/index.html", "package.json",
-                                    "tooling/build-info.json"} <= actual,
+    required = {"dashboard/index.html", "package.json", "tooling/build-info.json"}
+    required.add("services/rust/dispatch-backend" if rust else "api/main.js")
+    if rust:
+        required.update({"services/runtime/auth-worker.js", "services/runtime/collection-worker.js"})
+        require(not any(name.startswith("api/") or name in ("tooling/cli.js", "tooling/supervisor.js")
+                        for name in actual), "Rust artifact contains a retired Node core")
+    require(actual == set(files) and required <= actual,
             "Artifact incomplete or contains extra files")
     metadata = json.loads((directory / "tooling/build-info.json").read_text())
     require(re.fullmatch(r"[a-f0-9]{40}", metadata["commit"]), "Invalid build commit")
@@ -224,6 +233,8 @@ class DevUpdater:
 
     def activate(self, candidate, commit):
         manifest = verify_artifact(candidate, commit)
+        if manifest["format"] == 2:
+            (candidate / "services/rust/dispatch-backend").chmod(0o700)
         self.clean_checkout()
         current = self.git("rev-parse", "HEAD")
         old = verify_artifact(self.live / ".build", current)
@@ -252,6 +263,8 @@ class DevUpdater:
             raise
 
     def update(self):
+        require(not (self.runtime / "rust-reset-receipt.json").exists(),
+                "Recover the interrupted Rust fresh-state cutover first")
         self.recover()
         self.clean_checkout()
         self.git("fetch", "origin", "dev")
@@ -307,7 +320,9 @@ def main():
     updater = DevUpdater(args.root)
     if args.verify:
         updater.clean_checkout()
-        verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
+        manifest = verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
+        if manifest["format"] == 2:
+            (updater.live / ".build/services/rust/dispatch-backend").chmod(0o700)
         return
     with (updater.platform / "dev-update.lock").open("a") as lock:
         try:

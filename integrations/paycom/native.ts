@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import type { Page, BrowserContext } from 'playwright';
-import type { Credentials } from '../../services/auth-broker/vault.js';
+import type { Credentials } from '../../services/browsers/protocol.js';
 import type { Workforce, Employee, Timecard } from '../../shared/contracts/index.js';
 import { projectTimecards, type ProviderTimecard } from './timecards.js';
 import { AppError, assert } from '../../shared/errors.js';

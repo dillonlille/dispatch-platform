@@ -1,5 +1,10 @@
 import type { BrowserInput } from '../../shared/browser.js';
-import type { Credentials } from '../auth-broker/vault.js';
+export interface Credentials {
+  clientCode: string;
+  username: string;
+  password: string;
+  securityAnswers?: string[];
+}
 import type { Workforce } from '../../shared/contracts/index.js';
 export type BrowserCommand =
   | {

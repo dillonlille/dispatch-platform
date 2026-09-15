@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { Credentials } from '../../services/auth-broker/vault.js';
+import type { Credentials } from '../../services/browsers/protocol.js';
 import { AppError } from '../../shared/errors.js';
 import type { BrowserCommand } from '../../services/browsers/protocol.js';
 const require = createRequire(import.meta.url);

@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tarfile
@@ -15,13 +16,16 @@ updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 
 
-def artifact(root, commit, marker="candidate"):
+def artifact(root, commit, marker="candidate", rust=False, schema=None):
     root.mkdir(mode=0o700, parents=True)
-    for name, contents in {
-        "api/main.js": marker, "dashboard/index.html": "<h1>Dispatch</h1>",
+    contents = {
+        ("services/rust/dispatch-backend" if rust else "api/main.js"): marker, "dashboard/index.html": "<h1>Dispatch</h1>",
         "package.json": '{"type":"module"}',
         "tooling/build-info.json": json.dumps({"commit": commit}),
-    }.items():
+    }
+    if rust:
+        contents.update({"services/runtime/auth-worker.js": "worker", "services/runtime/collection-worker.js": "worker"})
+    for name, contents in contents.items():
         target = root / name
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         target.write_text(contents)
@@ -31,7 +35,8 @@ def artifact(root, commit, marker="candidate"):
             files.append({"path": item.relative_to(root).as_posix(),
                           "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
                           "size": item.stat().st_size})
-    manifest = {"format": 1, "version": "0.1.0-dev.0", "nodeMajor": 22, "schema": 1, "files": files}
+    manifest = ({"format": 2, "version": "0.1.0-dev.0", "runtime": "rust", "workerNodeMajor": 22, "schema": 3, "files": files} if rust else
+                {"format": 1, "version": "0.1.0-dev.0", "nodeMajor": 22, "schema": schema or 1, "files": files})
     manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
     (root / "release.json").write_text(json.dumps(manifest))
     return manifest
@@ -148,6 +153,41 @@ class DevUpdaterTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     updater.unpack(package, self.root / f"unpacked-{number}")
         self.assertFalse((self.root / "outside").exists())
+
+
+class RustDevUpdaterTests(DevUpdaterTests):
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.live / ".build")
+        shutil.rmtree(self.candidate)
+        self.old_artifact = artifact(self.live / ".build", self.old, "old Rust", rust=True)
+        self.manifest = artifact(self.candidate, self.new, "new Rust", rust=True)
+
+    def test_inventory_rejects_changed_files_and_wrong_source(self):
+        with self.assertRaisesRegex(RuntimeError, "another commit"):
+            updater.verify_artifact(self.candidate, self.old)
+        (self.candidate / "services/rust/dispatch-backend").write_text("tampered")
+        with self.assertRaisesRegex(RuntimeError, "verification failed"):
+            updater.verify_artifact(self.candidate, self.new)
+
+    def test_activate_restores_executable_bit_from_untrusted_archive_modes(self):
+        (self.candidate / "services/rust/dispatch-backend").chmod(0o600)
+        with patch.object(self.instance, "service"), patch.object(self.instance, "healthy", return_value=True):
+            self.instance.activate(self.candidate, self.new)
+        self.assertEqual((self.live / ".build/services/rust/dispatch-backend").stat().st_mode & 0o777, 0o700)
+
+    def test_rust_inventory_rejects_retired_core_even_with_valid_hash(self):
+        target = self.candidate / "api/main.js"
+        target.parent.mkdir()
+        target.write_text("retired Node core")
+        manifest = json.loads((self.candidate / "release.json").read_text())
+        manifest.pop("digest")
+        manifest["files"].append({"path": "api/main.js", "size": target.stat().st_size,
+                                  "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+        manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
+        (self.candidate / "release.json").write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(RuntimeError, "retired Node core"):
+            updater.verify_artifact(self.candidate, self.new)
 
 
 if __name__ == "__main__":

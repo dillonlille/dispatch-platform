@@ -1,49 +1,28 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { Runtime } from '../services/runtime.js';
-import { configuration } from '../services/config.js';
-import { seed, demo } from './seed.js';
+const demo = { email: 'owner@dispatch.test', password: 'Dispatch-demo-2026!' };
 const args = process.argv.slice(2);
 const smokeOnly = args.length === 1 && args[0] === '--smoke-only';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-ui-check-'));
-const runtime = new Runtime(
-  configuration({
-    stateRoot: root,
-    development: true,
-    providerMode: 'fixture',
-    standalone: smokeOnly,
-    environment: smokeOnly ? 'preview' : 'production',
-    smtpUrl: undefined,
-    previewOrigin: undefined,
-    previewKey: undefined,
-    allowDeployment: false,
-  }),
-);
-await seed(runtime);
-await runtime.close();
 const port = 5190,
   origin = `http://127.0.0.1:${port}`;
-const server = spawn(process.execPath, ['.build/api/main.js'], {
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    NODE_ENV: 'development',
-    DISPATCH_PROVIDER_MODE: 'fixture',
-    DISPATCH_FIXTURE_PREVIEW: smokeOnly ? '0' : '1',
-    DISPATCH_STANDALONE: smokeOnly ? '1' : '0',
-    DISPATCH_ENVIRONMENT: smokeOnly ? 'preview' : 'production',
-    DISPATCH_SMTP_URL: '',
-    DISPATCH_PREVIEW_ORIGIN: '',
-    DISPATCH_PREVIEW_KEY: '',
-    DISPATCH_ENABLE_DEPLOYMENT: '0',
-    DISPATCH_STATE_ROOT: root,
-    DISPATCH_ORIGIN: origin,
-    PORT: String(port),
-  },
-});
+const binary = path.resolve('.build/services/rust/dispatch-backend');
+const env = {
+  ...process.env,
+  NODE_ENV: 'development',
+  DISPATCH_PROVIDER_MODE: 'fixture',
+  DISPATCH_STANDALONE: '1',
+  DISPATCH_ENVIRONMENT: 'preview',
+  DISPATCH_STATE_ROOT: root,
+  DISPATCH_ORIGIN: origin,
+  DISPATCH_ARTIFACT_ROOT: path.resolve('.build'),
+  PORT: String(port),
+};
+execFileSync(binary, ['seed'], { env, stdio: 'inherit' });
+const server = spawn(binary, ['serve'], { env, stdio: 'inherit' });
 try {
   let ready = false;
   for (let i = 0; i < 100; i++) {

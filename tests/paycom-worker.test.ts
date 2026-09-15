@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture } from './helpers.js';
-import { configuration } from '../services/config.js';
+import { fixture } from './rust-support.js';
+import { createDecipheriv } from 'node:crypto';
 
 test(
   'archived auth runs through save/check API and the real isolated worker, preserving PINs and rejection cooldowns',
@@ -28,13 +28,14 @@ test(
       path.join(bundle, 'auth-worker.js'),
       `import './fixture.cjs'; await import('./real-worker.js');`,
     );
-    const f = await fixture({ runtimeBundle: bundle });
-    Object.defineProperty(f.runtime.storage, 'config', {
-      value: configuration({ ...f.runtime.storage.config, providerMode: 'native' }),
+    const f = await fixture({
+      env: { DISPATCH_RUNTIME_BUNDLE: bundle, DISPATCH_PROVIDER_MODE: 'native' },
     });
     t.after(() => f.close());
     const client = await f.client();
-    const dsp = client.session.dsps.find((d) => d.name === 'Northline Logistics')!;
+    const dsp = client.session.dsps.find(
+      (d: { name: string; id: string }) => d.name === 'Northline Logistics',
+    )!;
     await client.select(dsp.id);
     const credentials = {
       clientCode: 'fixture-client',
@@ -45,8 +46,23 @@ test(
     const saved = await client.post('/api/dsp/connections/paycom', credentials);
     assert.equal(saved.statusCode, 200, saved.body);
     assert.equal(saved.json().status, 'ready', saved.body);
-    assert.deepEqual(f.runtime.broker.vault.read(dsp.id), credentials);
-    const profile = f.runtime.storage.paths.profile(dsp.id);
+    const secrets = path.join(f.root, 'dsps', dsp.id, 'secrets');
+    const [nonce, encrypted] = fs.readFileSync(path.join(secrets, 'paycom.enc'), 'utf8').split('.');
+    const bytes = Buffer.from(encrypted!, 'base64url');
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      fs.readFileSync(path.join(secrets, 'vault.key')),
+      Buffer.from(nonce!, 'base64url'),
+    );
+    decipher.setAAD(Buffer.from(`${dsp.id}:paycom:2`));
+    decipher.setAuthTag(bytes.subarray(-16));
+    assert.deepEqual(
+      JSON.parse(
+        Buffer.concat([decipher.update(bytes.subarray(0, -16)), decipher.final()]).toString(),
+      ),
+      credentials,
+    );
+    const profile = path.join(f.root, 'dsps', dsp.id, 'state/browsers/paycom');
     const events = () =>
       fs.readFileSync(path.join(profile, 'fixture-events'), 'utf8').trim().split('\n');
     assert.equal(events().filter((value) => value === 'primary').length, 1);
@@ -67,8 +83,8 @@ test(
     const rejected = await client.post('/api/dsp/connections/paycom/check', {});
     assert.equal(rejected.statusCode, 409, rejected.body);
     assert.equal(rejected.json().error, 'primary_credentials_rejected');
-    assert.equal(f.runtime.broker.connection(dsp.id).status, 'error');
-    assert.equal(f.runtime.browsers.sessions.has(dsp.id), false);
+    assert.equal((await client.get('/api/dsp/connections')).value.status, 'error');
+    assert.equal((await client.get('/api/platform/health')).value.browsers.active, 0);
     const blocked = await client.post('/api/dsp/connections/paycom/check', {});
     assert.equal(blocked.statusCode, 409, blocked.body);
     assert.equal(blocked.json().error, 'attempt_cooldown');
@@ -123,7 +139,7 @@ test(
       ]);
       for (const response of responses)
         assert.equal(response.statusCode, 200, response.body.slice(0, 200));
-      assert.equal(f.runtime.broker.connection(dsp.id).status, 'needs_verification');
+      assert.equal((await client.get('/api/dsp/connections')).value.status, 'needs_verification');
       assert.equal(events().filter((value) => value === 'primary').length, beforeInput);
       assert.equal(
         events().filter((value) => value === 'pins').length,
