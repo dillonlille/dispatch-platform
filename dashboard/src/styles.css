@@ -1201,6 +1201,9 @@ td small {
 .plugin-setting-choice {
   flex-direction: row;
 }
+.plugin-setting-choices > .plugin-setting-choice {
+  padding-inline: 0.85rem;
+}
 
 .side-sheet .modal-heading {
   display: flex;
