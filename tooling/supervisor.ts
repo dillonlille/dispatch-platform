@@ -62,7 +62,10 @@ async function stop(env: Environment) {
   });
 }
 async function healthy(env: Environment, digest: string) {
+  const child = children.get(env);
   for (let i = 0; i < 100; i++) {
+    if (!child || child.exitCode !== null || child.signalCode !== null)
+      throw new Error('release_process_exited');
     try {
       const response = await fetch(`http://127.0.0.1:${port(env)}/api/health`, {
         signal: AbortSignal.timeout(1000),

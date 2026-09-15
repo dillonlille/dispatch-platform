@@ -8,16 +8,36 @@ The persistent repository is `/home/thepickle/dispatch-platform/dev/live`, track
 independent platform with its own login, owner dashboard, Dev DSP and test DSPs.
 Nothing depends on a Production account registry or gateway.
 
-Use isolated feature worktrees from `dev`; target PRs at `dev`. Merge only when
-the owner explicitly requests it. After a verified merge, remove the clean feature
+Use isolated feature worktrees from `dev`; target PRs at `dev`. The owner gives
+standing approval to merge completed feature PRs after reviewing the submitted
+head and passing checks, unless they ask to hold a PR. After a verified merge, remove the clean feature
 worktree and local/remote feature branch, preserving any unmerged work. Never
 delete `dev`, `main`, or the persistent environment checkout.
 
 Successful **push checks on dev** upload a compiled artifact identified by the
-commit SHA. A user-systemd timer checks every minute. It installs only the artifact
+commit SHA. A user-systemd timer checks every 10 seconds. It installs only the artifact
 for the current merged `dev` head, after verifying the GitHub download digest,
-runtime inventory and source commit. PR artifacts and failed/pending checks cannot
+runtime inventory and source commit. PR build artifacts and failed/pending checks cannot
 update the environment. Unfinished edits in the running checkout block updates.
+
+PR checks run independent suites concurrently on one runner. A change consisting
+only of dashboard stylesheets runs TypeScript, formatting, a complete build and
+all dashboard browser tests. Other changes run the full suite, including unit,
+dependency, artifact/rollback and Python checks. Unknown changes use the full path.
+
+A successful same-repository PR publishes a small validation receipt containing
+its base/head commits, complete Git tree and check scope. A merge to `dev` reuses
+those results only when all three revisions match, the latest PR workflow passed,
+and the receipt's GitHub archive digest and run attempt match. Missing, expired,
+failed or mismatched evidence falls back to normal checks. This never installs a
+PR build: the merged commit gets a fresh verified build and a smoke check covering
+standalone startup, health/digest, dashboard assets, login, DSP access and Paycom
+settings. The existing updater still requires a successful merged-dev workflow.
+
+Manual checks and release checks always run the full suite. A host timer dispatches
+full `dev` checks nightly at 04:00 UTC, independently of deployment checks. This
+works while `main` remains the GitHub default branch. Nightly/manual runs do not
+publish deployable artifacts or cancel a running push workflow.
 
 The updater stops Dev, swaps `.build/`, fast-forwards the source checkout, starts
 Dev and verifies its health/digest. A failed start restores the previous code and
@@ -57,6 +77,21 @@ temporary state; `node tooling/clean-test-output.mjs` removes known reports and
 screenshots. Remove only your own `/tmp` artifacts.
 
 ## Verification
+
+Keep local feedback proportional to the change. For a cosmetic fix, build once,
+inspect the affected flow on desktop/mobile, and reuse the existing browser tests;
+do not write a new browser harness or repeat the full suite already running in CI
+without a specific failure or concern. Forward Playwright filters to the built
+fixture runner, for example:
+
+```bash
+npm run build
+npm run test:ui -- tests/browser/dashboard.spec.ts --grep 'archived Paycom settings'
+```
+
+For pipeline/backend changes, `npm run check:ci -- full` runs independent checks
+concurrently. `npm run test:smoke` exercises a fresh standalone fixture without
+starting a browser. The individual verification commands remain available:
 
 ```bash
 npm run check

@@ -42,7 +42,9 @@ account database. Dev email is always captured privately in
 
 After reviewing the units, copy the reviewed `tooling/systemd/dispatch-dev*` units into
 `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then enable/start
-`dispatch-dev.service` and `dispatch-dev-update.timer`. The units use port 5180 on
+`dispatch-dev.service`, `dispatch-dev-update.timer` and `dispatch-dev-checks.timer`.
+The checks timer uses authenticated `gh` to dispatch the full `dev` workflow at
+04:00 UTC daily. The units use port 5180 on
 loopback; they do not expose a public network listener.
 
 For this host, `dispatch-dev-tunnel.service` runs a dedicated Cloudflare Tunnel
@@ -83,12 +85,12 @@ root-owned binary copy when the system bubblewrap package receives updates.
 ## Operate
 
 ```bash
-systemctl --user status dispatch-dev.service dispatch-dev-update.timer
+systemctl --user status dispatch-dev.service dispatch-dev-update.timer dispatch-dev-checks.timer
 journalctl --user -u dispatch-dev.service -u dispatch-dev-update.service -n 80
 systemctl --user start dispatch-dev-update.service
 ```
 
-The updater checks every minute and waits for successful GitHub checks. Dev builds
+The updater checks every 10 seconds and waits for successful GitHub checks. Dev builds
 are shown on the dashboard's Releases page. The same PR can be edited/tested in a
 feature worktree without affecting the running platform until merge.
 
@@ -96,6 +98,13 @@ The first build is installed during this explicit setup. Subsequent builds come
 from the GitHub artifact published by `checks.yml` for a push to `dev`. A failed
 build/check/start leaves or restores the last working version. Update receipts and
 status live under `data/platform/`; only `.build/` and the source checkout change.
+
+To apply timer changes on an existing installation, copy only the reviewed unit
+files from the merged checkout into `~/.config/systemd/user/`, run
+`systemctl --user daemon-reload`, restart `dispatch-dev-update.timer`, and enable
+`dispatch-dev-checks.timer`. Changing the repository copy alone does not update
+the installed timers. Manual full validation is also available with
+`gh workflow run checks.yml --repo dillonlille/dispatch-platform --ref dev`.
 
 Do not run `npm run dev`, reset Git, or rebuild `.build/` in the persistent checkout
 while the shared Dev service is running. Use feature worktrees for local edits.
