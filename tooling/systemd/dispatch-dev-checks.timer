@@ -1,0 +1,10 @@
+[Unit]
+Description=Run complete Dispatch Dev checks nightly
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+Unit=dispatch-dev-checks.service
+
+[Install]
+WantedBy=timers.target

@@ -1,9 +1,10 @@
 [Unit]
-Description=Check for merged Dispatch Dev builds every minute
+Description=Check for merged Dispatch Dev builds every 10 seconds
 
 [Timer]
-OnBootSec=2min
-OnUnitInactiveSec=1min
+OnBootSec=30s
+OnUnitInactiveSec=10s
+AccuracySec=1s
 Unit=dispatch-dev-update.service
 
 [Install]
