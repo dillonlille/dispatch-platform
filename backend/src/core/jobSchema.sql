@@ -1,0 +1,4 @@
+CREATE TABLE jobs (id TEXT PRIMARY KEY, dsp_id TEXT NOT NULL, environment TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind='paycom.collect'), status TEXT NOT NULL CHECK(status IN ('queued','running','waiting_verification','succeeded','failed','cancelled')), progress INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT 'Waiting for a worker', attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, available_at INTEGER NOT NULL, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, error TEXT, release TEXT NOT NULL, actor_id TEXT, lease_owner TEXT, lease_until INTEGER, connection_revision INTEGER NOT NULL, idempotency_key TEXT NOT NULL, UNIQUE(dsp_id,idempotency_key));
+CREATE INDEX jobs_claim ON jobs(status,available_at,created_at);
+CREATE INDEX jobs_dsp ON jobs(dsp_id,created_at DESC);
+CREATE UNIQUE INDEX one_active_dsp ON jobs(dsp_id) WHERE status IN ('running','waiting_verification');

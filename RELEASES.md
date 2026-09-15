@@ -33,12 +33,13 @@ Promote action.
 
 **Production provisioning, release publishing automation and Production deployment
 are not installed by this Dev setup.** Implement and verify them when requested.
-The older gateway/Update Dev/Promote operator commands remain for compatibility
-tests; standalone Dev disables those activation controls.
+The retired Node gateway and in-dashboard activation commands are removed.
+GitHub and the external updater own deployments.
 
 ## Build integrity and rollback
 
-`.build/release.json` records the version, Node major, compatibility schema, every
+`.build/release.json` uses format 2 and records the version, Rust runtime, browser-worker Node major,
+compatibility schema 3, every
 runtime file hash/size and aggregate digest. `tooling/build-info.json` records the
 source commit. Symlinks, hardlinks, unexpected files and unsafe paths are rejected.
 The Dev updater additionally verifies the GitHub artifact archive digest and that
@@ -55,12 +56,20 @@ With the Dev service and updater timer stopped, load `config/platform.env` into 
 operator process environment and use the built CLI:
 
 ```text
-node live/.build/tooling/cli.js backup /absolute/private/backup-destination
-node live/.build/tooling/cli.js restore /absolute/private/backup /absolute/empty/restore-target
+live/.build/services/rust/dispatch-backend backup /absolute/private/backup-destination
+live/.build/services/rust/dispatch-backend restore /absolute/private/backup /absolute/empty/restore-target
 ```
 
 Standalone backups include `data/` and `dsps/`. Keep a separate private backup of
 `config/`; environment configuration is not included in the state archive. Restore
-validates checksums, revokes old sessions/invitations/reset links, clears stale
-release state and cancels pending jobs. Configure and verify a compatible artifact
+validates checksums, revokes old sessions/invitations/reset links and cancels
+pending jobs. Configure and verify a compatible artifact
 before restarting a restored platform.
+
+## Fresh Rust cutover
+
+The initial Rust core changes password and credential formats. Existing Node data
+is deliberately discarded only by the explicit Dev reset described in
+[Dev setup](docs/DEV-SETUP.md#fresh-state-cutover-from-the-node-core). The normal updater
+refuses this schema transition. Future Rust updates preserve data and retain the
+previous compatible Rust artifact for rollback.

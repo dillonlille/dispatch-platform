@@ -20,9 +20,11 @@ Use a clean checkout and a verified `.build/` artifact for that exact commit.
 
 ## Initialize
 
-Requirements: Node 22.23.2 at `~/.local/bin/node`, Python 3, Git, authenticated `gh`
+Requirements: a verified Rust artifact, Node 22.23.2 for isolated browser workers at `~/.local/bin/node`, Python 3, Git, authenticated `gh`
 at `~/.local/bin/gh`, user systemd with lingering, and an HTTPS endpoint. Native
-provider connections also need compatible Chromium/bubblewrap isolation.
+provider connections also need compatible Chromium/bubblewrap isolation. Building
+from source requires the pinned Rust toolchain and a C compiler. The installed
+platform service runs the Rust binary directly; it needs no Cargo or Node API.
 
 From the merged repository, after building/verifying the exact commit:
 
@@ -109,3 +111,41 @@ the installed timers. Manual full validation is also available with
 Do not run `npm run dev`, reset Git, or rebuild `.build/` in the persistent checkout
 while the shared Dev service is running. Use feature worktrees for local edits.
 Stop the updater timer before deliberate configuration, backup or maintenance.
+
+## Fresh-state cutover from the Node core
+
+This one-time operation **erases existing Dev accounts, DSPs, jobs, credentials,
+and browser profiles** after the fresh Rust instance passes verification. The
+initial owner's email and name are retained for a newly created owner account;
+its password is regenerated. The resulting platform has one empty permanent Dev
+DSP and no seeded demo data. Archive, Production, tunnel and host configuration
+are outside the reset scope.
+
+After explicit authorization to discard Dev data, merge and wait for successful
+merged-dev checks, then run the reviewed tool from an isolated checkout:
+
+```bash
+python3 tooling/migrate-rust-dev.py --root /home/thepickle/dispatch-platform/dev --reset-data
+```
+
+It downloads the verified GitHub artifact for the current merged `dev` head,
+bootstraps empty state privately before stopping Dev, installs the direct Rust
+service unit, and checks health, login, the empty DSP, jobs and connection state.
+Only then does it erase old state and write new private login details to
+`dev/config/initial-owner.json`. It preserves `platform.env`, tunnel settings and
+unrelated host configuration. The normal updater cannot cross schema 2 to 3.
+
+If interrupted, recover using the same reviewed tool:
+
+```bash
+python3 tooling/migrate-rust-dev.py --root /home/thepickle/dispatch-platform/dev --recover
+```
+
+A receipt in `live/.runtime/rust-reset-receipt.json` survives data replacement.
+Before verification completes, recovery restores the old code, service unit, data
+and initial credentials. After completion, recovery only finishes cleanup; it
+cannot bring retired data back. No normal updates run while this receipt exists.
+
+For read-only inspection while the service is running, load `platform.env` and use
+`live/.build/services/rust/dispatch-backend status`. Backup/restore commands require
+the service and updater timer to be stopped; see [Releases](../RELEASES.md).

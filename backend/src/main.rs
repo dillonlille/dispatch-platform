@@ -1,117 +1,129 @@
-use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, State},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{get, post},
+use dispatch_backend::core::{
+    self, Error, Result,
+    config::Config,
+    db::Store,
+    ensure,
+    operations::{self, Lock},
 };
-use dispatch_backend::{EmployeeRequest, Error};
-use serde_json::json;
-use std::{
-    io::{Read, Write},
-    os::unix::fs::{MetadataExt, PermissionsExt},
-    path::PathBuf,
-    sync::Arc,
-};
-use tokio::{net::UnixListener, sync::Semaphore};
-
-#[derive(Clone)]
-struct Backend {
-    root: Arc<PathBuf>,
-    capacity: Arc<Semaphore>,
+use std::{io::Read, path::Path};
+#[tokio::main(worker_threads = 2)]
+async fn main() {
+    // All state and child-created files are private, including SQLite sidecars.
+    unsafe {
+        libc::umask(0o077);
+    }
+    if let Err(error) = run().await {
+        eprintln!("dispatch: {}", error.code);
+        std::process::exit(1);
+    }
 }
-
-async fn employee(State(state): State<Backend>, Json(request): Json<EmployeeRequest>) -> Response {
-    let Ok(permit) = state.capacity.clone().try_acquire_owned() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": "backend_busy"})),
-        )
-            .into_response();
-    };
-    // SQLite work must not block Tokio's HTTP/event-loop threads.
-    let result = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        dispatch_backend::employee(&state.root, request)
-    })
-    .await;
-    match result {
-        Ok(Ok(detail)) => Json(detail).into_response(),
-        Ok(Err(Error::NotFound)) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "employee_not_found"})),
-        )
-            .into_response(),
-        Ok(Err(Error::InvalidInput)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "invalid_input"})),
-        )
-            .into_response(),
-        _ => {
-            // Never log employee data, credentials, SQL, or private filesystem paths.
-            eprintln!("employee_read_failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "operation_failed"})),
+async fn run() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let command = args.first().map(String::as_str).unwrap_or("serve");
+    if command == "restore" {
+        ensure(args.len() == 3, "usage_restore_backup_empty_target", 400)?;
+        println!(
+            "{}",
+            operations::restore(Path::new(&args[1]), Path::new(&args[2]))?
+        );
+        return Ok(());
+    }
+    let config = Config::load()?;
+    if command == "status" {
+        println!("{}", operations::status(&config)?);
+        return Ok(());
+    }
+    let _lock = Lock::acquire(&config.root)?;
+    match command {
+        "serve" => {
+            ensure(
+                config.platform().join("accounts.sqlite").is_file(),
+                "run_bootstrap_before_starting",
+                503,
+            )?;
+            let state = core::State::new(config.clone())?;
+            state.run(|db|ensure(db.platform.one("SELECT id FROM users WHERE platform_owner=1 AND status='active' LIMIT 1",[])?.is_some(),"run_bootstrap_before_starting",503)).await?;
+            state
+                .run(|db| {
+                    db.recover_jobs(true)?;
+                    operations::clean_browser_runs(&db.config)
+                })
+                .await?;
+            let listener =
+                tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port)).await?;
+            let (stop, receiver) = tokio::sync::watch::channel(false);
+            let jobs = tokio::spawn(core::supervise(
+                core::jobs::start(state.clone(), receiver.clone()),
+                stop.clone(),
+            ));
+            let mail_state = state.clone();
+            let mail = tokio::spawn(core::supervise(
+                async move {
+                    operations::mailer(mail_state, receiver).await;
+                    Ok(())
+                },
+                stop.clone(),
+            ));
+            println!(
+                "Dispatch Rust {} listening at http://127.0.0.1:{}",
+                config.environment, config.port
+            );
+            let sender = stop.clone();
+            let mut shutdown_receiver = stop.subscribe();
+            let shutdown = async move {
+                let mut term =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("SIGTERM handler");
+                tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{},_=core::cancelled(&mut shutdown_receiver)=>{}};
+                sender.send_replace(true);
+            };
+            let server = axum::serve(
+                listener,
+                core::http::router(state.clone())
+                    .into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
-                .into_response()
+            .with_graceful_shutdown(shutdown);
+            let result = server.await;
+            stop.send_replace(true);
+            state.browsers.close().await;
+            let jobs = jobs.await.map_err(|_| Error::new("scheduler_failed", 500));
+            let mail = mail.await.map_err(|_| Error::new("mailer_failed", 500));
+            jobs??;
+            mail??;
+            result?;
+        }
+        "bootstrap" => {
+            ensure(args.len() == 4, "usage_bootstrap_email_first_last", 400)?;
+            ensure(
+                unsafe { libc::isatty(libc::STDIN_FILENO) } == 0,
+                "password_required_on_stdin",
+                400,
+            )?;
+            let mut password = String::new();
+            std::io::stdin().take(1024).read_to_string(&mut password)?;
+            let db = Store::initialize(config)?;
+            println!(
+                "{}",
+                operations::bootstrap(
+                    &db,
+                    &args[1],
+                    &args[2],
+                    &args[3],
+                    password.trim_end_matches(['\r', '\n'])
+                )?
+            );
+        }
+        "seed" => operations::seed(&Store::initialize(config)?)?,
+        "backup" => {
+            ensure(args.len() == 2, "usage_backup_destination", 400)?;
+            println!("{}", operations::backup(&config, Path::new(&args[1]))?);
+        }
+        _ => {
+            return Err(Error::new(
+                "usage_serve_bootstrap_seed_status_backup_restore",
+                400,
+            ));
         }
     }
-}
-
-#[tokio::main(worker_threads = 2)]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("expected socket and DSP root".into());
-    }
-    let socket = PathBuf::from(&args[0]);
-    let root = PathBuf::from(&args[1]);
-    if !root.is_absolute() || root.canonicalize()? != root {
-        return Err("unsafe DSP root".into());
-    }
-    let parent = socket.parent().ok_or("missing socket directory")?;
-    let permissions = std::fs::symlink_metadata(parent)?;
-    if !socket.is_absolute()
-        || parent.canonicalize()? != parent
-        || !permissions.is_dir()
-        || permissions.mode() & 0o077 != 0
-        || permissions.uid() != std::fs::metadata(&root)?.uid()
-    {
-        return Err("private socket directory required".into());
-    }
-    let listener = UnixListener::bind(&socket)?;
-    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
-    let (closed, parent_closed) = tokio::sync::oneshot::channel();
-    // A dedicated thread detects the gateway disappearing, including SIGKILL.
-    // It does not keep the process alive after the Tokio runtime exits.
-    std::thread::spawn(move || {
-        let _ = std::io::stdin().read(&mut [0u8; 1]);
-        let _ = closed.send(());
-    });
-    let app = Router::new()
-        .route(
-            "/health",
-            get(|| async { Json(json!({"status": "ready", "protocol": 1})) }),
-        )
-        .route("/employee", post(employee))
-        .layer(DefaultBodyLimit::max(1024))
-        .with_state(Backend {
-            root: Arc::new(root),
-            capacity: Arc::new(Semaphore::new(8)),
-        });
-    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    println!("ready");
-    std::io::stdout().flush()?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = parent_closed => {},
-                _ = terminate.recv() => {},
-                _ = tokio::signal::ctrl_c() => {},
-            }
-        })
-        .await?;
-    let _ = std::fs::remove_file(socket);
     Ok(())
 }

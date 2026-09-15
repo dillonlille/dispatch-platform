@@ -7,7 +7,24 @@ publish = false
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "functions", "collation"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+fs2 = "0.4"
+getrandom = "0.3"
+hmac = "0.12"
+libc = "0.2"
+icu_collator = "2"
+sha2 = "0.10"
+subtle = "2"
+url = "2"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
+
+[dev-dependencies]
+tempfile = "3"

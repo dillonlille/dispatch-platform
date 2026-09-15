@@ -1,0 +1,12 @@
+CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, first_name TEXT NOT NULL, last_name TEXT NOT NULL, password TEXT NOT NULL, platform_owner INTEGER NOT NULL DEFAULT 0 CHECK(platform_owner IN (0,1)), status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')), version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE TABLE dsps (id TEXT PRIMARY KEY, name TEXT NOT NULL, environment TEXT NOT NULL CHECK(environment IN ('production','preview')), status TEXT NOT NULL CHECK(status IN ('provisioning','active','suspended','failed')), timezone TEXT NOT NULL, permanent INTEGER NOT NULL DEFAULT 0 CHECK(permanent IN (0,1)), revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX permanent_dev ON dsps(permanent) WHERE permanent=1;
+CREATE TABLE memberships (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), dsp_id TEXT NOT NULL REFERENCES dsps(id), role TEXT NOT NULL CHECK(role IN ('owner','manager','member')), UNIQUE(user_id,dsp_id));
+CREATE TABLE sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), user_version INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX session_expiry ON sessions(expires_at);
+CREATE TABLE invitations (hash TEXT PRIMARY KEY, dsp_id TEXT NOT NULL REFERENCES dsps(id), email TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('owner','manager','member')), expires_at INTEGER NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), used_at INTEGER);
+CREATE TABLE resets (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), user_version INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
+CREATE TABLE audit (id INTEGER PRIMARY KEY, at TEXT NOT NULL, actor_id TEXT REFERENCES users(id), dsp_id TEXT REFERENCES dsps(id), action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+CREATE INDEX audit_dsp_time ON audit(dsp_id,id DESC);
+CREATE TABLE throttle (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
+CREATE TABLE outbox (id TEXT PRIMARY KEY, encrypted_message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL, sent_at TEXT);

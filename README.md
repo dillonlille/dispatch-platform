@@ -27,29 +27,19 @@ Open `http://127.0.0.1:5173`. Synthetic development accounts:
 
 These accounts exist only in the explicit fixture seed. Production bootstrap
 requires an operator-supplied password on stdin and never creates demo accounts.
-Development state defaults to `/tmp/dispatch-development-<uid>`; set
-`DISPATCH_STATE_ROOT` to a separate private directory to choose another location.
-Stop the development runner with Ctrl+C before removing its state directory.
+The local development runner creates a new temporary state directory and removes
+it on shutdown. Installed environments set `DISPATCH_STATE_ROOT` explicitly.
 
 ## Repository
 
 ```text
 dashboard/          React dashboard, responsive layouts, forms and tables
-api/                HTTP API, signed DSP views, Preview gateway, server entrypoint
-backend/            Rust service; employee-detail reads over a private Unix socket
-services/
-  accounts/         Accounts, sessions, invitations, password recovery, mail outbox
-  dsps/             Provisioning, memberships, settings, suspension
-  auth-broker/      Per-DSP credential vault and provider authentication
-  browsers/         Private browser and collection workers, leases and egress
-  jobs/             Durable queue, schedules, retries, cancellation and recovery
-  releases/         Artifact verification, activation plans, promotion and rollback
-  storage/          SQLite schemas, private paths, locks, backup and restore
-  audit/            Platform and DSP activity records
-integrations/paycom/ Provider adapter, validated workforce publication, fixtures
-shared/             Contracts, errors and cryptography
-tooling/            Development, build, operator CLI, supervisor, verification
-tests/              Service, security, browser, Preview and artifact integration tests
+backend/            Rust platform API, auth, DSPs, jobs, vault, mail, storage and CLI
+services/browsers/  Isolated Node/Playwright authentication and collection workers
+integrations/paycom/ Retained provider adapter, parsers and worker contracts
+shared/             Dashboard/worker contracts and validation helpers
+tooling/            Build, updater, fresh-state cutover and developer verification
+tests/              Rust API, provider, browser and artifact integration tests
 docs/               Architecture, implementation record and design reference
 ```
 
@@ -75,8 +65,8 @@ node tooling/clean-test-output.mjs
 `test:ui` starts the **built artifact** on loopback port 5190 with disposable
 fixtures. It stops that process and removes its data when finished. It requires
 Playwright Chromium (`npx playwright install chromium`). `test:browser` targets
-an already-running development server. `test:artifact` exercises two temporary
-API processes on ports 5200/5201 and a supervisor entirely under `/tmp`.
+an already-running development server. `test:artifact` launches the installed Rust
+artifact with an empty platform on a temporary port and checks its inventory.
 
 Native tests use local fixture pages, real Chromium, separate Linux namespaces,
 profiles and the private CDP bridge. Host verification with
@@ -87,5 +77,5 @@ owner to configure a Dev DSP connection.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md),
 [security](docs/SECURITY.md), and [RELEASES.md](RELEASES.md).
-The [Rust migration](docs/RUST-MIGRATION.md) describes the first backend slice,
-verification, measurements and remaining migration work.
+The [Rust migration](docs/RUST-MIGRATION.md) describes the complete core retirement,
+verification, performance measurements and deployment boundaries.

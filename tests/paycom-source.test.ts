@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { allowedHost } from '../services/browsers/egress.js';
-import { paycom } from '../integrations/paycom/manifest.js';
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 test('installed archived Paycom adapter and native input retain their source hashes', () => {
@@ -23,22 +21,4 @@ test('installed archived Paycom adapter and native input retain their source has
         : file;
     assert.equal(digest(original), source.sourceSha256, source.file);
   }
-});
-
-test('Paycom subdomain policy permits archived CAPTCHA assets and rejects lookalike hosts', () => {
-  for (const host of [
-    'paycomonline.net',
-    'www.paycomonline.net',
-    'captcha-assethost.paycomonline.net',
-    'nested.asset.paycomonline.net',
-  ])
-    assert(allowedHost(host, paycom.hosts), host);
-  for (const host of [
-    'paycomonline.net.evil.example',
-    'evilpaycomonline.net',
-    '127.0.0.1',
-    'localhost',
-    'paycomonline.net@evil.example',
-  ])
-    assert(!allowedHost(host, paycom.hosts), host);
 });
