@@ -283,6 +283,13 @@ impl Session {
             .await
             .map_err(|_| Error::new("browser_closed", 409))?
     }
+    pub async fn navigation(&self, session: &str, previous: &str) -> Result<Value> {
+        self.send(WireCommand::Navigation {
+            session: session.into(),
+            previous: previous.into(),
+        })
+        .await
+    }
     pub async fn event(&self, session: &str) -> Result<Value> {
         self.send(WireCommand::Event {
             session: session.into(),
@@ -338,6 +345,10 @@ impl Session {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum WireCommand {
+    Navigation {
+        session: String,
+        previous: String,
+    },
     Event {
         session: String,
     },

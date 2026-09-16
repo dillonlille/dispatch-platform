@@ -113,7 +113,7 @@ function timecard(url: URL, mismatch: boolean) {
       (index % 7 === 6 ? `<tr><td>Weekly Totals</td><td>${mismatch ? 9 : 8}</td></tr>` : '')
     );
   }).join('');
-  return `<title>Timecard Editor</title><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">16</div>`;
+  return `<title>Timecard Editor</title><input type="password" hidden aria-label="Hidden account settings"><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">16</div>`;
 }
 export async function paycomFixture() {
   const events: string[] = [];
@@ -132,6 +132,10 @@ export async function paycomFixture() {
     timecardsPeak: 0,
     wrongIdentity: false,
     timecardStatus: 200,
+    missingContent: new Map<string, number>(),
+    navigationStalls: new Map<string, number>(),
+    readsByCode: new Map<string, number>(),
+    expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
   const server = http.createServer(async (req, res) => {
@@ -241,12 +245,16 @@ export async function paycomFixture() {
       const active = (state.activeByAccount.get(account) ?? 0) + 1;
       state.activeByAccount.set(account, active);
       state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
+      const code = url.searchParams.get('firstrefno')!;
+      state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
       events.push('timecard');
       state.timecardsActive++;
       state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
       try {
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, state.timecardDelayMs);
+          const stalled = (state.navigationStalls.get(code) ?? 0) > 0;
+          if (stalled) state.navigationStalls.set(code, state.navigationStalls.get(code)! - 1);
+          const timer = setTimeout(resolve, stalled ? 60000 : state.timecardDelayMs);
           res.once('close', () => {
             clearTimeout(timer);
             resolve();
@@ -256,6 +264,14 @@ export async function paycomFixture() {
         if (state.timecardStatus !== 200 && url.searchParams.get('firstrefno') === 'BB02') {
           res.writeHead(state.timecardStatus);
           return res.end('Provider temporarily unavailable');
+        }
+        if (state.expiredTimecard) {
+          res.writeHead(302, { Location: '/' });
+          return res.end();
+        }
+        if ((state.missingContent.get(code) ?? 0) > 0) {
+          state.missingContent.set(code, state.missingContent.get(code)! - 1);
+          return html('<title>Timecard loading failed</title><p>Try again</p>');
         }
         if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
           url.searchParams.set('firstrefno', 'AA01');

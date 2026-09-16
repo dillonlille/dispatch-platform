@@ -47,7 +47,15 @@ impl Page {
         Ok(page)
     }
     pub(super) async fn command(&self, method: &str, params: Value) -> Result<Value> {
-        self.browser.command(method, params, Some(&self.id)).await
+        let result = self.browser.command(method, params, Some(&self.id)).await;
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.code == "browser_command_timeout")
+        {
+            eprintln!("provider_browser_command_timeout: {method}");
+        }
+        result
     }
     pub(super) async fn frame(&self) -> Result<Value> {
         Ok(self.command("Page.getFrameTree", json!({})).await?["frameTree"]["frame"].clone())
@@ -121,6 +129,18 @@ impl Page {
             502,
         )
     }
+    pub async fn navigation(&self, previous: &str) -> Result<Value> {
+        self.browser.navigation(&self.id, previous).await
+    }
+    pub async fn reset(&mut self) -> Result<()> {
+        self.browser
+            .command("Target.closeTarget", json!({"targetId":self.target}), None)
+            .await?;
+        let mut replacement = Self::open(self.browser.clone(), self.origin.clone()).await?;
+        replacement.trusted_origins = self.trusted_origins.clone();
+        *self = replacement;
+        Ok(())
+    }
     pub async fn collect_garbage(&self) -> Result<()> {
         self.command("HeapProfiler.collectGarbage", json!({}))
             .await?;
@@ -135,14 +155,17 @@ impl Page {
             409,
         )?;
         // Page.navigate holds the serialized CDP actor until the server responds.
-        // A scripted navigation starts the request and immediately releases it,
-        // allowing the other tab to load while this one waits for Paycom.
+        // Scheduling navigation after this evaluation returns releases the actor
+        // before waiting for the response through navigation events.
         // Replace history so completed employee pages cannot accumulate in the
         // back/forward cache while the tab is reused.
         match self
             .evaluate_in(
                 &current,
-                &format!("location.replace({}); true", json!(source)),
+                &format!(
+                    "setTimeout(()=>location.replace({}),50); true",
+                    json!(source)
+                ),
             )
             .await
         {

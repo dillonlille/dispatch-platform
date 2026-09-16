@@ -65,6 +65,7 @@ test(
       peakPrivateBytes = 0;
     let completeMemorySamples = 0,
       maxRunningPerDsp = 0;
+    let memoryDelayed = false;
     const began = performance.now();
     let final: Job[] = [];
     await until(async () => {
@@ -78,6 +79,7 @@ test(
       latencies.push(performance.now() - start);
       for (const response of [health, listed, employees, session])
         assert.equal(response.status, 200, response.body);
+      memoryDelayed ||= !health.value.browsers.memory.canStart;
       peakBrowsers = Math.max(peakBrowsers, health.value.browsers.active);
       assert(health.value.browsers.active <= 2);
       const ours = (listed.value as Job[]).filter((j) => jobs.includes(j.id));
@@ -102,9 +104,17 @@ test(
       await new Promise((resolve) => setTimeout(resolve, 950));
       return false;
     }, 240000);
-    assert.equal(peakBrowsers, 2, 'Exercise simultaneous DSP browsers');
+    assert(
+      peakBrowsers === 2 || (peakBrowsers === 1 && memoryDelayed),
+      'Use two browsers when memory permits; queue under pressure',
+    );
     assert.equal(maxRunningPerDsp, 1);
-    assert.equal(f.state.timecardsPeak, 4, 'Two tabs in each of two browsers overlap');
+    assert(f.state.timecardsPeak >= 2 && f.state.timecardsPeak <= 4);
+    // Two tabs per DSP do not guarantee that both pairs reach the provider at
+    // precisely the same time. Three overlapping requests prove cross-DSP
+    // concurrency; each account's two-request peak is checked separately below.
+    if (peakBrowsers === 2 && !memoryDelayed)
+      assert(f.state.timecardsPeak >= 3, 'Requests from concurrent DSPs must overlap');
     for (const account of accounts) assert.equal(f.state.peakByAccount.get(account), 2);
     assert.equal(f.state.accountStarts.filter((v) => v === accounts[0]).length, 2);
     // Fairness is the order in which jobs receive a slot. If both slots free
@@ -159,6 +169,7 @@ test(
         collectedDailyRecords: count * 14 * 4,
         elapsedMs: Math.round(performance.now() - began),
         peakBrowsers,
+        memoryDelayed,
         peakTimecardRequests: f.state.timecardsPeak,
         readBatches: latencies.length,
         readBatchP95Ms: Math.round(p95),

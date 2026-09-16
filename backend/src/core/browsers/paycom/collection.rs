@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::job_metrics::Recorder;
 use chrono::{Datelike, NaiveDate};
 use std::{collections::BTreeSet, future::Future};
 const API: &str = "https://time-and-attendance.paycomonline.net/api/cl/timecard-search/employees";
@@ -247,7 +248,12 @@ pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
     }).collect()
 }
 impl Driver {
-    pub async fn collect<F, Fut>(&mut self, timezone: &str, mut progress: F) -> Result<Value>
+    pub async fn collect<F, Fut>(
+        &mut self,
+        timezone: &str,
+        metrics: &Recorder,
+        mut progress: F,
+    ) -> Result<Value>
     where
         F: FnMut(i64, String) -> Fut,
         Fut: Future<Output = Result<()>>,
@@ -331,7 +337,7 @@ impl Driver {
         self.evaluate("delete globalThis.dispatchRoster").await?;
         let employees = employees(&raw, &codes)?;
         let mut timecards = Vec::with_capacity(employees.len() * 14);
-        let second = if employees.len() > 1 {
+        let mut second = if employees.len() > 1 {
             Some(Page::open(self.browser.clone(), self.origin.clone()).await?)
         } else {
             None
@@ -349,19 +355,32 @@ impl Driver {
             )
             .await?;
             let result = if let [a, b] = employees {
-                let (mut a, b) = tokio::try_join!(
-                    read_timecard(&self.page, &self.origin, a, &period),
+                // Never drop the sibling's in-flight CDP command on a page error:
+                // the transport intentionally closes when a caller disappears.
+                let (a, b) = tokio::join!(
+                    read_timecard(&mut self.page, &self.origin, a, &period, metrics, first + 1),
                     read_timecard(
-                        second.as_ref().expect("second collection tab"),
+                        second.as_mut().expect("second collection tab"),
                         &self.origin,
                         b,
-                        &period
+                        &period,
+                        metrics,
+                        first + 2
                     )
-                )?;
-                a.extend(b);
+                );
+                let mut a = a?;
+                a.extend(b?);
                 a
             } else {
-                read_timecard(&self.page, &self.origin, &employees[0], &period).await?
+                read_timecard(
+                    &mut self.page,
+                    &self.origin,
+                    &employees[0],
+                    &period,
+                    metrics,
+                    first + 1,
+                )
+                .await?
             };
             timecards.extend(result);
             // Both pages are complete and their validated records are now owned
@@ -378,10 +397,46 @@ impl Driver {
 }
 
 async fn read_timecard(
+    page: &mut Page,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    metrics: &Recorder,
+    ordinal: usize,
+) -> Result<Vec<Value>> {
+    for attempt in 1..=2 {
+        metrics.page_start(ordinal, attempt);
+        let result = read_once(page, origin, employee, period, metrics, ordinal).await;
+        metrics.page_finish(
+            ordinal,
+            result.as_ref().err().map(|error| error.code.as_str()),
+        );
+        let retry = result.as_ref().err().is_some_and(|error| {
+            [
+                "provider_navigation_timeout",
+                "provider_content_timeout",
+                "provider_content_missing",
+                "browser_navigation_pending",
+            ]
+            .contains(&error.code.as_str())
+        });
+        if attempt == 2 || !retry {
+            return result;
+        }
+        // Only this page is reloaded. Authentication, throttling, extraction and
+        // validation failures stay fail-closed and use the job policy if allowed.
+        page.reset().await?;
+        sleep(Duration::from_millis(1000 + (ordinal as u64 * 347 % 1000))).await;
+    }
+    unreachable!()
+}
+async fn read_once(
     page: &Page,
     origin: &str,
     employee: &Value,
     period: &Value,
+    metrics: &Recorder,
+    ordinal: usize,
 ) -> Result<Vec<Value>> {
     let source = format!(
         "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
@@ -389,38 +444,71 @@ async fn read_timecard(
         s(period, "key")
     );
     let previous_loader = page.start_navigation(&source).await?;
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let started = Instant::now();
+    let mut content_started = None;
+    let mut missing_since = None;
     loop {
-        ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-        let frame = page.frame().await?;
-        if s(&frame, "url") == source && s(&frame, "loaderId") != previous_loader {
-            match page.evaluate("({ready:document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
-                Ok(value) => {
-                    let status=value["status"].as_u64().unwrap_or(0);
-                    ensure(![401,403].contains(&status),"authentication_failed",409)?;
-                    // Abort the pair on throttling/server errors. The existing
-                    // job retry policy supplies bounded exponential backoff.
-                    ensure(status!=429 && status<500,"provider_unavailable",502)?;
-                    if value["ready"]==true { break; }
-                },
-                Err(error) if error.code=="browser_navigation_pending" => (),
-                Err(error) => return Err(error),
-            }
+        if let Some(content) = content_started {
+            ensure(
+                Instant::now() < content + Duration::from_secs(30),
+                "provider_content_timeout",
+                504,
+            )?;
+        } else {
+            ensure(
+                started.elapsed() < Duration::from_secs(45),
+                "provider_navigation_timeout",
+                504,
+            )?;
+        }
+        let frame = page.navigation(&previous_loader).await?;
+        if frame.is_null() {
+            sleep(Duration::from_millis(200)).await;
+            continue;
         }
         ensure(
             s(&frame, "url") == "about:blank" || page.trusted(s(&frame, "url")),
             "authentication_failed",
             409,
         )?;
+        if s(&frame, "loaderId") != previous_loader && s(&frame, "url") != "about:blank" {
+            // A completed redirect away from the requested employee cannot be
+            // mistaken for a slowly rendering timecard (including same-origin login).
+            ensure(s(&frame, "url") == source, "authentication_failed", 409)?;
+            content_started.get_or_insert_with(Instant::now);
+            metrics.page_stage(ordinal, "content");
+            match page.evaluate("({complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')&&Array.from(document.querySelectorAll('input[type=password]')).some(e=>e.offsetParent!==null&&e.getClientRects().length>0),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
+                Ok(value) => {
+                    let status = value["status"].as_u64().unwrap_or(0);
+                    ensure(![401,403].contains(&status) && value["login"] != true, "authentication_failed", 409)?;
+                    ensure(status != 429 && status < 500, "provider_unavailable", 502)?;
+                    if value["complete"] == true && value["present"] == true { break; }
+                    if value["complete"] == true && value["present"] != true {
+                        let missing = missing_since.get_or_insert_with(Instant::now);
+                        ensure(missing.elapsed() < Duration::from_secs(3), "provider_content_missing", 502)?;
+                    } else { missing_since = None; }
+                }
+                Err(error) if error.code == "browser_navigation_pending" => (),
+                Err(error) => return Err(error),
+            }
+        }
         sleep(Duration::from_millis(200)).await;
     }
+    metrics.page_stage(ordinal, "extraction");
     let config = json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
     let record = page
         .evaluate(&format!(
             "({})({config})",
             include_str!("timecard.js").trim().trim_end_matches(';')
         ))
-        .await?;
+        .await
+        .map_err(|error| {
+            if error.code == "browser_script_failed" {
+                Error::new("timecard_extraction_failed", 502)
+            } else {
+                error
+            }
+        })?;
     project(&record, s(employee, "code"))
 }
 

@@ -112,7 +112,7 @@ async fn measure_live_collection() -> Result<()> {
         driver.credentials=Value::Null;
         let timezone=std::env::var("DISPATCH_BENCHMARK_TIMEZONE").map_err(|_|Error::new("benchmark_configuration_required",400))?;
         let started=Instant::now();
-        let data=driver.collect(&timezone,|progress,_| async move {
+        let data=driver.collect(&timezone, &crate::core::job_metrics::Recorder::new(&json!({})), |progress,_| async move {
             if progress % 10 == 0 { eprintln!("BENCH {}",json!({"progress":progress})); }
             Ok(())
         }).await?;
@@ -136,6 +136,10 @@ async fn measure_live_collection() -> Result<()> {
             }
         }
         eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak[0],"collectionPeakPssKiB":collection_peak[1],"collectionPeakPrivateKiB":collection_peak[2],"unreadableSmaps":collection_peak[3]}));
+
+        if std::env::var("DISPATCH_BENCHMARK_RESPONSE").as_deref() == Ok("1") {
+            inspect_responses(&driver, &data).await?;
+        }
 
         if !differences.is_empty() {
             driver.new_page().await?;
@@ -191,4 +195,81 @@ async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Resu
         ))
         .await?;
     collection::project(&record, code)
+}
+
+// An explicit, read-only experiment. Raw HTML never leaves the authenticated
+// browser; only validated records and aggregate structure reach this process.
+// The detached document runs no provider scripts and is never inserted in a tab.
+async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
+    let from = s(data, "from");
+    let to = s(data, "to");
+    let day = chrono::NaiveDate::parse_from_str(from, "%Y-%m-%d")
+        .map_err(|_| Error::new("invalid_period", 409))?;
+    let period = json!({"start":from,"end":to,"key":format!("{from}_{to}"),"dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
+    let mut equal = 0;
+    let mut validated = 0;
+    let started = Instant::now();
+    for (index, employee) in data["employees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(6)
+        .enumerate()
+    {
+        let code = s(employee, "code");
+        let source = format!(
+            "{}/v4/cl/web.php/timecard/index?firstrefno={code}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+            driver.origin,
+            s(&period, "key")
+        );
+        let config = json!({"employeeCode":code,"period":period,"sourceUrl":source});
+        let extractor = include_str!("timecard.js").trim().trim_end_matches(';');
+        driver.evaluate(&format!(r#"(()=>{{globalThis.dispatchProbe=null;(async()=>{{try{{
+          const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
+          if(response.status!==200||!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
+          const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
+          for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 0;}}text+=decoder.decode(part.value,{{stream:true}});}}
+          text+=decoder.decode();const document=new DOMParser().parseFromString(text,'text/html'),location={{href:{source}}};
+          const result={{bytes:size,tablePresent:!!document.querySelector('#tbltimesheet'),rows:document.querySelectorAll('#tbltimesheet > tbody > tr').length,scripts:document.scripts.length,record:null}};
+          try{{result.record=({extractor})({config});}}catch{{}}
+          globalThis.dispatchProbe={{ok:true,value:result}};
+        }}catch{{globalThis.dispatchProbe={{ok:false}};}}}})();return true;}})()"#, source=json!(source))).await?;
+        let deadline = Instant::now() + Duration::from_secs(35);
+        let probe = loop {
+            ensure(Instant::now() < deadline, "provider_timeout", 504)?;
+            let probe = driver.evaluate("globalThis.dispatchProbe").await?;
+            if !probe.is_null() {
+                break probe;
+            }
+            sleep(Duration::from_millis(100)).await;
+        };
+        driver.evaluate("delete globalThis.dispatchProbe").await?;
+        ensure(probe["ok"] == true, "benchmark_response_failed", 502)?;
+        let value = &probe["value"];
+        let actual = collection::project(&value["record"], code);
+        let reference = data["timecards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|card| s(card, "employeeCode") == code)
+            .cloned()
+            .collect::<Vec<_>>();
+        if actual.is_ok() {
+            validated += 1;
+        }
+        let matches = actual.is_ok_and(|cards| cards == reference);
+        if matches {
+            equal += 1;
+        }
+        eprintln!(
+            "RESPONSE {}",
+            json!({"ordinal":index+1,"bytes":value["bytes"],"tablePresent":value["tablePresent"],"rows":value["rows"],"scripts":value["scripts"],"validated":!value["record"].is_null(),"matchesRendered":matches})
+        );
+        driver.page.collect_garbage().await?;
+    }
+    eprintln!(
+        "RESPONSE {}",
+        json!({"samples":6.min(data["employees"].as_array().unwrap().len()),"validated":validated,"equal":equal,"elapsedMs":started.elapsed().as_millis()})
+    );
+    Ok(())
 }

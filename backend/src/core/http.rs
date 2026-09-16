@@ -417,7 +417,7 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
                 .map(|r| (s(&r, "status").into(), r["n"].clone()))
                 .collect();
             Ok(Reply::json(
-                json!({"environment":db.config.environment,"release":db.config.release,"jobs":counts,"browsers":{"active":state.browsers.active(),"capacity":db.config.browser_capacity},"dsps":db.platform.one("SELECT count(*) n FROM dsps",[])?.unwrap()["n"],"email":db.config.mail_available(),"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
+                json!({"environment":db.config.environment,"release":db.config.release,"jobs":counts,"browsers":{"active":state.browsers.active(),"capacity":db.config.browser_capacity,"memory":state.browsers.admission()},"dsps":db.platform.one("SELECT count(*) n FROM dsps",[])?.unwrap()["n"],"email":db.config.mail_available(),"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
             ))
         }
         ("GET", "/api/platform/diagnostics") => Ok(Reply::json(diagnostics(db, state)?)),

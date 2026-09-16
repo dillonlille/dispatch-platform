@@ -124,6 +124,9 @@ pub(super) async fn run(mode: &str) -> Result<()> {
                 params,
                 session,
             } => cdp.command(&method, params, session.as_deref()).await,
+            WireCommand::Navigation { session, previous } => {
+                cdp.navigation(&session, &previous).await
+            }
             WireCommand::Event { session } => cdp.event(&session).await,
             WireCommand::NativeMove { x, y } => {
                 ensure(mode == "windowed", "browser_interaction_required", 409)?;

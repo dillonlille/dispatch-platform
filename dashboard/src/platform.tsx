@@ -857,6 +857,17 @@ export function HealthPanel() {
           <dt>Browser workers</dt>
           <dd>
             {data.browsers.active} / {data.browsers.capacity} active
+            <small>
+              {data.browsers.memory.canStart
+                ? 'Memory available for another browser'
+                : 'New browsers waiting for memory'}
+              {' · '}
+              {data.browsers.memory.availableBytes === null
+                ? 'Available memory unknown'
+                : `${(data.browsers.memory.availableBytes / 1024 ** 2).toFixed(0)} MiB available`}
+              {' · '}
+              {(data.browsers.memory.requiredBytes / 1024 ** 2).toFixed(0)} MiB needed
+            </small>
           </dd>
           <dt>Email</dt>
           <dd>{data.email ? 'Configured' : 'Not configured'}</dd>

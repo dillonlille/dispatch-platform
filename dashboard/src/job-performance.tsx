@@ -59,6 +59,35 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
                       : `${attempt.employees} employees · ${attempt.timecards} daily records`}
                   </dd>
                 </dl>
+                {attempt.pageReads && (
+                  <div aria-label="Timecard diagnostics">
+                    <p>
+                      {attempt.pageReads.completed} timecards validated ·{' '}
+                      {attempt.pageReads.retries} page retries · {attempt.pageReads.recovered}{' '}
+                      recovered
+                    </p>
+                    {attempt.pageReads.active.map((page) => (
+                      <small key={page.ordinal}>
+                        Employee {page.ordinal} · {title(page.stage)} · {duration(page.elapsedMs)}
+                        {attempt.outcome !== 'running' && ' at interruption'}
+                      </small>
+                    ))}
+                    {attempt.pageReads.failures.map((page) => (
+                      <small key={`${page.ordinal}-${page.attempt}`}>
+                        Employee {page.ordinal}, read {page.attempt} · {title(page.stage)} ·{' '}
+                        {title(page.error ?? '')} after {duration(page.elapsedMs)}
+                      </small>
+                    ))}
+                    {attempt.pageReads.slowest.length > 0 && (
+                      <p className="muted">
+                        Slowest read: employee {attempt.pageReads.slowest[0]!.ordinal} · navigation{' '}
+                        {duration(attempt.pageReads.slowest[0]!.navigationMs)}, page content{' '}
+                        {duration(attempt.pageReads.slowest[0]!.contentMs)}, extraction{' '}
+                        {duration(attempt.pageReads.slowest[0]!.extractionMs)}.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <p className="muted">
                   Browser memory accounts for shared pages proportionally (PSS). Sampled every
                   second; {attempt.memorySamples} samples, {attempt.incompleteMemorySamples}{' '}
