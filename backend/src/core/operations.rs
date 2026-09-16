@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 use super::{
     Error, Result, State,
     config::Config,
@@ -147,7 +148,7 @@ pub fn seed(db: &Store) -> Result<()> {
             &area.join("paycom.enc"),
             crypto::encrypt(&key, &format!("{id}:paycom:2"), &credentials)?.as_bytes(),
         )?;
-        db.dsp(id)?.exec(
+        db.collector(id, Provider::Paycom)?.exec(
             "UPDATE connections SET enabled=1,status='ready',account_label='DEMO1',verified_at=?",
             [iso()],
         )?;

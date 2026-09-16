@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod browsers;
+pub mod collectors;
 pub mod config;
 pub mod crypto;
 pub mod db;

@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 pub mod browseros;
 pub mod egress;
 mod paycom;
@@ -309,7 +310,7 @@ pub fn validate_credentials(value: &Value) -> Result<()> {
 }
 impl Store {
     pub fn connection(&self, id: &str) -> Result<Value> {
-        let mut row=self.dsp(id)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
+        let mut row=self.collector(id, Provider::Paycom)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
         db::boolean(&mut row, &["enabled"]);
         Ok(row)
     }
@@ -320,7 +321,7 @@ impl Store {
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        self.dsp(id)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider='paycom' AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),revision])?;
+        self.collector(id, Provider::Paycom)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider='paycom' AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),revision])?;
         Ok(())
     }
     pub fn save_credentials(&self, c: &Context, value: &Value) -> Result<()> {
@@ -333,7 +334,7 @@ impl Store {
             &area.join("paycom.enc"),
             crypto::encrypt(&key, &format!("{id}:paycom:2"), value)?.as_bytes(),
         )?;
-        self.dsp(id)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[s(value,"clientCode"),&iso()])?;
+        self.collector(id, Provider::Paycom)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[s(value,"clientCode"),&iso()])?;
         let profile = self.area(id, "state")?.join("browsers");
         if profile.exists() {
             db::private_dir(&profile)?;
@@ -360,7 +361,7 @@ impl Store {
     pub fn disable(&self, c: &Context, remove: bool) -> Result<()> {
         self.revalidate(c, "connections")?;
         let id = s(&c.dsp, "id");
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[iso()])?;db.exec("UPDATE schedules SET enabled=0,next_run=NULL",[])?;Ok(())})?;
         if remove {
             let file = self.area(id, "secrets")?.join("paycom.enc");
@@ -439,7 +440,7 @@ impl State {
                     409,
                 )?;
                 let connection = db
-                    .dsp(&dsp)?
+                    .collector(&dsp, Provider::Paycom)?
                     .one(
                         "SELECT enabled,revision FROM connections WHERE provider='paycom'",
                         [],
@@ -515,7 +516,7 @@ impl State {
             let dsp=id.to_owned();self.run(move|db| {
                 let tenant = db.get_dsp(&dsp)?;
                 ensure(s(&tenant,"status")=="active", "dsp_unavailable",409)?;
-                let connection = db.dsp(&dsp)?.one("SELECT enabled,revision FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
+                let connection = db.collector(&dsp, Provider::Paycom)?.one("SELECT enabled,revision FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
                 ensure(flag(&connection,"enabled") && n(&connection,"revision")==revision,"connection_changed",409)?;
                 db.connection_state(&dsp,revision,"signing_in",None)
             }).await?;
