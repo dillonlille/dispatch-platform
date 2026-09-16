@@ -602,7 +602,9 @@ impl State {
             if !session.fixture {
                 let admission = admission::Admission::new(
                     admission::available(),
-                    sessions.values().map(|s| s.observed_pss.load(Ordering::Acquire)),
+                    sessions
+                        .values()
+                        .map(|s| s.observed_pss.load(Ordering::Acquire)),
                 );
                 ensure(admission.can_start, "browser_memory_busy", 503)?;
             }
