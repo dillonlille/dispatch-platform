@@ -49,6 +49,17 @@ impl Provider {
     fn relative_path(self) -> PathBuf {
         Path::new(self.id()).join(format!("{}.sqlite", self.id()))
     }
+    fn browser_entries(self) -> &'static [&'static str] {
+        match self {
+            Self::Paycom => &[
+                "paycom", // Retired profile retained on existing hosts.
+                "paycom-browseros",
+                "paycom-attempt.json",
+                "paycom-diagnostics.json",
+                ".paycom-browseros.browseros.lock",
+            ],
+        }
+    }
 }
 
 fn split_layout(db: &Db) -> Result<bool> {
@@ -89,6 +100,31 @@ pub fn database_path(dsp_root: &Path, provider: Provider) -> Result<PathBuf> {
 }
 
 impl Store {
+    /// Credential changes reset only this collector's sessions. Call after its
+    /// browser worker closes; other collectors' profiles must survive unchanged.
+    pub(crate) fn clear_collector_browser_state(&self, id: &str, provider: Provider) -> Result<()> {
+        let browsers = self.area(id, "state")?.join("browsers");
+        if !browsers.try_exists()? {
+            return Ok(());
+        }
+        db::private_dir(&browsers)?;
+        for entry in provider.browser_entries() {
+            let path = browsers.join(entry);
+            match std::fs::symlink_metadata(&path) {
+                Ok(stat) if stat.is_dir() => {
+                    db::private_dir(&path)?;
+                    std::fs::remove_dir_all(path)?;
+                }
+                Ok(_) => {
+                    db::private_file(&path, false)?;
+                    std::fs::remove_file(path)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
     pub fn collector(&self, id: &str, provider: Provider) -> Result<DspLease<'_>> {
         if !split_layout(&*self.dsp(id)?)? {
             // Legacy layout only ever held Paycom data.
@@ -395,6 +431,35 @@ mod tests {
             before
         );
         assert_eq!(reopened.get_dsp(&id).unwrap()["status"], "suspended");
+    }
+    #[test]
+    fn resetting_paycom_browser_state_preserves_other_collectors_and_business_data() {
+        let (_root, store, id) = legacy();
+        store.migrate_collector_storage(&id).unwrap();
+        let before = snapshot(&store.collector(&id, Provider::Paycom).unwrap());
+        let browsers = store.area(&id, "state").unwrap().join("browsers");
+        for name in ["paycom", "paycom-browseros", "future-collector"] {
+            db::private_dir(&browsers.join(name)).unwrap();
+            db::write_private(&browsers.join(name).join("session"), b"private session").unwrap();
+        }
+        db::write_private(&browsers.join("paycom-attempt.json"), b"{}").unwrap();
+        store
+            .clear_collector_browser_state(&id, Provider::Paycom)
+            .unwrap();
+        assert!(!browsers.join("paycom").exists());
+        assert!(!browsers.join("paycom-browseros").exists());
+        assert!(!browsers.join("paycom-attempt.json").exists());
+        assert_eq!(
+            std::fs::read(browsers.join("future-collector/session")).unwrap(),
+            b"private session"
+        );
+        assert_eq!(
+            snapshot(&store.collector(&id, Provider::Paycom).unwrap()),
+            before
+        );
+        store
+            .clear_collector_browser_state(&id, Provider::Paycom)
+            .unwrap();
     }
     #[test]
     fn refuses_missing_cross_tenant_and_unsafe_storage() {

@@ -99,7 +99,8 @@ path or executable supplied by a DSP.
    are rejected. Today execution and scheduling support Paycom only; registering
    a storage variant alone does not enable a new collector.
 5. Add authorized API routes and reads using the typed collector accessor. Keep
-   provider settings/schedules with the provider data. Review timezone updates,
+   provider settings/schedules with the provider data. Register its owned browser
+   entries so credential changes clear only that collector's sessions. Review timezone updates,
    suspension and credential-revision cancellation across all affected collectors.
 6. Test provisioning, failed/restarted migration, schema compatibility,
    cross-DSP isolation, failed publication, scheduler behavior, backup/restore
