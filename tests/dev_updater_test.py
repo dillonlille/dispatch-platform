@@ -16,14 +16,17 @@ updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 
 
-def artifact(root, commit, marker="candidate", rust=False, schema=None):
+def artifact(root, commit, marker="candidate", rust=False, schema=None, rust_only=False):
+    rust = rust or rust_only
     root.mkdir(mode=0o700, parents=True)
     contents = {
         ("services/rust/dispatch-backend" if rust else "api/main.js"): marker, "dashboard/index.html": "<h1>Dispatch</h1>",
         "package.json": '{"type":"module"}',
         "tooling/build-info.json": json.dumps({"commit": commit}),
     }
-    if rust:
+    if rust_only:
+        contents.pop("package.json")
+    if rust and not rust_only:
         contents.update({"services/runtime/auth-worker.js": "worker", "services/runtime/collection-worker.js": "worker"})
     for name, contents in contents.items():
         target = root / name
@@ -37,6 +40,9 @@ def artifact(root, commit, marker="candidate", rust=False, schema=None):
                           "size": item.stat().st_size})
     manifest = ({"format": 2, "version": "0.1.0-dev.0", "runtime": "rust", "workerNodeMajor": 22, "schema": 3, "files": files} if rust else
                 {"format": 1, "version": "0.1.0-dev.0", "nodeMajor": 22, "schema": schema or 1, "files": files})
+    if rust_only:
+        manifest["format"] = 3
+        manifest.pop("workerNodeMajor")
     manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
     (root / "release.json").write_text(json.dumps(manifest))
     return manifest
@@ -188,6 +194,35 @@ class RustDevUpdaterTests(DevUpdaterTests):
         (self.candidate / "release.json").write_text(json.dumps(manifest))
         with self.assertRaisesRegex(RuntimeError, "retired Node core"):
             updater.verify_artifact(self.candidate, self.new)
+
+
+class RustOnlyTransitionTests(RustDevUpdaterTests):
+    """Exercise activation and rollback from deployed format 2 to format 3."""
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.candidate)
+        self.manifest = artifact(self.candidate, self.new, "Rust only", rust_only=True)
+
+    def test_runtime_payload_is_rejected_even_with_valid_inventory(self):
+        target = self.candidate / "node_modules/unused/index.js"
+        target.parent.mkdir(parents=True)
+        target.write_text("unused runtime")
+        manifest = json.loads((self.candidate / "release.json").read_text())
+        manifest.pop("digest")
+        manifest["files"].append({"path": "node_modules/unused/index.js", "size": target.stat().st_size,
+                                  "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+        manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
+        (self.candidate / "release.json").write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(RuntimeError, "retired runtime files"):
+            updater.verify_artifact(self.candidate, self.new)
+
+
+class RustOnlyUpdaterTests(RustOnlyTransitionTests):
+    """Once upgraded, future format-3 updates keep the same recovery guarantees."""
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.live / ".build")
+        self.old_artifact = artifact(self.live / ".build", self.old, "previous Rust only", rust_only=True)
 
 
 if __name__ == "__main__":
