@@ -1,3 +1,4 @@
+pub mod browseros;
 pub mod egress;
 pub mod sandbox;
 use super::{

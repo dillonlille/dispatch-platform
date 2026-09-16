@@ -1,7 +1,7 @@
 use crate::core::{Error, Result, ensure};
 use std::{net::IpAddr, os::fd::AsRawFd, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpStream, UnixListener, UnixStream},
     sync::Semaphore,
     task::JoinHandle,
@@ -84,11 +84,18 @@ impl Egress {
         Ok(Self { task, path, inode })
     }
 }
-async fn proxy(mut client: UnixStream, fixture: Option<(String, u16)>) -> Result<()> {
+async fn proxy(client: UnixStream, fixture: Option<(String, u16)>) -> Result<()> {
+    // Buffer headers instead of making one socket read per byte. Keep this
+    // reader for the tunnel so prefetched request-body/TLS bytes are preserved.
+    let mut client = BufReader::new(client);
     let mut header = Vec::new();
     while !header.ends_with(b"\r\n\r\n") {
         ensure(header.len() < 16384, "egress_denied", 403)?;
-        header.push(client.read_u8().await?);
+        match client.read_u8().await {
+            Ok(byte) => header.push(byte),
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(_) => return Err(Error::new("egress_closed", 503)),
+        }
     }
     let text = std::str::from_utf8(&header).map_err(|_| Error::new("egress_denied", 403))?;
     let first = text.lines().next().unwrap_or("");
@@ -112,10 +119,12 @@ async fn proxy(mut client: UnixStream, fixture: Option<(String, u16)>) -> Result
     let port = url
         .port_or_known_default()
         .ok_or_else(|| Error::new("egress_denied", 403))?;
-    let address = if fixture
-        .as_ref()
-        .is_some_and(|(h, p)| h == host && *p == port)
-    {
+    let address = if let Some((fixture_host, fixture_port)) = fixture {
+        ensure(
+            fixture_host == host && fixture_port == port,
+            "egress_denied",
+            403,
+        )?;
         std::net::SocketAddr::from(([127, 0, 0, 1], port))
     } else {
         ensure(

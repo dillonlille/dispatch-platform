@@ -20,6 +20,10 @@ async fn main() {
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("serve");
+    if command == "browseros-worker" {
+        ensure(args.len() == 2, "invalid_browser_worker_arguments", 400)?;
+        return core::browsers::browseros::worker_main(&args[1]).await;
+    }
     if command == "restore" {
         ensure(args.len() == 3, "usage_restore_backup_empty_target", 400)?;
         println!(
