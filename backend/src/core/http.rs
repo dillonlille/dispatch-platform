@@ -474,7 +474,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         "audit" | "settings" => "settings",
         "profile" if write => "settings",
         "paycom" | "schedule" if write => "settings",
-        "jobs" if write => "collect",
+        "jobs" | "cortex" if write => "collect",
         _ => "read",
     };
     let c = i.context(db, permission)?;
@@ -495,6 +495,8 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
         ("POST","/api/dsp/jobs")=>{v::fields(b,&["requestId"])?;let job=db.enqueue(id,Some(actor),v::text(b,"requestId",1,128)?)?;db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},
+        ("POST","/api/dsp/cortex/meal-breaks/collect")=>{let scope=super::meals::Scope::request(b,s(&c.dsp,"timezone"))?;let job=db.enqueue_meals(id,Some(actor),v::text(b,"requestId",1,128)?,&scope)?;db.audit(Some(actor),Some(id),"cortex.collection.requested","")?;Ok(Reply::status(job,202))},
+        ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
         ("GET","/api/dsp/schedule")=>Ok(Reply::json(db.schedule(id)?)),
         ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
@@ -607,7 +609,10 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                 let row = db.job(&job, Some(s(&c.dsp, "id")))?;
                 let active_revision =
                     if ["running", "waiting_verification"].contains(&s(&row, "status")) {
-                        Some(super::db::n(&row, "connection_revision"))
+                        Some((
+                            super::db::n(&row, "connection_revision"),
+                            browsers::Provider::from_job_kind(s(&row, "kind"))?,
+                        ))
                     } else {
                         None
                     };
@@ -621,10 +626,10 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                 Ok((c, result, active_revision))
             })
             .await?;
-        if let Some(revision) = active_revision {
+        if let Some((revision, provider)) = active_revision {
             state
                 .browsers
-                .revoke_revision(s(&context.dsp, "id"), revision)
+                .revoke_provider_revision(s(&context.dsp, "id"), revision, provider)
                 .await;
         }
         state
@@ -687,11 +692,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             state
                 .run(move |db| {
                     db.revalidate(&context, "connections")?;
-                    if provider == browsers::Provider::Paycom {
-                        db.cancel_dsp(s(&context.dsp, "id"))
-                    } else {
-                        Ok(())
-                    }
+                    db.cancel_provider(s(&context.dsp, "id"), provider)
                 })
                 .await?;
             state.browsers.revoke_for(&id, provider).await;
@@ -717,11 +718,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             state
                 .run(move |db| {
                     db.revalidate(&context, "connections")?;
-                    if provider == browsers::Provider::Paycom {
-                        db.cancel_dsp(s(&context.dsp, "id"))
-                    } else {
-                        Ok(())
-                    }
+                    db.cancel_provider(s(&context.dsp, "id"), provider)
                 })
                 .await?;
             state.browsers.revoke_for(&id, provider).await;

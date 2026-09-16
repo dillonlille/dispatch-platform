@@ -8,6 +8,7 @@ pub mod error;
 pub mod http;
 pub mod job_metrics;
 pub mod jobs;
+pub mod meals;
 pub mod operations;
 pub mod tenants;
 pub mod validate;

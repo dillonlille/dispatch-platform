@@ -1,4 +1,5 @@
-//! Cortex authenticates through Amazon Logistics DSP Console. Only authentication is enabled.
+//! Cortex authentication and structured meal evidence from Amazon Logistics.
+mod collection;
 use super::{attempt::Attempts, browseros, page::Page};
 use crate::core::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};

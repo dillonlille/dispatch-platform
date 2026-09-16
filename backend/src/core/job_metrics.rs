@@ -39,6 +39,8 @@ pub struct Metrics {
     publication_ms: Option<u64>,
     employees: Option<usize>,
     timecards: Option<usize>,
+    itineraries: Option<usize>,
+    meals: Option<usize>,
     peak_rss_bytes: Option<u64>,
     peak_pss_bytes: Option<u64>,
     peak_private_bytes: Option<u64>,
@@ -63,6 +65,8 @@ impl Metrics {
             publication_ms: None,
             employees: None,
             timecards: None,
+            itineraries: None,
+            meals: None,
             peak_rss_bytes: None,
             peak_pss_bytes: None,
             peak_private_bytes: None,
@@ -213,6 +217,12 @@ impl Recorder {
         let mut clock = self.0.lock().expect("job metrics");
         clock.value.employees = data["employees"].as_array().map(Vec::len);
         clock.value.timecards = data["timecards"].as_array().map(Vec::len);
+        clock.value.itineraries = data["itineraries"].as_array().map(Vec::len);
+        clock.value.meals = data["itineraries"].as_array().map(|rows| {
+            rows.iter()
+                .map(|r| r["meals"].as_array().map_or(0, Vec::len))
+                .sum()
+        });
     }
     pub fn snapshot(&self) -> Metrics {
         let clock = self.0.lock().expect("job metrics");

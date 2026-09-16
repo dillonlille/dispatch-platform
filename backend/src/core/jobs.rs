@@ -8,6 +8,25 @@ use super::{
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
+// Preserve the original user_version so the prior runtime can still operate Paycom
+// after rollback. The new request column has a default for its old INSERTs.
+pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
+    let columns = db.all("PRAGMA table_info(jobs)", [])?;
+    if columns.iter().any(|c| s(c, "name") == "request") {
+        return Ok(());
+    }
+    db.0.execute_batch("PRAGMA foreign_keys=OFF")?;
+    let result=db.transaction(|| {
+        let schema=include_str!("jobSchema.sql");
+        let (table,indexes)=schema.split_once('\n').unwrap();
+        db.0.execute_batch(&table.replacen("CREATE TABLE jobs ","CREATE TABLE jobs_next ",1))?;
+        let names=columns.iter().map(|c|s(c,"name")).collect::<Vec<_>>().join(",");
+        db.0.execute_batch(&format!("INSERT INTO jobs_next ({names}) SELECT {names} FROM jobs; DROP TABLE jobs; ALTER TABLE jobs_next RENAME TO jobs; {indexes}"))?;
+        ensure(db.all("PRAGMA foreign_key_check",[])?.is_empty(),"invalid_job_migration",503)
+    });
+    db.0.execute_batch("PRAGMA foreign_keys=ON")?;
+    result
+}
 impl Store {
     pub fn public_job(&self, row: &Value) -> Result<Value> {
         Ok(
@@ -34,6 +53,32 @@ impl Store {
             .ok_or_else(|| Error::new("job_not_found", 404))
     }
     pub fn enqueue(&self, id: &str, actor: Option<&str>, key: &str) -> Result<Value> {
+        self.enqueue_for(id, actor, key, Provider::Paycom, &json!({}))
+    }
+    pub fn enqueue_meals(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+        key: &str,
+        scope: &super::meals::Scope,
+    ) -> Result<Value> {
+        scope.validate()?;
+        self.enqueue_for(
+            id,
+            actor,
+            key,
+            Provider::Cortex,
+            &serde_json::to_value(scope)?,
+        )
+    }
+    fn enqueue_for(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+        key: &str,
+        provider: Provider,
+        request: &Value,
+    ) -> Result<Value> {
         let dsp = self.get_dsp(id)?;
         ensure(
             s(&dsp, "status") == "active" && s(&dsp, "environment") == self.config.environment,
@@ -41,18 +86,18 @@ impl Store {
             409,
         )?;
         let connection = self
-            .collector(id, Provider::Paycom)?
+            .collector(id, provider)?
             .one(
-                "SELECT enabled,revision FROM connections WHERE provider='paycom'",
-                [],
+                "SELECT enabled,revision FROM connections WHERE provider=?",
+                [provider.id()],
             )?
             .unwrap();
         ensure(flag(&connection, "enabled"), "connection_required", 409)?;
         self.jobs.transaction(||{
-            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {return self.public_job(&row);}
+            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind().unwrap() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
             ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
             let job=crypto::id("job")?;
-            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key) VALUES (?,?,?,?,'queued',?,?,?,?,?,?)",params![job,id,self.config.environment,Provider::Paycom.job_kind(),now(),iso(),self.config.release,actor,n(&connection,"revision"),key])?;
+            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key,request) VALUES (?,?,?,?,'queued',?,?,?,?,?,?,?)",params![job,id,self.config.environment,provider.job_kind(),now(),iso(),self.config.release,actor,n(&connection,"revision"),key,serde_json::to_string(request)?])?;
             self.public_job(&self.job(&job,None)?)
         })
     }
@@ -60,6 +105,10 @@ impl Store {
         self.job(id, Some(dsp))?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE id=? AND dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id,dsp])?;
         self.public_job(&self.job(id, Some(dsp))?)
+    }
+    pub fn cancel_provider(&self, id: &str, provider: Provider) -> Result<()> {
+        self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND kind=? AND status IN ('queued','running','waiting_verification')",params![iso(),id,provider.job_kind()])?;
+        Ok(())
     }
     pub fn cancel_dsp(&self, id: &str) -> Result<()> {
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id])?;
@@ -90,13 +139,14 @@ impl Store {
                 403,
             )?;
         }
+        let provider = Provider::from_job_kind(s(&row, "kind"))?;
         let connection = self
-            .collector(s(&row, "dsp_id"), Provider::from_job_kind(s(&row, "kind"))?)?
+            .collector(s(&row, "dsp_id"), provider)?
             .one(
-                "SELECT enabled,revision FROM connections WHERE provider='paycom'",
-                [],
+                "SELECT enabled,revision FROM connections WHERE provider=?",
+                [provider.id()],
             )?
-            .unwrap();
+            .ok_or_else(|| Error::new("connection_required", 409))?;
         ensure(
             flag(&connection, "enabled") && connection["revision"] == row["connection_revision"],
             "connection_changed",
@@ -114,11 +164,15 @@ impl Store {
             Ok(())
         })
     }
-    pub fn claim(&self, owner: &str, eligible: impl Fn(&str) -> bool) -> Result<Option<Value>> {
+    pub fn claim(
+        &self,
+        owner: &str,
+        eligible: impl Fn(&str, Provider) -> bool,
+    ) -> Result<Option<Value>> {
         self.jobs.transaction(|| {
             if n(&self.jobs.one("SELECT count(*) n FROM jobs WHERE status IN ('running','waiting_verification')",[])?.unwrap(),"n")>=self.config.browser_capacity as i64 {return Ok(None);}
             let rows=self.jobs.all("SELECT * FROM jobs j WHERE j.status='queued' AND j.available_at<=? AND NOT EXISTS (SELECT 1 FROM jobs active WHERE active.dsp_id=j.dsp_id AND active.status IN ('running','waiting_verification')) ORDER BY (SELECT COALESCE(MAX(completed_at),'') FROM jobs previous WHERE previous.dsp_id=j.dsp_id),j.created_at LIMIT 200",[now()])?;
-            let Some(row)=rows.into_iter().find(|r|eligible(s(r,"dsp_id"))) else {return Ok(None);};
+            let Some(row)=rows.into_iter().find(|r|Provider::from_job_kind(s(r,"kind")).is_ok_and(|p|eligible(s(r,"dsp_id"),p))) else {return Ok(None);};
             self.jobs.exec("UPDATE jobs SET status='running',attempt=attempt+1,started_at=?,lease_owner=?,lease_until=?,message='Starting collection' WHERE id=?",params![iso(),owner,now()+120000,s(&row,"id")])?;
             let job=self.job(s(&row,"id"),None)?;
             self.jobs.exec("INSERT INTO job_metrics(job_id,attempt,owner,metrics) VALUES (?,?,?,?)",params![s(&job,"id"),n(&job,"attempt"),owner,serde_json::to_string(&Metrics::new(&job))?])?;
@@ -152,6 +206,8 @@ impl Store {
                 "provider_unavailable",
                 "provider_navigation_timeout",
                 "provider_content_timeout",
+                "cortex_source_changed",
+                "cortex_content_incomplete",
             ]
             .contains(&e)
         }) && n(&row, "attempt") < n(&row, "max_attempts");
@@ -245,24 +301,28 @@ fn retry_delay(id: &str, attempt: i64) -> i64 {
 pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<()> {
     let owner = crypto::id("worker")?;
     let mut tasks = tokio::task::JoinSet::new();
+    let mut running_dsps = std::collections::HashSet::new();
     let mut timer = tokio::time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
             _=super::cancelled(&mut stop)=>break,
-            _=tasks.join_next(),if !tasks.is_empty()=>{},
+            result=tasks.join_next(),if !tasks.is_empty()=>{
+                match result {Some(Ok(dsp))=>{running_dsps.remove(&dsp);},Some(Err(_))=>return Err(Error::new("collector_task_failed",500)),None=>{}}
+            },
             _=timer.tick()=>{
                 state.expire_browsers().await;
                 let result=state.run(|db|{db.recover_jobs(false)?;db.schedule_tick()}).await;
                 if let Err(error)=result {eprintln!("scheduler_tick_failed: {}",error.code);}
                 while tasks.len()<state.config.browser_capacity {
                     let pool=state.clone();let claim_owner=owner.clone();
+                    let running=running_dsps.clone();
                     let job=state.run(move|db| {
                         let memory_ready = (pool.config.fixture && pool.config.fixture_url.is_none()) || pool.browsers.admission().can_start;
                         let message = if memory_ready {"Waiting for a browser"} else {"Waiting for available memory"};
                         db.jobs.exec("UPDATE jobs SET message=?1 WHERE status='queued' AND available_at<=?2 AND message<>?1", params![message,now()])?;
-                        db.claim(&claim_owner,|id|pool.browsers.get(id).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
+                        db.claim(&claim_owner,|id,provider|!running.contains(id) && pool.browsers.get_for(id,provider).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
                     }).await;
-                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();tasks.spawn(async move{execute(state,job,owner).await;});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
+                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();let dsp=s(&job,"dsp_id").to_owned();running_dsps.insert(dsp.clone());tasks.spawn(async move{execute(state,job,owner).await;dsp});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
                 }
             }
         }
@@ -275,16 +335,13 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     let id = s(&job, "id").to_owned();
     let dsp = s(&job, "dsp_id").to_owned();
     let metrics = Recorder::new(&job);
+    let provider = Provider::from_job_kind(s(&job, "kind")).expect("registered job kind");
     let task = async {
         let jid = id.clone();
         let worker = owner.clone();
         state.run(move |db| db.guard_job(&jid, &worker)).await?;
         metrics.phase(Phase::Authentication);
-        let provider = Provider::from_job_kind(s(&job, "kind"))?;
-        let session = match provider {
-            Provider::Paycom => state.ensure_browser(&dsp, false).await?,
-            Provider::Cortex => return Err(Error::new("unsupported_collector", 409)),
-        };
+        let session = state.ensure_provider_browser(&dsp, false, provider).await?;
         if session.challenge() {
             metrics.phase(Phase::Verification);
             let jid = id.clone();
@@ -310,11 +367,24 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         state
             .run(move |db| {
                 db.guard_job(&jid, &worker)?;
-                db.progress(&jid, &worker, 10, "Collecting workforce", "running")
+                db.progress(
+                    &jid,
+                    &worker,
+                    10,
+                    if provider == Provider::Cortex {
+                        "Collecting meal breaks"
+                    } else {
+                        "Collecting workforce"
+                    },
+                    "running",
+                )
             })
             .await?;
         metrics.phase(Phase::Collection);
-        let data = session.collect(&state, &id, &owner, &metrics).await?;
+        let request: Value = serde_json::from_str(s(&job, "request"))?;
+        let data = session
+            .collect(&state, &id, &owner, &metrics, &request)
+            .await?;
         metrics.counts(&data);
         metrics.phase(Phase::Publication);
         let jid = id.clone();
@@ -326,7 +396,12 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                 db.guard_job(&jid, &worker)?;
                 match provider {
                     Provider::Paycom => db.publish(&tenant, &data)?,
-                    Provider::Cortex => return Err(Error::new("unsupported_collector", 409)),
+                    Provider::Cortex => db.publish_meals(
+                        &tenant,
+                        &jid,
+                        &serde_json::from_value(data)?,
+                        &serde_json::from_value(request)?,
+                    )?,
                 };
                 completed_metrics.finish("succeeded", None);
                 db.jobs.transaction(|| {
@@ -344,9 +419,9 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         tokio::select! {
             result=&mut task=>break result,
             _=sample.tick()=>{
-                if let Some(pid)=state.browsers.get(&dsp).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
+                if let Some(pid)=state.browsers.get_for(&dsp,provider).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
                     && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
-                    if let Some(session) = state.browsers.get(&dsp) { session.observe_memory(&memory); }
+                    if let Some(session) = state.browsers.get_for(&dsp,provider) { session.observe_memory(&memory); }
                     metrics.observe(memory);
                 }
                 let jid=id.clone(); let worker=owner.clone(); let snapshot=metrics.snapshot();
@@ -406,7 +481,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     }
     state
         .browsers
-        .revoke_revision(&dsp, n(&job, "connection_revision"))
+        .revoke_provider_revision(&dsp, n(&job, "connection_revision"), provider)
         .await;
     let error = result.err().map(|e| e.code);
     let actor = job["actor_id"].as_str().map(str::to_owned);
@@ -446,5 +521,43 @@ mod retry_tests {
         let delay = retry_delay("job-test", 2);
         assert!((120000..=180000).contains(&delay));
         assert_eq!(delay, retry_delay("job-test", 2));
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    #[test]
+    fn extending_job_kinds_preserves_jobs_metrics_and_legacy_inserts() {
+        let db = super::super::db::Db(rusqlite::Connection::open_in_memory().unwrap());
+        let old = include_str!("jobSchema.sql")
+            .replace(
+                "CHECK(kind IN ('paycom.collect','cortex.meal_breaks.collect'))",
+                "CHECK(kind='paycom.collect')",
+            )
+            .replace(" request TEXT NOT NULL DEFAULT '{}',", "");
+        db.0.execute_batch(&old).unwrap();
+        db.0.execute_batch(include_str!("jobMetricsSchema.sql"))
+            .unwrap();
+        let insert = "INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,'dsp','preview','paycom.collect','queued',0,'2026','test',1,?)";
+        db.exec(insert, ["job-1", "key-1"]).unwrap();
+        db.exec(
+            "INSERT INTO job_metrics VALUES ('job-1',1,'worker','{}')",
+            [],
+        )
+        .unwrap();
+        migrate(&db).unwrap();
+        migrate(&db).unwrap();
+        assert_eq!(
+            db.one("SELECT request FROM jobs WHERE id='job-1'", [])
+                .unwrap()
+                .unwrap()["request"],
+            "{}"
+        );
+        assert_eq!(db.all("SELECT * FROM job_metrics", []).unwrap().len(), 1);
+        db.exec(insert, ["job-2", "key-2"]).unwrap();
+        assert!(db.all("PRAGMA foreign_key_check", []).unwrap().is_empty());
+        db.exec("DELETE FROM jobs WHERE id='job-1'", []).unwrap();
+        assert!(db.all("SELECT * FROM job_metrics", []).unwrap().is_empty());
     }
 }

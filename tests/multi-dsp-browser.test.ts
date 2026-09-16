@@ -58,17 +58,38 @@ test(
     const firstRequests = new Promise<void>((resolve) => (releaseFirst = resolve));
     const gateAccounts = new Set<string>();
     const gateTimer = setTimeout(releaseFirst, 20000);
+    // Also rendezvous each DSP's first two tabs. A fixed response delay cannot
+    // prove concurrency when the browser starts those navigations unevenly.
+    const pairs = new Map<
+      string,
+      { arrivals: number; ready: Promise<void>; release: () => void; timer: NodeJS.Timeout }
+    >();
     t.after(() => {
       clearTimeout(gateTimer);
       releaseFirst();
+      for (const pair of pairs.values()) {
+        clearTimeout(pair.timer);
+        pair.release();
+      }
     });
     f.state.beforeTimecard = async (account) => {
+      let pair = pairs.get(account);
+      if (!pair) {
+        let release!: () => void;
+        const ready = new Promise<void>((resolve) => (release = resolve));
+        pair = { arrivals: 0, ready, release, timer: setTimeout(release, 10000) };
+        pairs.set(account, pair);
+      }
+      if (++pair.arrivals === 2) {
+        clearTimeout(pair.timer);
+        pair.release();
+      }
       gateAccounts.add(account);
       if (gateAccounts.size > 1) {
         clearTimeout(gateTimer);
         releaseFirst();
       }
-      await firstRequests;
+      await Promise.all([firstRequests, pair.ready]);
     };
     // A second queued job from A must not jump ahead of C's first collection.
     for (const index of [0, 0, 1, 2]) {
@@ -132,7 +153,12 @@ test(
     assert(f.state.timecardsPeak >= 2 && f.state.timecardsPeak <= 4);
     if (peakBrowsers === 2 && !memoryDelayed)
       assert.equal(f.state.timecardAccountsPeak, 2, 'Distinct DSPs must collect concurrently');
-    for (const account of accounts) assert.equal(f.state.peakByAccount.get(account), 2);
+    for (const account of accounts)
+      assert.equal(
+        f.state.peakByAccount.get(account),
+        2,
+        `${account} must use two concurrent tabs`,
+      );
     assert.equal(f.state.accountStarts.filter((v) => v === accounts[0]).length, 2);
     // Fairness is the order in which jobs receive a slot. If both slots free
     // together, different browser startup times can reorder the first HTTP request.

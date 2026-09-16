@@ -39,7 +39,7 @@ impl Provider {
     pub fn job_kind(self) -> Option<&'static str> {
         match self {
             Self::Paycom => Some("paycom.collect"),
-            Self::Cortex => None,
+            Self::Cortex => Some("cortex.meal_breaks.collect"),
         }
     }
     pub fn from_job_kind(kind: &str) -> Result<Self> {
@@ -189,7 +189,7 @@ impl Store {
         let marker = core.setting("storage.cortex", Value::Null)?;
         if marker == json!(1) {
             self.collector(id, Provider::Cortex)?;
-            return Ok(());
+            return self.initialize_cortex_meals(id);
         }
         ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
         let provider = Provider::Cortex;
@@ -218,7 +218,39 @@ impl Store {
             "collector_storage_invalid",
             503,
         )?;
-        core.set("storage.cortex", &json!(1))
+        core.set("storage.cortex", &json!(1))?;
+        self.initialize_cortex_meals(id)
+    }
+
+    fn initialize_cortex_meals(&self, id: &str) -> Result<()> {
+        let db = self.collector(id, Provider::Cortex)?;
+        if db
+            .one(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_schema'",
+                [],
+            )?
+            .is_none()
+        {
+            db.transaction(|| {
+                db.0.execute_batch(include_str!("cortexMeals.sql"))?;
+                Ok(())
+            })?;
+        }
+        ensure(
+            db.all("SELECT version FROM meal_schema", [])? == vec![json!({"version":1})],
+            "unsupported_cortex_schema",
+            503,
+        )?;
+        // Missing initialized feature tables fail closed, rather than recreating lost data.
+        for table in [
+            "meal_publications",
+            "meal_itineraries",
+            "meal_delivery_events",
+            "meal_breaks",
+        ] {
+            db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
+        }
+        Ok(())
     }
 
     fn copy_legacy_paycom(&self, id: &str) -> Result<()> {

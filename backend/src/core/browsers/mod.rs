@@ -121,8 +121,8 @@ impl Manager {
             session.close().await;
         }
     }
-    pub async fn revoke_revision(&self, id: &str, revision: i64) {
-        if let Some(session) = self.get(id)
+    pub async fn revoke_provider_revision(&self, id: &str, revision: i64, provider: Provider) {
+        if let Some(session) = self.get_for(id, provider)
             && session.revision == revision
         {
             self.revoke_current(&session).await;
@@ -296,12 +296,8 @@ impl Session {
         job: &str,
         owner: &str,
         metrics: &super::job_metrics::Recorder,
+        request: &Value,
     ) -> Result<Value> {
-        ensure(
-            self.provider == Provider::Paycom,
-            "unsupported_collector",
-            409,
-        )?;
         ensure(self.ready(), "verification_required", 409)?;
         ensure(
             !self.collecting.swap(true, Ordering::SeqCst),
@@ -310,17 +306,20 @@ impl Session {
         )?;
         if self.fixture {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            return workforce::fixture(&self.timezone);
+            return if self.provider == Provider::Cortex {
+                Ok(serde_json::to_value(super::meals::fixture(
+                    &serde_json::from_value(request.clone())?,
+                ))?)
+            } else {
+                workforce::fixture(&self.timezone)
+            };
         }
         let mut worker = self.worker.lock().await;
         let worker = worker
             .as_mut()
             .ok_or_else(|| Error::new("browser_unavailable", 409))?;
         let mut cancellation = self.cancel.subscribe();
-        let Worker::Paycom(worker) = worker else {
-            return Err(Error::new("collector_unavailable", 409));
-        };
-        let response = worker.collect(&self.timezone, metrics, |progress, message| {
+        let progress = |progress, message: String| {
             let job = job.to_owned();
             let owner = owner.to_owned();
             async move {
@@ -331,7 +330,17 @@ impl Session {
                     })
                     .await
             }
-        });
+        };
+        let response = async {
+            match worker {
+                Worker::Paycom(worker) => worker.collect(&self.timezone, metrics, progress).await,
+                Worker::Cortex(worker) => {
+                    worker
+                        .collect(&serde_json::from_value(request.clone())?, metrics, progress)
+                        .await
+                }
+            }
+        };
         tokio::select! {
             _=cancellation.wait_for(|closed|*closed)=>Err(Error::new("job_cancelled",409)),
             result=tokio::time::timeout(Duration::from_secs(1800),response)=>result.map_err(|_|Error::new("provider_timeout",504))?,

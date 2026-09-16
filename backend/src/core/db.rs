@@ -268,6 +268,7 @@ impl Store {
             1,
             true,
         )?;
+        super::jobs::migrate(&jobs)?;
         // Additive tables retain compatibility with the previous Rust release.
         jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
         let store = Self {
