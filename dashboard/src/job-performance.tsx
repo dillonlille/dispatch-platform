@@ -2,13 +2,13 @@ import { useState } from 'react';
 import type { JobMetrics } from '../../shared/contracts/index.js';
 import { title } from './ui.js';
 
-function duration(ms: number | null) {
+export function duration(ms: number | null) {
   if (ms === null) return '—';
   if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
-function memory(bytes: number | null) {
+export function memory(bytes: number | null) {
   return bytes === null ? 'Not sampled' : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
 }
 export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
@@ -64,7 +64,8 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
                     <p>
                       {attempt.pageReads.completed} timecards validated ·{' '}
                       {attempt.pageReads.retries} page retries · {attempt.pageReads.recovered}{' '}
-                      recovered
+                      recovered · {attempt.pageReads.resumed ?? 0} resumed ·{' '}
+                      {attempt.pageReads.earlyReady ?? 0} ready before full page load
                     </p>
                     {attempt.pageReads.active.map((page) => (
                       <small key={page.ordinal}>
@@ -76,6 +77,9 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
                       <small key={`${page.ordinal}-${page.attempt}`}>
                         Employee {page.ordinal}, read {page.attempt} · {title(page.stage)} ·{' '}
                         {title(page.error ?? '')} after {duration(page.elapsedMs)}
+                        {page.documentState && ` · document ${page.documentState}`}
+                        {page.pendingRequests != null &&
+                          ` · ${page.pendingRequests} data requests pending`}
                       </small>
                     ))}
                     {attempt.pageReads.slowest.length > 0 && (

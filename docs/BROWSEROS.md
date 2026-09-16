@@ -100,13 +100,16 @@ The host checks cover:
 - A process allowlist containing only Rust, bubblewrap, BrowserOS and optional
   Xvfb, with no Node/Bun or agent server in the worker namespace.
 
-The API checks in `tests/paycom-worker.test.ts` and `tests/native-browser.test.ts`
+The API checks in `tests/paycom-worker.test.ts`, `tests/native-browser.test.ts`
+and `tests/collection-throughput.test.ts`
 exercise native X11 PIN input, rejection cooldowns across restart, explicit CAPTCHA
 continuation, cookie reuse, complete roster/timecard collection, separate DSPs,
 and preservation of the prior publication when a roster or total is incomplete.
 They also prove that at most two timecard document requests overlap, an odd-sized
 roster completes, cross-employee responses fail, throttling schedules backoff, and
-cancelling a job closes both in-flight pages.
+cancelling a job closes both in-flight pages. A core crash resumes completed
+employees, a blocked lane leaves its sibling working, and a delayed data response
+is observed before accepting an otherwise ready page with a slow image.
 They run as part of `npm run test:browseros` during full CI checks. Synthetic results
 do not establish real provider latency or measured memory savings.
 
@@ -129,24 +132,65 @@ only be submitted again in the same document with the same values.
 Collection closes credential tabs, captures the Timecard Search roster request,
 selects the current fortnight using the DSP timezone, and verifies exact employee
 membership. It validates each timecard's identity, dates, layout and weekly totals
-before Rust reconciles daily hours. Two tabs load timecards in bounded pairs within
-the same browser and DSP session. Each tab owns its execution-context cache. A
-scheduled navigation releases the serialized command channel while Paycom responds;
-committed-frame events gate renderer queries so a slow response cannot block the
-other tab. The worker retains at most eight latest main frames (64 KiB each) and
-removes them when tabs detach. The reader then requires a new document, the exact employee URL, a fully loaded
-table and all existing validation. After each pair is fully validated and its
-records are owned by Rust, collection asks both renderers to collect unreachable
-page objects through `HeapProfiler.collectGarbage`. This keeps the tabs and
-profile alive while reclaiming old page allocations between reads. It does not
-clear cookies or request another provider page. Collection also replaces each
-tab's history entry so
-completed employee pages cannot accumulate in the back/forward cache. Credentials
-remain confined to authentication.
-Throttling or server errors abort the pair and use the existing bounded job retry
-backoff. Failed or cancelled jobs preserve the last
-successful publication. One persistent browser serves the flow without a Node
-worker, Playwright connection, or second browser launch.
+before Rust reconciles daily hours. Two tabs share an employee queue within the
+same browser and DSP session. Each tab advances independently, so one stalled
+employee does not hold up the other lane. Each tab owns its execution-context
+cache. A scheduled navigation releases the serialized command channel while
+Paycom responds; committed-frame events gate renderer queries so a slow response
+cannot block the other tab. The worker retains at most eight latest main frames
+(64 KiB each) and removes them when tabs detach.
+
+The reader requires a new document and the exact employee URL. A fully loaded
+page with no pending data dependencies follows the established extraction path.
+When only decorative resources are still loading, it can finish earlier: the
+HTML must be parsed, document/script/style/XHR/fetch requests must have finished
+successfully and remained quiet for 750 ms, and the fully validated projected
+records must remain identical across another 750 ms of observations. Failed
+critical requests disable that early shortcut. Images and fonts are excluded
+from readiness. Network tracking retains at most 512 request/loader IDs per tab;
+it does not persist URLs, headers, response bodies or credentials. Browser response
+buffers are capped at 1 KiB. Diagnostics record early completions, document state
+and outstanding data-request counts, alongside bounded slow/failing page timings.
+
+After each employee is validated and its records are owned by Rust, that renderer
+collects unreachable objects through `HeapProfiler.collectGarbage`. Tabs also
+replace their history entry to prevent completed pages accumulating in the
+back/forward cache. Cookies and provider profiles remain available for reuse.
+Local retries replace only the affected tab. Both lanes are drained on error so
+an abandoned command cannot close the shared transport beneath its sibling.
+
+### Restart checkpoints
+
+The host saves each validated employee's 14 projected days in private Paycom
+SQLite tables. These are unpublished staging records, separate from the active
+dataset; browser workers receive no storage paths. A retried or interrupted job
+can reuse them only after reading a fresh roster and matching the same job, DSP,
+credential revision, timezone, complete employee metadata and pay-period bounds.
+Saved pages are validated again before reuse. A mismatch or malformed page
+invalidates the checkpoint. Checkpoints expire 15 minutes after their initial
+creation; additional progress does not extend that deadline. Expired progress
+stops accepting writes while the current in-memory collection can still finish.
+
+Successful publication, terminal failure, cancellation and credential replacement
+clear the staging records. Startup and a minute-level sweep remove expired and
+orphaned checkpoints. Resume still requires the entire roster and all 14 days per
+employee before publishing; failure preserves the last successful dataset. A
+resumed run can contain records collected up to 15 minutes earlier, so it is
+identified separately in diagnostics and excluded from speed baselines. The
+additive tables keep the previous runtime usable after rollback.
+
+### Performance history
+
+Collections and Diagnostics show recent duration, page/job retries, peak browser
+PSS, resumed employees and the last successful collection. DSPs and providers
+have separate histories, drawn from the existing bounded 200-job response. The
+median and 95th percentile use up to 20 successful first-attempt full runs. Speed
+regressions compare time per employee (Paycom) or itinerary (Cortex) against the
+previous five comparable runs; a 25% increase is highlighted. Peak-memory warnings
+require both 25% and 32 MiB increases. Retried/resumed jobs do not enter these
+baselines. Interrupted timings end at the last saved sample; the UI marks them
+as partial. History contains recorded observations, not an assumed performance
+baseline or a guarantee that provider data has not changed since collection.
 
 `DISPATCH_BROWSEROS_EXECUTABLE` defaults to the pinned installation. The legacy
 `DISPATCH_BROWSER_EXECUTABLE` setting does not select the DSP provider browser.

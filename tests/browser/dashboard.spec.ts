@@ -64,6 +64,11 @@ test('owner dashboard, search, workforce, timecards, connection verification and
     timeout: 15000,
   });
   await page.getByRole('link', { name: 'Collections', exact: true }).click();
+  const history = page.getByRole('region', { name: 'Collection performance history' });
+  await expect(history).toContainText('Last successful collection');
+  await expect(history).toContainText('Median collection time');
+  await expect(history.getByLabel('Collection source')).toBeVisible();
+  await expect(history).toContainText('Needs 5 full runs');
   const collection = page.getByRole('row').filter({ hasText: 'Collection completed' }).first();
   await collection.getByText('Attempt details', { exact: true }).click();
   await expect(collection.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(

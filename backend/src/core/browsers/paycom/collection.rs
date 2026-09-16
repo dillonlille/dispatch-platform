@@ -1,7 +1,11 @@
 use super::*;
-use crate::core::job_metrics::Recorder;
+use crate::core::{collection_checkpoint::Checkpoint, job_metrics::Recorder};
 use chrono::{Datelike, NaiveDate};
-use std::{collections::BTreeSet, future::Future};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 const API: &str = "https://time-and-attendance.paycomonline.net/api/cl/timecard-search/employees";
 const FIELDS: &[&str] = &[
     "allocationCategories",
@@ -252,6 +256,7 @@ impl Driver {
         &mut self,
         timezone: &str,
         metrics: &Recorder,
+        checkpoint: Option<&Checkpoint>,
         mut progress: F,
     ) -> Result<Value>
     where
@@ -336,63 +341,120 @@ impl Driver {
         };
         self.evaluate("delete globalThis.dispatchRoster").await?;
         let employees = employees(&raw, &codes)?;
-        let mut timecards = Vec::with_capacity(employees.len() * 14);
-        let mut second = if employees.len() > 1 {
+        let resume = if let Some(checkpoint) = checkpoint {
+            Some(checkpoint.prepare(&period, &employees, timezone).await?)
+        } else {
+            None
+        };
+        let (token, mut pages) = resume.map(|r| (r.token, r.pages)).unwrap_or_default();
+        metrics.resumed(pages.len());
+        let todo = employees
+            .iter()
+            .enumerate()
+            .filter_map(|(index, employee)| {
+                (!pages.contains_key(s(employee, "code"))).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        let mut second = if todo.len() > 1 {
             Some(Page::open(self.browser.clone(), self.origin.clone()).await?)
         } else {
             None
         };
-        for (batch, employees) in employees.chunks(2).enumerate() {
-            let first = batch * 2;
-            progress(
-                20 + (first * 70 / codes.len()) as i64,
-                format!(
-                    "Reading timecards ({}–{} of {})",
-                    first + 1,
-                    first + employees.len(),
-                    codes.len()
-                ),
-            )
-            .await?;
-            let result = if let [a, b] = employees {
-                // Never drop the sibling's in-flight CDP command on a page error:
-                // the transport intentionally closes when a caller disappears.
-                let (a, b) = tokio::join!(
-                    read_timecard(&mut self.page, &self.origin, a, &period, metrics, first + 1),
-                    read_timecard(
-                        second.as_mut().expect("second collection tab"),
-                        &self.origin,
-                        b,
-                        &period,
-                        metrics,
-                        first + 2
-                    )
-                );
-                let mut a = a?;
-                a.extend(b?);
-                a
+        let queue = Queue {
+            employees: &employees,
+            todo,
+            next: AtomicUsize::new(0),
+            stopped: AtomicBool::new(false),
+            progress: tokio::sync::Mutex::new((pages.len(), progress)),
+            origin: &self.origin,
+            period: &period,
+            metrics,
+            checkpoint,
+            token: &token,
+        };
+        // Drain both lanes even when one fails. Dropping a sibling's in-flight
+        // CDP command intentionally closes the shared browser transport.
+        let (first, second) = tokio::join!(queue.lane(&mut self.page), async {
+            if let Some(page) = &mut second {
+                queue.lane(page).await
             } else {
-                read_timecard(
-                    &mut self.page,
-                    &self.origin,
-                    &employees[0],
-                    &period,
-                    metrics,
-                    first + 1,
-                )
-                .await?
-            };
-            timecards.extend(result);
-            // Both pages are complete and their validated records are now owned
-            // by Rust. Reclaim unreachable page objects before loading more.
-            self.page.collect_garbage().await?;
-            if let Some(second) = &second {
-                second.collect_garbage().await?;
+                Ok(BTreeMap::new())
             }
-        }
+        });
+        pages.extend(first?);
+        pages.extend(second?);
+        let timecards = employees
+            .iter()
+            .flat_map(|employee| pages.remove(s(employee, "code")).unwrap_or_default())
+            .collect::<Vec<_>>();
+        ensure(
+            timecards.len() == employees.len() * 14,
+            "roster_not_complete",
+            409,
+        )?;
         Ok(
             json!({"employees":employees,"timecards":timecards,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),
         )
+    }
+}
+
+struct Queue<'a, F> {
+    employees: &'a [Value],
+    todo: Vec<usize>,
+    next: AtomicUsize,
+    stopped: AtomicBool,
+    progress: tokio::sync::Mutex<(usize, F)>,
+    origin: &'a str,
+    period: &'a Value,
+    metrics: &'a Recorder,
+    checkpoint: Option<&'a Checkpoint>,
+    token: &'a str,
+}
+impl<F, Fut> Queue<'_, F>
+where
+    F: FnMut(i64, String) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    async fn lane(&self, page: &mut Page) -> Result<BTreeMap<String, Vec<Value>>> {
+        let result = self.read_queue(page).await;
+        if result.is_err() {
+            self.stopped.store(true, Ordering::SeqCst);
+        }
+        result
+    }
+    async fn read_queue(&self, page: &mut Page) -> Result<BTreeMap<String, Vec<Value>>> {
+        let mut pages = BTreeMap::new();
+        while !self.stopped.load(Ordering::SeqCst) {
+            let Some(&index) = self.todo.get(self.next.fetch_add(1, Ordering::SeqCst)) else {
+                break;
+            };
+            let employee = &self.employees[index];
+            let records = read_timecard(
+                page,
+                self.origin,
+                employee,
+                self.period,
+                self.metrics,
+                index + 1,
+            )
+            .await?;
+            if let Some(checkpoint) = self.checkpoint {
+                checkpoint
+                    .save(self.token, employee, self.period, &records)
+                    .await?;
+            }
+            pages.insert(s(employee, "code").to_owned(), records);
+            page.collect_garbage().await?;
+            let mut progress = self.progress.lock().await;
+            progress.0 += 1;
+            let done = progress.0;
+            (progress.1)(
+                20 + (done * 70 / self.employees.len()) as i64,
+                format!("Reading timecards ({done} of {})", self.employees.len()),
+            )
+            .await?;
+        }
+        Ok(pages)
     }
 }
 
@@ -443,10 +505,12 @@ async fn read_once(
         s(employee, "code"),
         s(period, "key")
     );
+    page.monitor_loading().await?;
     let previous_loader = page.start_navigation(&source).await?;
     let started = Instant::now();
     let mut content_started = None;
     let mut missing_since = None;
+    let mut candidate: Option<(Vec<Value>, Instant)> = None;
     loop {
         if let Some(content) = content_started {
             ensure(
@@ -477,12 +541,38 @@ async fn read_once(
             ensure(s(&frame, "url") == source, "authentication_failed", 409)?;
             content_started.get_or_insert_with(Instant::now);
             metrics.page_stage(ordinal, "content");
-            match page.evaluate("({complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')&&Array.from(document.querySelectorAll('input[type=password]')).some(e=>e.offsetParent!==null&&e.getClientRects().length>0),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
+            match page.evaluate("({parsed:document.readyState!=='loading',complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')&&Array.from(document.querySelectorAll('input[type=password]')).some(e=>e.offsetParent!==null&&e.getClientRects().length>0),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
                 Ok(value) => {
                     let status = value["status"].as_u64().unwrap_or(0);
                     ensure(![401,403].contains(&status) && value["login"] != true, "authentication_failed", 409)?;
                     ensure(status != 429 && status < 500, "provider_unavailable", 502)?;
-                    if value["complete"] == true && value["present"] == true { break; }
+                    let loading = page.loading(s(&frame,"loaderId")).await?;
+                    metrics.page_loading(ordinal, loading["pending"].as_u64().map(|n| n as usize),
+                        if value["complete"] == true { "complete" } else if value["parsed"] == true { "interactive" } else { "loading" });
+                    if value["complete"] == true && value["present"] == true
+                        && (loading["known"] != true || loading["pending"] == 0) { break; }
+                    let quiet = loading["known"] == true && loading["failed"] == false
+                        && loading["pending"] == 0 && loading["quietMs"].as_u64().unwrap_or(0) >= 750;
+                    if value["parsed"] == true && value["present"] == true && quiet {
+                        // Validate the actual data, then require it to remain stable
+                        // across polls. Images/fonts do not hold up a valid timecard.
+                        match extract(page, employee, period, &source).await {
+                            Ok(records) => {
+                                if let Some((previous, since)) = &candidate
+                                    && *previous == records && since.elapsed() >= Duration::from_millis(750) {
+                                    metrics.page_stage(ordinal, "extraction");
+                                    if value["complete"] != true { metrics.early_ready(); }
+                                    return Ok(records);
+                                }
+                                if candidate.as_ref().is_none_or(|(previous,_)| *previous != records) {
+                                    candidate = Some((records, Instant::now()));
+                                }
+                            }
+                            Err(error) if value["complete"] == true => return Err(error),
+                            Err(error) if ["timecard_extraction_failed","invalid_timecard_hours","provider_hours_mismatch","browser_navigation_pending"].contains(&error.code.as_str()) => {candidate=None;}
+                            Err(error) => return Err(error),
+                        }
+                    } else { candidate = None; }
                     if value["complete"] == true && value["present"] != true {
                         let missing = missing_since.get_or_insert_with(Instant::now);
                         ensure(missing.elapsed() < Duration::from_secs(3), "provider_content_missing", 502)?;
@@ -495,6 +585,14 @@ async fn read_once(
         sleep(Duration::from_millis(200)).await;
     }
     metrics.page_stage(ordinal, "extraction");
+    extract(page, employee, period, &source).await
+}
+async fn extract(
+    page: &Page,
+    employee: &Value,
+    period: &Value,
+    source: &str,
+) -> Result<Vec<Value>> {
     let config = json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
     let record = page
         .evaluate(&format!(

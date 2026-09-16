@@ -97,7 +97,7 @@ test(
 );
 
 test(
-  'Paycom preserves paired collection through page cleanup and rejects cross-employee data',
+  'Paycom preserves two-tab collection through page cleanup and rejects cross-employee data',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
   async (t) => {
     const f = await paycomFixture();
@@ -246,7 +246,7 @@ test(
 );
 
 test(
-  'a missing timecard retries only that employee and preserves complete validated pairs',
+  'a missing timecard retries only that employee while the other lane continues',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 150000 },
   async (t) => {
     const f = await paycomFixture();
@@ -312,7 +312,7 @@ test(
     assert.equal(failed.error, 'provider_content_missing');
     assert.equal(failed.attempt, 1);
     assert.equal(failed.metrics[0].pageReads.retries, 1);
-    assert.equal(failed.metrics[0].pageReads.completed, 3);
+    assert.equal(failed.metrics[0].pageReads.completed, 4);
     assert.equal(publication(), previous);
     assert.equal(f.state.readsByCode.get('DD04'), 4);
     await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);

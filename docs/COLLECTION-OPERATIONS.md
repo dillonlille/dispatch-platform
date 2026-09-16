@@ -60,8 +60,9 @@ at two browsers until measurements with several real DSP accounts support a chan
 Each employee page gets at most two reads within a collection. A navigation stall
 (45 seconds), incomplete page load (30 seconds after navigation), or a completed
 page still missing the timecard tables after three seconds gets one local retry.
-Only that employee reloads in a replacement tab; already validated records stay
-in Rust memory. Navigation waits use bounded browser events instead of renderer
+Only that employee reloads in a replacement tab. Two independent lanes draw from
+a shared queue, so the healthy lane continues through the roster. Validated
+records stay in Rust memory and are checkpointed in private Paycom storage. Navigation waits use bounded browser events instead of renderer
 queries that can block before response headers arrive. Reads
 from both tabs settle without cancelling the other tab's browser command.
 
@@ -71,16 +72,36 @@ transient failures retain exponential backoff, now with stable per-job jitter:
 60–90 seconds before attempt two and 120–180 seconds before attempt three.
 Persistent missing content fails after the second read. Publication still requires
 the complete roster and all validated timecards; failed/cancelled work preserves
-the last successful publication. In-memory progress does not survive a browser
-crash or platform restart.
+the last successful publication. After a browser crash or platform restart, the
+same job can resume saved employees for up to 15 minutes, after checking fresh
+roster metadata, period, timezone and credential revision. Checkpoint writes are
+guarded by the current job lease; cancellation and terminal completion clear them.
+The active dataset changes only when the entire resumed collection validates.
 
-Attempt details include completed employee pages, local retries and recoveries,
+Attempt details include completed and resumed employee pages, early readiness,
+local retries and recoveries,
 up to two active reads, the five slowest reads and the eight most recent failed
 reads. Each includes the employee's ordinal in this collection, read attempt,
-navigation/content/extraction durations and a sanitized failure code. Ordinals
+navigation/content/extraction durations and a sanitized failure code. Content
+failures also record the document loading state and pending data-request count. Ordinals
 are progress positions, not employee identifiers. Page durations overlap across
 tabs and must not be added to derive wall-clock collection time. These optional
 JSON fields preserve compatibility with older metrics and rollback builds.
+
+## History and regression comparisons
+
+Collections and Diagnostics group recent jobs by DSP and provider, showing
+collection time, retries, peak PSS, resumed employees and the last successful
+collection. The view reuses the existing 200-job poll. Missing measurements remain
+unknown; failed work does not advance the last-success timestamp.
+
+The median and 95th percentile summarize up to 20 successful full first attempts.
+Regression notices require five previous comparable runs and normalize speed by
+employee or itinerary count. Retried and resumed jobs are excluded from comparison.
+A 25% slowdown is highlighted; memory warnings require both a 25% and a 32 MiB
+increase. Timings from interrupted attempts are marked as partial.
+
+For the exact readiness and checkpoint rules, see [BrowserOS](BROWSEROS.md#restart-checkpoints).
 
 ## Memory-aware admission
 

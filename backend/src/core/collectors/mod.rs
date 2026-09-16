@@ -171,7 +171,8 @@ impl Store {
         let core = self.dsp(id)?;
         if split_layout(&core)? {
             self.collector(id, Provider::Paycom)?;
-            return self.initialize_cortex(id);
+            self.initialize_cortex(id)?;
+            return self.prune_checkpoints(id);
         }
         self.copy_legacy_paycom(id)?;
         core.transaction(|| {
@@ -179,7 +180,8 @@ impl Store {
                 DELETE FROM settings WHERE key GLOB 'paycom.*';")?;
             core.set(LAYOUT, &json!(1))
         })?;
-        self.initialize_cortex(id)
+        self.initialize_cortex(id)?;
+        self.prune_checkpoints(id)
     }
 
     // New provider storage is additive and initialized before serving traffic.

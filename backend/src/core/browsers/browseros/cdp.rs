@@ -21,6 +21,7 @@ pub(super) struct Cdp {
     partial: Vec<u8>,
     events: VecDeque<Value>,
     frames: HashMap<String, Value>,
+    loading: super::loading::Loading,
 }
 impl Cdp {
     pub(super) fn new(socket: UnixStream) -> Result<Self> {
@@ -31,6 +32,7 @@ impl Cdp {
             partial: Vec::new(),
             events: VecDeque::new(),
             frames: HashMap::new(),
+            loading: super::loading::Loading::default(),
         })
     }
     // read_until appends to persistent storage, so a poll timeout cannot lose a
@@ -55,6 +57,7 @@ impl Cdp {
         Ok(())
     }
     fn observe(&mut self, value: &Value) -> Result<()> {
+        self.loading.observe(value)?;
         match value["method"].as_str() {
             Some("Fetch.requestPaused") => self.retain(value.clone())?,
             Some("Page.frameNavigated") if value["params"]["frame"]["parentId"].is_null() => {
@@ -74,11 +77,15 @@ impl Cdp {
             Some("Target.detachedFromTarget") => {
                 if let Some(session) = value["params"]["sessionId"].as_str() {
                     self.frames.remove(session);
+                    self.loading.remove(session);
                 }
             }
             _ => (),
         }
         Ok(())
+    }
+    pub(super) fn loading(&self, session: &str, loader: &str) -> Value {
+        self.loading.status(session, loader)
     }
     // Do not send renderer commands while a navigation awaits response headers:
     // even Page.getFrameTree can block there and starve the other tab's commands.

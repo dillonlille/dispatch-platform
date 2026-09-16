@@ -112,7 +112,7 @@ async fn measure_live_collection() -> Result<()> {
         driver.credentials=Value::Null;
         let timezone=std::env::var("DISPATCH_BENCHMARK_TIMEZONE").map_err(|_|Error::new("benchmark_configuration_required",400))?;
         let started=Instant::now();
-        let data=driver.collect(&timezone, &crate::core::job_metrics::Recorder::new(&json!({})), |progress,_| async move {
+        let data=driver.collect(&timezone, &crate::core::job_metrics::Recorder::new(&json!({})), None, |progress,_| async move {
             if progress % 10 == 0 { eprintln!("BENCH {}",json!({"progress":progress})); }
             Ok(())
         }).await?;

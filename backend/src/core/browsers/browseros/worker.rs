@@ -124,6 +124,7 @@ pub(super) async fn run(mode: &str) -> Result<()> {
                 params,
                 session,
             } => cdp.command(&method, params, session.as_deref()).await,
+            WireCommand::Loading { session, loader } => Ok(cdp.loading(&session, &loader)),
             WireCommand::Navigation { session, previous } => {
                 cdp.navigation(&session, &previous).await
             }

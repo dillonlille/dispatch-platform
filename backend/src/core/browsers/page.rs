@@ -9,6 +9,7 @@ pub(super) struct Page {
     origin: String,
     trusted_origins: Vec<String>,
     world: std::sync::Mutex<Option<(String, String, i64)>>,
+    monitoring: std::sync::atomic::AtomicBool,
 }
 impl Page {
     pub fn empty(browser: browseros::Session, origin: String) -> Self {
@@ -19,6 +20,7 @@ impl Page {
             trusted_origins: vec![origin.clone()],
             origin,
             world: std::sync::Mutex::new(None),
+            monitoring: std::sync::atomic::AtomicBool::new(false),
         }
     }
     pub fn allow_origins(&mut self, origins: &[&str]) {
@@ -131,6 +133,21 @@ impl Page {
     }
     pub async fn navigation(&self, previous: &str) -> Result<Value> {
         self.browser.navigation(&self.id, previous).await
+    }
+    pub async fn monitor_loading(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if !self.monitoring.load(Ordering::Relaxed) {
+            self.command(
+                "Network.enable",
+                json!({"maxPostDataSize":0,"maxTotalBufferSize":1024,"maxResourceBufferSize":1024}),
+            )
+            .await?;
+            self.monitoring.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+    pub async fn loading(&self, loader: &str) -> Result<Value> {
+        self.browser.loading(&self.id, loader).await
     }
     pub async fn reset(&mut self) -> Result<()> {
         self.browser
