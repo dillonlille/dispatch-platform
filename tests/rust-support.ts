@@ -11,10 +11,16 @@ const password = 'Dispatch-demo-2026!';
 export async function fixture(
   options: boolean | { seed?: boolean; env?: NodeJS.ProcessEnv; binary?: string } = true,
 ) {
-  const binary = typeof options === 'boolean' ? defaultBinary : (options.binary ?? defaultBinary);
+  let binary = typeof options === 'boolean' ? defaultBinary : (options.binary ?? defaultBinary);
   const seed = typeof options === 'boolean' ? options : (options.seed ?? true);
   const overrides = typeof options === 'boolean' ? {} : (options.env ?? {});
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-rust-core-'));
+  if (overrides.DISPATCH_FIXTURE_PROVIDER_URL) {
+    const executable = path.join(root, 'dispatch-backend');
+    fs.copyFileSync(binary, executable, fs.constants.COPYFILE_FICLONE);
+    fs.chmodSync(executable, 0o700);
+    binary = executable;
+  }
   const listener = net.createServer();
   await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
   const port = (listener.address() as net.AddressInfo).port;
@@ -74,7 +80,7 @@ export async function fixture(
       method: body === undefined ? 'GET' : 'POST',
       headers: { origin, 'content-type': 'application/json', ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(overrides.DISPATCH_FIXTURE_PROVIDER_URL ? 180000 : 15000),
     });
     const value = await response.json();
     return {

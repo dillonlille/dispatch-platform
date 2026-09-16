@@ -9,12 +9,12 @@ workforce publication, backup and restore. Systemd starts it directly on loopbac
 The Node API, Preview gateway, supervisor, platform services and deployed Node CLI
 are removed from both source and build artifacts.
 
-The isolated Paycom authentication and collection workers remain Node/Playwright.
-They retain the archived provider flow, private profiles, manual verification,
-native input, nested Chromium sandbox and narrowly scoped CDP access. There is no
-always-running Node parent process. Browser workers start when needed and close
-when their work ends; ready sessions idle for 60 seconds are closed. Node is also
-used for frontend development, build tools and test harnesses.
+Paycom authentication and collection now run through the Rust BrowserOS driver.
+The browser has a private profile, display, nested sandbox and inherited CDP pipe.
+Ready sessions close after 60 idle seconds; native PIN input, cooldowns and manual
+verification are covered by real BrowserOS fixture tests. See [BrowserOS](BROWSEROS.md).
+Node remains a frontend/build/test dependency. Archived Node worker files remain
+in the artifact for updater compatibility but are not used by DSP provider jobs.
 
 ## Runtime
 

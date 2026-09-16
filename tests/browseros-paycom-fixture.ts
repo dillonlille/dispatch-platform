@@ -1,0 +1,235 @@
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { fixture } from './rust-support.js';
+
+export const credentials = {
+  clientCode: 'fixture-client',
+  username: 'fixture-user',
+  password: 'fixture-password',
+  securityAnswers: ['One', 'Two', '00 Three !', 'Four', ' Five? '],
+};
+const loginPath = '/v4/cl/cl-login.php',
+  actionPath = '/v4/cl/cl-loginproc.php';
+const pinPath = '/v4/cl/web.php/security/security-question/login';
+const landing = '/v4/cl/web.php/client-landing/arc';
+const login = `<form method="post" action="${actionPath}"><input name="clientcode"><input name="username"><input type="password" name="password"><button>Log in</button></form>`;
+const pins = `<form method="post" action="${pinPath}"><label for="first">PIN 3</label><input id="first" name="firstSecurityQuestion" type="password"><label for="second">PIN 5</label><input id="second" name="secondSecurityQuestion" type="password"><input name="firstIndex" type="hidden" value="3"><input name="secondIndex" type="hidden" value="5"><button name="continue" type="submit">Continue</button></form>`;
+const challenge = `<iframe style="position:absolute;left:500px;top:200px;width:200px;height:100px" src="/captcha/frame"></iframe><button type="button" id="solveCaptcha" style="position:absolute;left:500px;top:350px;width:140px;height:40px" onclick="document.querySelector('iframe').remove();window.fixtureSolved=true;document.cookie='fixture_captcha=solved; Path=/';this.remove()">Solve fixture</button>`;
+const profilePath = '/v4/cl/web.php/two-factor/react/index/preferences/campaign';
+const warning =
+  'You will no longer be prompted at login to verify your info this month. You will continue to use security questions to access your account. You may verify your information at any time from your contact information page.';
+const profile = `<h1>Setup Your Security Profile</h1><p>Verify your contact information</p>
+<input name="cell-number"><button>Verify</button><input name="email"><button>Verify</button><input name="work-number"><button>Verify</button>
+<button id="notnow" onclick="document.querySelector('#warning').hidden=false">Not Now</button>
+<button onclick="if(window.confirmed){document.cookie='profile_done=true; Path=/';location.href='${landing}'}">Continue</button>
+<div id="warning" hidden><p>Warning</p><p>${warning}</p><button></button><button>Cancel</button><button onclick="window.confirmed=true;this.parentElement.remove()">Continue</button></div>`;
+const authenticated = '<a id="mainMenuLink">Menu</a><a id="clientLogout">Log out</a>';
+const headers = [
+  'date',
+  'paycode',
+  'i1',
+  'allocation1',
+  'o1',
+  'i2',
+  'allocation2',
+  'o2',
+  'hours',
+  'total_hours',
+  'amount',
+  'exception-points',
+  'waiver',
+  'comment',
+  'missing-punch',
+  'delete',
+];
+const requestBody = {
+  allocationCategories: [],
+  approvalMode: 'pending',
+  eeCodes: ['AA01', 'BB02'],
+  endDate: '2026-09-12',
+  getCount: true,
+  highlighting: null,
+  isAdvancedFilterApplied: true,
+  loadTotals: true,
+  minWageUrl: null,
+  onlyBorrowedEmployees: false,
+  payClassCodes: ['Driver'],
+  q: null,
+  selectedColumns: [],
+  selectedEarnings: ['REG'],
+  skip: null,
+  sortParams: [],
+  startDate: '2026-08-30',
+  take: null,
+};
+const employee = (code: string) => ({
+  employeeCode: code,
+  fullName: `Fixture ${code}`,
+  eestatus: 'A',
+  allocation: {
+    selections: [
+      { categoryName: 'Department', isDepartment: true, code: 'D', description: 'Driver' },
+      {
+        categoryName: 'Delivery Station Code',
+        isDepartment: false,
+        code: 'S',
+        description: 'Station',
+      },
+    ],
+  },
+  position: 'Driver',
+  payClassCode: 'Driver',
+  terminalCode: 'S',
+  payType: 'Hourly',
+  primarySupervisor: 'Fixture Manager',
+  missingPunches: 0,
+  totals: { totalHours: 16, otHours: 0 },
+  approvalPercentages: { employee: 100, supervisor: 100 },
+});
+function timecard(url: URL, mismatch: boolean) {
+  const start = Date.parse(url.searchParams.get('perioddates')!.split('_')[0]!);
+  const rows = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(start + index * 86400000),
+      iso = date.toISOString().slice(0, 10);
+    const values: Record<string, string> = {
+      date: `${['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][index % 7]} (${iso.slice(5).replace('-', '/')})`,
+      paycode: 'REG',
+      hours: index % 7 === 0 ? '8' : '0',
+      total_hours: index % 7 === 0 ? '8' : '0',
+    };
+    if (index % 7 === 0) {
+      values.i1 = '08:00 AM';
+      values.o1 = '04:00 PM';
+    }
+    return (
+      `<tr>${headers.map((h) => `<td>${values[h] ?? ''}</td>`).join('')}</tr>` +
+      (index % 7 === 6 ? `<tr><td>Weekly Totals</td><td>${mismatch ? 9 : 8}</td></tr>` : '')
+    );
+  }).join('');
+  return `<title>Timecard Editor</title><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">16</div>`;
+}
+export async function paycomFixture() {
+  const events: string[] = [];
+  const state = {
+    rejection: false,
+    mode: '',
+    incomplete: false,
+    mismatch: false,
+    requests: [] as Record<string, unknown>[],
+  };
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url!, 'http://fixture.invalid');
+    const logged = !state.rejection && req.headers.cookie?.includes('fixture_session=one');
+    const solved = req.headers.cookie?.includes('fixture_captcha=solved');
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    const text = Buffer.concat(chunks).toString();
+    res.setHeader('Content-Type', 'text/html');
+    const redirect = (path: string) => {
+      res.writeHead(302, { Location: path });
+      res.end();
+    };
+    const html = (value: string) => res.end('<!doctype html>' + value);
+    if (url.pathname === landing) {
+      events.push('landing');
+      if (logged) {
+        if (state.mode === 'profile' && !req.headers.cookie?.includes('profile_done=true'))
+          return redirect(profilePath);
+        return html(authenticated);
+      }
+      return redirect(loginPath);
+    }
+    if (url.pathname === loginPath)
+      return html(login + (state.mode === 'before-login' && !solved ? challenge : ''));
+    if (url.pathname === actionPath && req.method === 'POST') {
+      events.push('primary');
+      const values = new URLSearchParams(text);
+      if (
+        state.rejection ||
+        values.get('clientcode') !== credentials.clientCode ||
+        values.get('username') !== credentials.username ||
+        values.get('password') !== credentials.password
+      )
+        return html(login + '<p>Invalid username or password</p>');
+      return redirect(pinPath);
+    }
+    if (url.pathname === pinPath && req.method === 'POST') {
+      events.push('pins');
+      const values = new URLSearchParams(text);
+      if (
+        values.get('firstSecurityQuestion') !== credentials.securityAnswers[2] ||
+        values.get('secondSecurityQuestion') !== credentials.securityAnswers[4]
+      )
+        return html(pins + '<p>Security answers are not correct</p>');
+      res.setHeader('Set-Cookie', 'fixture_session=one; Path=/; Max-Age=3600; HttpOnly');
+      return redirect(landing);
+    }
+    if (url.pathname === pinPath && url.searchParams.has('changed'))
+      return html(
+        pins +
+          `<script>document.querySelector('#first').value='00 Three !';document.querySelector('#second').value=' Five? ';</script>`,
+      );
+    const manualChallenge =
+      state.mode === 'changed-document'
+        ? challenge.replace('this.remove()', `location.href='${pinPath}?changed=1'`)
+        : state.mode === 'changed-pins'
+          ? challenge.replace(
+              'this.remove()',
+              "document.querySelector('#first').value='changed';this.remove()",
+            )
+          : challenge;
+    if (url.pathname === pinPath)
+      return html(
+        pins +
+          (['after-pins', 'changed-document', 'changed-pins'].includes(state.mode)
+            ? `<script>document.querySelector('form').onsubmit=e=>{if(!window.fixtureSolved){e.preventDefault();if(!document.querySelector('iframe'))document.body.insertAdjacentHTML('beforeend',${JSON.stringify(manualChallenge)});}}</script>`
+            : ''),
+      );
+    if (url.pathname === profilePath) return html(profile);
+    if (url.pathname === '/captcha/frame') return html('Fixture challenge');
+    if (!logged) {
+      res.writeHead(403);
+      return res.end('Not authenticated');
+    }
+    if (url.pathname === '/v4/cl/web.php/timecardsearch/index')
+      return html(
+        `${authenticated}<title>Timecard Search</title><p>Employee Status Is Active</p><button>Export</button><script>fetch('/api/cl/timecard-search/employees',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'fixture-token'},body:JSON.stringify(${JSON.stringify(requestBody)})})</script>`,
+      );
+    if (url.pathname === '/api/cl/timecard-search/employees' && req.method === 'POST') {
+      const body = JSON.parse(text);
+      state.requests.push(body);
+      if (req.headers['x-csrf-token'] !== 'fixture-token') {
+        res.writeHead(403);
+        return res.end();
+      }
+      res.setHeader('Content-Type', 'application/json');
+      const codes = state.incomplete ? ['AA01'] : ['AA01', 'BB02'];
+      return res.end(JSON.stringify({ eeCodes: codes, employees: codes.map(employee) }));
+    }
+    if (url.pathname === '/v4/cl/web.php/timecard/index') {
+      events.push('timecard');
+      return html(timecard(url, state.mismatch));
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://fixture.dispatch.invalid:${(server.address() as AddressInfo).port}`;
+  const platform = await fixture({
+    env: {
+      DISPATCH_FIXTURE_PROVIDER_URL: url,
+      DISPATCH_BWRAP_EXECUTABLE:
+        process.env.DISPATCH_BWRAP_EXECUTABLE ?? '/usr/local/libexec/dispatch-dev/bwrap',
+    },
+  });
+  return {
+    ...platform,
+    events,
+    state,
+    close: async () => {
+      await platform.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}

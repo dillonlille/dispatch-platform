@@ -1,5 +1,6 @@
 pub mod browseros;
 pub mod egress;
+mod paycom;
 pub mod sandbox;
 use super::{
     Error, Result, State,
@@ -19,15 +20,12 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdout},
-    sync::{Mutex as AsyncMutex, watch},
-};
+use tokio::sync::{Mutex as AsyncMutex, watch};
 #[derive(Default)]
 pub struct Manager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     operations: Mutex<HashMap<String, std::sync::Weak<AsyncMutex<()>>>>,
+    runtime: Mutex<Option<Arc<browseros::Runtime>>>,
 }
 pub struct Session {
     pub id: String,
@@ -40,17 +38,30 @@ pub struct Session {
     commands: tokio::sync::Semaphore,
     cancel: watch::Sender<bool>,
     fixture: bool,
-    fixture_url: Option<String>,
     started: std::time::Instant,
     last_used: Mutex<std::time::Instant>,
     collecting: std::sync::atomic::AtomicBool,
 }
-struct Worker {
-    child: Child,
-    reader: BufReader<ChildStdout>,
-    _egress: egress::Egress,
-}
+type Worker = paycom::Driver;
 impl Manager {
+    fn runtime(&self, config: &super::config::Config) -> Result<Arc<browseros::Runtime>> {
+        let mut current = self
+            .runtime
+            .lock()
+            .map_err(|_| Error::new("browser_unavailable", 503))?;
+        if let Some(runtime) = current.as_ref() {
+            return Ok(runtime.clone());
+        }
+        let runtime = Arc::new(browseros::Runtime::new(
+            &config.browseros,
+            &config.sandbox,
+            &std::env::current_exe()?,
+            &config.environment_root().join("browser-runs"),
+            config.browser_capacity,
+        )?);
+        *current = Some(runtime.clone());
+        Ok(runtime)
+    }
     pub fn operation(&self, id: &str) -> Result<tokio::sync::OwnedMutexGuard<()>> {
         let lock = {
             let mut operations = self
@@ -137,16 +148,8 @@ impl Session {
     async fn close(&self) {
         self.status.store(3, Ordering::SeqCst);
         self.cancel.send_replace(true);
-        if let Some(mut worker) = self.worker.lock().await.take() {
-            if let Some(mut stdin) = worker.child.stdin.take() {
-                let _ = stdin.write_all(b"{\"action\":\"close\"}\n").await;
-            }
-            if tokio::time::timeout(Duration::from_secs(5), worker.child.wait())
-                .await
-                .is_err()
-            {
-                let _ = worker.child.kill().await;
-            }
+        if let Some(worker) = self.worker.lock().await.take() {
+            worker.browser.close().await;
         }
         let _ = std::fs::remove_dir_all(&self.run);
     }
@@ -212,27 +215,16 @@ impl Session {
             .as_mut()
             .ok_or_else(|| Error::new("browser_unavailable", 409))?;
         let mut cancellation = self.cancel.subscribe();
-        let response = async {
-            let input = worker
-                .child
-                .stdin
-                .as_mut()
-                .ok_or_else(|| Error::new("browser_lost", 503))?;
-            input.write_all(format!("{command}\n").as_bytes()).await?;
-            loop {
-                let event = read_event(&mut worker.reader).await?;
-                if s(&event, "type") == "error" {
-                    return Err(provider_error(s(&event, "code")));
-                }
-                if types.contains(&s(&event, "type")) {
-                    return Ok(event);
-                }
-            }
-        };
+        let response = worker.request(command);
         let event = tokio::select! {
             _=cancellation.wait_for(|closed|*closed)=>Err(Error::new("verification_expired",409)),
             result=tokio::time::timeout(Duration::from_secs(seconds),response)=>result.map_err(|_|Error::new("provider_timeout",504))?,
         }?;
+        ensure(
+            types.contains(&s(&event, "type")),
+            "browser_protocol_failed",
+            502,
+        )?;
         *self.last_used.lock().expect("browser idle clock") = std::time::Instant::now();
         if s(&event, "type") == "ready" {
             self.status.store(1, Ordering::SeqCst);
@@ -258,124 +250,28 @@ impl Session {
             tokio::time::sleep(Duration::from_millis(100)).await;
             return workforce::fixture(&self.timezone);
         }
-        let grant = self
-            .request(json!({"action":"collect"}), &["collection_access"], 180)
-            .await?;
-        let path = s(&grant, "path");
-        ensure(
-            path.starts_with("/devtools/browser/")
-                && path.len() < 200
-                && path[18..]
-                    .bytes()
-                    .all(|b| b.is_ascii_hexdigit() || b == b'-'),
-            "browser_protocol_failed",
-            502,
-        )?;
-        let mut child = sandbox::launch(&state.config, &self.run, None)?;
-        let mut reader = BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| Error::new("browser_start_failed", 503))?,
-        );
-        let mut input = child
-            .stdin
-            .take()
-            .ok_or_else(|| Error::new("browser_start_failed", 503))?;
-        input
-            .write_all(
-                json!({"endpointPath":path,"timezone":self.timezone,"fixtureUrl":self.fixture_url})
-                    .to_string()
-                    .as_bytes(),
-            )
-            .await?;
-        drop(input);
+        let mut worker = self.worker.lock().await;
+        let worker = worker
+            .as_mut()
+            .ok_or_else(|| Error::new("browser_unavailable", 409))?;
         let mut cancellation = self.cancel.subscribe();
-        let response = async {
-            loop {
-                let event = read_event(&mut reader).await?;
-                match s(&event, "type") {
-                    "collected" => return Ok(event["workforce"].clone()),
-                    "error" => return Err(provider_error(s(&event, "code"))),
-                    "progress" => {
-                        let job = job.to_owned();
-                        let owner = owner.to_owned();
-                        let progress = n(&event, "progress");
-                        let message = s(&event, "message").chars().take(200).collect::<String>();
-                        state
-                            .run(move |db| {
-                                db.guard_job(&job, &owner)?;
-                                db.progress(&job, &owner, progress, &message, "running")
-                            })
-                            .await?;
-                    }
-                    _ => return Err(Error::new("browser_protocol_failed", 502)),
-                }
+        let response = worker.collect(&self.timezone, |progress, message| {
+            let job = job.to_owned();
+            let owner = owner.to_owned();
+            async move {
+                state
+                    .run(move |db| {
+                        db.guard_job(&job, &owner)?;
+                        db.progress(&job, &owner, progress, &message, "running")
+                    })
+                    .await
             }
-        };
-        let result = tokio::select! {
+        });
+        tokio::select! {
             _=cancellation.wait_for(|closed|*closed)=>Err(Error::new("job_cancelled",409)),
             result=tokio::time::timeout(Duration::from_secs(1800),response)=>result.map_err(|_|Error::new("provider_timeout",504))?,
-        };
-        let _ = child.kill().await;
-        result
+        }
     }
-}
-async fn read_event(reader: &mut BufReader<ChildStdout>) -> Result<Value> {
-    let mut data = Vec::new();
-    let length = reader
-        .take(24 * 1024 * 1024 + 1)
-        .read_until(b'\n', &mut data)
-        .await?;
-    ensure(
-        length > 0 && length <= 24 * 1024 * 1024 && data.last() == Some(&b'\n'),
-        "browser_protocol_failed",
-        502,
-    )?;
-    Ok(serde_json::from_slice(&data)?)
-}
-fn provider_error(code: &str) -> Error {
-    // Worker output is untrusted and must never become arbitrary API/log content.
-    let allowed = [
-        "primary_credentials_rejected",
-        "attempt_cooldown",
-        "security_question_rejected",
-        "security_questions_required",
-        "authentication_unavailable",
-        "browser_sandbox_unavailable",
-        "browser_profile_busy",
-        "browser_cleanup_failed",
-        "browser_protocol_failed",
-        "browser_timeout",
-        "authentication_timeout",
-        "account_locked",
-        "manual_verification_required",
-        "acquisition_cancelled",
-        "attempt_state_invalid",
-        "browser_interaction_required",
-        "invalid_credentials",
-        "invalid_verification_code",
-        "verification_required",
-        "verification_incomplete",
-        "verification_expired",
-        "connection_busy",
-        "browser_lost",
-        "browser_start_failed",
-        "provider_timeout",
-        "provider_unavailable",
-        "collection_failed",
-        "authentication_failed",
-        "security_answers_required",
-        "security_answers_rejected",
-    ];
-    Error::new(
-        if allowed.contains(&code) {
-            code
-        } else {
-            "provider_unavailable"
-        },
-        409,
-    )
 }
 pub fn validate_credentials(value: &Value) -> Result<()> {
     v::fields(
@@ -546,8 +442,8 @@ impl State {
                 ensure(flag(&connection, "enabled"), "connection_required", 409)?;
                 let runs = db::private_dir(&db.config.environment_root().join("browser-runs"))?;
                 let run = runs.join(crypto::id("run")?);
-                let profile =
-                    db::private_dir(&db.area(&dsp, "state")?.join("browsers"))?.join("paycom");
+                let profile = db::private_dir(&db.area(&dsp, "state")?.join("browsers"))?
+                    .join("paycom-browseros");
                 Ok((
                     value,
                     db.credentials(&dsp)?,
@@ -588,7 +484,6 @@ impl State {
             commands: tokio::sync::Semaphore::new(32),
             cancel,
             fixture: self.config.fixture && self.config.fixture_url.is_none(),
-            fixture_url: self.config.fixture_url.clone(),
             started: std::time::Instant::now(),
             last_used: Mutex::new(std::time::Instant::now()),
             collecting: std::sync::atomic::AtomicBool::new(false),
@@ -620,10 +515,17 @@ impl State {
             ensure(!session.closed(), "verification_expired", 409)?;
             db::private_dir(&run)?;db::private_dir(&profile)?;
             if !session.fixture {
-                let policy=self.config.fixture_url.as_ref().map(|s|url::Url::parse(s).expect("validated fixture URL")).map(|url|(url.host_str().unwrap().to_owned(),url.port().unwrap()));
-                let egress=egress::Egress::start(&run,policy)?;let mut child=sandbox::launch(&self.config,&run,Some(&profile))?;
-                let reader=BufReader::new(child.stdout.take().ok_or_else(||Error::new("browser_start_failed",503))?);
-                *worker=Some(Worker{child,reader,_egress:egress});
+                paycom::preflight(&profile,retry)?;
+                let policy=if let Some(value)=&self.config.fixture_url {
+                    browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
+                } else { browseros::NetworkPolicy::Paycom };
+                let runtime=self.browsers.runtime(&self.config)?;
+                let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
+                match paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
+                    Ok(driver)=>*worker=Some(driver),
+                    Err(error)=>{browser.close().await;return Err(error);},
+                }
+
             }
             drop(worker);
             session.request(json!({"action":"start","credentials":credentials,"timezone":session.timezone,"ownerRetry":retry,"fixtureUrl":self.config.fixture_url}),&["ready","challenge"],180).await

@@ -17,6 +17,7 @@ pub struct Config {
     pub dashboard: PathBuf,
     pub node: PathBuf,
     pub browser: PathBuf,
+    pub browseros: PathBuf,
     pub sandbox: PathBuf,
     pub smtp_url: Option<String>,
     pub mail_from: Option<String>,
@@ -55,6 +56,10 @@ impl Config {
             browser: PathBuf::from(variable(
                 "DISPATCH_BROWSER_EXECUTABLE",
                 "/opt/google/chrome/chrome",
+            )),
+            browseros: PathBuf::from(variable(
+                "DISPATCH_BROWSEROS_EXECUTABLE",
+                "/opt/dispatch-browseros/0.50.5/browseros",
             )),
             sandbox: PathBuf::from(variable("DISPATCH_BWRAP_EXECUTABLE", "/usr/bin/bwrap")),
             smtp_url: env::var("DISPATCH_SMTP_URL").ok(),

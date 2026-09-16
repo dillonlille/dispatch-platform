@@ -117,27 +117,39 @@ pub(super) async fn run(mode: &str) -> Result<()> {
         let Some(value) = value else {
             break;
         };
-        match serde_json::from_value::<WireCommand>(value)? {
+        let result = match serde_json::from_value::<WireCommand>(value)? {
             WireCommand::Close => break,
             WireCommand::Cdp {
                 method,
                 params,
                 session,
-            } => {
-                let result = cdp.command(&method, params, session.as_deref()).await;
-                let failed = result.is_err();
-                let response = match result {
-                    Ok(value) => json!({"result":value}),
-                    Err(_) => json!({"error":"browser_command_failed"}),
-                };
-                output.write_all(&frame(&response, RESPONSE_BYTES)?).await?;
-                output.flush().await?;
-                if failed {
-                    return Err(Error::new("browser_command_failed", 502));
-                }
+            } => cdp.command(&method, params, session.as_deref()).await,
+            WireCommand::Event { session } => cdp.event(&session).await,
+            WireCommand::NativeMove { x, y } => {
+                ensure(mode == "windowed", "browser_interaction_required", 409)?;
+                super::native::move_pointer(x, y)
             }
+            WireCommand::NativeClick { x, y } => {
+                ensure(mode == "windowed", "browser_interaction_required", 409)?;
+                super::native::click(x, y)
+            }
+            WireCommand::NativeType { text } => {
+                ensure(mode == "windowed", "browser_interaction_required", 409)?;
+                super::native::type_text(&text)
+            }
+        };
+        let failed = result.is_err();
+        let response = match result {
+            Ok(value) => json!({"result":value}),
+            Err(_) => json!({"error":"browser_command_failed"}),
+        };
+        output.write_all(&frame(&response, RESPONSE_BYTES)?).await?;
+        output.flush().await?;
+        if failed {
+            return Err(Error::new("browser_command_failed", 502));
         }
     }
+
     cdp.command("Browser.close", json!({}), None).await?;
     let status = timeout(Duration::from_secs(5), child.wait())
         .await

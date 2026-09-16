@@ -79,8 +79,8 @@ screenshots. Remove only your own `/tmp` artifacts.
 
 The [Rust BrowserOS worker](docs/BROWSEROS.md) is included in the backend artifact.
 Full checks require its separately installed pinned browser and run
-`npm run test:browseros` against temporary DSP profiles. The current Paycom driver
-continues to use the existing workers until its adapter migration is complete.
+`npm run test:browseros` against temporary DSP profiles. These checks exercise the active Rust Paycom driver, including native PIN entry
+and complete collection through the DSP API.
 
 Keep local feedback proportional to the change. For a cosmetic fix, build once,
 inspect the affected flow on desktop/mobile, and reuse the existing browser tests;

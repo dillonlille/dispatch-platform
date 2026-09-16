@@ -20,9 +20,10 @@ Use a clean checkout and a verified `.build/` artifact for that exact commit.
 
 ## Initialize
 
-Requirements: a verified Rust artifact, Node 22.23.2 for isolated browser workers at `~/.local/bin/node`, Python 3, Git, authenticated `gh`
+Requirements: a verified Rust artifact, Python 3, Git, authenticated `gh`
 at `~/.local/bin/gh`, user systemd with lingering, and an HTTPS endpoint. Native
-provider connections also need compatible Chromium/bubblewrap isolation. Building
+provider connections also need the [pinned BrowserOS runtime](BROWSEROS.md),
+bubblewrap, Xvfb, libX11 and libXtst. Building
 from source requires the pinned Rust toolchain and a C compiler. The installed
 platform service runs the Rust binary directly; it needs no Cargo or Node API.
 
@@ -57,9 +58,9 @@ The tunnel credential and origin certificate must never enter Git or build artif
 
 ### Native browser host
 
-The archived Paycom flow needs root-owned Chrome, `/usr/bin/Xvfb`,
-`/usr/bin/python3`, and `/usr/bin/setpriv`, plus X11/XTest libraries (Ubuntu packages
-`xvfb`, `python3`, `util-linux`, `libx11-6`, and `libxtst6`). Native PIN entry uses a
+The Rust Paycom flow needs the root-owned pinned BrowserOS installation,
+`/usr/bin/Xvfb`, bubblewrap and X11/XTest libraries (Ubuntu packages
+`xvfb`, `bubblewrap`, `libx11-6`, and `libxtst6`). Native PIN entry uses a
 private Xvfb display; the host check verifies actual keyboard/mouse input as well
 as both layers of sandboxing. No graphical desktop or per-DSP installation is needed.
 
@@ -75,7 +76,7 @@ sudo install -d -o root -g root -m 755 /usr/local/libexec/dispatch-dev
 sudo install -o root -g thepickle -m 750 /usr/bin/bwrap /usr/local/libexec/dispatch-dev/bwrap
 sudo install -o root -g root -m 644 tooling/host/dispatch-dev-bwrap.apparmor /etc/apparmor.d/dispatch-dev-bwrap
 sudo apparmor_parser -r /etc/apparmor.d/dispatch-dev-bwrap
-DISPATCH_BWRAP_EXECUTABLE=/usr/local/libexec/dispatch-dev/bwrap npm run test:browser-host
+DISPATCH_BWRAP_EXECUTABLE=/usr/local/libexec/dispatch-dev/bwrap npm run test:browseros
 ```
 
 After this check passes, supply
