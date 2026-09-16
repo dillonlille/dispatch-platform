@@ -51,7 +51,11 @@ fn validate_preferences(value: &Value) -> Result<()> {
         "invalid_input",
         400,
     )?;
-    v::choice(value, "opening_page", &["timecards", "employees"])?;
+    v::choice(
+        value,
+        "opening_page",
+        &["timecards", "meal-breaks", "employees"],
+    )?;
     v::choice(value, "name_order", &["first_last", "last_first"])?;
     v::choice(
         value,
@@ -453,7 +457,15 @@ pub fn validate_workforce(value: &Value) -> Result<()> {
             .ok_or_else(|| Error::new("invalid_punches", 400))?;
         ensure(punches.len() <= 64, "invalid_punches", 400)?;
         for p in punches {
-            v::fields(p, &["in", "out", "hours"])?;
+            v::fields(p, &["in", "out", "hours", "inKind", "outKind"])?;
+            for (key, kinds) in [
+                ("inKind", ["IN DAY", "IN LUNCH"]),
+                ("outKind", ["OUT LUNCH", "OUT DAY"]),
+            ] {
+                if !p[key].is_null() {
+                    v::choice(p, key, &kinds)?;
+                }
+            }
             for k in ["in", "out"] {
                 if !p[k].is_null() {
                     v::text(p, k, 0, 64)?;

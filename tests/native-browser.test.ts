@@ -57,7 +57,7 @@ test(
       assert.equal(day.hours, 8, 'Use the reported daily total on the additional row');
       assert.equal(day.status, 'Complete');
       assert.deepEqual(JSON.parse(day.punches as string), [
-        { in: '08:00 AM', out: '04:00 PM', hours: null },
+        { in: '08:00 AM', out: '04:00 PM', hours: null, inKind: null, outKind: null },
       ]);
     }
     const publication = () =>

@@ -161,6 +161,7 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
           <>
             {select('opening_page', 'Opening page', [
               ['timecards', 'Timecards'],
+              ['meal-breaks', 'Meal Breaks'],
               ['employees', 'Employees'],
             ])}
             {select('rows_per_page', 'Rows per page', [

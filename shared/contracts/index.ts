@@ -162,6 +162,8 @@ export interface Employee {
   active: boolean;
 }
 export interface Punch {
+  inKind?: 'IN DAY' | 'IN LUNCH' | null;
+  outKind?: 'OUT LUNCH' | 'OUT DAY' | null;
   in: string | null;
   out: string | null;
   hours: number | null;
