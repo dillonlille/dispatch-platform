@@ -53,7 +53,7 @@ impl Page {
             .err()
             .is_some_and(|error| error.code == "browser_command_timeout")
         {
-            eprintln!("paycom_browser_command_timeout: {method}");
+            eprintln!("provider_browser_command_timeout: {method}");
         }
         result
     }
@@ -136,7 +136,9 @@ impl Page {
         self.browser
             .command("Target.closeTarget", json!({"targetId":self.target}), None)
             .await?;
-        *self = Self::open(self.browser.clone(), self.origin.clone()).await?;
+        let mut replacement = Self::open(self.browser.clone(), self.origin.clone()).await?;
+        replacement.trusted_origins = self.trusted_origins.clone();
+        *self = replacement;
         Ok(())
     }
     pub async fn collect_garbage(&self) -> Result<()> {
