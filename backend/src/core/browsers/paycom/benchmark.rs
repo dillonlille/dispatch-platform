@@ -13,7 +13,7 @@ fn env_path(name: &str) -> Result<PathBuf> {
         .map(PathBuf::from)
         .ok_or_else(|| Error::new("benchmark_configuration_required", 400))
 }
-fn rss_tree(root: u32) -> u64 {
+fn memory_tree(root: u32) -> [u64; 4] {
     let mut processes = Vec::new();
     for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
@@ -44,11 +44,34 @@ fn rss_tree(root: u32) -> u64 {
             break;
         }
     }
-    processes
-        .iter()
-        .filter(|(pid, _, _)| ids.contains(pid))
-        .map(|(_, _, rss)| rss)
-        .sum()
+    let mut totals = [0; 4];
+    for (pid, _, rss) in processes.iter().filter(|(pid, _, _)| ids.contains(pid)) {
+        totals[0] += rss;
+        match std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")) {
+            Ok(smaps) => {
+                for line in smaps.lines() {
+                    let Some((name, value)) = line.split_once(':') else {
+                        continue;
+                    };
+                    let kib = value
+                        .split_whitespace()
+                        .next()
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(0);
+                    match name {
+                        "Pss" => totals[1] += kib,
+                        "Private_Clean" | "Private_Dirty" | "Private_Hugetlb" => totals[2] += kib,
+                        _ => (),
+                    }
+                }
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(libc::ESRCH) => {}
+            Err(_) => totals[3] += 1,
+        }
+    }
+    totals
 }
 #[tokio::test]
 #[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
@@ -70,13 +93,15 @@ async fn measure_live_collection() -> Result<()> {
         )
         .await?;
     let mut driver = Driver::new(browser, &profile, None).await?;
-    let peak = Arc::new(AtomicU64::new(0));
+    let peak = Arc::new(std::array::from_fn::<_, 4, _>(|_| AtomicU64::new(0)));
     let counter = peak.clone();
     let pid = driver.browser.process_id();
     let sampler = tokio::spawn(async move {
         loop {
-            counter.fetch_max(rss_tree(pid), Ordering::Relaxed);
-            sleep(Duration::from_millis(250)).await;
+            for (counter, value) in counter.iter().zip(memory_tree(pid)) {
+                counter.fetch_max(value, Ordering::Relaxed);
+            }
+            sleep(Duration::from_secs(1)).await;
         }
     });
     let result = async {
@@ -92,7 +117,7 @@ async fn measure_live_collection() -> Result<()> {
             Ok(())
         }).await?;
         let elapsed=started.elapsed().as_millis();
-        let collection_peak=peak.load(Ordering::Relaxed);
+        let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
         let database=rusqlite::Connection::open_with_flags(dsp.join("data/dispatch.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();
         let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
@@ -110,7 +135,7 @@ async fn measure_live_collection() -> Result<()> {
                 None => added+=1,
             }
         }
-        eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak}));
+        eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak[0],"collectionPeakPssKiB":collection_peak[1],"collectionPeakPrivateKiB":collection_peak[2],"unreadableSmaps":collection_peak[3]}));
 
         if !differences.is_empty() {
             driver.new_page().await?;
@@ -132,7 +157,7 @@ async fn measure_live_collection() -> Result<()> {
     let exit = driver.browser.close().await;
     eprintln!(
         "BENCH {}",
-        json!({"peakRssKiB":peak.load(Ordering::Relaxed),"supervisorReaped":exit.supervisor_reaped})
+        json!({"peakRssKiB":peak[0].load(Ordering::Relaxed),"peakPssKiB":peak[1].load(Ordering::Relaxed),"peakPrivateKiB":peak[2].load(Ordering::Relaxed),"unreadableSmaps":peak[3].load(Ordering::Relaxed),"supervisorReaped":exit.supervisor_reaped})
     );
     result
 }

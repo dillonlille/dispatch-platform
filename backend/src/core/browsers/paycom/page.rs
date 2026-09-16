@@ -113,6 +113,11 @@ impl Page {
             502,
         )
     }
+    pub async fn collect_garbage(&self) -> Result<()> {
+        self.command("HeapProfiler.collectGarbage", json!({}))
+            .await?;
+        Ok(())
+    }
     pub async fn start_navigation(&self, source: &str) -> Result<String> {
         ensure(self.trusted(source), "navigation_policy_violation", 409)?;
         let current = self.frame().await?;
