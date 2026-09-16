@@ -1,18 +1,22 @@
 # Cortex connection
 
-Cortex connects a DSP to Amazon Logistics Delivery Execution at
-`https://logistics.amazon.com/operations/execution`. This increment enables
-connection authentication only. No Cortex jobs, schedules or collection run yet.
+Cortex authenticates through Amazon Logistics DSP Console at
+`https://logistics.amazon.com/dspconsolev2`. Both initial credential entry and
+Test Connection use this page. This increment enables connection authentication
+only. No Cortex jobs, schedules or collection run yet.
 
-DSP owners use Settings → Connections → Cortex to save an Amazon username and
-password, test the connection, complete verification or disconnect. Credentials
-are encrypted with the DSP vault key and bound to that DSP and provider. They
-are never returned by the API. OTPs and CAPTCHA interactions use the existing
-owner-only verification window; unknown pages remain unverified. The driver
-requires the Delivery Execution application and route/driver content before
-reporting readiness. It handles separate username and password pages, preserves
-browser sessions, and bounds automated credential submissions with persistent
-cooldowns and interruption recovery.
+DSP owners use Settings → Connections → Cortex to save an Amazon email address
+and password, test the connection or disconnect. Credentials are encrypted with
+the DSP vault key and bound to that DSP and provider. They are never returned by
+the API. The driver handles separate email and password pages, preserves browser
+sessions, and bounds automated submissions with persistent cooldowns and
+interruption recovery. Unexpected provider challenges use the existing owner-only
+verification window; unknown pages remain unverified.
+
+Readiness requires the DSP Console URL and title, visible weekly scheduling
+navigation, and a visible Sign out control. A title or URL alone is insufficient.
+Delivery Execution remains the future meal-break collector's destination and is
+not the connection test page.
 
 Cortex owns `data/cortex/cortex.sqlite` (schema version 1, connection state and
 DSP/provider identity only), `secrets/cortex.enc`, and the registered
@@ -57,5 +61,7 @@ provider/DSP isolation and disconnect. `tests/cortex-worker.test.ts` exercises t
 real Rust driver in sandboxed BrowserOS against staged local forms, OTP, CAPTCHA,
 session reuse, invalid credentials and incomplete application loading.
 Storage tests cover initialization recovery, identity and missing-file refusal.
-Real Amazon acceptance is performed in the DSP named **Dev** after the owner
-enters credentials in Connections; fixture success is not live-provider proof.
+The owner successfully signed in with email/password in **Dev DSP**. Read-only
+inspection confirmed the signed-in DSP Console at the requested URL. Fixture
+coverage reproduces its title, navigation and Sign out control and rejects a
+loading shell.

@@ -26,21 +26,17 @@ test('Cortex credentials, verification, retest and disconnect stay scoped to its
   const dialog = page.getByRole('dialog', { name: 'Cortex credentials', exact: true });
   await expect(dialog.getByLabel('Client code')).toHaveCount(0);
   await expect(dialog.getByLabel('PIN 1')).toHaveCount(0);
-  await dialog.getByLabel('Username', { exact: true }).fill('fixture-cortex');
+  await dialog.getByLabel('Email address', { exact: true }).fill('fixture-cortex@example.test');
   await dialog.getByLabel('Password', { exact: true }).fill('require-verification');
   await dialog.getByRole('button', { name: 'Save credentials' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(
-    cortex.getByRole('heading', { name: 'Cortex needs your verification' }),
-  ).toBeVisible();
+  await expect(cortex.getByRole('heading', { name: 'Finish signing in to Cortex' })).toBeVisible();
   await cortex.getByLabel('Verification code').fill('123456');
   await cortex.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(cortex.getByText('Your Cortex connection is ready to use.')).toBeVisible();
   await expect(paycom.getByText('Your Paycom connection is ready to use.')).toBeVisible();
   await cortex.getByRole('button', { name: 'Test connection' }).click();
-  await expect(
-    cortex.getByRole('heading', { name: 'Cortex needs your verification' }),
-  ).toBeVisible();
+  await expect(cortex.getByRole('heading', { name: 'Finish signing in to Cortex' })).toBeVisible();
   await cortex.getByLabel('Verification code').fill('123456');
   await cortex.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(cortex.getByText('Your Cortex connection is ready to use.')).toBeVisible();

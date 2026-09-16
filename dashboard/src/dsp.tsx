@@ -572,7 +572,11 @@ function ConnectionCard({
             {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
             {!saving && data.status === 'needs_verification' && (
               <div className="verification">
-                <h3>{name} needs your verification</h3>
+                <h3>
+                  {provider === 'cortex'
+                    ? 'Finish signing in to Cortex'
+                    : 'Paycom needs your verification'}
+                </h3>
                 <p>
                   {data.verificationSessionId
                     ? 'Complete the verification in the browser window, then press Submit to continue.'
@@ -708,8 +712,14 @@ function ConnectionCard({
               </label>
             )}
             <label>
-              Username
-              <input name="username" required maxLength={200} autoComplete="off" />
+              {provider === 'cortex' ? 'Email address' : 'Username'}
+              <input
+                name="username"
+                type={provider === 'cortex' ? 'email' : 'text'}
+                required
+                maxLength={200}
+                autoComplete="off"
+              />
             </label>
             <label>
               Password

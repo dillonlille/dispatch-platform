@@ -1,4 +1,4 @@
-//! Cortex is Amazon Logistics Delivery Execution. Only authentication is enabled.
+//! Cortex authenticates through Amazon Logistics DSP Console. Only authentication is enabled.
 use super::{attempt::Attempts, browseros, page::Page};
 use crate::core::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
@@ -6,7 +6,7 @@ use std::{path::Path, time::Duration};
 use tokio::time::{Instant, sleep};
 const ORIGIN: &str = "https://logistics.amazon.com";
 const ORIGINS: &[&str] = &[ORIGIN, "https://www.amazon.com", "https://amazon.com"];
-const LANDING: &str = "/operations/execution";
+const LANDING: &str = "/dspconsolev2";
 const AUTH: &str = include_str!("auth.js");
 pub(super) fn preflight(profile: &Path, retry: bool) -> Result<()> {
     Attempts::open(

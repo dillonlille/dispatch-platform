@@ -47,9 +47,17 @@
   else if (username) state = 'username';
   else if (
     location.origin === input.applicationOrigin &&
-    /^\/operations\/execution(?:\/|$)/.test(location.pathname) &&
-    /delivery execution/.test(text) &&
-    /itineraries|routes|drivers|delivery associates/.test(text)
+    /^\/dspconsolev2\/?$/.test(location.pathname) &&
+    document.title.trim() === 'DSP Console' &&
+    [...document.querySelectorAll('nav a[href]')].some(
+      (element) =>
+        visible(element) &&
+        new URL(element.href).origin === input.applicationOrigin &&
+        new URL(element.href).pathname === '/scheduling/calendar-view/week',
+    ) &&
+    [...document.querySelectorAll('a, button')].some(
+      (element) => visible(element) && /^sign out$/i.test(element.textContent.trim()),
+    )
   )
     state = 'authenticated';
   if (input.action === 'observe') return { state };
