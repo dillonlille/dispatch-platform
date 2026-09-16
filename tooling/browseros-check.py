@@ -12,3 +12,9 @@ subprocess.run([
     "cargo", "test", "--locked", "--test", "browseros_host", "--",
     "--ignored", "--nocapture", "--test-threads=1",
 ], cwd=root, env=environment, check=True)
+
+environment["DISPATCH_TEST_NATIVE"] = "1"
+subprocess.run([
+    "node", "node_modules/tsx/dist/cli.mjs", "--test", "--test-concurrency=1",
+    "tests/paycom-worker.test.ts", "tests/native-browser.test.ts",
+], cwd=root, env=environment, check=True)

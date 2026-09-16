@@ -1,11 +1,9 @@
 # Rust BrowserOS worker
 
-The BrowserOS runtime now lives in the Rust backend, replacing the standalone
-proof program. It ships in the normal artifact and can be used by internal
-provider adapters. **The current Paycom driver still uses the existing Node
-workers.** Authentication and collection must be ported before selecting this
-runtime for provider jobs. Legacy Dispatch and Hermes retain their installations,
-services, and profiles.
+DSP Paycom authentication and collection use the Rust BrowserOS driver in
+`backend/src/core/browsers/paycom/`. The platform runs deterministic login and
+collection scripts with no AI service. Legacy Dispatch and Hermes retain their
+installations, services, and profiles.
 
 ## Installation
 
@@ -22,7 +20,7 @@ updates. BrowserOS remains a Chromium fork; its binary is installed separately
 from Dispatch's artifact. No upstream Rust source is copied into Dispatch.
 [Upstream source and licensing](https://github.com/browseros-ai/BrowserOS/tree/96ff75aa8f3f023c526308df32cdd299331a3ec9).
 
-On Linux x86_64 with the pinned Rust toolchain, bubblewrap, Xvfb, and Chromium
+On Linux x86_64 with the pinned Rust toolchain, bubblewrap, Xvfb, libX11/libXtst, and Chromium
 system libraries installed:
 
 ```bash
@@ -41,13 +39,14 @@ platform smoke check when it reuses the exact PR tree's successful full checks.
 
 `backend/src/core/browsers/browseros/` owns four pieces:
 
-- **Runtime and sessions:** one runtime per environment supplies a shared browser
+- **Runtime and sessions:** the DSP manager enforces a shared browser
   capacity limit. Each session has one actor, one active command, and at most eight
   queued commands. Commands are limited to 64 KiB, CDP frames to 8 MiB, and command
-  deadlines to 15 seconds including queue time. Idle sessions close after 60
-  seconds; total lifetime is capped at 30 minutes.
+  deadlines to 15 seconds including queue time. Ready DSP sessions close after 60 idle
+  seconds. The worker allows up to ten minutes for manual verification; total
+  lifetime is capped at 30 minutes.
 - **Persistent profiles:** trusted host code derives a dedicated BrowserOS path
-  from the DSP registry, such as `state/browsers/browseros/paycom`. Never accept a
+  from the DSP registry, such as `state/browsers/paycom-browseros`. Never accept a
   path from a DSP request or reuse a legacy browser's profile. An exclusive OS
   file lock beside the profile prevents simultaneous use, including across runtime
   instances. The lock and capacity permit remain held until the supervisor is
@@ -101,17 +100,45 @@ The host checks cover:
 - A process allowlist containing only Rust, bubblewrap, BrowserOS and optional
   Xvfb, with no Node/Bun or agent server in the worker namespace.
 
-These are synthetic functional checks, not Paycom performance benchmarks. They do
-not establish native X11 keyboard compatibility or a measured memory/speed gain.
+The API checks in `tests/paycom-worker.test.ts` and `tests/native-browser.test.ts`
+exercise native X11 PIN input, rejection cooldowns across restart, explicit CAPTCHA
+continuation, cookie reuse, complete roster/timecard collection, separate DSPs,
+and preservation of the prior publication when a roster or total is incomplete.
+They run as part of `npm run test:browseros` during full CI checks. Synthetic results
+do not establish real provider latency or measured memory savings.
 
-## Remaining migration work
+## Paycom driver
 
-1. Port Paycom authentication, PIN handling, cooldowns, recovery, and manual
-   assistance to this runtime. Verify the native input behavior required by the
-   retained authentication flow, then wire the adapter into the Rust session manager.
-2. Port collection, verify workforce/timecard parity and atomic publication, and
-   select the Rust worker for real provider jobs.
-3. Add a separately enabled MCP gateway with authorized session scope and exclusive
-   control handoffs between scripts, humans, and optional agents.
-4. Benchmark complete collection and recovery, then retire the platform's remaining
-   Node browser workers. Shared legacy Dispatch/Hermes tooling stays independent.
+The driver opens the existing landing session before submitting credentials.
+Numbered PINs use native X11 events on a private display, preserving spaces and
+leading zeroes. Pointer events locate BrowserOS's content area before native
+clicks; asymmetric browser controls cannot shift the submit target. Page scripts
+run in isolated JavaScript worlds and validate the exact provider origin, route,
+form and known layout. The platform API exposes bounded assistance actions only.
+
+The host stores attempt state and sanitized diagnostics beside the profile,
+outside the browser mount. Rejections impose five-minute and thirty-minute
+cooldowns; a third rejection requires manual intervention. Interrupted submissions
+permit observation-only recovery, preventing an automatic credential replay.
+Manual CAPTCHA assistance requires an explicit Submit action; retained PINs can
+only be submitted again in the same document with the same values.
+
+Collection closes credential tabs, captures the Timecard Search roster request,
+selects the current fortnight using the DSP timezone, and verifies exact employee
+membership. It validates each timecard's identity, dates, layout and weekly totals
+before Rust reconciles daily hours. Failed or cancelled jobs preserve the last
+successful publication. One persistent browser serves the flow without a Node
+worker, Playwright connection, or second browser launch.
+
+`DISPATCH_BROWSEROS_EXECUTABLE` defaults to the pinned installation. The legacy
+`DISPATCH_BROWSER_EXECUTABLE` setting does not select the DSP provider browser.
+The artifact still includes archived Node worker files for compatibility with the
+existing artifact inventory/updater; DSP authentication and collection do not run
+them. Removing those files requires a coordinated artifact/updater change.
+
+## Remaining work
+
+- Verify real Paycom accounts and benchmark complete collection and recovery.
+- Remove the unused Node worker artifact payload through an updater-compatible change.
+- If requested, add a separately enabled MCP gateway with DSP authorization and
+  exclusive control handoffs between scripts, humans, and optional agents.

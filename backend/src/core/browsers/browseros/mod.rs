@@ -1,6 +1,7 @@
 //! Internal Rust browser runtime. Provider adapters own these handles; no raw CDP
 //! endpoint, client-supplied path, or script is exposed through the platform API.
 mod cdp;
+mod native;
 mod sandbox;
 mod worker;
 
@@ -105,6 +106,30 @@ impl Runtime {
             .try_acquire_owned()
             .map_err(|_| Error::new("browser_capacity_busy", 429))?;
         let lease = profile_lease(profile)?;
+        // Credentials belong to the DSP vault; password-manager chrome must not
+        // cover native PIN entry or persist another copy in the browser profile.
+        let defaults = db::private_dir(&profile.join("Default"))?;
+        let preferences = defaults.join("Preferences");
+        db::private_file(&preferences, false)?;
+        let mut settings: Value = if preferences.exists() {
+            ensure(
+                fs::metadata(&preferences)?.len() <= 4 * 1024 * 1024,
+                "browser_profile_invalid",
+                409,
+            )?;
+            serde_json::from_slice(&fs::read(&preferences)?)?
+        } else {
+            json!({})
+        };
+        ensure(
+            settings.is_object()
+                && (settings["profile"].is_null() || settings["profile"].is_object()),
+            "browser_profile_invalid",
+            409,
+        )?;
+        settings["credentials_enable_service"] = json!(false);
+        settings["profile"]["password_manager_enabled"] = json!(false);
+        db::write_private(&preferences, &serde_json::to_vec(&settings)?)?;
         let run = RunDirectory::create(&self.runs)?;
         let fixture = match policy {
             NetworkPolicy::Paycom => None,
@@ -236,11 +261,14 @@ impl Session {
             "browser_closed",
             409,
         )?;
-        let command = WireCommand::Cdp {
+        self.send(WireCommand::Cdp {
             method: method.into(),
             params,
             session: session.map(str::to_owned),
-        };
+        })
+        .await
+    }
+    async fn send(&self, command: WireCommand) -> Result<Value> {
         let bytes = frame(&command, COMMAND_BYTES)?;
         let (reply, response) = oneshot::channel();
         self.0
@@ -257,6 +285,22 @@ impl Session {
         response
             .await
             .map_err(|_| Error::new("browser_closed", 409))?
+    }
+    pub async fn event(&self, session: &str) -> Result<Value> {
+        self.send(WireCommand::Event {
+            session: session.into(),
+        })
+        .await
+    }
+    pub async fn native_move(&self, x: i32, y: i32) -> Result<Value> {
+        self.send(WireCommand::NativeMove { x, y }).await
+    }
+    pub async fn native_click(&self, x: i32, y: i32) -> Result<Value> {
+        self.send(WireCommand::NativeClick { x, y }).await
+    }
+    pub async fn native_type(&self, text: &str) -> Result<Value> {
+        self.send(WireCommand::NativeType { text: text.into() })
+            .await
     }
     pub async fn evaluate(&self, session: &str, expression: &str) -> Result<Value> {
         let result = self
@@ -297,6 +341,20 @@ impl Session {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum WireCommand {
+    Event {
+        session: String,
+    },
+    NativeMove {
+        x: i32,
+        y: i32,
+    },
+    NativeClick {
+        x: i32,
+        y: i32,
+    },
+    NativeType {
+        text: String,
+    },
     Cdp {
         method: String,
         params: Value,
@@ -362,7 +420,7 @@ async fn serve_child(
             biased;
             _ = cancelled(&mut cancellation) => break,
             _ = tokio::time::sleep_until(lifetime) => break,
-            _ = tokio::time::sleep(Duration::from_secs(60)) => break,
+            _ = tokio::time::sleep(Duration::from_secs(600)) => break,
             _ = child.wait() => break,
             request = requests.recv() => request,
         };

@@ -34,8 +34,8 @@ it on shutdown. Installed environments set `DISPATCH_STATE_ROOT` explicitly.
 
 ```text
 dashboard/          React dashboard, responsive layouts, forms and tables
-backend/            Rust platform API, auth, DSPs, jobs, vault, mail, storage and CLI
-services/browsers/  Isolated Node/Playwright authentication and collection workers
+backend/            Rust platform API, BrowserOS Paycom driver, DSPs, jobs and storage
+services/browsers/  Archived Node workers retained for artifact compatibility
 integrations/paycom/ Retained provider adapter, parsers and worker contracts
 shared/             Dashboard/worker contracts and validation helpers
 tooling/            Build, updater, fresh-state cutover and developer verification
