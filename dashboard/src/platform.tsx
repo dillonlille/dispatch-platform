@@ -528,7 +528,7 @@ export function JobsPage({
   );
   return (
     <>
-      <Header title="Jobs" subtitle="Follow collection progress and recent results." />
+      <Header title="Collections" subtitle="Follow collection progress and recent results." />
       <ErrorBox message={error} />
       {data ? (
         <JobTable

@@ -184,6 +184,7 @@ function App() {
     ? [
         { id: 'overview', label: 'Home Page', icon: House },
         { id: 'paycom', label: 'Paycom', icon: CalendarDays },
+        ...(canCollect ? [{ id: 'jobs', label: 'Collections', icon: FlaskConical }] : []),
         ...(owner ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
         { id: 'settings', label: 'Settings', icon: Settings },
       ]
