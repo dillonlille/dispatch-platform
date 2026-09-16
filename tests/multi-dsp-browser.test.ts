@@ -107,9 +107,12 @@ test(
     assert.equal(f.state.timecardsPeak, 4, 'Two tabs in each of two browsers overlap');
     for (const account of accounts) assert.equal(f.state.peakByAccount.get(account), 2);
     assert.equal(f.state.accountStarts.filter((v) => v === accounts[0]).length, 2);
+    // Fairness is the order in which jobs receive a slot. If both slots free
+    // together, different browser startup times can reorder the first HTTP request.
     assert(
-      f.state.accountStarts.indexOf(accounts[2]!) < f.state.accountStarts.lastIndexOf(accounts[0]!),
-      'C must start before A collects again',
+      Date.parse(final.find((j) => j.id === jobs[3])!.startedAt!) <=
+        Date.parse(final.find((j) => j.id === jobs[1])!.startedAt!),
+      'C must receive a slot before A collects again',
     );
     assert.equal(
       f.events.filter((event) => event === 'primary').length,
@@ -163,7 +166,7 @@ test(
         peakPssBytes,
         peakPrivateBytes,
         completeMemorySamples,
-        queueMs: final.map((j) => j.metrics[0]!.queueMs),
+        queueMs: jobs.map((id) => final.find((j) => j.id === id)!.metrics[0]!.queueMs),
       }),
     );
   },
