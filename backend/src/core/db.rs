@@ -315,7 +315,11 @@ impl Store {
         };
         let db = match cached {
             Some(db) => db,
-            None => Db::open(&path, "", 1, false)?,
+            None => {
+                let db = Db::open(&path, "", 1, false)?;
+                migrate_connections(&db)?;
+                db
+            }
         };
         Ok(DspLease {
             id: id.into(),
@@ -350,4 +354,29 @@ impl Store {
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
         Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR a.dsp_id=?) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
     }
+}
+
+// Widen the provider constraint without changing user_version: the previous
+// runtime can still read/write Paycom and rollback without losing either row.
+fn migrate_connections(db: &Db) -> Result<()> {
+    let schema = db
+        .one(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='connections'",
+            [],
+        )?
+        .ok_or_else(|| super::Error::new("database_invalid", 500))?;
+    if !s(&schema, "sql").contains("'cortex'") {
+        db.transaction(|| {
+            db.exec("CREATE TABLE connections_next (provider TEXT PRIMARY KEY CHECK(provider IN ('paycom','cortex')), enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)), status TEXT NOT NULL DEFAULT 'not_connected', error TEXT, account_label TEXT, updated_at TEXT NOT NULL, verified_at TEXT, revision INTEGER NOT NULL DEFAULT 1)", [])?;
+            db.exec("INSERT INTO connections_next SELECT * FROM connections", [])?;
+            db.exec("DROP TABLE connections", [])?;
+            db.exec("ALTER TABLE connections_next RENAME TO connections", [])?;
+            Ok(())
+        })?;
+    }
+    db.exec(
+        "INSERT OR IGNORE INTO connections(provider,updated_at) VALUES ('cortex',?)",
+        [iso()],
+    )?;
+    Ok(())
 }

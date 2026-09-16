@@ -1,10 +1,13 @@
 //! Per-tab state. Tabs share a bounded BrowserOS session, not execution contexts.
-use super::*;
+use super::browseros;
+use crate::core::{Error, Result, db::s, ensure};
+use serde_json::{Value, json};
 pub(super) struct Page {
     pub id: String,
     pub target: String,
     browser: browseros::Session,
     origin: String,
+    trusted_origins: Vec<String>,
     world: std::sync::Mutex<Option<(String, String, i64)>>,
 }
 impl Page {
@@ -13,9 +16,13 @@ impl Page {
             id: String::new(),
             target: String::new(),
             browser,
+            trusted_origins: vec![origin.clone()],
             origin,
             world: std::sync::Mutex::new(None),
         }
+    }
+    pub fn allow_origins(&mut self, origins: &[&str]) {
+        self.trusted_origins = origins.iter().map(|s| (*s).to_owned()).collect();
     }
     pub async fn open(browser: browseros::Session, origin: String) -> Result<Self> {
         let target = browser
@@ -47,7 +54,8 @@ impl Page {
     }
     pub(super) fn trusted(&self, value: &str) -> bool {
         url::Url::parse(value).is_ok_and(|url| {
-            url.origin().ascii_serialization() == self.origin
+            self.trusted_origins
+                .contains(&url.origin().ascii_serialization())
                 && url.username().is_empty()
                 && url.password().is_none()
                 && url.fragment().is_none()
@@ -72,7 +80,7 @@ impl Page {
             let world = self
                 .command(
                     "Page.createIsolatedWorld",
-                    json!({"frameId":frame["id"],"worldName":"dispatch-paycom"}),
+                    json!({"frameId":frame["id"],"worldName":"dispatch-provider"}),
                 )
                 .await?;
             ensure(
@@ -143,5 +151,70 @@ impl Page {
             Err(error) => return Err(error),
         }
         Ok(s(&current, "loaderId").to_owned())
+    }
+    pub async fn assist(&self, input: &Value) -> Result<()> {
+        ensure(
+            self.trusted(s(&self.frame().await?, "url")),
+            "verification_expired",
+            409,
+        )?;
+        match s(input, "kind") {
+            "click" => {
+                for kind in ["mousePressed", "mouseReleased"] {
+                    self.command("Input.dispatchMouseEvent",json!({"type":kind,"x":input["x"],"y":input["y"],"button":"left","clickCount":1})).await?;
+                }
+            }
+            "pointer" => {
+                let kind = match s(input, "phase") {
+                    "down" => "mousePressed",
+                    "up" => "mouseReleased",
+                    _ => "mouseMoved",
+                };
+                self.command("Input.dispatchMouseEvent",json!({"type":kind,"x":input["x"],"y":input["y"],"button":if s(input,"phase")=="move"&&input["pressed"]!=true{"none"}else{"left"},"buttons":if input["pressed"]==true{1}else{0},"clickCount":if kind=="mouseMoved"{0}else{1}})).await?;
+            }
+            "scroll" => {
+                self.command("Input.dispatchMouseEvent",json!({"type":"mouseWheel","x":input["x"],"y":input["y"],"deltaX":input["deltaX"],"deltaY":input["deltaY"]})).await?;
+            }
+            "type" => {
+                let text = s(input, "text");
+                if !text.is_empty()
+                    && text.len() <= 64
+                    && text.bytes().all(|b| (32..=126).contains(&b))
+                {
+                    self.browser.native_type(text).await?;
+                } else {
+                    self.command("Input.insertText", json!({"text":text}))
+                        .await?;
+                }
+            }
+            "key" => {
+                let key = s(input, "key");
+                let code = match key {
+                    "Enter" => 13,
+                    "Tab" => 9,
+                    "Backspace" => 8,
+                    "Escape" => 27,
+                    "ArrowDown" => 40,
+                    "ArrowUp" => 38,
+                    "ArrowLeft" => 37,
+                    "ArrowRight" => 39,
+                    "Delete" => 46,
+                    "Home" => 36,
+                    "End" => 35,
+                    "PageUp" => 33,
+                    "PageDown" => 34,
+                    _ => return Err(Error::new("invalid_input", 400)),
+                };
+                for kind in ["keyDown", "keyUp"] {
+                    let mut args = json!({"type":kind,"key":key,"windowsVirtualKeyCode":code,"modifiers":if input["shift"]==true{8}else{0}});
+                    if key == "Enter" && kind == "keyDown" {
+                        args["text"] = json!("\r");
+                    }
+                    self.command("Input.dispatchKeyEvent", args).await?;
+                }
+            }
+            _ => return Err(Error::new("invalid_input", 400)),
+        }
+        Ok(())
     }
 }

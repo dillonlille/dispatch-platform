@@ -1,6 +1,11 @@
+mod attempt;
 pub mod browseros;
+mod cortex;
 pub mod egress;
+mod page;
 mod paycom;
+mod provider;
+pub use provider::Provider;
 pub mod sandbox;
 use super::{
     Error, Result, State,
@@ -30,6 +35,7 @@ pub struct Manager {
 pub struct Session {
     pub id: String,
     pub dsp: String,
+    pub provider: Provider,
     pub revision: i64,
     pub timezone: String,
     run: PathBuf,
@@ -43,7 +49,24 @@ pub struct Session {
     last_used: Mutex<std::time::Instant>,
     collecting: std::sync::atomic::AtomicBool,
 }
-type Worker = paycom::Driver;
+enum Worker {
+    Paycom(paycom::Driver),
+    Cortex(cortex::Driver),
+}
+impl Worker {
+    fn browser(&self) -> &browseros::Session {
+        match self {
+            Self::Paycom(driver) => &driver.browser,
+            Self::Cortex(driver) => &driver.browser,
+        }
+    }
+    async fn request(&mut self, command: Value) -> Result<Value> {
+        match self {
+            Self::Paycom(driver) => driver.request(command).await,
+            Self::Cortex(driver) => driver.request(command).await,
+        }
+    }
+}
 impl Manager {
     fn runtime(&self, config: &super::config::Config) -> Result<Arc<browseros::Runtime>> {
         let mut current = self
@@ -85,10 +108,10 @@ impl Manager {
         let removed = {
             let mut sessions = self.sessions.lock().expect("browser registry");
             if sessions
-                .get(&session.dsp)
+                .get(&session.provider.key(&session.dsp))
                 .is_some_and(|current| Arc::ptr_eq(current, session))
             {
-                sessions.remove(&session.dsp)
+                sessions.remove(&session.provider.key(&session.dsp))
             } else {
                 None
             }
@@ -106,13 +129,25 @@ impl Manager {
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
-        self.sessions.lock().ok()?.get(id).cloned()
+        self.get_for(id, Provider::Paycom)
+    }
+    pub fn get_for(&self, id: &str, provider: Provider) -> Option<Arc<Session>> {
+        self.sessions.lock().ok()?.get(&provider.key(id)).cloned()
     }
     pub fn active(&self) -> usize {
         self.sessions.lock().map(|s| s.len()).unwrap_or(0)
     }
     pub async fn revoke(&self, id: &str) {
-        let session = self.sessions.lock().ok().and_then(|mut s| s.remove(id));
+        for provider in [Provider::Paycom, Provider::Cortex] {
+            self.revoke_for(id, provider).await;
+        }
+    }
+    pub async fn revoke_for(&self, id: &str, provider: Provider) {
+        let session = self
+            .sessions
+            .lock()
+            .ok()
+            .and_then(|mut s| s.remove(&provider.key(id)));
         if let Some(session) = session {
             session.close().await;
         }
@@ -155,7 +190,7 @@ impl Session {
         self.status.store(3, Ordering::SeqCst);
         self.cancel.send_replace(true);
         if let Some(worker) = self.worker.lock().await.take() {
-            worker.browser.close().await;
+            worker.browser().close().await;
         }
         let _ = std::fs::remove_dir_all(&self.run);
     }
@@ -261,6 +296,9 @@ impl Session {
             .as_mut()
             .ok_or_else(|| Error::new("browser_unavailable", 409))?;
         let mut cancellation = self.cancel.subscribe();
+        let Worker::Paycom(worker) = worker else {
+            return Err(Error::new("collector_unavailable", 409));
+        };
         let response = worker.collect(&self.timezone, |progress, message| {
             let job = job.to_owned();
             let owner = owner.to_owned();
@@ -279,7 +317,13 @@ impl Session {
         }
     }
 }
-pub fn validate_credentials(value: &Value) -> Result<()> {
+pub fn validate_credentials(value: &Value, provider: Provider) -> Result<()> {
+    if provider == Provider::Cortex {
+        v::fields(value, &["username", "password"])?;
+        v::name(value, "username", 200)?;
+        v::text(value, "password", 1, 256)?;
+        return Ok(());
+    }
     v::fields(
         value,
         &["clientCode", "username", "password", "securityAnswers"],
@@ -309,61 +353,64 @@ pub fn validate_credentials(value: &Value) -> Result<()> {
 }
 impl Store {
     pub fn connection(&self, id: &str) -> Result<Value> {
-        let mut row=self.dsp(id)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
+        self.connection_for(id, Provider::Paycom)
+    }
+    pub fn connection_for(&self, id: &str, provider: Provider) -> Result<Value> {
+        let mut row=self.dsp(id)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider=?",[provider.name()])?.ok_or_else(||Error::new("connection_required",409))?;
         db::boolean(&mut row, &["enabled"]);
         Ok(row)
     }
     pub fn connection_state(
         &self,
         id: &str,
+        provider: Provider,
         revision: i64,
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        self.dsp(id)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider='paycom' AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),revision])?;
+        self.dsp(id)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider=? AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),provider.name(),revision])?;
         Ok(())
     }
-    pub fn save_credentials(&self, c: &Context, value: &Value) -> Result<()> {
+    pub fn save_credentials(&self, c: &Context, value: &Value, provider: Provider) -> Result<()> {
         self.revalidate(c, "connections")?;
-        validate_credentials(value)?;
+        validate_credentials(value, provider)?;
         let id = s(&c.dsp, "id");
         let area = self.area(id, "secrets")?;
         let key = db::key_file(&area.join("vault.key"))?;
         db::write_private(
-            &area.join("paycom.enc"),
-            crypto::encrypt(&key, &format!("{id}:paycom:2"), value)?.as_bytes(),
+            &area.join(format!("{}.enc", provider.name())),
+            crypto::encrypt(&key, &format!("{id}:{}:2", provider.name()), value)?.as_bytes(),
         )?;
-        self.dsp(id)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[s(value,"clientCode"),&iso()])?;
-        let profile = self.area(id, "state")?.join("browsers");
-        if profile.exists() {
-            db::private_dir(&profile)?;
-            std::fs::remove_dir_all(profile)?;
-        }
+        self.dsp(id)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[if provider == Provider::Paycom { s(value,"clientCode") } else { "" },&iso(),provider.name()])?;
+        self.clear_browser_state(id, provider)?;
         self.audit(
             Some(s(&c.auth.user, "id")),
             Some(id),
             "connection.credentials_saved",
-            "",
+            provider.name(),
         )
     }
-    pub fn credentials(&self, id: &str) -> Result<Value> {
+    pub fn credentials(&self, id: &str, provider: Provider) -> Result<Value> {
         let area = self.area(id, "secrets")?;
-        let path = area.join("paycom.enc");
+        let path = area.join(format!("{}.enc", provider.name()));
         db::private_file(&path, false)?;
         let key = db::key_file(&area.join("vault.key"))?;
         crypto::decrypt(
             &key,
-            &format!("{id}:paycom:2"),
+            &format!("{id}:{}:2", provider.name()),
             &std::fs::read_to_string(path)?,
         )
     }
-    pub fn disable(&self, c: &Context, remove: bool) -> Result<()> {
+    pub fn disable(&self, c: &Context, remove: bool, provider: Provider) -> Result<()> {
         self.revalidate(c, "connections")?;
         let id = s(&c.dsp, "id");
         let db = self.dsp(id)?;
-        db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[iso()])?;db.exec("UPDATE schedules SET enabled=0,next_run=NULL",[])?;Ok(())})?;
+        db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.name().into()])?;db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?",[provider.name()])?;Ok(())})?;
+        self.clear_browser_state(id, provider)?;
         if remove {
-            let file = self.area(id, "secrets")?.join("paycom.enc");
+            let file = self
+                .area(id, "secrets")?
+                .join(format!("{}.enc", provider.name()));
             db::private_file(&file, false)?;
             if file.exists() {
                 std::fs::remove_file(file)?;
@@ -373,8 +420,29 @@ impl Store {
             Some(s(&c.auth.user, "id")),
             Some(id),
             "connection.disabled",
-            "",
+            provider.name(),
         )
+    }
+    fn clear_browser_state(&self, id: &str, provider: Provider) -> Result<()> {
+        let root = self.area(id, "state")?.join("browsers");
+        if !root.exists() {
+            return Ok(());
+        }
+        db::private_dir(&root)?;
+        let profile = root.join(format!("{}-browseros", provider.name()));
+        if profile.exists() {
+            db::private_dir(&profile)?;
+            std::fs::remove_dir_all(profile)?;
+        }
+        // Only an explicit credential change/disable resets this provider's limiter.
+        for suffix in ["attempt.json", "diagnostics.json"] {
+            let file = root.join(format!("{}-{suffix}", provider.name()));
+            db::private_file(&file, false)?;
+            if file.exists() {
+                std::fs::remove_file(file)?;
+            }
+        }
+        Ok(())
     }
 }
 impl State {
@@ -409,18 +477,27 @@ impl State {
             if expired {
                 let id = session.dsp.clone();
                 let revision = session.revision;
+                let provider = session.provider;
                 let _ = self
                     .run(move |db| {
-                        db.connection_state(&id, revision, "error", Some("verification_expired"))
+                        db.connection_state(
+                            &id,
+                            provider,
+                            revision,
+                            "error",
+                            Some("verification_expired"),
+                        )
                     })
                     .await;
             }
         }
     }
-    pub async fn connection(self: &Arc<Self>, id: &str) -> Result<Value> {
+    pub async fn connection(self: &Arc<Self>, id: &str, provider: Provider) -> Result<Value> {
         let dsp = id.to_owned();
-        let mut value = self.run(move |db| db.connection(&dsp)).await?;
-        if let Some(session) = self.browsers.get(id)
+        let mut value = self
+            .run(move |db| db.connection_for(&dsp, provider))
+            .await?;
+        if let Some(session) = self.browsers.get_for(id, provider)
             && session.interactive()
         {
             value["verificationSessionId"] = json!(session.id);
@@ -428,6 +505,15 @@ impl State {
         Ok(value)
     }
     pub async fn ensure_browser(self: &Arc<Self>, id: &str, retry: bool) -> Result<Arc<Session>> {
+        self.ensure_provider_browser(id, retry, Provider::Paycom)
+            .await
+    }
+    pub async fn ensure_provider_browser(
+        self: &Arc<Self>,
+        id: &str,
+        retry: bool,
+        provider: Provider,
+    ) -> Result<Arc<Session>> {
         let dsp = id.to_owned();
         let (dsp, credentials, revision, run, profile) = self
             .run(move |db| {
@@ -441,25 +527,25 @@ impl State {
                 let connection = db
                     .dsp(&dsp)?
                     .one(
-                        "SELECT enabled,revision FROM connections WHERE provider='paycom'",
-                        [],
+                        "SELECT enabled,revision FROM connections WHERE provider=?",
+                        [provider.name()],
                     )?
                     .ok_or_else(|| Error::new("connection_required", 409))?;
                 ensure(flag(&connection, "enabled"), "connection_required", 409)?;
                 let runs = db::private_dir(&db.config.environment_root().join("browser-runs"))?;
                 let run = runs.join(crypto::id("run")?);
                 let profile = db::private_dir(&db.area(&dsp, "state")?.join("browsers"))?
-                    .join("paycom-browseros");
+                    .join(format!("{}-browseros", provider.name()));
                 Ok((
                     value,
-                    db.credentials(&dsp)?,
+                    db.credentials(&dsp, provider)?,
                     n(&connection, "revision"),
                     run,
                     profile,
                 ))
             })
             .await?;
-        if let Some(session) = self.browsers.get(id) {
+        if let Some(session) = self.browsers.get_for(id, provider) {
             ensure(!session.closed() && !session.busy(), "connection_busy", 409)?;
             ensure(session.revision == revision, "connection_changed", 409)?;
             if retry {
@@ -482,6 +568,7 @@ impl State {
         let session = Arc::new(Session {
             id: run.file_name().unwrap().to_string_lossy().into_owned(),
             dsp: id.into(),
+            provider,
             revision,
             timezone: s(&dsp, "timezone").into(),
             run: run.clone(),
@@ -501,13 +588,17 @@ impl State {
                 .sessions
                 .lock()
                 .map_err(|_| Error::new("browser_unavailable", 503))?;
-            ensure(!sessions.contains_key(id), "connection_busy", 409)?;
+            ensure(
+                !sessions.contains_key(&provider.key(id)),
+                "connection_busy",
+                409,
+            )?;
             ensure(
                 sessions.len() < self.config.browser_capacity,
                 "browser_capacity_busy",
                 429,
             )?;
-            sessions.insert(id.into(), session.clone());
+            sessions.insert(provider.key(id), session.clone());
         }
         let start=async {
             let mut worker = session.worker.lock().await;
@@ -515,21 +606,25 @@ impl State {
             let dsp=id.to_owned();self.run(move|db| {
                 let tenant = db.get_dsp(&dsp)?;
                 ensure(s(&tenant,"status")=="active", "dsp_unavailable",409)?;
-                let connection = db.dsp(&dsp)?.one("SELECT enabled,revision FROM connections WHERE provider='paycom'",[])?.ok_or_else(||Error::new("connection_required",409))?;
+                let connection = db.dsp(&dsp)?.one("SELECT enabled,revision FROM connections WHERE provider=?",[provider.name()])?.ok_or_else(||Error::new("connection_required",409))?;
                 ensure(flag(&connection,"enabled") && n(&connection,"revision")==revision,"connection_changed",409)?;
-                db.connection_state(&dsp,revision,"signing_in",None)
+                db.connection_state(&dsp,provider,revision,"signing_in",None)
             }).await?;
             ensure(!session.closed(), "verification_expired", 409)?;
             db::private_dir(&run)?;db::private_dir(&profile)?;
             if !session.fixture {
-                paycom::preflight(&profile,retry)?;
+                match provider { Provider::Paycom => paycom::preflight(&profile,retry)?, Provider::Cortex => cortex::preflight(&profile,retry)? };
                 let policy=if let Some(value)=&self.config.fixture_url {
                     browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
-                } else { browseros::NetworkPolicy::Paycom };
+                } else { match provider { Provider::Paycom => browseros::NetworkPolicy::Paycom, Provider::Cortex => browseros::NetworkPolicy::Cortex } };
                 let runtime=self.browsers.runtime(&self.config)?;
                 let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
                 session.process_id.store(browser.process_id(),Ordering::Release);
-                match paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
+                let driver = match provider {
+                    Provider::Paycom => paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await.map(Worker::Paycom),
+                    Provider::Cortex => cortex::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await.map(Worker::Cortex),
+                };
+                match driver {
                     Ok(driver)=>*worker=Some(driver),
                     Err(error)=>{browser.close().await;return Err(error);},
                 }
@@ -552,6 +647,7 @@ impl State {
     ) -> Result<()> {
         let dsp = session.dsp.clone();
         let revision = session.revision;
+        let provider = session.provider;
         let recoverable = result.as_ref().is_err_and(|e| {
             [
                 "invalid_verification_code",
@@ -574,7 +670,7 @@ impl State {
         } else {
             result.as_ref().err().map(|e| e.code.clone())
         };
-        self.run(move |db| db.connection_state(&dsp, revision, status, error.as_deref()))
+        self.run(move |db| db.connection_state(&dsp, provider, revision, status, error.as_deref()))
             .await
     }
 }

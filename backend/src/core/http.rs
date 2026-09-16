@@ -635,8 +635,22 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             .await?;
         return Ok(Some(Reply::json(result)));
     }
-    if parts.len() < 4 || parts[1] != "dsp" || parts[2] != "connections" || parts[3] != "paycom" {
+    if parts.len() < 4
+        || parts[1] != "dsp"
+        || parts[2] != "connections"
+        || !["paycom", "cortex"].contains(&parts[3])
+    {
         return Ok(None);
+    }
+    let provider = browsers::Provider::parse(parts[3])?;
+    if parts.len() == 4 && !write {
+        let input = i.clone();
+        let c = state
+            .run(move |db| input.context(db, "connections"))
+            .await?;
+        return Ok(Some(Reply::json(
+            state.connection(s(&c.dsp, "id"), provider).await?,
+        )));
     }
     let action = parts.get(4).copied().unwrap_or("save");
     if (action == "screenshot" && write) || (action != "screenshot" && !write) || parts.len() > 5 {
@@ -668,25 +682,29 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
     };
     match action {
         "save" => {
-            browsers::validate_credentials(b)?;
+            browsers::validate_credentials(b, provider)?;
             let context = c.clone();
             state
                 .run(move |db| {
                     db.revalidate(&context, "connections")?;
-                    db.cancel_dsp(s(&context.dsp, "id"))
+                    if provider == browsers::Provider::Paycom {
+                        db.cancel_dsp(s(&context.dsp, "id"))
+                    } else {
+                        Ok(())
+                    }
                 })
                 .await?;
-            state.browsers.revoke(&id).await;
+            state.browsers.revoke_for(&id, provider).await;
             let context = c.clone();
             let value = b.clone();
             state
-                .run(move |db| db.save_credentials(&context, &value))
+                .run(move |db| db.save_credentials(&context, &value, provider))
                 .await?;
-            state.ensure_browser(&id, true).await?;
+            state.ensure_provider_browser(&id, true, provider).await?;
         }
         "check" => {
             v::fields(b, &[])?;
-            state.ensure_browser(&id, true).await?;
+            state.ensure_provider_browser(&id, true, provider).await?;
         }
         "disable" => {
             v::fields(b, &["removeCredentials"])?;
@@ -699,17 +717,23 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             state
                 .run(move |db| {
                     db.revalidate(&context, "connections")?;
-                    db.cancel_dsp(s(&context.dsp, "id"))
+                    if provider == browsers::Provider::Paycom {
+                        db.cancel_dsp(s(&context.dsp, "id"))
+                    } else {
+                        Ok(())
+                    }
                 })
                 .await?;
-            state.browsers.revoke(&id).await;
+            state.browsers.revoke_for(&id, provider).await;
             let context = c.clone();
-            state.run(move |db| db.disable(&context, remove)).await?;
+            state
+                .run(move |db| db.disable(&context, remove, provider))
+                .await?;
         }
         _ => {
             let session = state
                 .browsers
-                .get(&id)
+                .get_for(&id, provider)
                 .ok_or_else(|| Error::new("verification_expired", 409))?;
             if action != "verify" {
                 let input = if action == "screenshot" { &i.query } else { b };
@@ -755,7 +779,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                         state
                             .run(move |db| db.revalidate(&context, "connections"))
                             .await?;
-                        return Ok(Some(Reply::json(state.connection(&id).await?)));
+                        return Ok(Some(Reply::json(state.connection(&id, provider).await?)));
                     }
                     (
                         json!({"action":"complete_assistance"}),
@@ -796,7 +820,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                                 Some(s(&context.auth.user, "id")),
                                 Some(s(&context.dsp, "id")),
                                 "connection.verification_submitted",
-                                "",
+                                provider.name(),
                             )
                         })
                         .await?;
@@ -819,7 +843,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
     state
         .run(move |db| db.revalidate(&c, "connections"))
         .await?;
-    Ok(Some(Reply::json(state.connection(&id).await?)))
+    Ok(Some(Reply::json(state.connection(&id, provider).await?)))
 }
 fn validate_browser_input(input: &Value) -> Result<()> {
     let kind = v::choice(

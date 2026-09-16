@@ -7,10 +7,14 @@ import { ErrorBox, Loading, Modal } from './ui.js';
 export function BrowserVerification({
   sessionId,
   close,
+  provider = 'paycom',
 }: {
   sessionId: string;
+  provider?: 'paycom' | 'cortex';
   close: () => void;
 }) {
+  const name = provider === 'paycom' ? 'Paycom' : 'Cortex';
+  const endpoint = `/api/dsp/connections/${provider}`;
   const [frame, setFrame] = useState<BrowserFrame>();
   const [error, setError] = useState('');
   const [streamError, setStreamError] = useState('');
@@ -49,7 +53,7 @@ export function BrowserVerification({
     const signal = controller.current?.signal;
     try {
       const next = await api<BrowserFrame>(
-        `/api/dsp/connections/paycom/screenshot?sessionId=${encodeURIComponent(sessionId)}`,
+        `${endpoint}/screenshot?sessionId=${encodeURIComponent(sessionId)}`,
         undefined,
         signal,
       );
@@ -66,7 +70,7 @@ export function BrowserVerification({
     } finally {
       capturing.current = false;
     }
-  }, [sessionId, failed]);
+  }, [sessionId, failed, endpoint]);
   useEffect(() => {
     const abort = new AbortController();
     controller.current = abort;
@@ -102,11 +106,7 @@ export function BrowserVerification({
     pending.current = pending.current
       .then(async () => {
         if (controller.current?.signal.aborted) return;
-        await api(
-          '/api/dsp/connections/paycom/assist',
-          { sessionId, input },
-          controller.current?.signal,
-        );
+        await api(`${endpoint}/assist`, { sessionId, input }, controller.current?.signal);
       })
       .catch(failed);
   };
@@ -158,7 +158,7 @@ export function BrowserVerification({
     try {
       await pending.current;
       if (controller.current?.signal.aborted) return;
-      await api('/api/dsp/connections/paycom/submit', { sessionId }, controller.current?.signal);
+      await api(`${endpoint}/submit`, { sessionId }, controller.current?.signal);
       close();
     } catch (error) {
       failed(error as Error);
@@ -170,9 +170,10 @@ export function BrowserVerification({
     }
   };
   return (
-    <Modal title="Complete Paycom verification" variant="browser" onClose={close}>
+    <Modal title={`Complete ${name} verification`} variant="browser" onClose={close}>
       <p className="verification-instructions">
-        Solve the CAPTCHA in the window below, then click Submit to continue signing in.
+        Complete the verification requested in the window below, then click Submit to continue
+        signing in.
       </p>
       <div className="verification-toolbar">
         <span className="muted" role="status">
@@ -182,7 +183,7 @@ export function BrowserVerification({
               ? 'Session ended'
               : streamError
                 ? 'Reconnecting…'
-                : 'Live Paycom window'}
+                : `Live ${name} window`}
         </span>
         <div>
           <button
@@ -211,10 +212,10 @@ export function BrowserVerification({
           <img
             ref={image}
             className="verification-browser"
-            alt="Interactive Paycom verification browser"
+            alt={`Interactive ${name} verification browser`}
             tabIndex={busy || expired ? -1 : 0}
             role="application"
-            aria-label="Paycom verification browser"
+            aria-label={`${name} verification browser`}
             aria-describedby="verification-keyboard-help"
             draggable={false}
             src={`data:image/png;base64,${frame.image}`}
@@ -329,7 +330,7 @@ export function BrowserVerification({
           }}
         >
           <input
-            aria-label="Text to type in Paycom"
+            aria-label={`Text to type in ${name}`}
             placeholder="Text to type in the selected field"
             value={text}
             maxLength={256}

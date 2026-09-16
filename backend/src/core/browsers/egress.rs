@@ -1,3 +1,4 @@
+use super::browseros::NetworkPolicy;
 use crate::core::{Error, Result, ensure};
 use std::{net::IpAddr, os::fd::AsRawFd, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
 use tokio::{
@@ -20,6 +21,19 @@ pub fn allowed_host(host: &str) -> bool {
                 "www.recaptcha.net",
             ]
             .contains(&host))
+}
+pub fn allowed_cortex_host(host: &str) -> bool {
+    [
+        "logistics.amazon.com",
+        "amazon.com",
+        "www.amazon.com",
+        "unagi.amazon.com",
+        "unagi-na.amazon.com",
+    ]
+    .contains(&host)
+        || ["media-amazon.com", "ssl-images-amazon.com"]
+            .iter()
+            .any(|root| host == *root || host.ends_with(&format!(".{root}")))
 }
 pub fn public_address(address: IpAddr) -> bool {
     let IpAddr::V4(ip) = address else {
@@ -54,6 +68,15 @@ impl Drop for Egress {
 }
 impl Egress {
     pub fn start(run: &Path, fixture: Option<(String, u16)>) -> Result<Self> {
+        let policy = match fixture {
+            Some((_, port)) => NetworkPolicy::Fixture(
+                std::num::NonZeroU16::new(port).ok_or_else(|| Error::new("egress_denied", 403))?,
+            ),
+            None => NetworkPolicy::Paycom,
+        };
+        Self::start_with_policy(run, policy)
+    }
+    pub fn start_with_policy(run: &Path, policy: NetworkPolicy) -> Result<Self> {
         crate::core::db::private_dir(run)?;
         let directory = std::fs::File::open(run)?;
         let listener = UnixListener::bind(format!(
@@ -74,7 +97,7 @@ impl Egress {
             loop {
                 tokio::select! {
                     accepted=listener.accept()=>match accepted {
-                        Ok((stream,_))=> {if let Ok(permit)=slots.clone().try_acquire_owned(){let fixture=fixture.clone();tasks.spawn(async move {let _permit=permit;let _=tokio::time::timeout(std::time::Duration::from_secs(120),proxy(stream,fixture)).await;});}},
+                        Ok((stream,_))=> {if let Ok(permit)=slots.clone().try_acquire_owned(){tasks.spawn(async move {let _permit=permit;let _=tokio::time::timeout(std::time::Duration::from_secs(120),proxy(stream,policy)).await;});}},
                         Err(_)=>break,
                     },
                     _=tasks.join_next(),if !tasks.is_empty()=>{},
@@ -84,7 +107,7 @@ impl Egress {
         Ok(Self { task, path, inode })
     }
 }
-async fn proxy(client: UnixStream, fixture: Option<(String, u16)>) -> Result<()> {
+async fn proxy(client: UnixStream, policy: NetworkPolicy) -> Result<()> {
     // Buffer headers instead of making one socket read per byte. Keep this
     // reader for the tunnel so prefetched request-body/TLS bytes are preserved.
     let mut client = BufReader::new(client);
@@ -119,16 +142,22 @@ async fn proxy(client: UnixStream, fixture: Option<(String, u16)>) -> Result<()>
     let port = url
         .port_or_known_default()
         .ok_or_else(|| Error::new("egress_denied", 403))?;
-    let address = if let Some((fixture_host, fixture_port)) = fixture {
+    let address = if let NetworkPolicy::Fixture(fixture_port) = policy {
         ensure(
-            fixture_host == host && fixture_port == port,
+            host == "fixture.dispatch.invalid" && fixture_port.get() == port,
             "egress_denied",
             403,
         )?;
         std::net::SocketAddr::from(([127, 0, 0, 1], port))
     } else {
         ensure(
-            connect && port == 443 && allowed_host(host),
+            connect
+                && port == 443
+                && match policy {
+                    NetworkPolicy::Paycom => allowed_host(host),
+                    NetworkPolicy::Cortex => allowed_cortex_host(host),
+                    NetworkPolicy::Fixture(_) => false,
+                },
             "egress_denied",
             403,
         )?;
