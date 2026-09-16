@@ -40,6 +40,8 @@ jobs:
           if command -v apparmor_parser >/dev/null; then
             sudo apparmor_parser -r tooling/host/dispatch-dev-bwrap.apparmor
           fi
+          # Hosted runners allow writes to /opt; the browser needs trusted parents.
+          sudo install -d -o root -g root -m 755 /opt
           sudo python3 tooling/install-browseros.py
       - name: Validate and build
         run: npm run check:ci -- ${{ steps.validation.outputs.mode }}

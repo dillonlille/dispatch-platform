@@ -35,7 +35,7 @@ def main():
     for directory in (parent, *parent.parents):
         info = directory.lstat()
         if directory.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
-            raise ValueError("Installation parents must be root-owned and not writable by others")
+            raise ValueError(f"Installation parent {directory} must be root-owned and not writable by others")
     if DESTINATION.exists() or DESTINATION.is_symlink():
         raise ValueError(f"Refusing to overwrite {DESTINATION}")
     with tempfile.TemporaryDirectory(prefix=".install-", dir=parent) as directory:
