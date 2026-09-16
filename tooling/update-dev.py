@@ -110,7 +110,10 @@ def verify_artifact(directory, commit=None):
     rust = (set(manifest) == {"format", "version", "runtime", "workerNodeMajor", "schema", "files", "digest"}
             and manifest["format"] == 2 and manifest["runtime"] == "rust"
             and manifest["workerNodeMajor"] == 22 and manifest["schema"] == 3)
-    require(legacy or rust, "Unsupported artifact format/schema")
+    rust_only = (set(manifest) == {"format", "version", "runtime", "schema", "files", "digest"}
+                 and manifest["format"] == 3 and manifest["runtime"] == "rust"
+                 and manifest["schema"] == 3)
+    require(legacy or rust or rust_only, "Unsupported artifact format/schema")
     require(re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", manifest["version"]),
             "Invalid artifact version")
     payload = {key: value for key, value in manifest.items() if key != "digest"}
@@ -137,12 +140,19 @@ def verify_artifact(directory, commit=None):
         require(name in files and info.st_size == files[name]["size"] and
                 hashlib.sha256(item.read_bytes()).hexdigest() == files[name]["sha256"],
                 "Artifact file verification failed")
-    required = {"dashboard/index.html", "package.json", "tooling/build-info.json"}
-    required.add("services/rust/dispatch-backend" if rust else "api/main.js")
+    required = {"dashboard/index.html", "tooling/build-info.json"}
+    required.add("services/rust/dispatch-backend" if rust or rust_only else "api/main.js")
+    if not rust_only:
+        required.add("package.json")
     if rust:
         required.update({"services/runtime/auth-worker.js", "services/runtime/collection-worker.js"})
+    if rust or rust_only:
         require(not any(name.startswith("api/") or name in ("tooling/cli.js", "tooling/supervisor.js")
                         for name in actual), "Rust artifact contains a retired Node core")
+    if rust_only:
+        require(all(name.startswith("dashboard/") or name in
+                    ("services/rust/dispatch-backend", "tooling/build-info.json")
+                    for name in actual), "Rust-only artifact contains retired runtime files")
     require(actual == set(files) and required <= actual,
             "Artifact incomplete or contains extra files")
     metadata = json.loads((directory / "tooling/build-info.json").read_text())
@@ -233,7 +243,7 @@ class DevUpdater:
 
     def activate(self, candidate, commit):
         manifest = verify_artifact(candidate, commit)
-        if manifest["format"] == 2:
+        if manifest.get("runtime") == "rust":
             (candidate / "services/rust/dispatch-backend").chmod(0o700)
         self.clean_checkout()
         current = self.git("rev-parse", "HEAD")
@@ -321,7 +331,7 @@ def main():
     if args.verify:
         updater.clean_checkout()
         manifest = verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
-        if manifest["format"] == 2:
+        if manifest.get("runtime") == "rust":
             (updater.live / ".build/services/rust/dispatch-backend").chmod(0o700)
         return
     with (updater.platform / "dev-update.lock").open("a") as lock:
