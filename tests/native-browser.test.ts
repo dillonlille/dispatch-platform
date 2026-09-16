@@ -220,9 +220,10 @@ test(
     const id = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-retry' })).value.id;
     const current = async () =>
       (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
-    await until(
-      async () => (await current()).status === 'queued' && (await current()).attempt === 1,
-    );
+    await until(async () => {
+      const job = await current();
+      return job.status === 'queued' && job.attempt === 1;
+    });
     const failed = (await current()).metrics[0];
     assert.equal(failed.outcome, 'failed');
     assert.equal(failed.error, 'provider_unavailable');
