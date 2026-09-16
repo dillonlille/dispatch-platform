@@ -215,6 +215,9 @@ test('archived Diagnostics creates a synthetic DSP and excludes Plugins and Back
   await expect(page.getByRole('link', { name: /Plugins|Backups/ })).toHaveCount(0);
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Runtime health', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Runtime health', exact: true })).toContainText(
+    'MiB needed',
+  );
   await page.getByRole('button', { name: 'Deploy test DSP', exact: true }).click();
   await expect(
     page.getByText('Synthetic data prepared · Available', { exact: true }),
