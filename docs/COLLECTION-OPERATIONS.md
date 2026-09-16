@@ -33,7 +33,7 @@ fixture through real isolated BrowserOS processes. It queues two collections for
 one DSP and one for each of the others, checking:
 
 - At most two browsers and one active collection per DSP.
-- Two overlapping timecard requests per browser, four across both browsers.
+- Two overlapping timecard requests per browser, at most four across both browsers.
 - The third DSP starts before the first DSP gets its second collection.
 - Distinct credentials, profiles and employee publications remain isolated.
 - Health, job, session and employee API reads remain responsive during collection.
