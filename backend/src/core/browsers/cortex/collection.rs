@@ -2,7 +2,7 @@ use super::*;
 use crate::core::{
     db::now,
     job_metrics::Recorder,
-    meals::{Capture, Itinerary, Meal, Scope},
+    meals::{Capture, Itinerary, Scope},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,8 +18,15 @@ struct Candidate {
     driver: String,
     route: String,
     route_complete: bool,
-    meals: Vec<Meal>,
+    meals: Vec<Punch>,
     revision: String,
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Punch {
+    id: String,
+    start: i64,
+    end: Option<i64>,
 }
 impl Driver {
     async fn meal_read(&self, scope: &Scope, candidate: Option<&Candidate>) -> Result<Value> {

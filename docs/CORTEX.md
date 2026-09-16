@@ -73,19 +73,33 @@ Seconds and milliseconds are normalized to full timestamps; no clock-only
 arithmetic or Pacific timezone assumption is used. The itinerary's operating date
 can include an overnight continuation, bounded to 48 hours from local midnight.
 
-Gap evidence uses unique DROP_OFF tasks marked DELIVERED/COMPLETE with valid
-execution timestamps. The nearest event at/before meal start and at/after meal
-end is selected across the captured itinerary. Multiple tasks in the same minute
-remain separate. Source stop counts, unique stop/task identities and unknown or
-removed tasks determine delivery coverage. Unavailable delivery coverage preserves
-verified meal times while withholding gaps. A missing next event on an unfinished
-route is pending, not zero. A completed route with complete evidence can report
-verified absence. Intervals describe recorded events, not driver activity.
+For each meal, the browser selects exactly four timestamps:
 
-Amazon can repeat the same task across overlapping stop groups. Identical task
-facts are stored once, with a deterministic supporting stop ID. Copies that
-disagree on task type, state, completion, time or transporter are excluded from
-delivery evidence and make that itinerary's gap coverage unavailable.
+1. Last successful package delivery at/before OUT LUNCH.
+2. Meal start (OUT LUNCH).
+3. Meal end (IN LUNCH).
+4. First successful package delivery at/after IN LUNCH.
+
+Delivery selection uses DROP_OFF tasks marked DELIVERED/COMPLETE with valid
+execution times. A group stop with deliveries at 2:30 and 2:33 contributes 2:33
+before lunch; one with deliveries at 2:50 and 2:52 contributes 2:50 afterward.
+Full delivery arrays and task/stop IDs never leave the page. There is no stored
+package history or precomputed gap/duration data. Driver, itinerary, meal and scope
+identities associate the four timestamps with the correct record.
+
+Amazon's `unknownStops` are unplanned dwell locations with enter/exit times and
+coordinates. They do not invalidate otherwise complete delivery-task evidence.
+Stop-count mismatches, malformed delivered tasks and conflicting copies of the
+same task still withhold delivery boundaries. Identical repeated tasks collapse
+in memory. Removed delivered tasks are never attributed to this driver; they
+withhold boundaries only if their timestamp is invalid or could be closer to a
+meal than the selected active delivery. An unrelated removed task hours away
+cannot change either boundary.
+
+Unavailable delivery evidence preserves the meal times with NULL delivery times
+and explicit availability statuses. An unfinished route without a next delivery
+is pending. A completed route with complete evidence can report verified absence.
+Intervals describe recorded events, not driver activity.
 
 The adapter requires repeated stable observations. After reading details it
 recaptures the list, comparing meal content, execution status and progress/event
@@ -103,8 +117,8 @@ storage_identity tables are unchanged. The additive meal feature schema includes
 
 - `meal_publications`: scope, job identity, timestamps, counts and adapter version.
 - `meal_itineraries`: transporter/route identity, observation time and coverage.
-- `meal_breaks`: every meal, duration, boundary event references, gaps and statuses.
-- `meal_delivery_events`: supporting successful task/stop IDs and timestamps.
+- `meal_records`: the four timestamps for each logical meal, identity and availability.
+- `meal_breaks` and `meal_delivery_events`: empty legacy tables kept for rollback compatibility.
 
 The shared job database owns requests, attempts, progress and failures, avoiding a
 second run-status system in Cortex. The browser worker receives only its profile;
@@ -114,23 +128,30 @@ for the same job is idempotent. Five accepted revisions are retained per date an
 station/service-area/provider scope; foreign-key cascades remove older evidence.
 Other dates remain stored. Unknown gaps are SQL NULL, never fabricated zeros.
 
-The connection database user_version remains 1 with an explicit additive
-`meal_schema` feature marker. Existing databases initialize before serving traffic;
-missing initialized feature tables fail closed. The shared job migration preserves
-existing jobs/metrics while extending allowed job kinds and adding a defaulted
-request column. The previous runtime can still use Paycom and Cortex authentication
-and retain meal data; executing Cortex meal jobs requires the new runtime. Recursive
-backups already include the provider database and encrypted credentials. There are
-no raw provider-response archives or exports by default.
+The connection database user_version remains 1. The additive `meal_schema` and
+`meal_record_schema` markers distinguish initialized storage from lost tables;
+missing initialized tables fail closed. The four-timestamp migration copies
+previously verified boundaries into `meal_records` for **all** saved publications,
+then deletes every legacy break and delivery-event row in the same transaction.
+A fresh collection resolves boundaries previously withheld by the old adapter.
+
+The previous runtime can still start, authenticate and publish after migration.
+An activation trigger converts legacy publications into the four-timestamp format
+and clears their event rows inside the publication transaction, so rollback cannot
+resume retaining delivery histories. New code writes `meal_records` directly.
+Recursive backups already include the provider database and encrypted credentials.
+There are no raw provider-response archives or exports by default.
 
 ## Verification
 
 Rust tests cover timestamp validation, multiple meals, overnight boundaries,
-duplicate evidence, request identity, connection revisions, retention, migration
+invalid boundaries, request identity, connection revisions, retention, migration
 and atomic publication. API tests cover permissions, DSP/provider isolation and
 restart persistence. The native BrowserOS fixture exercises main-world extraction,
 changes to an existing itinerary's meals, multiple itineraries for one driver,
-exact task timestamps, failed refresh preservation and unavailable coverage.
+group-stop extrema, irrelevant unknown stops/removed tasks, failed refresh
+preservation and unavailable coverage. Migration tests include historical data
+cleanup and publication by the previous runtime.
 
 The inspected legacy reference is
 `/home/thepickle/dispatch/plugins/meal-break-gaps/source/collector/collect_cdp.js`.

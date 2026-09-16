@@ -1,5 +1,5 @@
-// Read only the observed Amazon application contract. No addresses, package
-// references, cookies or tokens leave the page. Runs in the application's world
+// Select the four meal timestamps inside the page. No delivery history, package
+// references, stop/task IDs, addresses, cookies or tokens leave the page. Runs in the application's world
 // because React's props are not visible from an isolated JavaScript world.
 (input) => {
   const fail = (error) => ({ error });
@@ -169,13 +169,15 @@
       !Array.isArray(d.stops) ||
       !Array.isArray(d.unknownStops) ||
       !Array.isArray(d.inactiveTasks) ||
-      d.stops.length > 2000
+      d.stops.length > 2000 ||
+      d.inactiveTasks.length > 10000
     )
       return fail('cortex_content_incomplete');
+    // unknownStops records unplanned dwell locations (enter/exit coordinates
+    // and times), not missing delivery tasks. It does not invalidate the
+    // independently counted stops[].tasks delivery evidence.
     let complete =
-      d.unknownStops.length === 0 &&
-      Number.isInteger(d.stopProgress?.total) &&
-      d.stops.length === d.stopProgress.total;
+      Number.isInteger(d.stopProgress?.total) && d.stops.length === d.stopProgress.total;
     const observations = new Map(),
       stopIds = new Set(),
       deliveries = new Map();
@@ -201,9 +203,6 @@
           if (observations.get(task.taskId) !== evidence) {
             complete = false;
             deliveries.delete(task.taskId);
-          } else {
-            const event = deliveries.get(task.taskId);
-            if (event && stop.stopId < event.stopId) event.stopId = stop.stopId;
           }
           continue;
         }
@@ -218,14 +217,54 @@
           complete = false;
           continue;
         }
-        deliveries.set(task.taskId, { id: task.taskId, stopId: stop.stopId, time });
+        deliveries.set(task.taskId, time);
       }
     }
-    // A removed delivered task may affect the nearest boundary; don't guess its ownership.
-    if (d.inactiveTasks.some((t) => t.taskState === 'DELIVERED')) complete = false;
-    const events = [...deliveries.values()].sort(
-      (a, b) => a.time - b.time || a.id.localeCompare(b.id),
-    );
+    const selectedMeals = breaks.map((meal) => {
+      let lastDelivery = null,
+        firstDelivery = null;
+      if (complete) {
+        for (const time of deliveries.values()) {
+          // Package completion times matter, including different completions
+          // within a group stop: latest before OUT, earliest after IN.
+          if (time <= meal.start && (lastDelivery === null || time > lastDelivery))
+            lastDelivery = time;
+          if (
+            meal.end !== null &&
+            time >= meal.end &&
+            (firstDelivery === null || time < firstDelivery)
+          )
+            firstDelivery = time;
+        }
+      }
+      return { ...meal, lastDelivery, firstDelivery };
+    });
+    // Removed tasks have uncertain ownership. Their times can only invalidate
+    // a boundary if they could be closer than the selected active delivery.
+    // Never substitute them for this driver's delivery or discard a verified
+    // boundary because an unrelated removed task occurred hours away.
+    for (const task of d.inactiveTasks.filter((t) => t.taskState === 'DELIVERED')) {
+      const time = stamp(task.actualExecutionTime ?? task.taskExecutionTime);
+      if (
+        selectedMeals.some(
+          (meal) =>
+            !time ||
+            task.taskType !== 'DROP_OFF' ||
+            task.executionStatus !== 'COMPLETE' ||
+            (time <= meal.start && (meal.lastDelivery === null || time > meal.lastDelivery)) ||
+            (meal.end !== null &&
+              time >= meal.end &&
+              (meal.firstDelivery === null || time < meal.firstDelivery)),
+        )
+      )
+        complete = false;
+    }
+    if (!complete) {
+      for (const meal of selectedMeals) {
+        meal.lastDelivery = null;
+        meal.firstDelivery = null;
+      }
+    }
     return {
       itinerary: {
         id: c.id,
@@ -235,8 +274,7 @@
         observedAt: Date.now(),
         routeComplete: c.routeComplete,
         deliveryCoverage: complete ? 'complete' : 'unavailable',
-        meals: breaks,
-        deliveries: events,
+        meals: selectedMeals,
       },
     };
   } catch (error) {
