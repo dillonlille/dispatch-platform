@@ -1383,3 +1383,13 @@ td small {
   font-size: 12px;
   line-height: 1.5;
 }
+
+.collection-table td {
+  vertical-align: top;
+}
+.diagnostics-jobs {
+  margin-top: 28px;
+}
+.diagnostics-jobs > h2 {
+  margin: 0 0 16px;
+}

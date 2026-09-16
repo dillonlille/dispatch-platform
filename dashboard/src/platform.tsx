@@ -451,7 +451,7 @@ export function JobTable({
 }) {
   return jobs.length ? (
     <div className="table-wrap">
-      <table>
+      <table className="collection-table">
         <thead>
           <tr>
             <th>Collection</th>

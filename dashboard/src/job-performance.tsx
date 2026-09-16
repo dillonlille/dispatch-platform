@@ -18,7 +18,11 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
   return (
     <div className="job-performance">
       <strong>{duration(latest.elapsedMs)} elapsed</strong>
-      <small>{memory(latest.peakPssBytes)} peak browser memory</small>
+      <small>
+        {latest.peakPssBytes === null
+          ? 'Browser memory not sampled'
+          : `${memory(latest.peakPssBytes)} peak browser memory`}
+      </small>
       <details onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary>Attempt details</summary>
         {expanded && (
