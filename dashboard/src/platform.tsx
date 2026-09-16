@@ -544,6 +544,7 @@ export function JobsPage({
   );
 }
 export function DiagnosticsPage({ perform }: { perform: Perform }) {
+  const health = useData<PlatformHealth>('/api/platform/health', 10000);
   const { data, error, refresh } = useData<{
     enabled: boolean;
     storageAvailableBytes: number;
@@ -555,7 +556,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
   return (
     <>
       <Header title="Diagnostics" subtitle="Check runtime health and create test DSPs." />
-      <ErrorBox message={error} />
+      <ErrorBox message={error || health.error} />
       {!data ? (
         <Loading />
       ) : (
@@ -572,6 +573,9 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
                 {data.runtime.browsers} active browsers
               </span>
             </div>
+            {health.data && (
+              <p className="muted">{browserMemoryStatus(health.data.browsers.memory)}</p>
+            )}
           </section>
           <section className="archived-card" aria-labelledby="test-dsp-title">
             <h2 id="test-dsp-title">Test DSP</h2>
@@ -839,6 +843,17 @@ export function ReleasesPage({ perform }: { perform: Perform }) {
     </>
   );
 }
+function browserMemoryStatus(memory: PlatformHealth['browsers']['memory']) {
+  const status = memory.canStart
+    ? 'Memory available for another browser'
+    : 'New browsers waiting for memory';
+  const available =
+    memory.availableBytes === null
+      ? 'Available memory unknown'
+      : `${(memory.availableBytes / 1024 ** 2).toFixed(0)} MiB available`;
+  return `${status} · ${available} · ${(memory.requiredBytes / 1024 ** 2).toFixed(0)} MiB needed`;
+}
+
 export function HealthPanel() {
   const { data, error } = useData<PlatformHealth>('/api/platform/health', 10000);
   return (
@@ -857,17 +872,7 @@ export function HealthPanel() {
           <dt>Browser workers</dt>
           <dd>
             {data.browsers.active} / {data.browsers.capacity} active
-            <small>
-              {data.browsers.memory.canStart
-                ? 'Memory available for another browser'
-                : 'New browsers waiting for memory'}
-              {' · '}
-              {data.browsers.memory.availableBytes === null
-                ? 'Available memory unknown'
-                : `${(data.browsers.memory.availableBytes / 1024 ** 2).toFixed(0)} MiB available`}
-              {' · '}
-              {(data.browsers.memory.requiredBytes / 1024 ** 2).toFixed(0)} MiB needed
-            </small>
+            <small>{browserMemoryStatus(data.browsers.memory)}</small>
           </dd>
           <dt>Email</dt>
           <dd>{data.email ? 'Configured' : 'Not configured'}</dd>
