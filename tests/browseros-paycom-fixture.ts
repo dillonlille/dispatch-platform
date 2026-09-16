@@ -128,8 +128,10 @@ export async function paycomFixture() {
     activeByAccount: new Map<string, number>(),
     peakByAccount: new Map<string, number>(),
     timecardDelayMs: 0,
+    beforeTimecard: undefined as ((account: string) => Promise<void>) | undefined,
     timecardsActive: 0,
     timecardsPeak: 0,
+    timecardAccountsPeak: 0,
     wrongIdentity: false,
     timecardStatus: 200,
     missingContent: new Map<string, number>(),
@@ -250,7 +252,12 @@ export async function paycomFixture() {
       events.push('timecard');
       state.timecardsActive++;
       state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
+      state.timecardAccountsPeak = Math.max(
+        state.timecardAccountsPeak,
+        [...state.activeByAccount.values()].filter((count) => count > 0).length,
+      );
       try {
+        await state.beforeTimecard?.(account);
         await new Promise<void>((resolve) => {
           const stalled = (state.navigationStalls.get(code) ?? 0) > 0;
           if (stalled) state.navigationStalls.set(code, state.navigationStalls.get(code)! - 1);

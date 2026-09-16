@@ -50,6 +50,26 @@ test(
     }
     const owner = await f.client();
     const jobs: string[] = [];
+    // Hold the first DSP's requests until another DSP reaches the provider.
+    // This proves independent collection without requiring short responses to
+    // happen to overlap. Under memory pressure the bounded gate lets one browser
+    // continue, without exceeding the driver's navigation deadline.
+    let releaseFirst!: () => void;
+    const firstRequests = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const gateAccounts = new Set<string>();
+    const gateTimer = setTimeout(releaseFirst, 20000);
+    t.after(() => {
+      clearTimeout(gateTimer);
+      releaseFirst();
+    });
+    f.state.beforeTimecard = async (account) => {
+      gateAccounts.add(account);
+      if (gateAccounts.size > 1) {
+        clearTimeout(gateTimer);
+        releaseFirst();
+      }
+      await firstRequests;
+    };
     // A second queued job from A must not jump ahead of C's first collection.
     for (const index of [0, 0, 1, 2]) {
       const response = await clients[index]!.post('/api/dsp/jobs', {
@@ -110,11 +130,8 @@ test(
     );
     assert.equal(maxRunningPerDsp, 1);
     assert(f.state.timecardsPeak >= 2 && f.state.timecardsPeak <= 4);
-    // Two tabs per DSP do not guarantee that both pairs reach the provider at
-    // precisely the same time. Three overlapping requests prove cross-DSP
-    // concurrency; each account's two-request peak is checked separately below.
     if (peakBrowsers === 2 && !memoryDelayed)
-      assert(f.state.timecardsPeak >= 3, 'Requests from concurrent DSPs must overlap');
+      assert.equal(f.state.timecardAccountsPeak, 2, 'Distinct DSPs must collect concurrently');
     for (const account of accounts) assert.equal(f.state.peakByAccount.get(account), 2);
     assert.equal(f.state.accountStarts.filter((v) => v === accounts[0]).length, 2);
     // Fairness is the order in which jobs receive a slot. If both slots free
@@ -171,6 +188,7 @@ test(
         peakBrowsers,
         memoryDelayed,
         peakTimecardRequests: f.state.timecardsPeak,
+        peakCollectingDsps: f.state.timecardAccountsPeak,
         readBatches: latencies.length,
         readBatchP95Ms: Math.round(p95),
         peakRssBytes,
