@@ -217,9 +217,9 @@ export function mealPairs(row: MealEmployee, date: string) {
         !p.cortex.firstDelivery,
     );
   const status = !row.paycom
-    ? 'Cortex only'
+    ? 'Flex only'
     : !row.cortex.length
-      ? 'No Cortex meal'
+      ? 'No Flex meal'
       : paycom.review
         ? 'Review Paycom punches'
         : !paycom.lunches.length

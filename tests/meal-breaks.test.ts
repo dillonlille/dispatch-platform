@@ -49,7 +49,7 @@ test('minute-precision differences, provider ordering and missing values', () =>
   row.cortex[0]!.lastDelivery = null;
   assert.equal(mealPairs(row, '2026-09-15').status, 'Missing data');
   row.paycom = null;
-  assert.equal(mealPairs(row, '2026-09-15').status, 'Cortex only');
+  assert.equal(mealPairs(row, '2026-09-15').status, 'Flex only');
 });
 test('typed partial punches retain kind; older partial punches are never relabeled as day boundaries', () => {
   const row = employee();
