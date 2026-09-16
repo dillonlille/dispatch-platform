@@ -146,6 +146,8 @@ impl Store {
         let retry = error.is_some_and(|e| {
             [
                 "browser_lost",
+                "browser_closed",
+                "browser_command_timeout",
                 "provider_timeout",
                 "provider_unavailable",
                 "provider_navigation_timeout",
@@ -256,7 +258,8 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                     let pool=state.clone();let claim_owner=owner.clone();
                     let job=state.run(move|db| {
                         let memory_ready = (pool.config.fixture && pool.config.fixture_url.is_none()) || pool.browsers.admission().can_start;
-                        db.jobs.exec("UPDATE jobs SET message=? WHERE status='queued' AND available_at<=?", params![if memory_ready {"Waiting for a browser"} else {"Waiting for available memory"},now()])?;
+                        let message = if memory_ready {"Waiting for a browser"} else {"Waiting for available memory"};
+                        db.jobs.exec("UPDATE jobs SET message=?1 WHERE status='queued' AND available_at<=?2 AND message<>?1", params![message,now()])?;
                         db.claim(&claim_owner,|id|pool.browsers.get(id).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
                     }).await;
                     match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();tasks.spawn(async move{execute(state,job,owner).await;});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
@@ -362,12 +365,17 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     if result.as_ref().err().is_some_and(|e| {
         ["browser_memory_busy", "browser_capacity_busy"].contains(&e.code.as_str())
     }) {
-        let _ = state.run(move |db| db.jobs.transaction(|| {
-            db.jobs.exec("DELETE FROM job_metrics WHERE job_id=? AND attempt=? AND owner=?", params![id,n(&job,"attempt"),owner])?;
-            db.jobs.exec("UPDATE jobs SET status='queued',attempt=attempt-1,started_at=NULL,lease_owner=NULL,lease_until=NULL,available_at=?,message='Waiting for browser resources' WHERE id=? AND lease_owner=? AND status='running'",params![now()+5000,id,owner])?;
-            Ok(())
+        let jid = id.clone();
+        let worker = owner.clone();
+        let attempt = n(&job, "attempt");
+        let deferred=state.run(move |db| db.jobs.transaction(|| {
+            let changed=db.jobs.exec("UPDATE jobs SET status='queued',attempt=attempt-1,started_at=NULL,lease_owner=NULL,lease_until=NULL,available_at=?,message='Waiting for browser resources' WHERE id=? AND lease_owner=? AND status='running'",params![now()+5000,jid,worker])?;
+            if changed==1 { db.jobs.exec("DELETE FROM job_metrics WHERE job_id=? AND attempt=? AND owner=?",params![jid,attempt,worker])?; }
+            Ok(changed==1)
         })).await;
-        return;
+        if matches!(deferred, Ok(true)) {
+            return;
+        }
     }
     if let Err(error) = &result {
         let jid = id.clone();

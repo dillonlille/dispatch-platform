@@ -131,8 +131,10 @@ selects the current fortnight using the DSP timezone, and verifies exact employe
 membership. It validates each timecard's identity, dates, layout and weekly totals
 before Rust reconciles daily hours. Two tabs load timecards in bounded pairs within
 the same browser and DSP session. Each tab owns its execution-context cache. A
-scripted navigation releases the serialized command channel while Paycom responds;
-the reader then requires a new document, the exact employee URL, a fully loaded
+scheduled navigation releases the serialized command channel while Paycom responds;
+committed-frame events gate renderer queries so a slow response cannot block the
+other tab. The worker retains at most eight latest main frames (64 KiB each) and
+removes them when tabs detach. The reader then requires a new document, the exact employee URL, a fully loaded
 table and all existing validation. After each pair is fully validated and its
 records are owned by Rust, collection asks both renderers to collect unreachable
 page objects through `HeapProfiler.collectGarbage`. This keeps the tabs and

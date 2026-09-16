@@ -168,6 +168,7 @@ export async function fixture(
     collector: <T>(dspId: string, callback: (db: DatabaseSync) => T): T =>
       database(path.relative(root, collectorDatabase(root, dspId, 'paycom')), callback),
     pid: () => server!.pid!,
+    logs: () => logs,
     close: async () => {
       await stop();
       fs.rmSync(root, { recursive: true, force: true });

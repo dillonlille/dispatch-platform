@@ -247,7 +247,7 @@ test(
 
 test(
   'a missing timecard retries only that employee and preserves complete validated pairs',
-  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 150000 },
   async (t) => {
     const f = await paycomFixture();
     t.after(f.close);
@@ -297,8 +297,18 @@ test(
     let failed: any;
     await until(async () => {
       failed = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === bad);
+      if (['succeeded', 'cancelled'].includes(failed.status)) assert.fail(JSON.stringify(failed));
       return failed.status === 'failed';
-    }, 30000);
+    }, 60000).catch(async (error) => {
+      console.error(
+        'RECOVERY_STATE',
+        JSON.stringify({
+          job: failed,
+          health: (await owner.get('/api/platform/health')).value.browsers,
+        }),
+      );
+      throw error;
+    });
     assert.equal(failed.error, 'provider_content_missing');
     assert.equal(failed.attempt, 1);
     assert.equal(failed.metrics[0].pageReads.retries, 1);
@@ -319,5 +329,45 @@ test(
     assert.equal(failed.metrics[0].pageReads.retries, 0);
     assert.equal(failed.metrics[0].pageReads.failures[0].stage, 'navigation');
     assert.equal(publication(), previous);
+  },
+);
+
+test(
+  'a stalled navigation is diagnosed and retried without discarding its completed sibling',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.navigationStalls.set('BB02', 1);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'navigation-recovery' })).value.id;
+    let job: any;
+    await until(async () => {
+      job = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+      if (
+        ['failed', 'cancelled'].includes(job.status) ||
+        (job.status === 'queued' && job.attempt > 0)
+      )
+        assert.fail(JSON.stringify({ job, logs: f.logs() }));
+      return job.status === 'succeeded';
+    }, 90000);
+    assert.equal(job.attempt, 1);
+    assert.equal(f.state.readsByCode.get('AA01'), 1);
+    assert.equal(f.state.readsByCode.get('BB02'), 2);
+    const reads = job.metrics[0].pageReads;
+    assert.equal(reads.completed, 2);
+    assert.equal(reads.recovered, 1);
+    assert.equal(reads.retries, 1);
+    assert.equal(reads.failures[0].error, 'provider_navigation_timeout');
+    assert.equal(reads.failures[0].stage, 'navigation');
+    assert(reads.failures[0].navigationMs >= 45000);
+    assert.equal(reads.failures[0].contentMs, 0);
+    assert.equal(job.metrics[0].timecards, 28);
   },
 );

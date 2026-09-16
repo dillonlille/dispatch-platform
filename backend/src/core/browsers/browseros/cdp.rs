@@ -1,6 +1,10 @@
 use crate::core::{Error, Result, ensure};
 use serde_json::{Value, json};
-use std::{collections::VecDeque, os::unix::net::UnixStream, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    os::unix::net::UnixStream,
+    time::Duration,
+};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 pub(super) const MAX_FRAME: u64 = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(15);
@@ -9,12 +13,14 @@ fn require(ok: bool, code: &str) -> Result<()> {
 }
 
 /// Serialized, bounded CDP transport. The descriptor is private to one browser.
-/// Only bounded Fetch request events are retained; commands never overlap.
+/// Retains bounded Fetch requests and the latest main-frame commit per tab;
+/// commands never overlap.
 pub(super) struct Cdp {
     socket: BufReader<tokio::net::UnixStream>,
     next: u64,
     partial: Vec<u8>,
     events: VecDeque<Value>,
+    frames: HashMap<String, Value>,
 }
 impl Cdp {
     pub(super) fn new(socket: UnixStream) -> Result<Self> {
@@ -24,6 +30,7 @@ impl Cdp {
             next: 0,
             partial: Vec::new(),
             events: VecDeque::new(),
+            frames: HashMap::new(),
         })
     }
     // read_until appends to persistent storage, so a poll timeout cannot lose a
@@ -47,6 +54,51 @@ impl Cdp {
         self.events.push_back(value);
         Ok(())
     }
+    fn observe(&mut self, value: &Value) -> Result<()> {
+        match value["method"].as_str() {
+            Some("Fetch.requestPaused") => self.retain(value.clone())?,
+            Some("Page.frameNavigated") if value["params"]["frame"]["parentId"].is_null() => {
+                if let Some(session) = value["sessionId"].as_str() {
+                    require(
+                        self.frames.contains_key(session) || self.frames.len() < 8,
+                        "browser_event_overflow",
+                    )?;
+                    require(
+                        serde_json::to_vec(&value["params"]["frame"])?.len() <= 64 * 1024,
+                        "browser_event_overflow",
+                    )?;
+                    self.frames
+                        .insert(session.into(), value["params"]["frame"].clone());
+                }
+            }
+            Some("Target.detachedFromTarget") => {
+                if let Some(session) = value["params"]["sessionId"].as_str() {
+                    self.frames.remove(session);
+                }
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+    // Do not send renderer commands while a navigation awaits response headers:
+    // even Page.getFrameTree can block there and starve the other tab's commands.
+    pub(super) async fn navigation(&mut self, session: &str, previous: &str) -> Result<Value> {
+        let result = tokio::time::timeout(Duration::from_millis(20), async {
+            loop {
+                if let Some(frame) = self.frames.get(session)
+                    && frame["loaderId"]
+                        .as_str()
+                        .is_some_and(|loader| loader != previous)
+                {
+                    return Ok(frame.clone());
+                }
+                let value = self.read().await?;
+                self.observe(&value)?;
+            }
+        })
+        .await;
+        result.unwrap_or(Ok(Value::Null))
+    }
     pub(super) async fn event(&mut self, session: &str) -> Result<Value> {
         let result = tokio::time::timeout(Duration::from_millis(250), async {
             loop {
@@ -54,9 +106,7 @@ impl Cdp {
                     return Ok(self.events.remove(index).unwrap()["params"].clone());
                 }
                 let value = self.read().await?;
-                if value["method"] == "Fetch.requestPaused" {
-                    self.retain(value)?;
-                }
+                self.observe(&value)?;
             }
         })
         .await;
@@ -84,10 +134,7 @@ impl Cdp {
             self.socket.get_mut().write_all(&bytes).await?;
             loop {
                 let value = self.read().await?;
-                if value["method"] == "Fetch.requestPaused" {
-                    self.retain(value)?;
-                    continue;
-                }
+                self.observe(&value)?;
                 if value["id"] != id {
                     continue;
                 }
@@ -116,6 +163,29 @@ impl Cdp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn navigation_poll_is_fragment_safe_and_keeps_tabs_and_roster_events_separate()
+    -> Result<()> {
+        let (client, server) = UnixStream::pair()?;
+        server.set_nonblocking(true)?;
+        let mut server = tokio::net::UnixStream::from_std(server)?;
+        let mut cdp = Cdp::new(client)?;
+        server.write_all(b"{\"method\":\"Fetch.requestPaused\",\"sessionId\":\"one\",\"params\":{\"requestId\":\"roster\"}}\0{\"method\":\"Page.frameNavigated\",\"sessionId\":\"two\",\"params\":{\"frame\":{\"loaderId\":\"other\"}}}\0{\"method\":\"Page.frameNavigated\",").await?;
+        assert!(cdp.navigation("one", "old").await?.is_null());
+        server.write_all(b"\"sessionId\":\"one\",\"params\":{\"frame\":{\"loaderId\":\"new\",\"url\":\"https://fixture.invalid/card\"}}}\0").await?;
+        assert_eq!(cdp.navigation("one", "old").await?["loaderId"], "new");
+        assert_eq!(cdp.navigation("two", "old").await?["loaderId"], "other");
+        assert_eq!(cdp.event("one").await?["requestId"], "roster");
+        cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":"one","params":{"frame":{"parentId":"main","loaderId":"subframe"}}}))?;
+        assert_eq!(cdp.frames["one"]["loaderId"], "new");
+        cdp.observe(&json!({"method":"Target.detachedFromTarget","params":{"sessionId":"one"}}))?;
+        assert!(!cdp.frames.contains_key("one"));
+        for index in 0..7 {
+            cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":format!("page-{index}"),"params":{"frame":{"loaderId":"new"}}}))?;
+        }
+        assert!(cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":"overflow","params":{"frame":{"loaderId":"new"}}})).is_err());
+        Ok(())
+    }
     #[tokio::test]
     async fn event_poll_preserves_a_fragment_across_timeout() -> Result<()> {
         let (client, server) = UnixStream::pair()?;

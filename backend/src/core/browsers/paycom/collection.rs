@@ -337,7 +337,7 @@ impl Driver {
         self.evaluate("delete globalThis.dispatchRoster").await?;
         let employees = employees(&raw, &codes)?;
         let mut timecards = Vec::with_capacity(employees.len() * 14);
-        let second = if employees.len() > 1 {
+        let mut second = if employees.len() > 1 {
             Some(Page::open(self.browser.clone(), self.origin.clone()).await?)
         } else {
             None
@@ -358,9 +358,9 @@ impl Driver {
                 // Never drop the sibling's in-flight CDP command on a page error:
                 // the transport intentionally closes when a caller disappears.
                 let (a, b) = tokio::join!(
-                    read_timecard(&self.page, &self.origin, a, &period, metrics, first + 1),
+                    read_timecard(&mut self.page, &self.origin, a, &period, metrics, first + 1),
                     read_timecard(
-                        second.as_ref().expect("second collection tab"),
+                        second.as_mut().expect("second collection tab"),
                         &self.origin,
                         b,
                         &period,
@@ -373,7 +373,7 @@ impl Driver {
                 a
             } else {
                 read_timecard(
-                    &self.page,
+                    &mut self.page,
                     &self.origin,
                     &employees[0],
                     &period,
@@ -397,7 +397,7 @@ impl Driver {
 }
 
 async fn read_timecard(
-    page: &Page,
+    page: &mut Page,
     origin: &str,
     employee: &Value,
     period: &Value,
@@ -425,7 +425,7 @@ async fn read_timecard(
         }
         // Only this page is reloaded. Authentication, throttling, extraction and
         // validation failures stay fail-closed and use the job policy if allowed.
-        page.command("Page.stopLoading", json!({})).await?;
+        page.reset().await?;
         sleep(Duration::from_millis(1000 + (ordinal as u64 * 347 % 1000))).await;
     }
     unreachable!()
@@ -461,7 +461,11 @@ async fn read_once(
                 504,
             )?;
         }
-        let frame = page.frame().await?;
+        let frame = page.navigation(&previous_loader).await?;
+        if frame.is_null() {
+            sleep(Duration::from_millis(200)).await;
+            continue;
+        }
         ensure(
             s(&frame, "url") == "about:blank" || page.trusted(s(&frame, "url")),
             "authentication_failed",
@@ -473,7 +477,7 @@ async fn read_once(
             ensure(s(&frame, "url") == source, "authentication_failed", 409)?;
             content_started.get_or_insert_with(Instant::now);
             metrics.page_stage(ordinal, "content");
-            match page.evaluate("({complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!!document.querySelector('input[type=password]'),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
+            match page.evaluate("({complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')&&Array.from(document.querySelectorAll('input[type=password]')).some(e=>e.offsetParent!==null&&e.getClientRects().length>0),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
                 Ok(value) => {
                     let status = value["status"].as_u64().unwrap_or(0);
                     ensure(![401,403].contains(&status) && value["login"] != true, "authentication_failed", 409)?;

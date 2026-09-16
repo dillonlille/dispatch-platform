@@ -41,9 +41,15 @@ fn constrained(mut available: u64, root: &Path, group: &str) -> Option<u64> {
     }
     let mut path = root.join(group.trim_start_matches('/'));
     loop {
-        if let Some(limit) = number(&path.join("memory.max")) {
-            let current = number(&path.join("memory.current"))?;
-            available = available.min(limit.saturating_sub(current));
+        match fs::read_to_string(path.join("memory.max")) {
+            Ok(value) if value.trim() == "max" => (),
+            Ok(value) => {
+                let limit = value.trim().parse::<u64>().ok()?;
+                let current = number(&path.join("memory.current"))?;
+                available = available.min(limit.saturating_sub(current));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return None,
         }
         if path == root || !path.pop() {
             break;
@@ -92,5 +98,7 @@ mod tests {
         fs::write(temp.path().join("parent/memory.current"), "1100").unwrap();
         assert_eq!(constrained(5000, temp.path(), "/parent/child"), Some(0));
         assert_eq!(constrained(5000, temp.path(), "/../escape"), None);
+        fs::write(temp.path().join("parent/memory.max"), "invalid").unwrap();
+        assert_eq!(constrained(5000, temp.path(), "/parent/child"), None);
     }
 }
