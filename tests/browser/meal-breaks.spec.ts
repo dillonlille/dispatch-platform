@@ -218,6 +218,6 @@ test('members can open real collected punch data without management controls', a
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(12);
   await expect(page.getByRole('button', { name: /employee links/ })).toHaveCount(0);
   await expect(
-    page.getByText('Cortex has no collection for this date.', { exact: false }),
+    page.getByText('Flex has no collection for this date.', { exact: false }),
   ).toBeVisible();
 });

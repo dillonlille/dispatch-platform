@@ -124,6 +124,10 @@ runtime, preserving rollback.
 
 ## Meal Breaks comparison
 
+The dashboard labels meal breaks and their surrounding deliveries as **Flex**,
+reflecting the driver app. Cortex remains the connection and collector provider;
+its API fields, provider IDs and stored records retain their existing names.
+
 Paycom → Meal Breaks reads `GET /api/dsp/paycom/meal-breaks?date=YYYY-MM-DD`.
 The latest Paycom publication covering that date is combined with active Cortex
 scopes for the report date. Overlapping Cortex scopes use the newest observation

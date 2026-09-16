@@ -15,7 +15,7 @@ import {
 import type { PaycomPreferences } from '../../shared/paycom.js';
 import './meal-breaks.css';
 
-function Source({ name }: { name: 'Paycom' | 'Cortex' }) {
+function Source({ name }: { name: 'Paycom' | 'Flex' }) {
   return (
     <span className={`meal-source ${name.toLowerCase()}`}>
       <i aria-hidden="true" />
@@ -67,7 +67,7 @@ function LunchCell({
         <Clock value={paycom} />
       </div>
       <div>
-        <Source name="Cortex" />
+        <Source name="Flex" />
         <Clock value={cortex} difference={difference} />
       </div>
     </td>
@@ -180,7 +180,7 @@ function EmployeeRows({
                 )}
               </section>
               <section>
-                <h3>Cortex meals</h3>
+                <h3>Flex meals</h3>
                 {row.cortex.length ? (
                   row.cortex.map((meal, i) => (
                     <div key={`${meal.itineraryId}:${meal.mealId}`}>
@@ -208,7 +208,7 @@ function EmployeeRows({
                     </div>
                   ))
                 ) : (
-                  <p>No Cortex meal collected for this employee on this date.</p>
+                  <p>No Flex meal collected for this employee on this date.</p>
                 )}
                 {summary.pairs.length > 1 && (
                   <p className="muted">
@@ -267,8 +267,8 @@ function LinkEmployees({
         <label className="search">
           <Search size={18} />
           <input
-            aria-label="Search Cortex drivers"
-            placeholder="Search Cortex drivers…"
+            aria-label="Search Flex drivers"
+            placeholder="Search Flex drivers…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -296,7 +296,7 @@ function LinkEmployees({
             <label key={driver.id}>
               <span>
                 {fullName(driver.name)}
-                <small>Cortex · {driver.id}</small>
+                <small>Flex · {driver.id}</small>
               </span>
               <select
                 aria-label={`Paycom employee for ${fullName(driver.name)}`}
@@ -431,7 +431,7 @@ export function MealBreaksPage({
     <section className="meal-page" aria-labelledby="meal-heading">
       <header className="meal-heading">
         <h2 id="meal-heading">Meal Breaks</h2>
-        <p>Compare Cortex meal times with Paycom punches.</p>
+        <p>Compare Flex meal times with Paycom punches.</p>
       </header>
       <div className="meal-datebar">
         <div className="meal-date-controls">
@@ -455,7 +455,7 @@ export function MealBreaksPage({
           <button onClick={() => selectDate(today)}>Today</button>
         </div>
         <span className="muted">
-          {zones.size > 1 ? 'Local time for each Cortex station' : zone.replaceAll('_', ' ')}
+          {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
         </span>
       </div>
       <div className="meal-toolbar">
@@ -510,7 +510,7 @@ export function MealBreaksPage({
             {[
               automatic ? `${automatic} matched automatically.` : '',
               unlinked
-                ? `${unlinked} Cortex ${unlinked === 1 ? 'employee needs' : 'employees need'} review. Different or ambiguous names appear separately.`
+                ? `${unlinked} Flex ${unlinked === 1 ? 'employee needs' : 'employees need'} review. Different or ambiguous names appear separately.`
                 : '',
               separate ? `${separate} kept separate by choice.` : '',
               !automatic && !unlinked && !separate ? 'Employee links are saved for this DSP.' : '',
@@ -542,7 +542,7 @@ export function MealBreaksPage({
             <p className="meal-source-notice">
               {!data.paycomCollectedAt
                 ? 'Paycom has no collection for this date.'
-                : 'Cortex has no collection for this date.'}{' '}
+                : 'Flex has no collection for this date.'}{' '}
               Available records are shown below.
             </p>
           )}
@@ -554,7 +554,7 @@ export function MealBreaksPage({
           >
             <table className="meal-table">
               <caption className="sr-only">
-                Meal breaks for {date}. Paycom local clock times and Cortex station-local times,
+                Meal breaks for {date}. Paycom local clock times and Flex station-local times,
                 compared to the minute.
               </caption>
               <thead>
@@ -570,7 +570,7 @@ export function MealBreaksPage({
                   </th>
                   <th scope="col">
                     Last delivery
-                    <Source name="Cortex" />
+                    <Source name="Flex" />
                   </th>
                   <th scope="col" className="meal-lunch">
                     OUT LUNCH
@@ -580,7 +580,7 @@ export function MealBreaksPage({
                   </th>
                   <th scope="col">
                     First delivery
-                    <Source name="Cortex" />
+                    <Source name="Flex" />
                   </th>
                   <th scope="col">
                     OUT DAY
@@ -619,7 +619,7 @@ export function MealBreaksPage({
               {filtered.length} {filtered.length === 1 ? 'employee' : 'employees'}
               {filtered.length !== counts.all && ` of ${counts.all}`}
             </span>
-            <span>Employees with a Cortex meal or any Paycom punch on this date.</span>
+            <span>Employees with a Flex meal or any Paycom punch on this date.</span>
           </footer>
           {filtered.length > pageSize && (
             <div className="meal-pagination">
@@ -646,15 +646,14 @@ export function MealBreaksPage({
             {data.paycomCollectedAt ? time(data.paycomCollectedAt) : 'No collection'}
           </span>
           <span>
-            Cortex collected:{' '}
+            Flex collected:{' '}
             {data.cortexPublications[0]
               ? time(data.cortexPublications[0].collectedAt)
               : 'No collection'}
           </span>
           <p>
-            Differences use displayed minutes: Cortex minus Paycom. Paycom punches use their
-            recorded local clock time; Cortex times use the station’s timezone. A missing value is
-            shown as —.
+            Differences use displayed minutes: Flex minus Paycom. Paycom punches use their recorded
+            local clock time; Flex times use the station’s timezone. A missing value is shown as —.
           </p>
         </div>
       )}
