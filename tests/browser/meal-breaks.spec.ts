@@ -107,7 +107,7 @@ async function open(page: Page, member = false) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Paycom', exact: true }).click();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-  await page.getByLabel('Meal break date').fill(date);
+  await page.getByLabel('Paycom date').fill(date);
 }
 test('approved comparison table, filters, details, links, date errors and mobile overflow', async ({
   page,
@@ -203,6 +203,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const scroll = page.getByRole('region', { name: 'Meal break comparison', exact: true });
   expect(await scroll.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await scroll.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await scroll.evaluate((el) => (el.scrollLeft = el.scrollWidth));
   await expect(
     page.getByRole('columnheader', { name: 'Comparison', exact: true }),
@@ -220,4 +221,152 @@ test('members can open real collected punch data without management controls', a
   await expect(
     page.getByText('Flex has no collection for this date.', { exact: false }),
   ).toBeVisible();
+});
+
+test('shared date and sync controls survive tabs, navigation, reload and collection', async ({
+  page,
+}) => {
+  let syncStatus = 'succeeded';
+  let flexStatus = 'failed';
+  let collectedAt = '2026-09-16T06:00:00Z';
+  let syncRequests = 0;
+  let mealReads = 0;
+  const mealDates: string[] = [];
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('**/api/dsp/paycom/settings', (route) =>
+    route.fulfill({
+      json: {
+        revision: 0,
+        values: paycomDefaults,
+        history: [],
+        options: { departments: [], stations: [] },
+      },
+    }),
+  );
+  await page.route('**/api/dsp/overview', (route) =>
+    route.fulfill({
+      json: {
+        connection: { enabled: true, status: 'ready' },
+        workforce: { collectedAt },
+        jobs: [
+          { id: 'flex-job', kind: 'cortex.meal_breaks.collect', status: 'failed' },
+          { id: 'paycom-job', kind: 'paycom.collect', status: syncStatus },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/dsp/paycom/meal-breaks?*', (route) => {
+    mealReads++;
+    const selected = new URL(route.request().url()).searchParams.get('date')!;
+    mealDates.push(selected);
+    return route.fulfill({ json: { ...sample(), date: selected, paycomCollectedAt: collectedAt } });
+  });
+  await page.route('**/api/dsp/jobs/meal-breaks?*', (route) =>
+    route.fulfill({
+      json: {
+        date: new URL(route.request().url()).searchParams.get('date'),
+        scopeAvailable: true,
+        paycom: {
+          enabled: true,
+          active: syncStatus === 'queued',
+          job: { status: syncStatus },
+          collectedAt,
+        },
+        flex: {
+          enabled: true,
+          active: flexStatus === 'queued',
+          job: { status: flexStatus },
+          collectedAt,
+        },
+      },
+    }),
+  );
+  await page.route('**/api/dsp/jobs/meal-breaks', (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().postDataJSON().requestId).toBeTruthy();
+    expect(route.request().postDataJSON().date).toBe(date);
+    syncRequests++;
+    syncStatus = flexStatus = 'queued';
+    return route.fulfill({ status: 202, json: { date, jobs: [] } });
+  });
+  await open(page);
+  const dateInput = page.getByLabel('Paycom date');
+  const sync = page.getByRole('button', { name: 'Sync now', exact: true });
+  const timecards = page.getByRole('tab', { name: 'Timecard', exact: true });
+  const meals = page.getByRole('tab', { name: 'Meal Breaks', exact: true });
+  await timecards.click();
+  await dateInput.fill('2026-09-14');
+  await dateInput.fill(date);
+  for (const viewport of [
+    { width: 1586, height: 992 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await timecards.click();
+    await expect(dateInput).toHaveValue(date);
+    const dateBox = (await dateInput.boundingBox())!;
+    const syncBox = (await sync.boundingBox())!;
+    await meals.click();
+    await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
+    await expect(dateInput).toHaveValue(date);
+    expect(mealDates.at(-1)).toBe(date);
+    const mealDateBox = (await dateInput.boundingBox())!;
+    const mealSyncBox = (await sync.boundingBox())!;
+    for (const axis of ['x', 'y'] as const) {
+      expect(mealDateBox[axis]).toBeCloseTo(dateBox[axis], 0);
+      expect(mealSyncBox[axis]).toBeCloseTo(syncBox[axis], 0);
+    }
+    await page.screenshot({
+      path: `/tmp/dispatch-shared-day-${viewport.width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText(
+    'Sync complete',
+  );
+  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toHaveText(
+    'Last collection failed',
+  );
+  const before = mealReads;
+  await sync.click();
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText('Queued');
+  await expect(sync).toBeDisabled();
+  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toHaveText('Queued');
+  syncStatus = 'succeeded';
+  collectedAt = '2026-09-16T06:05:00Z';
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText(
+    'Sync complete',
+    { timeout: 10000 },
+  );
+  await expect(sync).toBeDisabled();
+  flexStatus = 'failed';
+  await expect.poll(() => mealReads, { timeout: 10000 }).toBeGreaterThan(before);
+  await expect(sync).toBeEnabled({ timeout: 10000 });
+  await expect(dateInput).toHaveValue(date);
+  expect(syncRequests).toBe(1);
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
+  await meals.click();
+  await expect(dateInput).toHaveValue(date);
+  await page.getByRole('link', { name: 'Home Page', exact: true }).click();
+  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await expect(dateInput).toHaveValue(date);
+  await page.reload();
+  await expect(dateInput).toHaveValue(date);
+  await meals.click();
+  await page.getByRole('button', { name: 'Previous day', exact: true }).click();
+  await timecards.click();
+  await expect(dateInput).toHaveValue('2026-09-14');
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'Summit Delivery' })
+    .getByRole('button', { name: /Summit Delivery/ })
+    .click();
+  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await expect(dateInput).toBeVisible();
+  await expect(dateInput).not.toHaveValue('2026-09-14');
+  expect(errors).toEqual([]);
 });

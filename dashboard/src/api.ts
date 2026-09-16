@@ -15,6 +15,12 @@ export class ApiError extends Error {
   }
 }
 const labels: Record<string, string> = {
+  meal_sync_paycom_required: 'Connect Paycom before syncing meal breaks.',
+  meal_sync_flex_required: 'Connect Cortex in Settings → Connections before syncing Flex.',
+  meal_sync_scope_required: 'Flex needs an initial station collection before syncing this date.',
+  sync_in_progress: 'A collection is already in progress. Wait for it to finish, then sync again.',
+  queue_full: 'The collection queue is full. Try again after the current collections finish.',
+  invalid_date: 'Choose a valid date that is not in the future.',
   settings_changed_reload_before_saving:
     'These settings changed in another session. Discard your draft and try again.',
   connect_paycom_before_automatic_sync: 'Connect Paycom before turning on automatic sync.',
@@ -60,7 +66,7 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
   }
   return value as T;
 }
-export function useData<T>(url: string, poll = 0) {
+export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
   const [data, setData] = useState<T>(),
     [error, setError] = useState(''),
     [revision, setRevision] = useState(0);
@@ -87,6 +93,6 @@ export function useData<T>(url: string, poll = 0) {
       controller.abort();
       if (timer) clearInterval(timer);
     };
-  }, [url, revision, poll]);
+  }, [url, revision, poll, refreshKey]);
   return { data, error, refresh };
 }

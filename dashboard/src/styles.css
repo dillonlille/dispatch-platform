@@ -1019,8 +1019,36 @@ td small {
   justify-content: flex-end;
   margin-bottom: 20px;
 }
+.paycom-workspace-controls {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+.paycom-controls-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.paycom-controls-row > button {
+  margin-left: auto;
+}
 .paycom-sync-status {
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .paycom-date-controls {
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .paycom-date-controls label {
+    width: 148px;
+  }
 }
 @media (max-width: 600px) {
   .paycom-data-table td {
@@ -1457,4 +1485,11 @@ td small {
   margin-top: 16px;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.paycom-source-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
 }

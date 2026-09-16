@@ -128,6 +128,24 @@ The dashboard labels meal breaks and their surrounding deliveries as **Flex**,
 reflecting the driver app. Cortex remains the connection and collector provider;
 its API fields, provider IDs and stored records retain their existing names.
 
+Timecard and Meal Breaks share a date picker and sync toolbar above their content.
+The selected date stays in browser-session storage, scoped by DSP, across tabs,
+navigation and reloads. Loading Flex data never replaces that selection.
+Timecard sync collects the Paycom period containing the selected day; Employees
+and scheduled syncs continue collecting the current period.
+
+Meal Breaks Sync now posts `{requestId,date}` to `/api/dsp/jobs/meal-breaks`, with
+collect permission and CSRF, and atomically queues Paycom plus Cortex jobs. Paycom
+selects the biweekly period containing that date using the provider's observed
+period alignment. Flex uses this DSP's previously verified scopes for that date,
+or the most recently collected day's scopes when the day has no collection.
+Missing connections/scopes, invalid dates and queue capacity failures queue neither
+source. An existing collection must finish first. Request keys are idempotent.
+`GET /api/dsp/jobs/meal-breaks?date=YYYY-MM-DD` supplies independent provider job
+statuses and selected-date publication freshness. Either source's publication
+refreshes the table while retaining the day; a failed source keeps its previous
+data and remains visibly failed. Opening a date never starts collection.
+
 Paycom → Meal Breaks reads `GET /api/dsp/paycom/meal-breaks?date=YYYY-MM-DD`.
 The latest Paycom publication covering that date is combined with active Cortex
 scopes for the report date. Overlapping Cortex scopes use the newest observation

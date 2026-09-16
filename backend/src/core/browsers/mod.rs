@@ -311,7 +311,10 @@ impl Session {
                     &serde_json::from_value(request.clone())?,
                 ))?)
             } else {
-                workforce::fixture(&self.timezone)
+                workforce::fixture_date(
+                    &self.timezone,
+                    workforce::collection_date(request, &self.timezone)?,
+                )
             };
         }
         let mut worker = self.worker.lock().await;
@@ -337,6 +340,7 @@ impl Session {
                     worker
                         .collect(
                             &self.timezone,
+                            workforce::collection_date(request, &self.timezone)?,
                             metrics,
                             Some(&super::collection_checkpoint::Checkpoint::new(
                                 state.clone(),

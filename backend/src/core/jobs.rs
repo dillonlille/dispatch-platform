@@ -55,6 +55,17 @@ impl Store {
     pub fn enqueue(&self, id: &str, actor: Option<&str>, key: &str) -> Result<Value> {
         self.enqueue_for(id, actor, key, Provider::Paycom, &json!({}))
     }
+    pub fn enqueue_paycom_date(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+        key: &str,
+        date: &str,
+    ) -> Result<Value> {
+        let request = json!({"date":date});
+        super::workforce::collection_date(&request, s(&self.get_dsp(id)?, "timezone"))?;
+        self.enqueue_for(id, actor, key, Provider::Paycom, &request)
+    }
     pub fn enqueue_meals(
         &self,
         id: &str,
@@ -79,27 +90,43 @@ impl Store {
         provider: Provider,
         request: &Value,
     ) -> Result<Value> {
+        Ok(self
+            .enqueue_batch(id, actor, &[(key.into(), provider, request.clone())])?
+            .remove(0))
+    }
+    pub(crate) fn enqueue_batch(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+        requests: &[(String, Provider, Value)],
+    ) -> Result<Vec<Value>> {
         let dsp = self.get_dsp(id)?;
         ensure(
             s(&dsp, "status") == "active" && s(&dsp, "environment") == self.config.environment,
             "dsp_unavailable",
             409,
         )?;
-        let connection = self
-            .collector(id, provider)?
-            .one(
-                "SELECT enabled,revision FROM connections WHERE provider=?",
-                [provider.id()],
-            )?
-            .unwrap();
-        ensure(flag(&connection, "enabled"), "connection_required", 409)?;
-        self.jobs.transaction(||{
+        let connections = requests
+            .iter()
+            .map(|(_, provider, _)| {
+                let connection = self
+                    .collector(id, *provider)?
+                    .one(
+                        "SELECT enabled,revision FROM connections WHERE provider=?",
+                        [provider.id()],
+                    )?
+                    .unwrap();
+                ensure(flag(&connection, "enabled"), "connection_required", 409)?;
+                Ok(connection)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.jobs.transaction(|| requests.iter().zip(&connections).map(|((key,provider,request),connection)| {
             if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind().unwrap() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
             ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
             let job=crypto::id("job")?;
-            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key,request) VALUES (?,?,?,?,'queued',?,?,?,?,?,?,?)",params![job,id,self.config.environment,provider.job_kind(),now(),iso(),self.config.release,actor,n(&connection,"revision"),key,serde_json::to_string(request)?])?;
+            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key,request) VALUES (?,?,?,?,'queued',?,?,?,?,?,?,?)",params![job,id,self.config.environment,provider.job_kind(),now(),iso(),self.config.release,actor,n(connection,"revision"),key,serde_json::to_string(request)?])?;
             self.public_job(&self.job(&job,None)?)
-        })
+        }).collect())
     }
     pub fn cancel_job(&self, id: &str, dsp: &str) -> Result<Value> {
         let row = self.job(id, Some(dsp))?;
