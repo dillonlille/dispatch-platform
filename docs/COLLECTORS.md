@@ -43,10 +43,11 @@ schema and SQLite version; opening an unsupported version fails closed.
 
 ## Migration and rollback
 
-The rollout has two deployments. First deploy the dual-layout reader with
-`MIGRATE_ON_START=false`. Once that build is verified in Dev, enable the flag in
-a subsequent deployment. The previous artifact can then read migrated state if
-activation fails. Do not roll back to a build predating the dual-layout reader.
+The rollout uses two deployments. The dual-layout reader was introduced in
+`9a63ef1` (PR #29) with automatic migration disabled. The following deployment
+enables migration, after the compatible reader is verified in Dev. The previous
+artifact can read and write migrated state if activation fails. Do not roll back
+to a build predating `9a63ef1`. Migration is now enabled for startup/provisioning.
 Normal updater rollback retains the immediately previous compatible artifact.
 
 Migration runs under the exclusive platform process lock, before serving traffic
@@ -70,7 +71,9 @@ Do not run migration through a request or while database workers are serving.
 
 The offline backup command already recursively snapshots every `.sqlite` file in
 `data/` and `dsps/`, and includes DSP secrets and browser state. It therefore
-captures both layouts and nested provider databases. Restore verifies checksums,
+captures both layouts and nested provider databases. Disposable PulseAudio runtime
+symlinks inside browser profiles are excluded; unexpected symlinks still fail the
+backup. Restore verifies checksums,
 revokes sessions and cancels pending jobs. Restored legacy backups migrate on
 startup once migration is enabled. Configuration remains separately backed up.
 
@@ -96,7 +99,8 @@ path or executable supplied by a DSP.
    are rejected. Today execution and scheduling support Paycom only; registering
    a storage variant alone does not enable a new collector.
 5. Add authorized API routes and reads using the typed collector accessor. Keep
-   provider settings/schedules with the provider data. Review timezone updates,
+   provider settings/schedules with the provider data. Register its owned browser
+   entries so credential changes clear only that collector's sessions. Review timezone updates,
    suspension and credential-revision cancellation across all affected collectors.
 6. Test provisioning, failed/restarted migration, schema compatibility,
    cross-DSP isolation, failed publication, scheduler behavior, backup/restore

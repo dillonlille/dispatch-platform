@@ -248,10 +248,20 @@ pub fn backup(config: &Config, destination: &Path) -> Result<Value> {
         )?;
         if stat.is_dir() {
             db::private_dir(&destination.join(relative))?;
+            let parts: Vec<_> = relative.iter().filter_map(|p| p.to_str()).collect();
+            let browser_pulse = parts.len() >= 5
+                && parts[0] == "dsps"
+                && db::identifier(parts[1], "dsp_")
+                && parts[2..4] == ["state", "browsers"]
+                && parts.last() == Some(&"pulse");
             for item in fs::read_dir(source)? {
                 let item = item?;
                 let name = item.file_name().to_string_lossy().into_owned();
-                if name.ends_with("-wal")
+                // Chromium retains this disposable OS runtime link after shutdown.
+                let pulse_runtime =
+                    browser_pulse && name.ends_with("-runtime") && item.file_type()?.is_symlink();
+                if pulse_runtime
+                    || name.ends_with("-wal")
                     || name.ends_with("-shm")
                     || name.ends_with(".lock")
                     || [

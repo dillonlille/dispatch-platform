@@ -335,11 +335,7 @@ impl Store {
             crypto::encrypt(&key, &format!("{id}:paycom:2"), value)?.as_bytes(),
         )?;
         self.collector(id, Provider::Paycom)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider='paycom'",[s(value,"clientCode"),&iso()])?;
-        let profile = self.area(id, "state")?.join("browsers");
-        if profile.exists() {
-            db::private_dir(&profile)?;
-            std::fs::remove_dir_all(profile)?;
-        }
+        self.clear_collector_browser_state(id, Provider::Paycom)?;
         self.audit(
             Some(s(&c.auth.user, "id")),
             Some(id),

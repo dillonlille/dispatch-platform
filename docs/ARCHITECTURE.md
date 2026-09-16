@@ -55,9 +55,9 @@ provision can be retried. Browser binaries and provider logic are shared.
 
 Collector storage uses typed provider access and independently versioned schemas.
 See [Collector storage](COLLECTORS.md) for table ownership, the two-deployment
-migration, rollback compatibility and the contract for adding collectors. During
-the compatibility deployment, existing DSPs retain the legacy combined database
-until the subsequent migration-enabled build starts.
+migration, rollback compatibility and the contract for adding collectors. Startup
+migrates existing DSPs before serving traffic; provisioning creates the same
+separated layout. The previous compatibility build supports both layouts.
 
 ## Collection
 
