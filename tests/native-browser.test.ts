@@ -244,3 +244,80 @@ test(
     assert(completed.metrics[1].publicationMs !== null);
   },
 );
+
+test(
+  'a missing timecard retries only that employee and preserves complete validated pairs',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.codes = ['AA01', 'BB02', 'CC03', 'DD04', 'EE05'];
+    f.state.timecardDelayMs = 250;
+    f.state.missingContent.set('DD04', 1);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'page-recovery' })).value.id;
+    const current = async () =>
+      (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+    await until(async () => (await current()).status === 'succeeded', 30000);
+    const job = await current();
+    assert.equal(job.attempt, 1);
+    assert.deepEqual([...f.state.readsByCode.entries()].sort(), [
+      ['AA01', 1],
+      ['BB02', 1],
+      ['CC03', 1],
+      ['DD04', 2],
+      ['EE05', 1],
+    ]);
+    const metrics = job.metrics[0].pageReads;
+    assert.equal(metrics.completed, 5);
+    assert.equal(metrics.retries, 1);
+    assert.equal(metrics.recovered, 1);
+    assert.equal(metrics.active.length, 0);
+    assert.equal(metrics.failures.length, 1);
+    assert.equal(metrics.failures[0].ordinal, 4);
+    assert.equal(metrics.failures[0].stage, 'content');
+    assert.equal(metrics.failures[0].error, 'provider_content_missing');
+    assert(metrics.failures[0].contentMs >= 3000);
+    assert.equal(job.metrics[0].timecards, 70);
+    const publication = () =>
+      f.collector(
+        dsp.id,
+        (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
+      );
+    const previous = publication();
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    f.state.missingContent.set('DD04', 10);
+    const bad = (await owner.post('/api/dsp/jobs', { requestId: 'page-retry-limit' })).value.id;
+    let failed: any;
+    await until(async () => {
+      failed = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === bad);
+      return failed.status === 'failed';
+    }, 30000);
+    assert.equal(failed.error, 'provider_content_missing');
+    assert.equal(failed.attempt, 1);
+    assert.equal(failed.metrics[0].pageReads.retries, 1);
+    assert.equal(failed.metrics[0].pageReads.completed, 3);
+    assert.equal(publication(), previous);
+    assert.equal(f.state.readsByCode.get('DD04'), 4);
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    f.state.expiredTimecard = true;
+    const expired = (await owner.post('/api/dsp/jobs', { requestId: 'page-expired-auth' })).value
+      .id;
+    await until(async () => {
+      failed = (await owner.get('/api/dsp/jobs')).value.find(
+        (j: { id: string }) => j.id === expired,
+      );
+      return failed.status === 'failed';
+    }, 15000);
+    assert.equal(failed.error, 'authentication_failed');
+    assert.equal(failed.metrics[0].pageReads.retries, 0);
+    assert.equal(failed.metrics[0].pageReads.failures[0].stage, 'navigation');
+    assert.equal(publication(), previous);
+  },
+);

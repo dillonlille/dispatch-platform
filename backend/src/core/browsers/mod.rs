@@ -1,3 +1,4 @@
+mod admission;
 mod attempt;
 pub mod browseros;
 mod cortex;
@@ -39,6 +40,7 @@ pub struct Session {
     pub timezone: String,
     run: PathBuf,
     process_id: std::sync::atomic::AtomicU32,
+    observed_pss: std::sync::atomic::AtomicU64,
     status: AtomicU8, // 0 starting, 1 ready, 2 challenge, 3 closed
     worker: AsyncMutex<Option<Worker>>,
     commands: tokio::sync::Semaphore,
@@ -133,6 +135,15 @@ impl Manager {
     pub fn get_for(&self, id: &str, provider: Provider) -> Option<Arc<Session>> {
         self.sessions.lock().ok()?.get(&provider.key(id)).cloned()
     }
+    pub fn admission(&self) -> admission::Admission {
+        let sessions = self.sessions.lock().expect("browser registry");
+        admission::Admission::new(
+            admission::available(),
+            sessions
+                .values()
+                .map(|session| session.observed_pss.load(Ordering::Acquire)),
+        )
+    }
     pub fn active(&self) -> usize {
         self.sessions.lock().map(|s| s.len()).unwrap_or(0)
     }
@@ -163,6 +174,11 @@ impl Manager {
     }
 }
 impl Session {
+    pub fn observe_memory(&self, memory: &super::job_metrics::Memory) {
+        if memory.complete {
+            self.observed_pss.store(memory.pss, Ordering::Release);
+        }
+    }
     pub fn process_id(&self) -> Option<u32> {
         let id = self.process_id.load(Ordering::Acquire);
         (id != 0 && !self.closed()).then_some(id)
@@ -279,6 +295,7 @@ impl Session {
         state: &Arc<State>,
         job: &str,
         owner: &str,
+        metrics: &super::job_metrics::Recorder,
     ) -> Result<Value> {
         ensure(
             self.provider == Provider::Paycom,
@@ -303,7 +320,7 @@ impl Session {
         let Worker::Paycom(worker) = worker else {
             return Err(Error::new("collector_unavailable", 409));
         };
-        let response = worker.collect(&self.timezone, |progress, message| {
+        let response = worker.collect(&self.timezone, metrics, |progress, message| {
             let job = job.to_owned();
             let owner = owner.to_owned();
             async move {
@@ -556,6 +573,7 @@ impl State {
             timezone: s(&dsp, "timezone").into(),
             run: run.clone(),
             process_id: std::sync::atomic::AtomicU32::new(0),
+            observed_pss: std::sync::atomic::AtomicU64::new(0),
             status: AtomicU8::new(0),
             worker: AsyncMutex::new(None),
             commands: tokio::sync::Semaphore::new(32),
@@ -581,6 +599,13 @@ impl State {
                 "browser_capacity_busy",
                 429,
             )?;
+            if !session.fixture {
+                let admission = admission::Admission::new(
+                    admission::available(),
+                    sessions.values().map(|s| s.observed_pss.load(Ordering::Acquire)),
+                );
+                ensure(admission.can_start, "browser_memory_busy", 503)?;
+            }
             sessions.insert(provider.key(id), session.clone());
         }
         let start=async {

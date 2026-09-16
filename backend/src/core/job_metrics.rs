@@ -44,6 +44,7 @@ pub struct Metrics {
     peak_private_bytes: Option<u64>,
     memory_samples: u64,
     incomplete_memory_samples: u64,
+    page_reads: PageReads,
 }
 impl Metrics {
     pub fn new(job: &Value) -> Self {
@@ -67,6 +68,7 @@ impl Metrics {
             peak_private_bytes: None,
             memory_samples: 0,
             incomplete_memory_samples: 0,
+            page_reads: PageReads::default(),
         }
     }
     fn add(&mut self, phase: Phase, ms: u64) {
@@ -80,10 +82,46 @@ impl Metrics {
         *value = Some(value.unwrap_or(0).saturating_add(ms));
     }
 }
+// Keep diagnostics bounded even for the maximum 5,000-employee roster. Ordinals
+// identify progress without persisting employee codes, URLs or provider content.
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageReads {
+    completed: usize,
+    retries: usize,
+    recovered: usize,
+    total_ms: u64,
+    active: Vec<PageRead>,
+    slowest: Vec<PageRead>,
+    failures: Vec<PageRead>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageRead {
+    ordinal: usize,
+    attempt: usize,
+    stage: &'static str,
+    elapsed_ms: u64,
+    navigation_ms: u64,
+    content_ms: u64,
+    extraction_ms: u64,
+    error: Option<String>,
+}
+impl PageRead {
+    fn add(&mut self, ms: u64) {
+        match self.stage {
+            "navigation" => self.navigation_ms += ms,
+            "content" => self.content_ms += ms,
+            "extraction" => self.extraction_ms += ms,
+            _ => (),
+        }
+    }
+}
 struct Clock {
     value: Metrics,
     started: Instant,
     changed: Instant,
+    pages: Vec<(PageRead, Instant, Instant)>,
 }
 #[derive(Clone)]
 pub struct Recorder(Arc<Mutex<Clock>>);
@@ -94,7 +132,72 @@ impl Recorder {
             value: Metrics::new(job),
             started: now,
             changed: now,
+            pages: Vec::new(),
         })))
+    }
+    pub fn page_start(&self, ordinal: usize, attempt: usize) {
+        let mut clock = self.0.lock().expect("job metrics");
+        if attempt > 1 {
+            clock.value.page_reads.retries += 1;
+        }
+        clock.pages.push((
+            PageRead {
+                ordinal,
+                attempt,
+                stage: "navigation",
+                elapsed_ms: 0,
+                navigation_ms: 0,
+                content_ms: 0,
+                extraction_ms: 0,
+                error: None,
+            },
+            Instant::now(),
+            Instant::now(),
+        ));
+    }
+    pub fn page_stage(&self, ordinal: usize, stage: &'static str) {
+        let mut clock = self.0.lock().expect("job metrics");
+        if let Some((page, _, changed)) = clock
+            .pages
+            .iter_mut()
+            .find(|(p, _, _)| p.ordinal == ordinal)
+            && page.stage != stage
+        {
+            page.add(changed.elapsed().as_millis() as u64);
+            page.stage = stage;
+            *changed = Instant::now();
+        }
+    }
+    pub fn page_finish(&self, ordinal: usize, error: Option<&str>) {
+        let mut clock = self.0.lock().expect("job metrics");
+        if let Some(index) = clock
+            .pages
+            .iter()
+            .position(|(p, _, _)| p.ordinal == ordinal)
+        {
+            let (mut page, started, changed) = clock.pages.remove(index);
+            page.add(changed.elapsed().as_millis() as u64);
+            page.elapsed_ms = started.elapsed().as_millis() as u64;
+            page.error = error.map(str::to_owned);
+            let reads = &mut clock.value.page_reads;
+            reads.total_ms += page.elapsed_ms;
+            if error.is_some() {
+                reads.failures.push(page.clone());
+                if reads.failures.len() > 8 {
+                    reads.failures.remove(0);
+                }
+            } else {
+                reads.completed += 1;
+                if page.attempt > 1 {
+                    reads.recovered += 1;
+                }
+            }
+            reads.slowest.push(page);
+            reads
+                .slowest
+                .sort_by_key(|p| std::cmp::Reverse(p.elapsed_ms));
+            reads.slowest.truncate(5);
+        }
     }
     pub fn phase(&self, phase: Phase) {
         let mut clock = self.0.lock().expect("job metrics");
@@ -114,6 +217,18 @@ impl Recorder {
     pub fn snapshot(&self) -> Metrics {
         let clock = self.0.lock().expect("job metrics");
         let mut value = clock.value.clone();
+        if value.phase.is_some() {
+            value.page_reads.active = clock
+                .pages
+                .iter()
+                .map(|(page, started, changed)| {
+                    let mut page = page.clone();
+                    page.add(changed.elapsed().as_millis() as u64);
+                    page.elapsed_ms = started.elapsed().as_millis() as u64;
+                    page
+                })
+                .collect();
+        }
         if let Some(phase) = value.phase {
             value.add(phase, clock.changed.elapsed().as_millis() as u64);
             value.elapsed_ms = clock.started.elapsed().as_millis() as u64;
@@ -126,6 +241,15 @@ impl Recorder {
             let elapsed = clock.changed.elapsed().as_millis() as u64;
             clock.value.add(phase, elapsed);
             clock.value.elapsed_ms = clock.started.elapsed().as_millis() as u64;
+            clock.value.page_reads.active = clock
+                .pages
+                .drain(..)
+                .map(|(mut page, started, changed)| {
+                    page.add(changed.elapsed().as_millis() as u64);
+                    page.elapsed_ms = started.elapsed().as_millis() as u64;
+                    page
+                })
+                .collect();
             clock.value.finished_at = Some(db::iso());
             clock.value.outcome = outcome.into();
             clock.value.error = error.map(str::to_owned);
@@ -240,6 +364,30 @@ pub fn memory(root: u32) -> Option<Memory> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn page_history_is_bounded_and_interruption_freezes_active_reads() {
+        let recorder = Recorder::new(&serde_json::json!({"attempt":1}));
+        for ordinal in 1..=20 {
+            recorder.page_start(ordinal, 1);
+            recorder.page_stage(ordinal, "content");
+            recorder.page_finish(ordinal, Some("provider_content_missing"));
+            recorder.page_start(ordinal, 2);
+            recorder.page_stage(ordinal, "extraction");
+            recorder.page_finish(ordinal, None);
+        }
+        recorder.page_start(21, 1);
+        recorder.finish("cancelled", Some("job_cancelled"));
+        let before = serde_json::to_value(recorder.snapshot()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        assert_eq!(before, serde_json::to_value(recorder.snapshot()).unwrap());
+        let reads = &before["pageReads"];
+        assert_eq!(reads["completed"], 20);
+        assert_eq!(reads["recovered"], 20);
+        assert_eq!(reads["retries"], 20);
+        assert_eq!(reads["failures"].as_array().unwrap().len(), 8);
+        assert_eq!(reads["slowest"].as_array().unwrap().len(), 5);
+        assert_eq!(reads["active"][0]["ordinal"], 21);
+    }
     #[test]
     fn partial_samples_do_not_claim_a_complete_shared_memory_peak() {
         let recorder =

@@ -144,9 +144,16 @@ impl Store {
             return Ok(());
         }
         let retry = error.is_some_and(|e| {
-            ["browser_lost", "provider_timeout", "provider_unavailable"].contains(&e)
+            [
+                "browser_lost",
+                "provider_timeout",
+                "provider_unavailable",
+                "provider_navigation_timeout",
+                "provider_content_timeout",
+            ]
+            .contains(&e)
         }) && n(&row, "attempt") < n(&row, "max_attempts");
-        self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+30000*2_i64.pow(n(&row,"attempt").clamp(0,8) as u32),id])?;
+        self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+retry_delay(id,n(&row,"attempt")),id])?;
         Ok(())
     }
     pub fn schedule(&self, id: &str) -> Result<Value> {
@@ -225,6 +232,14 @@ fn next_scheduled(schedule: &Value, after: i64) -> Result<String> {
         next_occurrence(s(schedule, "localTime"), s(schedule, "timezone"), after)
     }
 }
+// Stable per-job jitter survives restarts and disperses DSP retries. No secret
+// material or provider identity participates in the delay.
+fn retry_delay(id: &str, attempt: i64) -> i64 {
+    use sha2::{Digest, Sha256};
+    let base = 30000 * 2_i64.pow(attempt.clamp(0, 8) as u32);
+    let digest = Sha256::digest(format!("{id}:{attempt}"));
+    base + i64::from(u32::from_le_bytes(digest[..4].try_into().unwrap())) % (base / 2 + 1)
+}
 pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<()> {
     let owner = crypto::id("worker")?;
     let mut tasks = tokio::task::JoinSet::new();
@@ -239,7 +254,11 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                 if let Err(error)=result {eprintln!("scheduler_tick_failed: {}",error.code);}
                 while tasks.len()<state.config.browser_capacity {
                     let pool=state.clone();let claim_owner=owner.clone();
-                    let job=state.run(move|db|db.claim(&claim_owner,|id|pool.browsers.get(id).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||pool.browsers.active()<pool.config.browser_capacity))).await;
+                    let job=state.run(move|db| {
+                        let memory_ready = (pool.config.fixture && pool.config.fixture_url.is_none()) || pool.browsers.admission().can_start;
+                        db.jobs.exec("UPDATE jobs SET message=? WHERE status='queued' AND available_at<=?", params![if memory_ready {"Waiting for a browser"} else {"Waiting for available memory"},now()])?;
+                        db.claim(&claim_owner,|id|pool.browsers.get(id).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
+                    }).await;
                     match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();tasks.spawn(async move{execute(state,job,owner).await;});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
                 }
             }
@@ -292,7 +311,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
             })
             .await?;
         metrics.phase(Phase::Collection);
-        let data = session.collect(&state, &id, &owner).await?;
+        let data = session.collect(&state, &id, &owner, &metrics).await?;
         metrics.counts(&data);
         metrics.phase(Phase::Publication);
         let jid = id.clone();
@@ -324,6 +343,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
             _=sample.tick()=>{
                 if let Some(pid)=state.browsers.get(&dsp).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
                     && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
+                    if let Some(session) = state.browsers.get(&dsp) { session.observe_memory(&memory); }
                     metrics.observe(memory);
                 }
                 let jid=id.clone(); let worker=owner.clone(); let snapshot=metrics.snapshot();
@@ -337,6 +357,18 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         }
     };
     drop(task);
+    // A settings-page browser or another just-claimed job may win admission.
+    // Put this job back without consuming a provider attempt or retry history.
+    if result.as_ref().err().is_some_and(|e| {
+        ["browser_memory_busy", "browser_capacity_busy"].contains(&e.code.as_str())
+    }) {
+        let _ = state.run(move |db| db.jobs.transaction(|| {
+            db.jobs.exec("DELETE FROM job_metrics WHERE job_id=? AND attempt=? AND owner=?", params![id,n(&job,"attempt"),owner])?;
+            db.jobs.exec("UPDATE jobs SET status='queued',attempt=attempt-1,started_at=NULL,lease_owner=NULL,lease_until=NULL,available_at=?,message='Waiting for browser resources' WHERE id=? AND lease_owner=? AND status='running'",params![now()+5000,id,owner])?;
+            Ok(())
+        })).await;
+        return;
+    }
     if let Err(error) = &result {
         let jid = id.clone();
         let cancelled = state
@@ -391,4 +423,20 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
             )
         })
         .await;
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    #[test]
+    fn retries_are_bounded_staggered_and_stable() {
+        let values = (0..100)
+            .map(|i| retry_delay(&format!("job-{i}"), 1))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(values.len() > 90);
+        assert!(values.iter().all(|delay| (60000..=90000).contains(delay)));
+        let delay = retry_delay("job-test", 2);
+        assert!((120000..=180000).contains(&delay));
+        assert_eq!(delay, retry_delay("job-test", 2));
+    }
 }

@@ -132,6 +132,9 @@ export async function paycomFixture() {
     timecardsPeak: 0,
     wrongIdentity: false,
     timecardStatus: 200,
+    missingContent: new Map<string, number>(),
+    readsByCode: new Map<string, number>(),
+    expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
   const server = http.createServer(async (req, res) => {
@@ -241,6 +244,8 @@ export async function paycomFixture() {
       const active = (state.activeByAccount.get(account) ?? 0) + 1;
       state.activeByAccount.set(account, active);
       state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
+      const code = url.searchParams.get('firstrefno')!;
+      state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
       events.push('timecard');
       state.timecardsActive++;
       state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
@@ -256,6 +261,14 @@ export async function paycomFixture() {
         if (state.timecardStatus !== 200 && url.searchParams.get('firstrefno') === 'BB02') {
           res.writeHead(state.timecardStatus);
           return res.end('Provider temporarily unavailable');
+        }
+        if (state.expiredTimecard) {
+          res.writeHead(302, { Location: '/' });
+          return res.end();
+        }
+        if ((state.missingContent.get(code) ?? 0) > 0) {
+          state.missingContent.set(code, state.missingContent.get(code)! - 1);
+          return html('<title>Timecard loading failed</title><p>Try again</p>');
         }
         if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
           url.searchParams.set('firstrefno', 'AA01');

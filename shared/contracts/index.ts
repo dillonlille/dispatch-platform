@@ -80,6 +80,16 @@ export interface Connection {
   lastVerifiedAt: string | null;
   accountLabel: string | null;
 }
+export interface PageRead {
+  ordinal: number;
+  attempt: number;
+  stage: 'navigation' | 'content' | 'extraction';
+  elapsedMs: number;
+  navigationMs: number;
+  contentMs: number;
+  extractionMs: number;
+  error: string | null;
+}
 export interface JobMetrics {
   attempt: number;
   startedAt: string;
@@ -100,6 +110,15 @@ export interface JobMetrics {
   peakPrivateBytes: number | null;
   memorySamples: number;
   incompleteMemorySamples: number;
+  pageReads?: {
+    completed: number;
+    retries: number;
+    recovered: number;
+    totalMs: number;
+    active: PageRead[];
+    slowest: PageRead[];
+    failures: PageRead[];
+  };
 }
 export interface Job {
   id: string;
@@ -178,7 +197,11 @@ export interface PlatformHealth {
   environment: Environment;
   release: string;
   jobs: Record<string, number>;
-  browsers: { active: number; capacity: number };
+  browsers: {
+    active: number;
+    capacity: number;
+    memory: { availableBytes: number | null; requiredBytes: number; canStart: boolean };
+  };
   dsps: number;
   email: boolean;
   providerMode: 'fixture' | 'native';
