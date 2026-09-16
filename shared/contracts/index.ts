@@ -105,6 +105,8 @@ export interface JobMetrics {
   publicationMs: number | null;
   employees: number | null;
   timecards: number | null;
+  itineraries?: number | null;
+  meals?: number | null;
   peakRssBytes: number | null;
   peakPssBytes: number | null;
   peakPrivateBytes: number | null;
@@ -125,7 +127,7 @@ export interface Job {
   dspId: string;
   dspName: string;
   environment: Environment;
-  kind: 'paycom.collect';
+  kind: 'paycom.collect' | 'cortex.meal_breaks.collect';
   status: JobStatus;
   progress: number;
   message: string;

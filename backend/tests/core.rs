@@ -99,10 +99,10 @@ fn queue_limits_and_authority_are_checked_again_before_publication() {
         db.enqueue(id, Some(actor), "overflow").unwrap_err().status,
         429
     );
-    let job = db.claim("worker", |_| true).unwrap().unwrap();
+    let job = db.claim("worker", |_, _| true).unwrap().unwrap();
     let jid = s(&job, "id");
     db.guard_job(jid, "worker").unwrap();
-    assert!(db.claim("second", |_| true).unwrap().is_none());
+    assert!(db.claim("second", |_, _| true).unwrap().is_none());
     db.platform
         .exec("UPDATE users SET status='disabled' WHERE id=?", [actor])
         .unwrap();

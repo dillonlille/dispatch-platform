@@ -10,7 +10,7 @@ dsps/dsp_<id>/
   data/
     dispatch.sqlite                 DSP profile and storage-layout metadata
     cortex/
-      cortex.sqlite                 Cortex connection state (collectors pending)
+      cortex.sqlite                 Cortex connection and meal-break evidence
     paycom/
       paycom.sqlite                 Paycom connection, settings, schedule and data
   secrets/
@@ -99,7 +99,7 @@ path or executable supplied by a DSP.
 4. Register its job kind and implement explicit execution dispatch. The job queue
    remains shared with provider-qualified kinds, authorization rechecks,
    idempotency, cancellation, bounded capacity and per-DSP fairness. Unknown kinds
-   are rejected. Today execution and scheduling support Paycom only; registering
+   are rejected. Execution supports Paycom and explicitly dated Cortex meal-break jobs; automatic scheduling remains Paycom-only. Registering
    a storage variant alone does not enable a new collector.
 5. Add authorized API routes and reads using the typed collector accessor. Keep
    provider settings/schedules with the provider data. Register its owned browser

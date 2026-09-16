@@ -118,13 +118,36 @@ async fn run() -> Result<()> {
             );
         }
         "seed" => operations::seed(&Store::initialize(config)?)?,
+        "enqueue-cortex-meals" => {
+            ensure(
+                args.len() == 8,
+                "usage_enqueue_cortex_meals_dsp_date_station_area_provider_timezone_request_id",
+                400,
+            )?;
+            let db = Store::initialize(config)?;
+            let scope = core::meals::Scope {
+                date: args[2].clone(),
+                station: args[3].clone(),
+                service_area_id: args[4].clone(),
+                provider: args[5].clone(),
+                timezone: args[6].clone(),
+            };
+            ensure(
+                !args[7].is_empty() && args[7].len() <= 128,
+                "invalid_request_id",
+                400,
+            )?;
+            let job = db.enqueue_meals(&args[1], None, &args[7], &scope)?;
+            db.audit(None, Some(&args[1]), "cortex.collection.requested", "")?;
+            println!("{}", job);
+        }
         "backup" => {
             ensure(args.len() == 2, "usage_backup_destination", 400)?;
             println!("{}", operations::backup(&config, Path::new(&args[1]))?);
         }
         _ => {
             return Err(Error::new(
-                "usage_serve_bootstrap_seed_status_backup_restore",
+                "usage_serve_bootstrap_seed_status_backup_restore_enqueue_cortex_meals",
                 400,
             ));
         }
