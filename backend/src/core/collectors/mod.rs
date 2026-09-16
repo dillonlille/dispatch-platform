@@ -250,6 +250,25 @@ impl Store {
         ] {
             db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
         }
+        if db
+            .one(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_record_schema'",
+                [],
+            )?
+            .is_none()
+        {
+            db.transaction(|| {
+                db.0.execute_batch(include_str!("cortexMealRecords.sql"))?;
+                Ok(())
+            })?;
+        }
+        ensure(
+            db.all("SELECT version FROM meal_record_schema", [])? == vec![json!({"version":1})]
+                && db.one("SELECT name FROM sqlite_master WHERE type='trigger' AND name='minimize_legacy_meal_publication'", [])?.is_some(),
+            "unsupported_cortex_schema",
+            503,
+        )?;
+        db.one("SELECT count(*) FROM meal_records WHERE 0", [])?;
         Ok(())
     }
 

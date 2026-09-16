@@ -4,13 +4,13 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fixture, until } from './rust-support.js';
 test(
-  'Cortex BrowserOS captures changed meals, multiple itineraries, and exact delivery evidence before atomic publication',
+  'Cortex BrowserOS captures changed meals, multiple itineraries, and four meal timestamps before atomic publication',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 180000 },
   async (t) => {
     let lists = 0;
     let mode = 'growing';
     const visits: Record<string, number> = {};
-    const start = Date.parse('2026-01-10T20:00:00Z');
+    const start = Date.parse('2026-01-10T22:34:00Z');
     const br = (id: string, on: number, off: number | null) => ({
       punchId: id,
       breakId: 'break-' + id,
@@ -56,7 +56,7 @@ test(
           latestTaskExecutionTime: start + 2400000,
           breaks: grown
             ? [
-                br('meal#1', start, start + 1800000),
+                br('meal#1', start, start + 900000),
                 br('meal#2', start + 3600000, start + 4500000),
                 { ...br('start-punch', start + 600, null), breakId: 'break-meal#1' },
               ]
@@ -98,19 +98,33 @@ test(
           localDate: [2026, 1, 10],
           serviceAreaId: 'area-1',
           stops: [
-            { stopId: 'stop#1', tasks: [task('task.1', start - 300000)] },
+            {
+              stopId: 'stop#1',
+              tasks: [task('task.0', start - 240000), task('task.1', start - 60000)],
+            },
             {
               stopId: 'stop#2',
               tasks: [
-                task('task.1', start - (mode === 'conflicting' ? 240000 : 300000)),
-                task('task.2', start + 1860000),
-                task('task.3', start + 1880000),
+                task('task.1', start - (mode === 'conflicting' ? 30000 : 60000)),
+                task('task.2', start + 960000),
+                task('task.3', start + 1080000),
                 task('task.4', start + 4560000),
               ],
             },
           ],
-          unknownStops: mode === 'unavailable' ? [{}] : [],
-          inactiveTasks: [],
+          // Amazon's unplanned dwell locations are separate from delivery tasks.
+          unknownStops: [
+            {
+              unknownStopId: 'unknown-1',
+              enterTime: start / 1000,
+              exitTime: (start + 900000) / 1000,
+              previousPlannedStopNumber: 1,
+            },
+          ],
+          inactiveTasks: [
+            task('removed-task', start - (mode === 'inactive-near' ? 30000 : 7200000)),
+          ],
+          stopProgress: { total: mode === 'unavailable' ? 3 : 2 },
         };
         if (mode === 'invalid') p.itineraryDetails.breaks = [br('bad', start, start - 1000)];
         if (mode === 'meal-conflict' && id === 'itinerary-1')
@@ -173,13 +187,29 @@ test(
     assert.equal(initial[0].verifiedGapPairs, 2);
     f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
       const rows = db
-        .prepare('SELECT meal_id,gap_after_seconds FROM meal_breaks ORDER BY meal_id')
-        .all() as any[];
+        .prepare(
+          'SELECT last_delivery_at,started_at,ended_at,first_delivery_at FROM meal_records ORDER BY meal_id',
+        )
+        .all();
       assert.deepEqual(
-        rows.map((r) => r.gap_after_seconds),
-        [60, 60],
+        rows.map((r) => ({ ...r })),
+        [
+          {
+            last_delivery_at: '2026-01-10T22:33:00.000Z',
+            started_at: '2026-01-10T22:34:00.000Z',
+            ended_at: '2026-01-10T22:49:00.000Z',
+            first_delivery_at: '2026-01-10T22:50:00.000Z',
+          },
+          {
+            last_delivery_at: '2026-01-10T22:52:00.000Z',
+            started_at: '2026-01-10T23:34:00.000Z',
+            ended_at: '2026-01-10T23:49:00.000Z',
+            first_delivery_at: '2026-01-10T23:50:00.000Z',
+          },
+        ],
       );
-      assert.equal((db.prepare('SELECT count(*) n FROM meal_delivery_events').get() as any).n, 8);
+      assert.equal((db.prepare('SELECT count(*) n FROM meal_delivery_events').get() as any).n, 0);
+      assert.equal((db.prepare('SELECT count(*) n FROM meal_breaks').get() as any).n, 0);
     });
     mode = 'invalid';
     const failed = await run('bad');
@@ -193,6 +223,9 @@ test(
     assert.deepEqual((await publications()).value, initial);
     mode = 'unavailable';
     assert.equal((await run('unknown')).status, 'succeeded');
+    assert.equal((await publications()).value[0].verifiedGapPairs, 0);
+    mode = 'inactive-near';
+    assert.equal((await run('inactive-near')).status, 'succeeded');
     assert.equal((await publications()).value[0].verifiedGapPairs, 0);
     mode = 'conflicting';
     assert.equal((await run('conflict')).status, 'succeeded');

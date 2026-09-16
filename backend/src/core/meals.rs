@@ -113,13 +113,8 @@ pub struct Meal {
     pub id: String,
     pub start: i64,
     pub end: Option<i64>,
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Delivery {
-    pub id: String,
-    pub stop_id: String,
-    pub time: i64,
+    pub last_delivery: Option<i64>,
+    pub first_delivery: Option<i64>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -132,7 +127,6 @@ pub struct Itinerary {
     pub route_complete: bool,
     pub delivery_coverage: Coverage,
     pub meals: Vec<Meal>,
-    pub deliveries: Vec<Delivery>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -176,7 +170,6 @@ impl Capture {
         let valid_time =
             |time: i64| time >= start && time < end && time <= self.finished_at + 60000;
         let mut ids = HashSet::new();
-        let mut events = 0;
         for route in &self.itineraries {
             ensure(
                 token(&route.id)
@@ -190,13 +183,11 @@ impl Capture {
             ensure(
                 route.observed_at >= self.started_at
                     && route.observed_at <= self.finished_at
-                    && route.meals.len() <= 16
-                    && route.deliveries.len() <= 2000,
+                    && route.meals.len() <= 16,
                 "invalid_cortex_capture",
                 502,
             )?;
             let mut meal_ids = HashSet::new();
-            let mut event_ids = HashSet::new();
             let mut ordered = route.meals.iter().collect::<Vec<_>>();
             ordered.sort_by_key(|meal| meal.start);
             for (index, meal) in ordered.iter().enumerate() {
@@ -212,6 +203,17 @@ impl Capture {
                         502,
                     )?;
                 }
+                ensure(
+                    meal.last_delivery
+                        .is_none_or(|time| valid_time(time) && time <= meal.start)
+                        && meal.first_delivery.is_none_or(|time| {
+                            valid_time(time) && meal.end.is_some_and(|end| time >= end)
+                        })
+                        && (route.delivery_coverage == Coverage::Complete
+                            || (meal.last_delivery.is_none() && meal.first_delivery.is_none())),
+                    "invalid_cortex_delivery_boundary",
+                    502,
+                )?;
                 if index > 0 {
                     ensure(
                         ordered[index - 1].end.is_some_and(|end| end <= meal.start),
@@ -220,28 +222,17 @@ impl Capture {
                     )?;
                 }
             }
-            for event in &route.deliveries {
-                ensure(
-                    token(&event.id)
-                        && token(&event.stop_id)
-                        && event_ids.insert(&event.id)
-                        && valid_time(event.time),
-                    "invalid_cortex_delivery",
-                    502,
-                )?;
-            }
-            events += route.deliveries.len();
         }
-        ensure(events <= 100000, "invalid_cortex_capture", 502)
+        Ok(())
     }
 }
-struct Boundaries<'a> {
-    prior: Option<&'a Delivery>,
-    next: Option<&'a Delivery>,
+struct Boundaries {
+    prior: Option<i64>,
+    next: Option<i64>,
     before: &'static str,
     after: &'static str,
 }
-fn boundaries<'a>(route: &'a Itinerary, meal: &Meal) -> Boundaries<'a> {
+fn boundaries(route: &Itinerary, meal: &Meal) -> Boundaries {
     if route.delivery_coverage != Coverage::Complete {
         return Boundaries {
             prior: None,
@@ -254,18 +245,8 @@ fn boundaries<'a>(route: &'a Itinerary, meal: &Meal) -> Boundaries<'a> {
             },
         };
     }
-    let prior = route
-        .deliveries
-        .iter()
-        .filter(|e| e.time <= meal.start)
-        .max_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
-    let next = meal.end.and_then(|end| {
-        route
-            .deliveries
-            .iter()
-            .filter(|e| e.time >= end)
-            .min_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)))
-    });
+    let prior = meal.last_delivery;
+    let next = meal.first_delivery;
     Boundaries {
         prior,
         next,
@@ -309,14 +290,13 @@ impl Store {
             let id=super::crypto::id("pub")?;
             let meals=capture.itineraries.iter().map(|r|r.meals.len()).sum::<usize>();
             let gaps=capture.itineraries.iter().flat_map(|r|r.meals.iter().map(move|m|boundaries(r,m))).filter(|b|b.prior.is_some()&&b.next.is_some()).count();
-            db.exec("INSERT INTO meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,2)",params![id,job,expected.date,expected.station,expected.service_area_id,expected.provider,expected.timezone,at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,meals as i64,gaps as i64])?;
+            db.exec("INSERT INTO meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,3)",params![id,job,expected.date,expected.station,expected.service_area_id,expected.provider,expected.timezone,at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,meals as i64,gaps as i64])?;
             for route in &capture.itineraries {
                 let state=if route.meals.is_empty(){"none_recorded"}else if route.meals.iter().any(|m|m.end.is_none()){"in_progress"}else{"recorded"};
                 db.exec("INSERT INTO meal_itineraries VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,route.transporter_id,route.driver,route.route,at(route.observed_at),route.route_complete,if route.delivery_coverage==Coverage::Complete{"complete"}else{"unavailable"},state])?;
-                for event in &route.deliveries {db.exec("INSERT INTO meal_delivery_events VALUES (?,?,?,?,?)",params![id,route.id,event.id,event.stop_id,at(event.time)])?;}
                 for meal in &route.meals {
                     let b=boundaries(route,meal);
-                    db.exec("INSERT INTO meal_breaks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",params![id,route.id,meal.id,at(meal.start),meal.end.map(at),meal.end.map(|e|(e-meal.start)/1000),b.prior.map(|e|&e.id),b.next.map(|e|&e.id),b.prior.map(|e|(meal.start-e.time)/1000),b.next.zip(meal.end).map(|(e,end)|(e.time-end)/1000),b.before,b.after])?;
+                    db.exec("INSERT INTO meal_records(publication_id,itinerary_id,meal_id,last_delivery_at,started_at,ended_at,first_delivery_at,before_status,after_status) VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,meal.id,b.prior.map(at),at(meal.start),meal.end.map(at),b.next.map(at),b.before,b.after])?;
                 }
             }
             if let Some(previous)=previous {db.exec("UPDATE meal_publications SET active=0 WHERE id=?",[s(&previous,"id")])?;}
@@ -361,19 +341,9 @@ pub fn fixture(scope: &Scope) -> Capture {
                 id: "meal-1".into(),
                 start,
                 end: Some(start + 1800000),
+                last_delivery: Some(start - 300000),
+                first_delivery: Some(start + 2100000),
             }],
-            deliveries: vec![
-                Delivery {
-                    id: "before".into(),
-                    stop_id: "stop-1".into(),
-                    time: start - 300000,
-                },
-                Delivery {
-                    id: "after".into(),
-                    stop_id: "stop-2".into(),
-                    time: start + 2100000,
-                },
-            ],
         }],
     }
 }
