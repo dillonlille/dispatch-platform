@@ -336,11 +336,34 @@ mod tests {
         let (_root, store, id) = legacy();
         store.migrate_collector_storage(&id).unwrap();
         let before = snapshot(&store.collector(&id, Provider::Paycom).unwrap());
+        let pulse = db::private_dir(
+            &store
+                .area(&id, "state")
+                .unwrap()
+                .join("browsers/paycom-browseros/config/pulse"),
+        )
+        .unwrap();
+        symlink(
+            "/tmp/obsolete-browser-runtime",
+            pulse.join("dispatch-server-runtime"),
+        )
+        .unwrap();
         let external = tempfile::tempdir().unwrap();
         let backup = external.path().join("backup");
         operations::backup(&store.config, &backup).unwrap();
         let restored = external.path().join("restored");
         operations::restore(&backup, &restored).unwrap();
+        assert!(
+            restored
+                .join("dsps")
+                .join(&id)
+                .join("state/browsers/paycom-browseros/config/pulse/dispatch-server-runtime")
+                .symlink_metadata()
+                .is_err()
+        );
+        // Unknown symlinks still fail closed; only known browser runtime links skip.
+        symlink("/tmp/not-profile-data", pulse.join("unexpected-link")).unwrap();
+        assert!(operations::backup(&store.config, &external.path().join("unsafe-backup")).is_err());
         let mut config = store.config.clone();
         config.root = restored;
         let reopened = Store::initialize(config).unwrap();

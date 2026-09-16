@@ -71,7 +71,9 @@ Do not run migration through a request or while database workers are serving.
 
 The offline backup command already recursively snapshots every `.sqlite` file in
 `data/` and `dsps/`, and includes DSP secrets and browser state. It therefore
-captures both layouts and nested provider databases. Restore verifies checksums,
+captures both layouts and nested provider databases. Disposable PulseAudio runtime
+symlinks inside browser profiles are excluded; unexpected symlinks still fail the
+backup. Restore verifies checksums,
 revokes sessions and cancels pending jobs. Restored legacy backups migrate on
 startup once migration is enabled. Configuration remains separately backed up.
 
