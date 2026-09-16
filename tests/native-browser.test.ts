@@ -95,3 +95,100 @@ test(
     assert.equal(fs.statSync(profile(north.id)).mode & 0o077, 0);
   },
 );
+
+test(
+  'Paycom overlaps at most two pages, handles an odd roster, and rejects cross-employee data',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.codes = ['AA01', 'BB02', 'CC03', 'DD04', 'EE05'];
+    f.state.timecardDelayMs = 600;
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    const run = async (requestId: string, expected: string) => {
+      const queued = await owner.post('/api/dsp/jobs', { requestId });
+      assert.equal(queued.status, 202, queued.body);
+      await until(async () => {
+        const job = (await owner.get('/api/dsp/jobs')).value.find(
+          (j: { id: string }) => j.id === queued.value.id,
+        );
+        if (!['succeeded', 'failed', 'cancelled'].includes(job.status)) return false;
+        assert.equal(job.status, expected, JSON.stringify(job));
+        return true;
+      }, 30000);
+      await until(
+        async () => (await owner.get('/api/platform/health')).value.browsers.active === 0,
+      );
+    };
+    await run('parallel-complete', 'succeeded');
+    assert.equal(
+      f.state.timecardsPeak,
+      2,
+      'Two real document requests must overlap, with a hard limit of two',
+    );
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 5);
+    const publication = () =>
+      f.database(
+        `dsps/${dsp.id}/data/dispatch.sqlite`,
+        (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
+      );
+    const id = publication();
+    const cards = f.database(`dsps/${dsp.id}/data/dispatch.sqlite`, (db) =>
+      db
+        .prepare(
+          'SELECT employee_code code,count(*) count,sum(hours) hours FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1) GROUP BY employee_code ORDER BY employee_code',
+        )
+        .all(),
+    );
+    assert.deepEqual(
+      cards.map((row) => ({ ...row })),
+      f.state.codes.map((code) => ({ code, count: 14, hours: 16 })),
+    );
+    f.state.wrongIdentity = true;
+    await run('parallel-wrong-employee', 'failed');
+    assert.equal(
+      publication(),
+      id,
+      'A failure in either tab must preserve the previous complete publication',
+    );
+    assert.equal(f.state.timecardsPeak, 2);
+    assert.equal(f.events.filter((e) => e === 'primary').length, 1);
+
+    f.state.wrongIdentity = false;
+    f.state.timecardStatus = 429;
+    const throttled = await owner.post('/api/dsp/jobs', { requestId: 'parallel-throttled' });
+    await until(async () => {
+      const job = (await owner.get('/api/dsp/jobs')).value.find(
+        (j: { id: string }) => j.id === throttled.value.id,
+      );
+      return job.status === 'queued' && job.error === 'provider_unavailable';
+    }, 15000);
+    assert.equal(publication(), id);
+    assert.equal(
+      (await owner.post(`/api/dsp/jobs/${throttled.value.id}/cancel`, {})).value.status,
+      'cancelled',
+    );
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+
+    f.state.timecardStatus = 200;
+    f.state.timecardDelayMs = 3000;
+    const cancelled = await owner.post('/api/dsp/jobs', { requestId: 'parallel-cancelled' });
+    await until(async () => f.state.timecardsActive === 2);
+    assert.equal(
+      (await owner.post(`/api/dsp/jobs/${cancelled.value.id}/cancel`, {})).value.status,
+      'cancelled',
+    );
+    await until(
+      async () =>
+        (await owner.get('/api/platform/health')).value.browsers.active === 0 &&
+        f.state.timecardsActive === 0,
+    );
+    assert.equal(publication(), id);
+  },
+);

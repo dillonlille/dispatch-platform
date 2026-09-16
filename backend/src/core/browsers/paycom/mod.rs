@@ -2,6 +2,10 @@
 //! belong to Rust; JavaScript is restricted to provider page operations.
 mod attempt;
 mod collection;
+mod page;
+use page::Page;
+#[cfg(test)]
+mod benchmark;
 use super::browseros;
 use crate::core::{
     Error, Result,
@@ -33,13 +37,11 @@ pub struct Driver {
     pub browser: browseros::Session,
     origin: String,
     fixture: bool,
-    page: String,
-    target: String,
+    page: Page,
     attempts: attempt::Attempts,
     diagnostics: std::path::PathBuf,
     credentials: Value,
     assistance: Option<Assistance>,
-    world: std::sync::Mutex<Option<(String, String, i64)>>,
 }
 impl Driver {
     pub async fn new(
@@ -50,86 +52,32 @@ impl Driver {
         let parent = profile
             .parent()
             .ok_or_else(|| Error::new("unsafe_storage_path", 500))?;
+        let origin = fixture
+            .unwrap_or("https://www.paycomonline.net")
+            .trim_end_matches('/')
+            .to_owned();
         Ok(Self {
+            page: Page::empty(browser.clone(), origin.clone()),
             browser,
-            origin: fixture
-                .unwrap_or("https://www.paycomonline.net")
-                .trim_end_matches('/')
-                .into(),
+            origin,
             fixture: fixture.is_some(),
-            page: String::new(),
-            target: String::new(),
             attempts: attempt::Attempts::open(&parent.join("paycom-attempt.json"))?,
             diagnostics: parent.join("paycom-diagnostics.json"),
             credentials: Value::Null,
             assistance: None,
-            world: std::sync::Mutex::new(None),
         })
     }
     async fn command(&self, method: &str, params: Value) -> Result<Value> {
-        self.browser.command(method, params, Some(&self.page)).await
+        self.page.command(method, params).await
     }
     async fn frame(&self) -> Result<Value> {
-        Ok(self.command("Page.getFrameTree", json!({})).await?["frameTree"]["frame"].clone())
+        self.page.frame().await
     }
     fn trusted(&self, value: &str) -> bool {
-        url::Url::parse(value).is_ok_and(|url| {
-            url.origin().ascii_serialization() == self.origin
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.fragment().is_none()
-        })
+        self.page.trusted(value)
     }
     async fn evaluate(&self, expression: &str) -> Result<Value> {
-        let frame = self.frame().await?;
-        ensure(
-            self.trusted(s(&frame, "url")),
-            "manual_verification_required",
-            409,
-        )?;
-        let cached = self.world.lock().expect("page world").clone();
-        let context = if let Some((id, loader, context)) = cached
-            .filter(|(id, loader, _)| id == s(&frame, "id") && loader == s(&frame, "loaderId"))
-        {
-            let _ = (id, loader);
-            context
-        } else {
-            let world = self
-                .command(
-                    "Page.createIsolatedWorld",
-                    json!({"frameId":frame["id"],"worldName":"dispatch-paycom"}),
-                )
-                .await?;
-            ensure(
-                world.get("navigationPending").is_none(),
-                "browser_navigation_pending",
-                502,
-            )?;
-            let context = world["executionContextId"]
-                .as_i64()
-                .ok_or_else(|| Error::new("browser_navigation_pending", 502))?;
-            *self.world.lock().expect("page world") = Some((
-                s(&frame, "id").into(),
-                s(&frame, "loaderId").into(),
-                context,
-            ));
-            context
-        };
-        let value=self.command("Runtime.evaluate",json!({"expression":expression,"contextId":context,"returnByValue":true,"awaitPromise":true})).await?;
-        if value.get("navigationPending").is_some() {
-            *self.world.lock().expect("page world") = None;
-        }
-        ensure(
-            value.get("navigationPending").is_none(),
-            "browser_navigation_pending",
-            502,
-        )?;
-        ensure(
-            value.get("exceptionDetails").is_none(),
-            "browser_script_failed",
-            502,
-        )?;
-        Ok(value["result"]["value"].clone())
+        self.page.evaluate(expression).await
     }
     async fn script(&self, mut input: Value) -> Result<Value> {
         input["origin"] = json!(self.origin);
@@ -137,27 +85,17 @@ impl Driver {
             .await
     }
     async fn new_page(&mut self) -> Result<()> {
-        let target = self
-            .browser
-            .command("Target.createTarget", json!({"url":"about:blank"}), None)
-            .await?;
-        let id = s(&target, "targetId").to_owned();
-        let attached = self
+        let page = Page::open(self.browser.clone(), self.origin.clone()).await?;
+        let window = self
             .browser
             .command(
-                "Target.attachToTarget",
-                json!({"targetId":id,"flatten":true}),
+                "Browser.getWindowForTarget",
+                json!({"targetId":page.target}),
                 None,
             )
             .await?;
-        let window = self
-            .browser
-            .command("Browser.getWindowForTarget", json!({"targetId":id}), None)
-            .await?;
         self.browser.command("Browser.setWindowBounds",json!({"windowId":window["windowId"],"bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),None).await?;
-        self.target = id;
-        self.page = s(&attached, "sessionId").into();
-        self.command("Page.enable", json!({})).await?;
+        self.page = page;
         self.command("Page.bringToFront", json!({})).await?;
         let targets = self
             .browser
@@ -165,7 +103,7 @@ impl Driver {
             .await?;
         if let Some(targets) = targets["targetInfos"].as_array() {
             for target in targets {
-                if s(target, "type") == "page" && s(target, "targetId") != self.target {
+                if s(target, "type") == "page" && s(target, "targetId") != self.page.target {
                     self.browser
                         .command(
                             "Target.closeTarget",
@@ -179,17 +117,7 @@ impl Driver {
         Ok(())
     }
     async fn navigate(&self, path: &str) -> Result<()> {
-        let value = self
-            .command(
-                "Page.navigate",
-                json!({"url":format!("{}{path}",self.origin)}),
-            )
-            .await?;
-        ensure(
-            value.get("errorText").is_none(),
-            "provider_unavailable",
-            502,
-        )?;
+        self.page.navigate(path).await?;
         sleep(Duration::from_millis(150)).await;
         Ok(())
     }
@@ -408,7 +336,7 @@ impl Driver {
             credentials
         };
         self.assistance = None;
-        if self.page.is_empty() {
+        if self.page.id.is_empty() {
             self.new_page().await?;
         }
         self.navigate(LANDING).await?;
