@@ -69,9 +69,13 @@ impl Drop for Egress {
 impl Egress {
     pub fn start(run: &Path, fixture: Option<(String, u16)>) -> Result<Self> {
         let policy = match fixture {
-            Some((_, port)) => NetworkPolicy::Fixture(
-                std::num::NonZeroU16::new(port).ok_or_else(|| Error::new("egress_denied", 403))?,
-            ),
+            Some((host, port)) => {
+                ensure(host == "fixture.dispatch.invalid", "egress_denied", 403)?;
+                NetworkPolicy::Fixture(
+                    std::num::NonZeroU16::new(port)
+                        .ok_or_else(|| Error::new("egress_denied", 403))?,
+                )
+            }
             None => NetworkPolicy::Paycom,
         };
         Self::start_with_policy(run, policy)

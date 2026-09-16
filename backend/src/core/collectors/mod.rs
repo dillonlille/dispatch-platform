@@ -21,9 +21,15 @@ pub enum Provider {
 impl Provider {
     pub const ALL: &[Self] = &[Self::Paycom, Self::Cortex];
     pub fn parse(value: &str) -> Result<Self> {
-        Self::ALL.iter().copied().find(|p| p.id() == value).ok_or_else(|| super::Error::new("not_found",404))
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|p| p.id() == value)
+            .ok_or_else(|| super::Error::new("not_found", 404))
     }
-    pub fn key(self, dsp: &str) -> String { format!("{dsp}:{}",self.id()) }
+    pub fn key(self, dsp: &str) -> String {
+        format!("{dsp}:{}", self.id())
+    }
     pub fn id(self) -> &'static str {
         match self {
             Self::Paycom => "paycom",
@@ -66,7 +72,11 @@ impl Provider {
                 "paycom-diagnostics.json",
                 ".paycom-browseros.browseros.lock",
             ],
-            Self::Cortex => &["cortex-browseros", "cortex-attempt.json", ".cortex-browseros.browseros.lock"],
+            Self::Cortex => &[
+                "cortex-browseros",
+                "cortex-attempt.json",
+                ".cortex-browseros.browseros.lock",
+            ],
         }
     }
 }
@@ -102,6 +112,11 @@ pub fn database_path(dsp_root: &Path, provider: Provider) -> Result<PathBuf> {
     let path = if split {
         dsp_root.join("data").join(provider.relative_path())
     } else {
+        ensure(
+            provider == Provider::Paycom,
+            "collector_not_initialized",
+            409,
+        )?;
         core
     };
     db::private_file(&path, false)?;
@@ -172,15 +187,37 @@ impl Store {
     fn initialize_cortex(&self, id: &str) -> Result<()> {
         let core = self.dsp(id)?;
         let marker = core.setting("storage.cortex", Value::Null)?;
-        if marker == json!(1) { self.collector(id, Provider::Cortex)?; return Ok(()); }
+        if marker == json!(1) {
+            self.collector(id, Provider::Cortex)?;
+            return Ok(());
+        }
         ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
         let provider = Provider::Cortex;
         let data = self.area(id, "data")?;
         db::private_dir(&data.join(provider.id()))?;
-        let schema = format!("{}\nINSERT INTO storage_identity VALUES ('{}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');", provider.schema(),id,db::iso());
-        let target = Db::open(&data.join(provider.relative_path()), &schema, provider.version(), true)?;
-        identity(&target,id,provider)?;
-        ensure(target.one("SELECT provider FROM connections WHERE provider='cortex'",[])?.is_some(),"collector_storage_invalid",503)?;
+        let schema = format!(
+            "{}\nINSERT INTO storage_identity VALUES ('{}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');",
+            provider.schema(),
+            id,
+            db::iso()
+        );
+        let target = Db::open(
+            &data.join(provider.relative_path()),
+            &schema,
+            provider.version(),
+            true,
+        )?;
+        identity(&target, id, provider)?;
+        ensure(
+            target
+                .one(
+                    "SELECT provider FROM connections WHERE provider='cortex'",
+                    [],
+                )?
+                .is_some(),
+            "collector_storage_invalid",
+            503,
+        )?;
         core.set("storage.cortex", &json!(1))
     }
 
@@ -458,6 +495,54 @@ mod tests {
             before
         );
         assert_eq!(reopened.get_dsp(&id).unwrap()["status"], "suspended");
+    }
+    #[test]
+    fn cortex_storage_recovers_initialization_and_preserves_provider_identity() {
+        let (_root, store, id) = legacy();
+        store.migrate_collector_storage(&id).unwrap();
+        let before = snapshot(&store.collector(&id, Provider::Paycom).unwrap());
+        store
+            .collector(&id, Provider::Cortex)
+            .unwrap()
+            .exec(
+                "UPDATE connections SET enabled=1,status='ready',revision=8",
+                [],
+            )
+            .unwrap();
+        // A crash after creating the database but before writing the core marker.
+        store
+            .dsp(&id)
+            .unwrap()
+            .exec("DELETE FROM settings WHERE key='storage.cortex'", [])
+            .unwrap();
+        store.migrate_collector_storage(&id).unwrap();
+        assert_eq!(
+            store.connection_for(&id, Provider::Cortex).unwrap()["status"],
+            "ready"
+        );
+        assert_eq!(
+            snapshot(&store.collector(&id, Provider::Paycom).unwrap()),
+            before
+        );
+        assert!(Provider::from_job_kind("cortex.collect").is_err());
+        store
+            .collector(&id, Provider::Cortex)
+            .unwrap()
+            .exec("UPDATE storage_identity SET dsp_id='another-dsp'", [])
+            .unwrap();
+        assert!(store.migrate_collector_storage(&id).is_err());
+    }
+    #[test]
+    fn missing_initialized_cortex_database_is_not_recreated() {
+        let (_root, store, id) = legacy();
+        store.migrate_collector_storage(&id).unwrap();
+        let path =
+            database_path(&store.config.root.join("dsps").join(&id), Provider::Cortex).unwrap();
+        let config = store.config.clone();
+        drop(store);
+        std::fs::remove_file(&path).unwrap();
+        assert!(Store::initialize(config).is_err());
+        assert!(!path.exists());
     }
     #[test]
     fn resetting_paycom_browser_state_preserves_other_collectors_and_business_data() {

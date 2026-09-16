@@ -280,6 +280,11 @@ impl Session {
         job: &str,
         owner: &str,
     ) -> Result<Value> {
+        ensure(
+            self.provider == Provider::Paycom,
+            "unsupported_collector",
+            409,
+        )?;
         ensure(self.ready(), "verification_required", 409)?;
         ensure(
             !self.collecting.swap(true, Ordering::SeqCst),
@@ -422,7 +427,6 @@ impl Store {
             provider.id(),
         )
     }
-
 }
 impl State {
     pub async fn expire_browsers(self: &Arc<Self>) {

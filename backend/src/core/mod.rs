@@ -31,6 +31,14 @@ pub struct State {
 impl State {
     pub fn new(config: config::Config) -> Result<Arc<Self>> {
         let store = db::Store::initialize(config.clone())?;
+        for dsp in store.platform.all(
+            "SELECT id FROM dsps WHERE status IN ('active','suspended')",
+            [],
+        )? {
+            for provider in collectors::Provider::ALL {
+                store.collector(db::s(&dsp, "id"), *provider)?.exec("UPDATE connections SET status='error',error='verification_expired' WHERE status IN ('signing_in','needs_verification')",[])?;
+            }
+        }
         Ok(Arc::new(Self {
             key: store.key.clone(),
             config,
