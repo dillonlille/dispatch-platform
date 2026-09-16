@@ -104,6 +104,9 @@ The API checks in `tests/paycom-worker.test.ts` and `tests/native-browser.test.t
 exercise native X11 PIN input, rejection cooldowns across restart, explicit CAPTCHA
 continuation, cookie reuse, complete roster/timecard collection, separate DSPs,
 and preservation of the prior publication when a roster or total is incomplete.
+They also prove that at most two timecard document requests overlap, an odd-sized
+roster completes, cross-employee responses fail, throttling schedules backoff, and
+cancelling a job closes both in-flight pages.
 They run as part of `npm run test:browseros` during full CI checks. Synthetic results
 do not establish real provider latency or measured memory savings.
 
@@ -126,7 +129,15 @@ only be submitted again in the same document with the same values.
 Collection closes credential tabs, captures the Timecard Search roster request,
 selects the current fortnight using the DSP timezone, and verifies exact employee
 membership. It validates each timecard's identity, dates, layout and weekly totals
-before Rust reconciles daily hours. Failed or cancelled jobs preserve the last
+before Rust reconciles daily hours. Two tabs load timecards in bounded pairs within
+the same browser and DSP session. Each tab owns its execution-context cache. A
+scripted navigation releases the serialized command channel while Paycom responds;
+the reader then requires a new document, the exact employee URL, a fully loaded
+table and all existing validation. Collection replaces each tab's history entry so
+completed employee pages cannot accumulate in the back/forward cache. Credentials
+remain confined to authentication.
+Throttling or server errors abort the pair and use the existing bounded job retry
+backoff. Failed or cancelled jobs preserve the last
 successful publication. One persistent browser serves the flow without a Node
 worker, Playwright connection, or second browser launch.
 
@@ -136,9 +147,33 @@ The artifact still includes archived Node worker files for compatibility with th
 existing artifact inventory/updater; DSP authentication and collection do not run
 them. Removing those files requires a coordinated artifact/updater change.
 
+## Live collection measurements
+
+An ignored operator benchmark can collect from an explicitly selected, idle DSP
+without publishing the result. It uses that DSP's saved credentials and profile,
+compares daily records with the active publication, and prints only aggregate
+timing, counts and process-tree RSS. Live provider changes may produce differences;
+the benchmark re-reads changed employees through the original sequential path and
+fails if those fresh records disagree. RSS sums shared
+pages across processes and is not a measure of unique physical memory.
+
+```bash
+DISPATCH_BENCHMARK_DSP=/absolute/environment/dsps/dsp_selected \
+DISPATCH_BENCHMARK_WORKER=/absolute/environment/live/.build/services/rust/dispatch-backend \
+DISPATCH_BENCHMARK_RUNS=/absolute/private/temporary-runs \
+DISPATCH_BENCHMARK_TIMEZONE=UTC \
+cargo test --locked --lib measure_live_collection -- --ignored --nocapture
+```
+
+Use the DSP's configured timezone. The profile lease rejects concurrent use of
+that same profile. The benchmark does not solve CAPTCHA or change credentials;
+an authentication challenge stops the measurement. Remove its empty runs directory
+afterward. Full API job timings include authentication and publication overhead
+that this collector-only measurement excludes.
+
 ## Remaining work
 
-- Verify real Paycom accounts and benchmark complete collection and recovery.
+- Extend real-provider acceptance to additional DSP account variants.
 - Remove the unused Node worker artifact payload through an updater-compatible change.
 - If requested, add a separately enabled MCP gateway with DSP authorization and
   exclusive control handoffs between scripts, humans, and optional agents.

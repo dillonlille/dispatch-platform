@@ -1,0 +1,169 @@
+//! Operator-only measurements. Never run by CI or print provider records.
+use super::*;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
+fn env_path(name: &str) -> Result<PathBuf> {
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::new("benchmark_configuration_required", 400))
+}
+fn rss_tree(root: u32) -> u64 {
+    let mut processes = Vec::new();
+    for entry in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(status) = std::fs::read_to_string(entry.path().join("status")) else {
+            continue;
+        };
+        let field = |prefix: &str| {
+            status
+                .lines()
+                .find_map(|l| l.strip_prefix(prefix))
+                .and_then(|s| s.split_whitespace().next())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        processes.push((pid, field("PPid:") as u32, field("VmRSS:")));
+    }
+    let mut ids = std::collections::HashSet::from([root]);
+    loop {
+        let before = ids.len();
+        for &(pid, parent, _) in &processes {
+            if ids.contains(&parent) {
+                ids.insert(pid);
+            }
+        }
+        if ids.len() == before {
+            break;
+        }
+    }
+    processes
+        .iter()
+        .filter(|(pid, _, _)| ids.contains(pid))
+        .map(|(_, _, rss)| rss)
+        .sum()
+}
+#[tokio::test]
+#[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
+async fn measure_live_collection() -> Result<()> {
+    let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
+    let profile = dsp.join("state/browsers/paycom-browseros");
+    let runtime = browseros::Runtime::new(
+        std::path::Path::new("/opt/dispatch-browseros/0.50.5/browseros"),
+        std::path::Path::new("/usr/local/libexec/dispatch-dev/bwrap"),
+        &env_path("DISPATCH_BENCHMARK_WORKER")?,
+        &env_path("DISPATCH_BENCHMARK_RUNS")?,
+        1,
+    )?;
+    let browser = runtime
+        .start(
+            &profile,
+            browseros::Mode::Windowed,
+            browseros::NetworkPolicy::Paycom,
+        )
+        .await?;
+    let mut driver = Driver::new(browser, &profile, None).await?;
+    let peak = Arc::new(AtomicU64::new(0));
+    let counter = peak.clone();
+    let pid = driver.browser.process_id();
+    let sampler = tokio::spawn(async move {
+        loop {
+            counter.fetch_max(rss_tree(pid), Ordering::Relaxed);
+            sleep(Duration::from_millis(250)).await;
+        }
+    });
+    let result = async {
+        let secrets = dsp.join("secrets");
+        let credentials = crate::core::crypto::decrypt(&db::key_file(&secrets.join("vault.key"))?, &format!("{}:paycom:2",dsp.file_name().unwrap().to_str().unwrap()), &std::fs::read_to_string(secrets.join("paycom.enc"))?)?;
+        let auth=driver.authenticate(credentials,false).await?;
+        ensure(auth["type"]=="ready","benchmark_verification_required",409)?;
+        driver.credentials=Value::Null;
+        let timezone=std::env::var("DISPATCH_BENCHMARK_TIMEZONE").map_err(|_|Error::new("benchmark_configuration_required",400))?;
+        let started=Instant::now();
+        let data=driver.collect(&timezone,|progress,_| async move {
+            if progress % 10 == 0 { eprintln!("BENCH {}",json!({"progress":progress})); }
+            Ok(())
+        }).await?;
+        let elapsed=started.elapsed().as_millis();
+        let collection_peak=peak.load(Ordering::Relaxed);
+        let database=rusqlite::Connection::open_with_flags(dsp.join("data/dispatch.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut expected=std::collections::BTreeMap::new();
+        let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
+        for value in statement.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,f64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
+            let (code,date,hours,status,punches)=value?;
+            expected.insert((code.clone(),date.clone()),json!({"employeeCode":code,"date":date,"hours":hours,"status":status,"punches":serde_json::from_str::<Value>(&punches)?}));
+        }
+        let records=data["timecards"].as_array().unwrap();
+        let mut equal=0; let mut changed=0; let mut added=0;
+        let mut differences=std::collections::BTreeSet::new();
+        for card in records {
+            match expected.get(&(s(card,"employeeCode").to_owned(),s(card,"date").to_owned())) {
+                Some(old) if old==card => equal+=1,
+                Some(_) => {changed+=1; differences.insert(s(card,"employeeCode").to_owned());},
+                None => added+=1,
+            }
+        }
+        eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak}));
+
+        if !differences.is_empty() {
+            driver.new_page().await?;
+            let from=s(&data,"from"); let to=s(&data,"to");
+            let day=chrono::NaiveDate::parse_from_str(from,"%Y-%m-%d").map_err(|_|Error::new("invalid_period",409))?;
+            let period=json!({"start":from,"end":to,"key":format!("{from}_{to}"),"dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
+            let mut confirmed=0;
+            for code in &differences {
+                let reference=reference_timecard(&driver,code,&period).await?;
+                let actual=records.iter().filter(|card|s(card,"employeeCode")==code).cloned().collect::<Vec<_>>();
+                ensure(actual==reference,"benchmark_reference_mismatch",409)?;
+                confirmed+=1;
+            }
+            eprintln!("BENCH {}",json!({"changedEmployeesConfirmedBySequentialReads":confirmed}));
+        }
+        Ok(())
+    }.await;
+    sampler.abort();
+    let exit = driver.browser.close().await;
+    eprintln!(
+        "BENCH {}",
+        json!({"peakRssKiB":peak.load(Ordering::Relaxed),"supervisorReaped":exit.supervisor_reaped})
+    );
+    result
+}
+
+// Preserve the original serialized navigation/read path as an independent live
+// reference. This exists only in the ignored operator benchmark, never runtime.
+async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Result<Vec<Value>> {
+    let path = format!(
+        "/v4/cl/web.php/timecard/index?firstrefno={code}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+        s(period, "key")
+    );
+    let source = format!("{}{path}", driver.origin);
+    driver.navigate(&path).await?;
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        ensure(Instant::now() < deadline, "provider_timeout", 504)?;
+        let frame = driver.frame().await?;
+        if s(&frame,"url")==source && driver.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await?==true {break;}
+        ensure(
+            driver.trusted(s(&frame, "url")),
+            "authentication_failed",
+            409,
+        )?;
+        sleep(Duration::from_millis(200)).await;
+    }
+    let config = json!({"employeeCode":code,"period":period,"sourceUrl":source});
+    let record = driver
+        .evaluate(&format!(
+            "({})({config})",
+            include_str!("timecard.js").trim().trim_end_matches(';')
+        ))
+        .await?;
+    collection::project(&record, code)
+}

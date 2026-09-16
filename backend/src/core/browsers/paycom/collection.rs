@@ -148,7 +148,7 @@ fn hours(value: &Value) -> Option<f64> {
         .as_f64()
         .or_else(|| value["hours"].as_f64())
 }
-fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
+pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
     let error = || Error::new("invalid_timecard_hours", 409);
     let days = record["days"].as_array().ok_or_else(error)?;
     let additional = record["additionalRows"].as_array().ok_or_else(error)?;
@@ -270,7 +270,7 @@ impl Driver {
         let deadline = Instant::now() + Duration::from_secs(60);
         let observed = loop {
             ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-            let event = self.browser.event(&self.page).await?;
+            let event = self.browser.event(&self.page.id).await?;
             if event.is_null() {
                 continue;
             }
@@ -331,41 +331,91 @@ impl Driver {
         self.evaluate("delete globalThis.dispatchRoster").await?;
         let employees = employees(&raw, &codes)?;
         let mut timecards = Vec::with_capacity(employees.len() * 14);
-        for (index, employee) in employees.iter().enumerate() {
+        let second = if employees.len() > 1 {
+            Some(Page::open(self.browser.clone(), self.origin.clone()).await?)
+        } else {
+            None
+        };
+        for (batch, employees) in employees.chunks(2).enumerate() {
+            let first = batch * 2;
             progress(
-                20 + (index * 70 / employees.len()) as i64,
-                format!("Reading timecards ({} of {})", index + 1, employees.len()),
+                20 + (first * 70 / codes.len()) as i64,
+                format!(
+                    "Reading timecards ({}–{} of {})",
+                    first + 1,
+                    first + employees.len(),
+                    codes.len()
+                ),
             )
             .await?;
-            let path = format!(
-                "/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
-                s(employee, "code"),
-                s(&period, "key")
-            );
-            let source = format!("{}{path}", self.origin);
-            self.navigate(&path).await?;
-            let deadline = Instant::now() + Duration::from_secs(120);
-            loop {
-                ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-                let frame = self.frame().await?;
-                if s(&frame,"url")==source && self.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await?==true {break;}
-                ensure(self.trusted(s(&frame, "url")), "authentication_failed", 409)?;
-                sleep(Duration::from_millis(200)).await;
-            }
-            let config =
-                json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
-            let record = self
-                .evaluate(&format!(
-                    "({})({config})",
-                    include_str!("timecard.js").trim().trim_end_matches(';')
-                ))
-                .await?;
-            timecards.extend(project(&record, s(employee, "code"))?);
+            let result = if let [a, b] = employees {
+                let (mut a, b) = tokio::try_join!(
+                    read_timecard(&self.page, &self.origin, a, &period),
+                    read_timecard(
+                        second.as_ref().expect("second collection tab"),
+                        &self.origin,
+                        b,
+                        &period
+                    )
+                )?;
+                a.extend(b);
+                a
+            } else {
+                read_timecard(&self.page, &self.origin, &employees[0], &period).await?
+            };
+            timecards.extend(result);
         }
         Ok(
             json!({"employees":employees,"timecards":timecards,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),
         )
     }
+}
+
+async fn read_timecard(
+    page: &Page,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+) -> Result<Vec<Value>> {
+    let source = format!(
+        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+        s(employee, "code"),
+        s(period, "key")
+    );
+    let previous_loader = page.start_navigation(&source).await?;
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        ensure(Instant::now() < deadline, "provider_timeout", 504)?;
+        let frame = page.frame().await?;
+        if s(&frame, "url") == source && s(&frame, "loaderId") != previous_loader {
+            match page.evaluate("({ready:document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
+                Ok(value) => {
+                    let status=value["status"].as_u64().unwrap_or(0);
+                    ensure(![401,403].contains(&status),"authentication_failed",409)?;
+                    // Abort the pair on throttling/server errors. The existing
+                    // job retry policy supplies bounded exponential backoff.
+                    ensure(status!=429 && status<500,"provider_unavailable",502)?;
+                    if value["ready"]==true { break; }
+                },
+                Err(error) if error.code=="browser_navigation_pending" => (),
+                Err(error) => return Err(error),
+            }
+        }
+        ensure(
+            s(&frame, "url") == "about:blank" || page.trusted(s(&frame, "url")),
+            "authentication_failed",
+            409,
+        )?;
+        sleep(Duration::from_millis(200)).await;
+    }
+    let config = json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
+    let record = page
+        .evaluate(&format!(
+            "({})({config})",
+            include_str!("timecard.js").trim().trim_end_matches(';')
+        ))
+        .await?;
+    project(&record, s(employee, "code"))
 }
 
 #[cfg(test)]

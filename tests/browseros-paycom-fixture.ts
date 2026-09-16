@@ -122,6 +122,12 @@ export async function paycomFixture() {
     mode: '',
     incomplete: false,
     mismatch: false,
+    codes: ['AA01', 'BB02'],
+    timecardDelayMs: 0,
+    timecardsActive: 0,
+    timecardsPeak: 0,
+    wrongIdentity: false,
+    timecardStatus: 200,
     requests: [] as Record<string, unknown>[],
   };
   const server = http.createServer(async (req, res) => {
@@ -200,7 +206,7 @@ export async function paycomFixture() {
     }
     if (url.pathname === '/v4/cl/web.php/timecardsearch/index')
       return html(
-        `${authenticated}<title>Timecard Search</title><p>Employee Status Is Active</p><button>Export</button><script>fetch('/api/cl/timecard-search/employees',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'fixture-token'},body:JSON.stringify(${JSON.stringify(requestBody)})})</script>`,
+        `${authenticated}<title>Timecard Search</title><p>Employee Status Is Active</p><button>Export</button><script>fetch('/api/cl/timecard-search/employees',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'fixture-token'},body:JSON.stringify(${JSON.stringify({ ...requestBody, eeCodes: state.codes })})})</script>`,
       );
     if (url.pathname === '/api/cl/timecard-search/employees' && req.method === 'POST') {
       const body = JSON.parse(text);
@@ -210,12 +216,32 @@ export async function paycomFixture() {
         return res.end();
       }
       res.setHeader('Content-Type', 'application/json');
-      const codes = state.incomplete ? ['AA01'] : ['AA01', 'BB02'];
+      const codes = state.incomplete ? ['AA01'] : state.codes;
       return res.end(JSON.stringify({ eeCodes: codes, employees: codes.map(employee) }));
     }
     if (url.pathname === '/v4/cl/web.php/timecard/index') {
       events.push('timecard');
-      return html(timecard(url, state.mismatch));
+      state.timecardsActive++;
+      state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
+      try {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, state.timecardDelayMs);
+          res.once('close', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        if (res.destroyed) return;
+        if (state.timecardStatus !== 200 && url.searchParams.get('firstrefno') === 'BB02') {
+          res.writeHead(state.timecardStatus);
+          return res.end('Provider temporarily unavailable');
+        }
+        if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
+          url.searchParams.set('firstrefno', 'AA01');
+        return html(timecard(url, state.mismatch));
+      } finally {
+        state.timecardsActive--;
+      }
     }
     res.writeHead(404);
     res.end();
