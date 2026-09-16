@@ -30,6 +30,19 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: rustup show active-toolchain
+      - name: Install isolated BrowserOS proof runtime
+        if: steps.validation.outputs.mode == 'full'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2t64 libgbm1
+          sudo install -d -m 755 /usr/local/libexec/dispatch-dev
+          sudo install -m 755 /usr/bin/bwrap /usr/local/libexec/dispatch-dev/bwrap
+          if command -v apparmor_parser >/dev/null; then
+            sudo apparmor_parser -r tooling/host/dispatch-dev-bwrap.apparmor
+          fi
+          # Hosted runners allow writes to /opt; the browser needs trusted parents.
+          sudo install -d -o root -g root -m 755 /opt
+          sudo python3 tooling/install-browseros.py
       - name: Validate and build
         run: npm run check:ci -- ${{ steps.validation.outputs.mode }}
       - name: Record PR validation

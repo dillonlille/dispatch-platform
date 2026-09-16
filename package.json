@@ -20,6 +20,7 @@
     "test:smoke": "tsx tooling/browser-check.ts --smoke-only",
     "test:native": "DISPATCH_TEST_NATIVE=1 tsx --test --test-concurrency=1 tests/native-browser.test.ts tests/paycom-native.test.ts tests/paycom-worker.test.ts",
     "test:browser-host": "tsx tooling/browser-preflight.ts",
+    "test:browseros": "python3 tooling/browseros-check.py",
     "test:artifact": "DISPATCH_TEST_ARTIFACT=1 tsx --test tests/artifact.test.ts",
     "verify": "npm run check && npm test && npm run build",
     "dispatch": "tsx tooling/cli.ts",

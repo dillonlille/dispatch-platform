@@ -77,6 +77,10 @@ screenshots. Remove only your own `/tmp` artifacts.
 
 ## Verification
 
+The opt-in [BrowserOS runtime proof](docs/BROWSEROS.md) prepares the next browser
+worker migration. Full checks require its separately installed pinned browser and
+run `npm run test:browseros`; the current Paycom runtime is unchanged.
+
 Keep local feedback proportional to the change. For a cosmetic fix, build once,
 inspect the affected flow on desktop/mobile, and reuse the existing browser tests;
 do not write a new browser harness or repeat the full suite already running in CI
