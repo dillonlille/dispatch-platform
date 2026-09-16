@@ -282,12 +282,16 @@ impl Store {
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
-        if super::collectors::MIGRATE_ON_START {
-            for row in store.platform.all(
-                "SELECT id FROM dsps WHERE status IN ('active','suspended')",
-                [],
-            )? {
-                store.migrate_collector_storage(s(&row, "id"))?;
+        for row in store.platform.all(
+            "SELECT id FROM dsps WHERE status IN ('active','suspended')",
+            [],
+        )? {
+            let id = s(&row, "id");
+            if super::collectors::MIGRATE_ON_START {
+                store.migrate_collector_storage(id)?;
+            } else {
+                // The rollback reader validates split databases before readiness too.
+                store.collector(id, super::collectors::Provider::Paycom)?;
             }
         }
         Ok(store)
