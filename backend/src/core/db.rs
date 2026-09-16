@@ -122,7 +122,7 @@ pub fn at(ms: i64) -> String {
 }
 pub struct Db(pub Connection);
 impl Db {
-    fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
+    pub(crate) fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
         private_file(file, initialize)?;
         for suffix in ["-wal", "-shm", "-journal"] {
             private_file(&PathBuf::from(format!("{}{suffix}", file.display())), false)?;
@@ -270,7 +270,7 @@ impl Store {
         )?;
         // Additive tables retain compatibility with the previous Rust release.
         jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
-        Ok(Self {
+        let store = Self {
             platform: Db::open(
                 &config.platform().join("accounts.sqlite"),
                 include_str!("platformSchema.sql"),
@@ -281,7 +281,20 @@ impl Store {
             config,
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
-        })
+        };
+        for row in store.platform.all(
+            "SELECT id FROM dsps WHERE status IN ('active','suspended')",
+            [],
+        )? {
+            let id = s(&row, "id");
+            if super::collectors::MIGRATE_ON_START {
+                store.migrate_collector_storage(id)?;
+            } else {
+                // The rollback reader validates split databases before readiness too.
+                store.collector(id, super::collectors::Provider::Paycom)?;
+            }
+        }
+        Ok(store)
     }
     pub fn open(config: Config, key: Vec<u8>) -> Result<Self> {
         Ok(Self {
@@ -305,31 +318,38 @@ impl Store {
     }
     pub fn dsp(&self, id: &str) -> Result<DspLease<'_>> {
         let path = self.area(id, "data")?.join("dispatch.sqlite");
-        private_file(&path, false)?;
+        self.cached_database(&path, 1)
+    }
+    pub(crate) fn cached_database(&self, path: &Path, version: i64) -> Result<DspLease<'_>> {
+        private_file(path, false)?;
+        ensure(path.is_file(), "storage_file_missing", 503)?;
+        let id = path.to_string_lossy();
         let cached = {
             let mut cache = self.dsp_cache.borrow_mut();
             cache
                 .iter()
-                .position(|(key, _)| key == id)
+                .position(|(key, _)| key == &id)
                 .map(|index| cache.remove(index).1)
         };
         let db = match cached {
             Some(db) => db,
-            None => Db::open(&path, "", 1, false)?,
+            None => Db::open(path, "", version, false)?,
         };
         Ok(DspLease {
-            id: id.into(),
+            id: id.into_owned(),
             db: Some(db),
             cache: &self.dsp_cache,
         })
     }
+    // Bootstrap the historical schema, then provisioning runs the same crash-safe
+    // migration as existing DSPs. Keep this frozen; collector schemas evolve alone.
     pub fn initialize_dsp(&self, id: &str) -> Result<Db> {
         for area in ["data", "config", "state", "secrets"] {
             self.area(id, area)?;
         }
         Db::open(
             &self.area(id, "data")?.join("dispatch.sqlite"),
-            include_str!("dspSchema.sql"),
+            include_str!("collectors/legacyDsp.sql"),
             1,
             true,
         )

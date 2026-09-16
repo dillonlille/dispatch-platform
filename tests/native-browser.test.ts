@@ -45,7 +45,7 @@ test(
     assert.equal(selected.approvalMode, null);
     const employees = (await owner.get('/api/dsp/employees')).value;
     assert.equal(employees.total, 2);
-    const trailingDays = f.database(`dsps/${north.id}/data/dispatch.sqlite`, (db) =>
+    const trailingDays = f.collector(north.id, (db) =>
       db
         .prepare(
           "SELECT hours,status,punches FROM timecards WHERE employee_code='BB02' AND hours>0 ORDER BY date",
@@ -61,8 +61,8 @@ test(
       ]);
     }
     const publication = () =>
-      f.database(
-        `dsps/${north.id}/data/dispatch.sqlite`,
+      f.collector(
+        north.id,
         (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
       );
     const id = publication();
@@ -144,12 +144,12 @@ test(
       'Page cleanup must retain the authenticated browser profile',
     );
     const publication = () =>
-      f.database(
-        `dsps/${dsp.id}/data/dispatch.sqlite`,
+      f.collector(
+        dsp.id,
         (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
       );
     const id = publication();
-    const cards = f.database(`dsps/${dsp.id}/data/dispatch.sqlite`, (db) =>
+    const cards = f.collector(dsp.id, (db) =>
       db
         .prepare(
           'SELECT employee_code code,count(*) count,sum(hours) hours FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1) GROUP BY employee_code ORDER BY employee_code',

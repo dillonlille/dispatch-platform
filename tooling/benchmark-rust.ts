@@ -1,3 +1,4 @@
+import { collectorDatabase } from './collector-storage.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +39,7 @@ function dataset(root: string) {
     id: string;
   };
   accounts.close();
-  const db = new DatabaseSync(path.join(root, 'dsps', dsp.id, 'data/dispatch.sqlite'));
+  const db = new DatabaseSync(collectorDatabase(root, dsp.id, 'paycom'));
   try {
     db.exec('BEGIN; DELETE FROM timecards; DELETE FROM employees; DELETE FROM publications;');
     const publication = 'pub_' + '0'.repeat(32);

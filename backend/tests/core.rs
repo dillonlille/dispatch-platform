@@ -113,7 +113,7 @@ fn queue_limits_and_authority_are_checked_again_before_publication() {
     db.platform
         .exec("UPDATE users SET status='active' WHERE id=?", [actor])
         .unwrap();
-    db.dsp(id)
+    db.collector(id, dispatch_backend::core::collectors::Provider::Paycom)
         .unwrap()
         .exec("UPDATE connections SET revision=revision+1", [])
         .unwrap();

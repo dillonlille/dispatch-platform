@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 use super::{
     Error, Result, crypto,
     db::{Db, Store, at, boolean, flag, iso, n, now, s},
@@ -142,7 +143,7 @@ fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
 }
 impl Store {
     pub fn preferences(&self, id: &str) -> Result<Value> {
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         let mut out = preferences(&db)?;
         let departments=db.all("SELECT department value,count(*) count FROM employees WHERE publication_id=(SELECT id FROM publications WHERE active=1) GROUP BY department ORDER BY department",[])?;
         let stations:Vec<Value>=db.all("SELECT DISTINCT station FROM employees WHERE publication_id=(SELECT id FROM publications WHERE active=1) ORDER BY station",[])?.into_iter().map(|r|r["station"].clone()).collect();
@@ -157,7 +158,7 @@ impl Store {
         values: &Value,
     ) -> Result<Value> {
         validate_preferences(values)?;
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         db.transaction(|| {
             let before = preferences(&db)?;
             ensure(
@@ -218,7 +219,7 @@ impl Store {
     }
     pub fn publish(&self, id: &str, value: &Value) -> Result<Value> {
         validate_workforce(value)?;
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         db.transaction(|| {
             let publication = crypto::id("pub")?;
             db.exec(
@@ -276,7 +277,7 @@ impl Store {
         limit: usize,
         desc: bool,
     ) -> Result<Value> {
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let p = &settings["values"];
         let Some(publication) = db.one(
@@ -310,7 +311,7 @@ impl Store {
     }
     pub fn employee(&self, id: &str, code: &str) -> Result<Value> {
         v::code(code)?;
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let mut row=db.one("SELECT e.* FROM employees e JOIN publications p ON p.id=e.publication_id WHERE e.code=? ORDER BY p.collected_at DESC LIMIT 1",[code])?.ok_or_else(||Error::new("employee_not_found",404))?;
         let timecards = cards(
@@ -328,7 +329,7 @@ impl Store {
     }
     pub fn daily(&self, id: &str, date: &str, sort: &str, desc: bool) -> Result<Value> {
         v::date(date)?;
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let p = &settings["values"];
         let Some(publication)=db.one("SELECT id,collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC LIMIT 1",[date,date])? else {return Ok(json!({"rows":[],"collectedAt":null,"available":false}));};

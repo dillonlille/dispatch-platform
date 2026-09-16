@@ -399,7 +399,7 @@ test('Unicode employee sorting agrees with the dashboard locale and preserves di
     (db) =>
       db.prepare("SELECT id FROM dsps WHERE name='Northline Logistics'").get() as { id: string },
   );
-  f.database(`dsps/${dsp.id}/data/dispatch.sqlite`, (db) => {
+  f.collector(dsp.id, (db) => {
     db.exec('DELETE FROM timecards; DELETE FROM employees');
     const publication = db.prepare('SELECT id FROM publications WHERE active=1').get() as {
       id: string;

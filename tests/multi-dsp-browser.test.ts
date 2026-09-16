@@ -121,7 +121,7 @@ test(
     );
     for (const [i, client] of clients.entries()) {
       assert.equal((await client.get('/api/dsp/employees')).value.total, count);
-      const actual = f.database(`dsps/${dsps[i].id}/data/dispatch.sqlite`, (db) =>
+      const actual = f.collector(dsps[i].id, (db) =>
         db
           .prepare(
             'SELECT employee_code code,count(*) days FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1) GROUP BY employee_code ORDER BY employee_code',

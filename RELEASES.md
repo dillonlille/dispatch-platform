@@ -60,7 +60,9 @@ live/.build/services/rust/dispatch-backend backup /absolute/private/backup-desti
 live/.build/services/rust/dispatch-backend restore /absolute/private/backup /absolute/empty/restore-target
 ```
 
-Standalone backups include `data/` and `dsps/`. Keep a separate private backup of
+Standalone backups include `data/` and `dsps/`, including nested collector databases.
+See [Collector storage](docs/COLLECTORS.md) for the staged Paycom migration and
+the minimum rollback-compatible build. Keep a separate private backup of
 `config/`; environment configuration is not included in the state archive. Restore
 validates checksums, revokes old sessions/invitations/reset links and cancels
 pending jobs. Configure and verify a compatible artifact

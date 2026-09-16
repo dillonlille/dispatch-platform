@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 use super::{
     Error, Result, State, crypto,
     db::{Store, at, flag, iso, n, now, s},
@@ -40,7 +41,7 @@ impl Store {
             409,
         )?;
         let connection = self
-            .dsp(id)?
+            .collector(id, Provider::Paycom)?
             .one(
                 "SELECT enabled,revision FROM connections WHERE provider='paycom'",
                 [],
@@ -51,7 +52,7 @@ impl Store {
             if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {return self.public_job(&row);}
             ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
             let job=crypto::id("job")?;
-            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key) VALUES (?,?,?,'paycom.collect','queued',?,?,?,?,?,?)",params![job,id,self.config.environment,now(),iso(),self.config.release,actor,n(&connection,"revision"),key])?;
+            self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key) VALUES (?,?,?,?,'queued',?,?,?,?,?,?)",params![job,id,self.config.environment,Provider::Paycom.job_kind(),now(),iso(),self.config.release,actor,n(&connection,"revision"),key])?;
             self.public_job(&self.job(&job,None)?)
         })
     }
@@ -90,7 +91,7 @@ impl Store {
             )?;
         }
         let connection = self
-            .dsp(s(&row, "dsp_id"))?
+            .collector(s(&row, "dsp_id"), Provider::from_job_kind(s(&row, "kind"))?)?
             .one(
                 "SELECT enabled,revision FROM connections WHERE provider='paycom'",
                 [],
@@ -149,7 +150,7 @@ impl Store {
         Ok(())
     }
     pub fn schedule(&self, id: &str) -> Result<Value> {
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         let r = db
             .one("SELECT * FROM schedules WHERE provider='paycom'", [])?
             .unwrap();
@@ -162,7 +163,7 @@ impl Store {
     }
     pub fn set_schedule(&self, id: &str, enabled: bool, time: &str, tz: &str) -> Result<Value> {
         let next = next_occurrence(time, tz, now())?;
-        let db = self.dsp(id)?;
+        let db = self.collector(id, Provider::Paycom)?;
         db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
         self.schedule(id)
     }
@@ -178,7 +179,7 @@ impl Store {
             }
             let next = if schedule["nextRun"].is_null() {
                 let next = next_scheduled(&schedule, now())?;
-                self.dsp(id)?
+                self.collector(id, Provider::Paycom)?
                     .exec("UPDATE schedules SET next_run=?", [&next])?;
                 next
             } else {
@@ -188,7 +189,7 @@ impl Store {
                 continue;
             }
             if self.enqueue(id, None, &format!("schedule:{next}")).is_ok() {
-                self.dsp(id)?.exec(
+                self.collector(id, Provider::Paycom)?.exec(
                     "UPDATE schedules SET next_run=?",
                     [next_scheduled(&schedule, now())?],
                 )?;
@@ -257,7 +258,10 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         let worker = owner.clone();
         state.run(move |db| db.guard_job(&jid, &worker)).await?;
         metrics.phase(Phase::Authentication);
-        let session = state.ensure_browser(&dsp, false).await?;
+        let provider = Provider::from_job_kind(s(&job, "kind"))?;
+        let session = match provider {
+            Provider::Paycom => state.ensure_browser(&dsp, false).await?,
+        };
         if session.challenge() {
             metrics.phase(Phase::Verification);
             let jid = id.clone();
@@ -297,7 +301,9 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         state
             .run(move |db| {
                 db.guard_job(&jid, &worker)?;
-                db.publish(&tenant, &data)?;
+                match provider {
+                    Provider::Paycom => db.publish(&tenant, &data)?,
+                };
                 completed_metrics.finish("succeeded", None);
                 db.jobs.transaction(|| {
                     db.save_metrics(&jid, &worker, &completed_metrics.snapshot())?;
