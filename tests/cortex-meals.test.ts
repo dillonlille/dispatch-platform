@@ -54,10 +54,21 @@ test('Cortex meal jobs publish tenant-owned data and preserve provider isolation
   assert.equal(publications[0].mealCount, 1);
   assert.equal(publications[0].verifiedGapPairs, 1);
   f.database(`dsps/${north.id}/data/cortex/cortex.sqlite`, (db) => {
-    assert.equal((db.prepare('SELECT count(*) n FROM meal_delivery_events').get() as any).n, 2);
-    assert.equal(
-      (db.prepare('SELECT gap_after_seconds FROM meal_breaks').get() as any).gap_after_seconds,
-      300,
+    assert.equal((db.prepare('SELECT count(*) n FROM meal_delivery_events').get() as any).n, 0);
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(
+            'SELECT last_delivery_at,started_at,ended_at,first_delivery_at FROM meal_records',
+          )
+          .get(),
+      },
+      {
+        last_delivery_at: '2026-01-10T19:55:00.000Z',
+        started_at: '2026-01-10T20:00:00.000Z',
+        ended_at: '2026-01-10T20:30:00.000Z',
+        first_delivery_at: '2026-01-10T20:35:00.000Z',
+      },
     );
     assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
   });

@@ -557,9 +557,26 @@ async fn persistent_profiles_isolation_egress_and_lifecycle() -> Result<()> {
         }
     })
     .await?;
-    let dropped = runtime
-        .start(&profile, Mode::Headless, fixture.policy())
-        .await?;
+    // Aborting startup drops its caller before the supervisor finishes cleanup.
+    // Removing the run directory precedes releasing the profile/capacity lease;
+    // wait for the actual public acquisition result rather than that file marker.
+    let retry_until = Instant::now() + Duration::from_secs(5);
+    let dropped = loop {
+        match runtime
+            .start(&profile, Mode::Headless, fixture.policy())
+            .await
+        {
+            Ok(session) => break session,
+            Err(error)
+                if Instant::now() < retry_until
+                    && ["browser_profile_busy", "browser_capacity_busy"]
+                        .contains(&error.code.as_str()) =>
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    };
     let before = snapshot(&dropped);
     drop(dropped);
     gone(&before).await?;
