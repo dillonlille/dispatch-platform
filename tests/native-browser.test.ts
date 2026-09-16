@@ -45,6 +45,21 @@ test(
     assert.equal(selected.approvalMode, null);
     const employees = (await owner.get('/api/dsp/employees')).value;
     assert.equal(employees.total, 2);
+    const trailingDays = f.database(`dsps/${north.id}/data/dispatch.sqlite`, (db) =>
+      db
+        .prepare(
+          "SELECT hours,status,punches FROM timecards WHERE employee_code='BB02' AND hours>0 ORDER BY date",
+        )
+        .all(),
+    );
+    assert.equal(trailingDays.length, 2);
+    for (const day of trailingDays) {
+      assert.equal(day.hours, 8, 'Use the reported daily total on the additional row');
+      assert.equal(day.status, 'Complete');
+      assert.deepEqual(JSON.parse(day.punches as string), [
+        { in: '08:00 AM', out: '04:00 PM', hours: null },
+      ]);
+    }
     const publication = () =>
       f.database(
         `dsps/${north.id}/data/dispatch.sqlite`,
