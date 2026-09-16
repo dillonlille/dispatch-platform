@@ -7,7 +7,6 @@ import {
   fullName,
   localDate,
   mealPairs,
-  nameKey,
   shiftDate,
   type ClockTime,
   type MealComparison,
@@ -237,48 +236,27 @@ function LinkEmployees({
 }) {
   // Keep the reviewed roster and revision together even while the page polls.
   const [data] = useState(initialData);
+  const selection = (id: string) => {
+    const saved = data.links.links.find((l) => l.cortexId === id);
+    return saved ? `paycom:${saved.paycomCode}` : data.links.separate?.includes(id) ? '' : 'auto';
+  };
   const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      data.drivers.map((d) => [
-        d.id,
-        data.links.links.find((l) => l.cortexId === d.id)?.paycomCode ?? '',
-      ]),
-    ),
+    Object.fromEntries(data.drivers.map((d) => [d.id, selection(d.id)])),
   );
   const [query, setQuery] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const changes = data.drivers
-    .filter(
-      (d) => values[d.id] !== (data.links.links.find((l) => l.cortexId === d.id)?.paycomCode ?? ''),
-    )
-    .map((d) => ({ cortexId: d.id, paycomCode: values[d.id] || null }));
-  const suggestions = () => {
-    const next = { ...values };
-    const used = new Set([
-      ...Object.values(next).filter(Boolean),
-      ...data.links.links
-        .filter((l) => !data.drivers.some((d) => d.id === l.cortexId))
-        .map((l) => l.paycomCode),
-    ]);
-    for (const driver of data.drivers) {
-      if (next[driver.id]) continue;
-      const matches = data.employees.filter((e) => nameKey(e.name) === nameKey(driver.name));
-      if (
-        matches.length === 1 &&
-        !used.has(matches[0]!.code) &&
-        data.drivers.filter((d) => nameKey(d.name) === nameKey(driver.name)).length === 1
-      ) {
-        next[driver.id] = matches[0]!.code;
-        used.add(matches[0]!.code);
-      }
-    }
-    setValues(next);
-  };
+    .filter((d) => values[d.id] !== selection(d.id))
+    .map((d) => ({
+      cortexId: d.id,
+      paycomCode: values[d.id]?.startsWith('paycom:') ? values[d.id]!.slice(7) : null,
+      ...(values[d.id] === 'auto' ? { automatic: true } : {}),
+    }));
   return (
     <Modal
       title="Link employees"
-      description="Confirm which Paycom employee belongs to each Cortex driver. Saved links apply to all dates in this DSP."
+      description="Unique full names match automatically. Override a match or link different names here. Saved choices apply to all dates in this DSP."
       onClose={() => {
         if (!busy) close();
       }}
@@ -295,13 +273,10 @@ function LinkEmployees({
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <button onClick={suggestions} disabled={busy || !data.employees.length}>
-          Suggest exact names
-        </button>
       </div>
       <p className="muted">
-        Review every selection before saving. Leave employees separate when you cannot confirm a
-        match.
+        Automatic matching ignores capitalization, punctuation and spacing. Different or ambiguous
+        names stay separate until you select the correct employee.
       </p>
       {!data.employees.length && (
         <p>
@@ -312,6 +287,11 @@ function LinkEmployees({
       <div className="meal-link-list">
         {data.drivers
           .filter((d) => fullName(d.name).toLowerCase().includes(query.toLowerCase()))
+          .sort(
+            (a, b) =>
+              Number(b.matchType === 'unmatched') - Number(a.matchType === 'unmatched') ||
+              fullName(a.name).localeCompare(fullName(b.name)),
+          )
           .map((driver) => (
             <label key={driver.id}>
               <span>
@@ -324,15 +304,25 @@ function LinkEmployees({
                 value={values[driver.id]}
                 onChange={(e) => setValues({ ...values, [driver.id]: e.target.value })}
               >
+                <option value="auto">
+                  {driver.matchType === 'name'
+                    ? `Automatic · ${fullName(data.employees.find((e) => e.code === driver.paycomCode)?.name ?? '')}`
+                    : driver.matchType === 'unmatched'
+                      ? 'Automatic · no unique match'
+                      : 'Automatic · unique full name'}
+                </option>
                 <option value="">Keep separate</option>
                 {data.employees.map((e) => (
-                  <option key={e.code} value={e.code}>
+                  <option key={e.code} value={`paycom:${e.code}`}>
                     {fullName(e.name)} · {e.code}
                   </option>
                 ))}
-                {values[driver.id] && !data.employees.some((e) => e.code === values[driver.id]) && (
-                  <option value={values[driver.id]}>Saved employee · {values[driver.id]}</option>
-                )}
+                {values[driver.id]?.startsWith('paycom:') &&
+                  !data.employees.some((e) => `paycom:${e.code}` === values[driver.id]) && (
+                    <option value={values[driver.id]}>
+                      Saved employee · {values[driver.id]!.slice(7)}
+                    </option>
+                  )}
               </select>
             </label>
           ))}
@@ -433,8 +423,9 @@ export function MealBreaksPage({
   const pageSize = preferences.rows_per_page;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
   const visible = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
-  const unlinked =
-    data?.drivers.filter((d) => !data.links.links.some((l) => l.cortexId === d.id)).length ?? 0;
+  const unlinked = data?.drivers.filter((d) => d.matchType === 'unmatched').length ?? 0;
+  const automatic = data?.drivers.filter((d) => d.matchType === 'name').length ?? 0;
+  const separate = data?.drivers.filter((d) => d.matchType === 'separate').length ?? 0;
   const zones = new Set(data?.cortexPublications.map((p) => p.timezone));
   return (
     <section className="meal-page" aria-labelledby="meal-heading">
@@ -516,9 +507,16 @@ export function MealBreaksPage({
       {data && (unlinked > 0 || (owner && data.drivers.length > 0)) && (
         <div className="meal-link-notice">
           <span>
-            {unlinked
-              ? `${unlinked} Cortex ${unlinked === 1 ? 'employee needs' : 'employees need'} linking. Unlinked records appear separately.`
-              : 'Employee links are saved for this DSP.'}
+            {[
+              automatic ? `${automatic} matched automatically.` : '',
+              unlinked
+                ? `${unlinked} Cortex ${unlinked === 1 ? 'employee needs' : 'employees need'} review. Different or ambiguous names appear separately.`
+                : '',
+              separate ? `${separate} kept separate by choice.` : '',
+              !automatic && !unlinked && !separate ? 'Employee links are saved for this DSP.' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           </span>
           {owner ? (
             <button className="text-button" onClick={() => setLinking(true)}>

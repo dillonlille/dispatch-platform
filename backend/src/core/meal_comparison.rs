@@ -1,5 +1,5 @@
-//! Read-only comparison across provider snapshots. Only confirmed employee links
-//! live in DSP-wide storage; source records remain owned by their collectors.
+//! Read-only comparison across provider snapshots. Unique full names can match
+//! automatically; saved overrides live in DSP storage, never in source records.
 use super::{
     Result,
     collectors::Provider,
@@ -10,6 +10,59 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 
 const LINKS: &str = "employees.provider_links";
+
+// Normalize provider formatting, not nicknames or omitted name components.
+fn name_key(name: &str) -> String {
+    let ordered = name
+        .split_once(',')
+        .map(|(last, first)| format!("{first} {last}"));
+    ordered
+        .as_deref()
+        .unwrap_or(name)
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+fn match_drivers(drivers: &mut BTreeMap<String, Value>, roster: &[Value], settings: &Value) {
+    let saved = settings["links"].as_array().cloned().unwrap_or_default();
+    let separate = settings["separate"].as_array().cloned().unwrap_or_default();
+    let reserved: HashSet<_> = saved.iter().map(|l| s(l, "paycomCode")).collect();
+    let mut employees_by_name: BTreeMap<String, Vec<&Value>> = BTreeMap::new();
+    let mut driver_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for employee in roster {
+        employees_by_name
+            .entry(name_key(s(employee, "name")))
+            .or_default()
+            .push(employee);
+    }
+    for driver in drivers.values() {
+        *driver_counts
+            .entry(name_key(s(driver, "name")))
+            .or_default() += 1;
+    }
+    for (id, driver) in drivers {
+        let key = name_key(s(driver, "name"));
+        let candidates = employees_by_name.get(&key);
+        let (code, kind) = if let Some(link) = saved.iter().find(|l| s(l, "cortexId") == id) {
+            (link["paycomCode"].clone(), "saved")
+        } else if separate.iter().any(|v| v.as_str() == Some(id)) {
+            (Value::Null, "separate")
+        } else if !key.is_empty()
+            && driver_counts[&key] == 1
+            && let Some(matches) = candidates
+            && matches.len() == 1
+            && !reserved.contains(s(matches[0], "code"))
+        {
+            (matches[0]["code"].clone(), "name")
+        } else {
+            (Value::Null, "unmatched")
+        };
+        driver["paycomCode"] = code;
+        driver["matchType"] = json!(kind);
+    }
+}
 
 impl Store {
     pub fn employee_links(&self, id: &str) -> Result<Value> {
@@ -35,23 +88,33 @@ impl Store {
             let before = db.setting(LINKS, json!({"revision":0,"links":[]}))?;
             ensure(n(&before,"revision") == revision,"settings_changed_reload_before_saving",409)?;
             let mut links = before["links"].as_array().cloned().unwrap_or_default();
+            let mut separate = before["separate"].as_array().cloned().unwrap_or_default();
             let mut seen = HashSet::new();
             for change in changes {
-                v::fields(change,&["cortexId","paycomCode"])?;
+                v::fields(change,&["cortexId","paycomCode","automatic"])?;
+                let automatic = match change.get("automatic") {
+                    None => false,
+                    Some(Value::Bool(value)) => *value,
+                    _ => return Err(super::Error::new("invalid_input",400)),
+                };
+                ensure(!automatic || change["paycomCode"].is_null(),"invalid_input",400)?;
                 let cortex_id = v::text(change,"cortexId",1,200)?;
                 ensure(seen.insert(cortex_id),"duplicate_employee_link",400)?;
                 // Unlinking remains possible after a provider's retained records expire.
                 links.retain(|link| s(link,"cortexId") != cortex_id);
+                separate.retain(|v| v.as_str() != Some(cortex_id));
                 if !change["paycomCode"].is_null() {
                     let code = v::text(change,"paycomCode",1,64)?;
                     ensure(paycom.one("SELECT 1 FROM employees WHERE code=? LIMIT 1",[code])?.is_some()
                         && cortex.one("SELECT 1 FROM meal_itineraries WHERE transporter_id=? LIMIT 1",[cortex_id])?.is_some(),"employee_link_source_missing",409)?;
                     links.push(json!({"id":super::crypto::id("employee")?,"cortexId":cortex_id,"paycomCode":code}));
+                } else if !automatic {
+                    separate.push(json!(cortex_id));
                 }
             }
             let mut codes = HashSet::new();
-            ensure(links.len() <= 5000 && links.iter().all(|l| codes.insert(s(l,"paycomCode"))),"employee_already_linked",409)?;
-            let value = json!({"revision":revision+1,"links":links});
+            ensure(links.len() + separate.len() <= 5000 && links.iter().all(|l| codes.insert(s(l,"paycomCode"))),"employee_already_linked",409)?;
+            let value = json!({"revision":revision+1,"links":links,"separate":separate});
             db.set(LINKS,&value)?;
             Ok(value)
         })?;
@@ -93,28 +156,48 @@ impl Store {
         // The newest observation wins, including a newer snapshot with no meal.
         let mut itineraries = HashSet::new();
         let mut drivers = BTreeMap::new();
+        let mut observations = vec![];
         for p in &publications {
             for itinerary in cortex.all("SELECT itinerary_id,transporter_id,driver_name FROM meal_itineraries WHERE publication_id=? ORDER BY itinerary_id",[s(p,"id")])? {
                 if !itineraries.insert((s(p,"serviceAreaId").to_owned(),s(&itinerary,"itinerary_id").to_owned())) {continue;}
                 let meals = cortex.all("SELECT meal_id mealId,last_delivery_at lastDelivery,started_at start,ended_at end,first_delivery_at firstDelivery,before_status beforeStatus,after_status afterStatus FROM meal_records WHERE publication_id=? AND itinerary_id=? ORDER BY started_at,meal_id",[s(p,"id"),s(&itinerary,"itinerary_id")])?;
-                if meals.is_empty() {continue;}
                 let transporter = s(&itinerary,"transporter_id");
+                // Include meal-free drivers in uniqueness checks so a name shared by
+                // two drivers cannot match just because one did not take a meal.
                 drivers.entry(transporter.to_owned()).or_insert(json!({"id":transporter,"name":itinerary["driver_name"]}));
-                let linked = links["links"].as_array().unwrap().iter().find(|l| s(l,"cortexId") == transporter);
-                let key = linked.map(|l| format!("paycom:{}",s(l,"paycomCode"))).unwrap_or_else(||format!("cortex:{transporter}"));
-                let name = linked.and_then(|l| roster.iter().find(|e| e["code"] == l["paycomCode"])).map(|e| e["name"].clone()).unwrap_or(itinerary["driver_name"].clone());
-                let row = rows.entry(key.clone()).or_insert(json!({"id":key,"name":name,"paycom":null,"cortex":[]}));
-                for mut meal in meals {
-                    meal["cortexId"] = json!(transporter);
-                    meal["driverName"] = itinerary["driver_name"].clone();
-                    meal["itineraryId"] = itinerary["itinerary_id"].clone();
-                    meal["station"] = p["station"].clone();
-                    meal["timezone"] = p["timezone"].clone();
-                    meal["collectedAt"] = p["collectedAt"].clone();
-                    row["cortex"].as_array_mut().unwrap().push(meal);
-                }
+                observations.push((p, itinerary, meals));
             }
         }
+        match_drivers(&mut drivers, &roster, &links);
+        let mut meal_drivers = HashSet::new();
+        for (p, itinerary, meals) in observations {
+            if meals.is_empty() {
+                continue;
+            }
+            let transporter = s(&itinerary, "transporter_id");
+            meal_drivers.insert(transporter.to_owned());
+            let code = drivers[transporter]["paycomCode"].as_str();
+            let key = code
+                .map(|c| format!("paycom:{c}"))
+                .unwrap_or_else(|| format!("cortex:{transporter}"));
+            let name = code
+                .and_then(|c| roster.iter().find(|e| s(e, "code") == c))
+                .map(|e| e["name"].clone())
+                .unwrap_or(itinerary["driver_name"].clone());
+            let row = rows
+                .entry(key.clone())
+                .or_insert(json!({"id":key,"name":name,"paycom":null,"cortex":[]}));
+            for mut meal in meals {
+                meal["cortexId"] = json!(transporter);
+                meal["driverName"] = itinerary["driver_name"].clone();
+                meal["itineraryId"] = itinerary["itinerary_id"].clone();
+                meal["station"] = p["station"].clone();
+                meal["timezone"] = p["timezone"].clone();
+                meal["collectedAt"] = p["collectedAt"].clone();
+                row["cortex"].as_array_mut().unwrap().push(meal);
+            }
+        }
+        drivers.retain(|id, _| meal_drivers.contains(id));
         let mut rows: Vec<Value> = rows.into_values().collect();
         for row in &mut rows {
             row["cortex"].as_array_mut().unwrap().sort_by(|a, b| {
@@ -135,5 +218,56 @@ impl Store {
         Ok(
             json!({"date":date,"timezone":zone,"rows":rows,"paycomCollectedAt":publication.map(|p|p["collected_at"].clone()),"cortexPublications":publications,"employees":roster,"drivers":drivers.into_values().collect::<Vec<_>>(),"links":links}),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_names_ignore_formatting_but_preserve_name_components() {
+        assert_eq!(
+            name_key("MOLINA REED, TAYLOR"),
+            name_key("Taylor MolinaReed")
+        );
+        assert_eq!(name_key("O’Neill, Jamie"), name_key("JAMIE O'NEILL"));
+        assert_eq!(name_key("Sánchez, René"), name_key("RENÉ SÁNCHEZ"));
+        assert_ne!(name_key("Alex Reed"), name_key("Alexander Reed"));
+        assert_ne!(name_key("Taylor Reed Jr"), name_key("Taylor Reed"));
+        assert_eq!(name_key(" , -- "), "");
+    }
+
+    #[test]
+    fn manual_links_reserve_targets_and_different_names_are_not_guessed() {
+        let mut drivers: BTreeMap<_, _> = [
+            ("one".to_owned(), json!({"name":"Jamie Reed"})),
+            ("two".to_owned(), json!({"name":"Different Name"})),
+            ("three".to_owned(), json!({"name":"Alex Jones"})),
+            ("empty".to_owned(), json!({"name":"---"})),
+        ]
+        .into();
+        let roster = vec![
+            json!({"code":"E1","name":"REED, JAMIE"}),
+            json!({"code":"E2","name":"JONES, ALEXANDER"}),
+            json!({"code":"E3","name":""}),
+        ];
+        match_drivers(
+            &mut drivers,
+            &roster,
+            &json!({"links":[{"cortexId":"two","paycomCode":"E1"}]}),
+        );
+        assert_eq!(drivers["one"]["matchType"], "unmatched");
+        assert_eq!(drivers["two"]["matchType"], "saved");
+        assert_eq!(drivers["three"]["matchType"], "unmatched");
+        assert_eq!(drivers["empty"]["matchType"], "unmatched");
+        match_drivers(
+            &mut drivers,
+            &roster,
+            &json!({"links":[],"separate":["one"]}),
+        );
+        assert_eq!(drivers["one"]["matchType"], "separate");
+        match_drivers(&mut drivers, &roster, &json!({"links":[]}));
+        assert_eq!(drivers["one"]["paycomCode"], "E1");
     }
 }

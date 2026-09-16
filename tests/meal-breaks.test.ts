@@ -1,12 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  cortexClock,
-  mealPairs,
-  nameKey,
-  paycomDay,
-  type MealEmployee,
-} from '../shared/meal-breaks.js';
+import { cortexClock, mealPairs, paycomDay, type MealEmployee } from '../shared/meal-breaks.js';
 import { fixture } from './rust-support.js';
 
 function employee(): MealEmployee {
@@ -56,7 +50,6 @@ test('minute-precision differences, provider ordering and missing values', () =>
   assert.equal(mealPairs(row, '2026-09-15').status, 'Missing data');
   row.paycom = null;
   assert.equal(mealPairs(row, '2026-09-15').status, 'Cortex only');
-  assert.equal(nameKey('Morgan, Alex'), nameKey('Alex Morgan'));
 });
 test('typed partial punches retain kind; older partial punches are never relabeled as day boundaries', () => {
   const row = employee();

@@ -73,16 +73,17 @@ function sample(): MealComparison {
       { station: 'DEMO1', timezone: 'America/Los_Angeles', collectedAt: '2026-09-16T06:00:00Z' },
     ],
     employees: rows.map((r, i) => ({ code: `E00${i + 1}`, name: r.name })),
-    drivers: rows.flatMap((r) => r.cortex.map((m) => ({ id: m.cortexId, name: m.driverName }))),
+    drivers: rows.flatMap((r, i) =>
+      r.cortex.map((m) => ({
+        id: m.cortexId,
+        name: m.driverName,
+        paycomCode: `E00${i + 1}`,
+        matchType: 'name' as const,
+      })),
+    ),
     links: {
       revision: 1,
-      links: rows.flatMap((r, i) =>
-        r.cortex.map((m) => ({
-          id: `employee-${i}`,
-          cortexId: m.cortexId,
-          paycomCode: `E00${i + 1}`,
-        })),
-      ),
+      links: [],
     },
   };
 }
@@ -135,11 +136,23 @@ test('approved comparison table, filters, details, links, date errors and mobile
   });
   await page.route('**/api/dsp/paycom/employee-links', async (route) => {
     const input = route.request().postDataJSON();
-    expect(input.revision).toBe(1);
-    expect(input.changes).toEqual([{ cortexId: 'driver-5', paycomCode: null }]);
+    expect(input.revision).toBe(data.links.revision);
+    const restore = input.revision === 2;
+    expect(input.changes).toEqual([
+      { cortexId: 'driver-5', paycomCode: null, ...(restore ? { automatic: true } : {}) },
+    ]);
     data = {
       ...data,
-      links: { revision: 2, links: data.links.links.filter((l) => l.cortexId !== 'driver-5') },
+      links: {
+        revision: data.links.revision + 1,
+        links: [],
+        separate: restore ? [] : ['driver-5'],
+      },
+      drivers: data.drivers.map((d) =>
+        d.id === 'driver-5'
+          ? { ...d, paycomCode: restore ? 'E005' : null, matchType: restore ? 'name' : 'separate' }
+          : d,
+      ),
     };
     await route.fulfill({ json: data.links });
   });
@@ -152,6 +165,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
   ]);
   await expect(page.getByRole('heading', { name: 'Meal Breaks', exact: true })).toBeVisible();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
+  await expect(page.getByText('4 matched automatically.', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Different times 1', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Missing data 3', exact: true })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Alex Morgan' })).toContainText('2:33 PM');
@@ -168,10 +182,17 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await expect(page.locator('.meal-detail')).toContainText('America/Los_Angeles');
   await page.getByLabel('Search meal break employees').fill('');
   await page.getByRole('button', { name: 'Manage employee links', exact: true }).click();
+  await expect(page.getByLabel('Paycom employee for Casey Brooks')).toHaveValue('auto');
   await page.getByLabel('Paycom employee for Casey Brooks').selectOption('');
   await page.getByRole('button', { name: 'Save 1 link', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByText('1 Cortex employee needs linking.', { exact: false })).toBeVisible();
+  await expect(page.getByText('1 kept separate by choice.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Manage employee links', exact: true }).click();
+  await expect(page.getByLabel('Paycom employee for Casey Brooks')).toHaveValue('');
+  await page.getByLabel('Paycom employee for Casey Brooks').selectOption('auto');
+  await page.getByRole('button', { name: 'Save 1 link', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('4 matched automatically.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Previous day', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.locator('.meal-table')).toHaveCount(0);
