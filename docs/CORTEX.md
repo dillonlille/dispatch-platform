@@ -78,6 +78,11 @@ verified meal times while withholding gaps. A missing next event on an unfinishe
 route is pending, not zero. A completed route with complete evidence can report
 verified absence. Intervals describe recorded events, not driver activity.
 
+Amazon can repeat the same task across overlapping stop groups. Identical task
+facts are stored once, with a deterministic supporting stop ID. Copies that
+disagree on task type, state, completion, time or transporter are excluded from
+delivery evidence and make that itinerary's gap coverage unavailable.
+
 The adapter requires repeated stable observations. After reading details it
 recaptures the list, comparing meal content, execution status and progress/event
 revisions, not just driver membership. Newly added or changed itineraries are

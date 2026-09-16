@@ -97,6 +97,7 @@ test(
             {
               stopId: 'stop#2',
               tasks: [
+                task('task.1', start - (mode === 'conflicting' ? 240000 : 300000)),
                 task('task.2', start + 1860000),
                 task('task.3', start + 1880000),
                 task('task.4', start + 4560000),
@@ -178,5 +179,32 @@ test(
     mode = 'unavailable';
     assert.equal((await run('unknown')).status, 'succeeded');
     assert.equal((await publications()).value[0].verifiedGapPairs, 0);
+    mode = 'conflicting';
+    assert.equal((await run('conflict')).status, 'succeeded');
+    const conflict = (await publications()).value[0];
+    assert.equal(conflict.mealCount, 2);
+    assert.equal(conflict.verifiedGapPairs, 0);
+    f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT count(*) n FROM meal_delivery_events WHERE publication_id=? AND event_id='task.1'",
+            )
+            .get(conflict.id) as any
+        ).n,
+        0,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT count(*) n FROM meal_itineraries WHERE publication_id=? AND delivery_coverage='unavailable'",
+            )
+            .get(conflict.id) as any
+        ).n,
+        2,
+      );
+    });
   },
 );

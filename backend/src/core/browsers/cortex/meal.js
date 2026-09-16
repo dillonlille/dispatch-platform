@@ -156,9 +156,9 @@
       d.unknownStops.length === 0 &&
       Number.isInteger(d.stopProgress?.total) &&
       d.stops.length === d.stopProgress.total;
-    const eventIds = new Set(),
+    const observations = new Map(),
       stopIds = new Set(),
-      deliveries = [];
+      deliveries = new Map();
     let taskCount = 0;
     for (const stop of d.stops) {
       if (!token(stop.stopId) || stopIds.has(stop.stopId) || !Array.isArray(stop.tasks))
@@ -166,11 +166,29 @@
       stopIds.add(stop.stopId);
       for (const task of stop.tasks) {
         if (++taskCount > 10000) return fail('cortex_source_too_large');
-        if (!token(task.taskId) || eventIds.has(task.taskId))
-          return fail('cortex_content_incomplete');
-        eventIds.add(task.taskId);
-        if (task.taskState !== 'DELIVERED') continue;
+        if (!token(task.taskId)) return fail('cortex_content_incomplete');
         const time = stamp(task.actualExecutionTime ?? task.taskExecutionTime);
+        const evidence = JSON.stringify([
+          task.taskType,
+          task.taskState,
+          task.executionStatus,
+          time,
+          task.transporterId ?? null,
+        ]);
+        // Amazon can repeat a task across overlapping stop groups. Identical
+        // facts represent one event; conflicting copies cannot establish gaps.
+        if (observations.has(task.taskId)) {
+          if (observations.get(task.taskId) !== evidence) {
+            complete = false;
+            deliveries.delete(task.taskId);
+          } else {
+            const event = deliveries.get(task.taskId);
+            if (event && stop.stopId < event.stopId) event.stopId = stop.stopId;
+          }
+          continue;
+        }
+        observations.set(task.taskId, evidence);
+        if (task.taskState !== 'DELIVERED') continue;
         if (
           task.taskType !== 'DROP_OFF' ||
           task.executionStatus !== 'COMPLETE' ||
@@ -180,12 +198,14 @@
           complete = false;
           continue;
         }
-        deliveries.push({ id: task.taskId, stopId: stop.stopId, time });
+        deliveries.set(task.taskId, { id: task.taskId, stopId: stop.stopId, time });
       }
     }
     // A removed delivered task may affect the nearest boundary; don't guess its ownership.
     if (d.inactiveTasks.some((t) => t.taskState === 'DELIVERED')) complete = false;
-    deliveries.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+    const events = [...deliveries.values()].sort(
+      (a, b) => a.time - b.time || a.id.localeCompare(b.id),
+    );
     return {
       itinerary: {
         id: c.id,
@@ -196,7 +216,7 @@
         routeComplete: c.routeComplete,
         deliveryCoverage: complete ? 'complete' : 'unavailable',
         meals: breaks,
-        deliveries,
+        deliveries: events,
       },
     };
   } catch (error) {
