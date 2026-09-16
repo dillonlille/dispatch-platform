@@ -55,7 +55,11 @@ test(
           stopProgress: { total: 2, completed: 2 },
           latestTaskExecutionTime: start + 2400000,
           breaks: grown
-            ? [br('meal#1', start, start + 1800000), br('meal#2', start + 3600000, start + 4500000)]
+            ? [
+                br('meal#1', start, start + 1800000),
+                br('meal#2', start + 3600000, start + 4500000),
+                { ...br('start-punch', start + 600, null), breakId: 'break-meal#1' },
+              ]
             : [],
         },
         {
@@ -90,6 +94,7 @@ test(
         p.isLoadingItineraryDetails = false;
         p.itineraryDetails = {
           ...c,
+          breaks: [...c.breaks].reverse(),
           localDate: [2026, 1, 10],
           serviceAreaId: 'area-1',
           stops: [
@@ -108,6 +113,11 @@ test(
           inactiveTasks: [],
         };
         if (mode === 'invalid') p.itineraryDetails.breaks = [br('bad', start, start - 1000)];
+        if (mode === 'meal-conflict' && id === 'itinerary-1')
+          p.itineraryDetails.breaks.push({
+            ...br('conflicting-punch', start, start + 1900000),
+            breakId: 'break-meal#1',
+          });
       }
       res.end(
         `<title>Delivery Execution</title><main id="application"></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:${JSON.stringify(p)}};</script>`,
@@ -175,6 +185,11 @@ test(
     const failed = await run('bad');
     assert.equal(failed.status, 'failed');
     assert.equal(failed.error, 'cortex_invalid_meal_evidence');
+    assert.deepEqual((await publications()).value, initial);
+    mode = 'meal-conflict';
+    const mealConflict = await run('meal-conflict');
+    assert.equal(mealConflict.status, 'failed');
+    assert.equal(mealConflict.error, 'cortex_invalid_meal_evidence');
     assert.deepEqual((await publications()).value, initial);
     mode = 'unavailable';
     assert.equal((await run('unknown')).status, 'succeeded');

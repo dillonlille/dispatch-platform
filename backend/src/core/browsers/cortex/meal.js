@@ -67,22 +67,42 @@
       : null;
   const meals = (values) => {
     if (!Array.isArray(values)) throw new Error('cortex_content_incomplete');
-    return values
-      .filter((b) => b.type === 'MEAL')
-      .map((b) => {
-        const start = stamp(b.timeStampOn),
-          end = stamp(b.timeStampOff),
-          id = b.punchId || b.breakId;
-        if (
-          !token(id) ||
-          !start ||
-          !['ON', 'OFF'].includes(b.state) ||
-          (b.state === 'OFF' && (!end || end < start)) ||
-          (b.state === 'ON' && end !== null)
-        )
+    const records = new Map();
+    for (const b of values.filter((b) => b.type === 'MEAL')) {
+      const start = stamp(b.timeStampOn),
+        end = stamp(b.timeStampOff),
+        id = b.breakId;
+      if (
+        !token(id) ||
+        !token(b.punchId) ||
+        !start ||
+        !['ON', 'OFF'].includes(b.state) ||
+        (b.state === 'OFF' && (!end || end < start)) ||
+        (b.state === 'ON' && end !== null)
+      )
+        throw new Error('cortex_invalid_meal_evidence');
+      const current = { id, start, end, sequence: b.sequenceNumber };
+      const prior = records.get(id);
+      if (prior) {
+        if (!Number.isInteger(current.sequence) || prior.sequence !== current.sequence)
           throw new Error('cortex_invalid_meal_evidence');
-        return { id, start, end };
-      })
+        if ((prior.end === null) === (end === null)) {
+          if (prior.start !== start || prior.end !== end)
+            throw new Error('cortex_invalid_meal_evidence');
+          continue;
+        }
+        // One logical break can retain its ON punch alongside the completed
+        // OFF record. The completed pair is authoritative only for that same
+        // break/sequence and an ON punch inside its recorded interval.
+        const completed = end === null ? prior : current;
+        const opened = end === null ? current : prior;
+        if (opened.start < completed.start || opened.start > completed.end)
+          throw new Error('cortex_invalid_meal_evidence');
+        records.set(id, completed);
+      } else records.set(id, current);
+    }
+    return [...records.values()]
+      .map(({ id, start, end }) => ({ id, start, end }))
       .sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
   };
   try {

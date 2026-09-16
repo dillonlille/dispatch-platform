@@ -309,7 +309,7 @@ impl Store {
             let id=super::crypto::id("pub")?;
             let meals=capture.itineraries.iter().map(|r|r.meals.len()).sum::<usize>();
             let gaps=capture.itineraries.iter().flat_map(|r|r.meals.iter().map(move|m|boundaries(r,m))).filter(|b|b.prior.is_some()&&b.next.is_some()).count();
-            db.exec("INSERT INTO meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)",params![id,job,expected.date,expected.station,expected.service_area_id,expected.provider,expected.timezone,at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,meals as i64,gaps as i64])?;
+            db.exec("INSERT INTO meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,2)",params![id,job,expected.date,expected.station,expected.service_area_id,expected.provider,expected.timezone,at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,meals as i64,gaps as i64])?;
             for route in &capture.itineraries {
                 let state=if route.meals.is_empty(){"none_recorded"}else if route.meals.iter().any(|m|m.end.is_none()){"in_progress"}else{"recorded"};
                 db.exec("INSERT INTO meal_itineraries VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,route.transporter_id,route.driver,route.route,at(route.observed_at),route.route_complete,if route.delivery_coverage==Coverage::Complete{"complete"}else{"unavailable"},state])?;

@@ -65,6 +65,10 @@ must fail validation and receive adapter updates.
 Every itinerary is read, including those with no meal. Multiple itineraries for
 the same transporter and all recorded MEAL breaks are retained. REST breaks are
 outside this collector. Completed meals and ongoing meals have distinct states.
+Meals use Amazon's logical `breakId`, rather than an individual `punchId`. When
+the same break/sequence retains both an ON punch and an OFF record, the completed
+record supplies the meal interval, provided that it contains the ON timestamp.
+Identical copies collapse; conflicting completed intervals still fail validation.
 Seconds and milliseconds are normalized to full timestamps; no clock-only
 arithmetic or Pacific timezone assumption is used. The itinerary's operating date
 can include an overnight continuation, bounded to 48 hours from local midnight.
