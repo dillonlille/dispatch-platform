@@ -9,6 +9,8 @@ services, but never databases, credentials, or browser profiles between DSPs.
 dsps/dsp_<id>/
   data/
     dispatch.sqlite                 DSP profile and storage-layout metadata
+    cortex/
+      cortex.sqlite                 Cortex connection state (collectors pending)
     paycom/
       paycom.sqlite                 Paycom connection, settings, schedule and data
   secrets/
@@ -36,7 +38,8 @@ platform databases. Provider enablement is in the provider's connection record;
 there is no duplicated enablement flag in the DSP core.
 
 The shared process calls `Store::dsp(id)` only for DSP-wide settings and
-`Store::collector(id, Provider::Paycom)` for Paycom data. Only compiled provider
+`Store::collector(id, Provider::Paycom)` for Paycom data. Cortex owns a separate version 1 connection database; see [Cortex](CORTEX.md).
+Only compiled provider
 identifiers can select paths. The cache is bounded across both core and provider
 databases and keyed by the full database path. Each collector defines its own
 schema and SQLite version; opening an unsupported version fails closed.

@@ -261,6 +261,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         let provider = Provider::from_job_kind(s(&job, "kind"))?;
         let session = match provider {
             Provider::Paycom => state.ensure_browser(&dsp, false).await?,
+            Provider::Cortex => return Err(Error::new("unsupported_collector", 409)),
         };
         if session.challenge() {
             metrics.phase(Phase::Verification);
@@ -303,6 +304,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                 db.guard_job(&jid, &worker)?;
                 match provider {
                     Provider::Paycom => db.publish(&tenant, &data)?,
+                    Provider::Cortex => return Err(Error::new("unsupported_collector", 409)),
                 };
                 completed_metrics.finish("succeeded", None);
                 db.jobs.transaction(|| {

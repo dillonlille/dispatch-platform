@@ -264,3 +264,27 @@ async fn essential_background_failure_stops_readiness_and_normal_shutdown_is_cle
     let (stop, _) = tokio::sync::watch::channel(true);
     assert!(supervise(async { Ok(()) }, stop).await.is_ok());
 }
+
+#[test]
+fn cortex_network_policy_keeps_provider_hosts_separate() {
+    use dispatch_backend::core::browsers::egress;
+    for host in [
+        "logistics.amazon.com",
+        "www.amazon.com",
+        "m.media-amazon.com",
+        "images-na.ssl-images-amazon.com",
+    ] {
+        assert!(egress::allowed_cortex_host(host));
+        assert!(!egress::allowed_host(host));
+    }
+    for host in [
+        "www.paycomonline.net",
+        "amazon.com.evil.test",
+        "evilamazon.com",
+        "evilmedia-amazon.com",
+        "127.0.0.1",
+        "metadata.google.internal",
+    ] {
+        assert!(!egress::allowed_cortex_host(host));
+    }
+}

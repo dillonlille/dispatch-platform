@@ -49,6 +49,7 @@ impl Mode {
 #[derive(Clone, Copy)]
 pub enum NetworkPolicy {
     Paycom,
+    Cortex,
     /// Synthetic local server, reachable only as fixture.dispatch.invalid.
     Fixture(std::num::NonZeroU16),
 }
@@ -131,11 +132,7 @@ impl Runtime {
         settings["profile"]["password_manager_enabled"] = json!(false);
         db::write_private(&preferences, &serde_json::to_vec(&settings)?)?;
         let run = RunDirectory::create(&self.runs)?;
-        let fixture = match policy {
-            NetworkPolicy::Paycom => None,
-            NetworkPolicy::Fixture(port) => Some(("fixture.dispatch.invalid".into(), port.get())),
-        };
-        let egress = Egress::start(&run.0, fixture)?;
+        let egress = Egress::start_with_policy(&run.0, policy)?;
         let child = sandbox::launch(self, &run.0, profile, mode)?;
         let process_id = child.id().expect("new browser supervisor");
         let (sender, requests) = mpsc::channel(QUEUE_SIZE);

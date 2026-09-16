@@ -72,7 +72,7 @@ export interface DspView {
 }
 export interface Connection {
   verificationSessionId?: string;
-  provider: 'paycom';
+  provider: 'paycom' | 'cortex';
   enabled: boolean;
   status: ConnectionStatus;
   error: string | null;

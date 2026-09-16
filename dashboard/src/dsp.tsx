@@ -461,7 +461,40 @@ export function ConnectionsPage({
   perform: Perform;
   development: boolean;
 }) {
-  const { data, error, refresh } = useData<Connection>('/api/dsp/connections', 4000);
+  return (
+    <section className="connections-view" aria-labelledby="connections-heading">
+      <div>
+        <h2 id="connections-heading">Connections</h2>
+        <p className="muted">
+          Connect the services your DSP uses. All supported features share these connections.
+        </p>
+      </div>
+      <div className="connection-cards">
+        <ConnectionCard provider="paycom" perform={perform} development={development} />
+        <ConnectionCard provider="cortex" perform={perform} development={development} />
+      </div>
+      <p className="connection-permissions muted">
+        <ShieldCheck size={16} />
+        DSP owners and platform owners can manage these credentials.
+      </p>
+    </section>
+  );
+}
+function ConnectionCard({
+  perform,
+  development,
+  provider,
+}: {
+  perform: Perform;
+  development: boolean;
+  provider: Connection['provider'];
+}) {
+  const name = provider === 'paycom' ? 'Paycom' : 'Cortex';
+  const endpoint = `/api/dsp/connections/${provider}`;
+  const { data, error, refresh } = useData<Connection>(
+    provider === 'paycom' ? '/api/dsp/connections' : endpoint,
+    4000,
+  );
   const [disconnecting, setDisconnecting] = useState(false);
   const [credentialError, setCredentialError] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -473,7 +506,7 @@ export function ConnectionsPage({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const securityAnswers = [1, 2, 3, 4, 5].map((number) => String(form.get(`pin${number}`) ?? ''));
-    if (new Set(securityAnswers).size !== 5) {
+    if (provider === 'paycom' && new Set(securityAnswers).size !== 5) {
       setCredentialError('Enter five distinct security PINs in their original Paycom numbering.');
       return;
     }
@@ -487,11 +520,12 @@ export function ConnectionsPage({
     try {
       await perform(async () => {
         try {
-          await api('/api/dsp/connections/paycom', {
-            clientCode: form.get('clientCode'),
+          await api(endpoint, {
+            ...(provider === 'paycom'
+              ? { clientCode: form.get('clientCode'), securityAnswers }
+              : {}),
             username: form.get('username'),
             password: form.get('password'),
-            securityAnswers,
           });
         } catch (error) {
           setSaveError((error as Error).message);
@@ -505,133 +539,125 @@ export function ConnectionsPage({
     }
   }
   return (
-    <section className="connections-view" aria-labelledby="connections-heading">
-      <div>
-        <h2 id="connections-heading">Connections</h2>
-        <p className="muted">
-          Connect the services your DSP uses. All supported features share these connections.
-        </p>
-      </div>
+    <>
       <ErrorBox message={error} />
       {!data ? (
         <Loading />
       ) : (
-        <div className="connection-cards">
-          <article className="archived-connection-card">
-            <header>
-              <h3>
-                <Plug size={20} />
-                Paycom
-              </h3>
-              <p className="muted">Workforce and timecards</p>
-            </header>
-            <div className="archived-connection-content">
-              <div role="status">
-                <Badge value={saving ? 'signing_in' : data.status} />
-              </div>
-              <p className="muted">
-                {saving
-                  ? 'Signing in to Paycom…'
-                  : data.status === 'ready'
-                    ? 'Your Paycom connection is ready to use.'
-                    : data.enabled
-                      ? 'Test your connection or update the saved credentials.'
-                      : 'Connect your Paycom account to get started.'}
-              </p>
-              {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
-              {!saving && data.status === 'needs_verification' && (
-                <div className="verification">
-                  <h3>Paycom needs your verification</h3>
-                  <p>
-                    {data.verificationSessionId
-                      ? 'Complete the CAPTCHA in the verification window, then press Submit to continue.'
-                      : 'Enter the verification code from your provider.'}
-                  </p>
-                  {data.verificationSessionId ? (
-                    <button type="button" onClick={() => setClosedVerification(undefined)}>
-                      Open verification window
-                    </button>
-                  ) : (
-                    <form
-                      className="inline-form"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const form = new FormData(event.currentTarget);
-                        void perform(async () => {
-                          await api('/api/dsp/connections/paycom/verify', {
-                            code: form.get('code'),
-                          });
-                          refresh();
-                        }, 'Verification submitted');
-                      }}
-                    >
-                      <input
-                        name="code"
-                        aria-label="Verification code"
-                        autoComplete="one-time-code"
-                        required
-                        maxLength={128}
-                      />
-                      <button className="primary">Verify</button>
-                    </form>
-                  )}
-                  {development && !data.verificationSessionId && (
-                    <small>Synthetic fixture verification code: 123456.</small>
-                  )}
-                </div>
-              )}
-
-              {data.lastVerifiedAt && (
-                <p className="muted">Last checked: {time(data.lastVerifiedAt)}</p>
-              )}
+        <article className="archived-connection-card">
+          <header>
+            <h3>
+              <Plug size={20} />
+              {name}
+            </h3>
+            <p className="muted">
+              {provider === 'paycom'
+                ? 'Workforce and timecards'
+                : 'Amazon Delivery Execution · Collectors coming later'}
+            </p>
+          </header>
+          <div className="archived-connection-content">
+            <div role="status">
+              <Badge value={saving ? 'signing_in' : data.status} />
             </div>
-            <footer>
-              <button
-                className="primary"
-                disabled={busy}
-                onClick={() => {
-                  setCredentialError('');
-                  setEditing(true);
-                }}
-              >
-                {data.enabled ? 'Update credentials' : 'Connect Paycom'}
-              </button>
-              {data.enabled && (
-                <>
-                  <button
-                    disabled={
-                      busy || data.status === 'signing_in' || data.status === 'needs_verification'
-                    }
-                    onClick={() => {
-                      setSaveError('');
+            <p className="muted">
+              {saving
+                ? `Signing in to ${name}…`
+                : data.status === 'ready'
+                  ? `Your ${name} connection is ready to use.`
+                  : data.enabled
+                    ? 'Test your connection or update the saved credentials.'
+                    : `Connect your ${name} account to get started.`}
+            </p>
+            {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
+            {!saving && data.status === 'needs_verification' && (
+              <div className="verification">
+                <h3>{name} needs your verification</h3>
+                <p>
+                  {data.verificationSessionId
+                    ? 'Complete the verification in the browser window, then press Submit to continue.'
+                    : 'Enter the verification code from your provider.'}
+                </p>
+                {data.verificationSessionId ? (
+                  <button type="button" onClick={() => setClosedVerification(undefined)}>
+                    Open verification window
+                  </button>
+                ) : (
+                  <form
+                    className="inline-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const form = new FormData(event.currentTarget);
                       void perform(async () => {
-                        await api('/api/dsp/connections/paycom/check', {});
+                        await api(`${endpoint}/verify`, {
+                          code: form.get('code'),
+                        });
                         refresh();
-                      }, 'Connection checked');
+                      }, 'Verification submitted');
                     }}
                   >
-                    <RefreshCw size={16} />
-                    Test connection
-                  </button>
-                  <button
-                    className="text-button"
-                    disabled={busy}
-                    onClick={() => setDisconnecting(true)}
-                  >
-                    Disconnect
-                  </button>
-                </>
-              )}
-            </footer>
-          </article>
-        </div>
+                    <input
+                      name="code"
+                      aria-label="Verification code"
+                      autoComplete="one-time-code"
+                      required
+                      maxLength={128}
+                    />
+                    <button className="primary">Verify</button>
+                  </form>
+                )}
+                {development && !data.verificationSessionId && (
+                  <small>Synthetic fixture verification code: 123456.</small>
+                )}
+              </div>
+            )}
+
+            {data.lastVerifiedAt && (
+              <p className="muted">Last checked: {time(data.lastVerifiedAt)}</p>
+            )}
+          </div>
+          <footer>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => {
+                setCredentialError('');
+                setEditing(true);
+              }}
+            >
+              {data.enabled ? 'Update credentials' : `Connect ${name}`}
+            </button>
+            {data.enabled && (
+              <>
+                <button
+                  disabled={
+                    busy || data.status === 'signing_in' || data.status === 'needs_verification'
+                  }
+                  onClick={() => {
+                    setSaveError('');
+                    void perform(async () => {
+                      await api(`${endpoint}/check`, {});
+                      refresh();
+                    }, 'Connection checked');
+                  }}
+                >
+                  <RefreshCw size={16} />
+                  Test connection
+                </button>
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => setDisconnecting(true)}
+                >
+                  Disconnect
+                </button>
+              </>
+            )}
+          </footer>
+        </article>
       )}
-      <p className="connection-permissions muted">
-        <ShieldCheck size={16} />
-        DSP owners and platform owners can manage these credentials.
-      </p>
       {disconnecting && (
-        <Modal title="Disconnect Paycom?" onClose={() => setDisconnecting(false)}>
+        <Modal title={`Disconnect ${name}?`} onClose={() => setDisconnecting(false)}>
           <p>
             Features will lose access to this service until you reconnect. Previously collected data
             will remain available.
@@ -645,10 +671,10 @@ export function ConnectionsPage({
                 setSaveError('');
                 setBusy(true);
                 void perform(async () => {
-                  await api('/api/dsp/connections/paycom/disable', { removeCredentials: true });
+                  await api(`${endpoint}/disable`, { removeCredentials: true });
                   refresh();
                   setDisconnecting(false);
-                }, 'Paycom disconnected').finally(() => setBusy(false));
+                }, `${name} disconnected`).finally(() => setBusy(false));
               }}
             >
               Disconnect
@@ -657,7 +683,7 @@ export function ConnectionsPage({
         </Modal>
       )}
       {editing && (
-        <Modal title="Paycom credentials" onClose={() => setEditing(false)}>
+        <Modal title={`${name} credentials`} onClose={() => setEditing(false)}>
           <p className="muted">
             Enter the account your DSP uses. Saved credentials are encrypted and are never displayed
             here.
@@ -669,16 +695,18 @@ export function ConnectionsPage({
             </div>
           )}
           <form onSubmit={(event) => void save(event)} onInput={() => setCredentialError('')}>
-            <label>
-              Client code
-              <input
-                name="clientCode"
-                required
-                maxLength={80}
-                autoComplete="off"
-                defaultValue={data?.accountLabel ?? ''}
-              />
-            </label>
+            {provider === 'paycom' && (
+              <label>
+                Client code
+                <input
+                  name="clientCode"
+                  required
+                  maxLength={80}
+                  autoComplete="off"
+                  defaultValue={data?.accountLabel ?? ''}
+                />
+              </label>
+            )}
             <label>
               Username
               <input name="username" required maxLength={200} autoComplete="off" />
@@ -693,22 +721,25 @@ export function ConnectionsPage({
                 autoComplete="new-password"
               />
             </label>
-            {[1, 2, 3, 4, 5].map((number) => (
-              <label key={number}>
-                PIN {number}
-                <input
-                  name={`pin${number}`}
-                  type="password"
-                  required
-                  maxLength={64}
-                  autoComplete="off"
-                />
-              </label>
-            ))}
-            <p className="muted">
-              Enter all five distinct security answers in the order configured for your Paycom
-              account.
-            </p>
+            {provider === 'paycom' &&
+              [1, 2, 3, 4, 5].map((number) => (
+                <label key={number}>
+                  PIN {number}
+                  <input
+                    name={`pin${number}`}
+                    type="password"
+                    required
+                    maxLength={64}
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            {provider === 'paycom' && (
+              <p className="muted">
+                Enter all five distinct security answers in the order configured for your Paycom
+                account.
+              </p>
+            )}
             <ErrorBox message={credentialError} />
             <div className="form-actions">
               <button type="button" onClick={() => setEditing(false)}>
@@ -729,12 +760,13 @@ export function ConnectionsPage({
           <BrowserVerification
             key={data.verificationSessionId}
             sessionId={data.verificationSessionId}
+            provider={provider}
             close={() => {
               setClosedVerification(data.verificationSessionId);
               refresh();
             }}
           />
         )}
-    </section>
+    </>
   );
 }
