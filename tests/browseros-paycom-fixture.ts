@@ -101,8 +101,15 @@ function timecard(url: URL, mismatch: boolean) {
       values.i1 = '08:00 AM';
       values.o1 = '04:00 PM';
     }
+    // Paycom can leave the dated row empty and put punches and totals on a
+    // following pay-code row. Extraction folds those punches into the day.
+    const trailing = url.searchParams.get('firstrefno') === 'BB02' && index % 7 === 0;
+    const render = (cells: Record<string, string>) =>
+      `<tr>${headers.map((h) => `<td>${cells[h] ?? ''}</td>`).join('')}</tr>`;
     return (
-      `<tr>${headers.map((h) => `<td>${values[h] ?? ''}</td>`).join('')}</tr>` +
+      (trailing
+        ? render({ date: values.date! }) + render({ ...values, date: '', hours: '4' })
+        : render(values)) +
       (index % 7 === 6 ? `<tr><td>Weekly Totals</td><td>${mismatch ? 9 : 8}</td></tr>` : '')
     );
   }).join('');

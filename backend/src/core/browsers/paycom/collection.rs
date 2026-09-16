@@ -162,8 +162,22 @@ fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
         .map(|day| {
             hours(day)
                 .or_else(|| {
-                    if day["missingPunch"] == false
-                        && day["punches"].as_array().is_some_and(Vec::is_empty)
+                    // DOM extraction folds all pay-code punches into the day.
+                    // Only row zero determines whether the leading row is empty;
+                    // additional rows contribute their own reported hours below.
+                    let no_missing_leading = day["missingPunch"] == false
+                        || day["unresolvedSlots"].as_array().is_some_and(|slots| {
+                            !slots.is_empty()
+                                && slots.iter().all(|slot| {
+                                    slot.as_str().is_some_and(|slot| slot.contains(':'))
+                                })
+                        });
+                    if no_missing_leading
+                        && day["punches"].as_array().is_some_and(|punches| {
+                            punches
+                                .iter()
+                                .all(|punch| punch["rowIndex"].as_u64().is_some_and(|row| row > 0))
+                        })
                     {
                         Some(0.)
                     } else {
@@ -397,6 +411,50 @@ mod tests {
         assert_eq!(project(&record, "AA01")?[0]["hours"], 10.);
         record["periodTotalHours"] = json!(11);
         assert!(project(&record, "AA01").is_err());
+        Ok(())
+    }
+    #[test]
+    fn blank_leading_row_uses_additional_totals_and_preserves_punches() -> Result<()> {
+        let days = (0..14).map(|i| json!({"date":format!("day{i}"),"hours":null,"totalHours":null,"missingPunch":false,"unresolvedSlots":[],"punches":[]})).collect::<Vec<_>>();
+        let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":4}],"weeklyTotals":[4,0],"periodTotalHours":4});
+        record["days"][0]["punches"] = json!([
+            {"slot":"i1","rowIndex":1,"displayTime":"08:00 AM"},
+            {"slot":"o1","rowIndex":1,"displayTime":"10:00 AM"}
+        ]);
+        let day = &project(&record, "AA01")?[0];
+        assert_eq!(day["hours"], 4.);
+        assert_eq!(day["status"], "Complete");
+        assert_eq!(
+            day["punches"],
+            json!([{"in":"08:00 AM","out":"10:00 AM","hours":null}])
+        );
+
+        // An unresolved punch on the additional row is still reported as such.
+        record["days"][0]["missingPunch"] = json!(true);
+        record["days"][0]["unresolvedSlots"] = json!(["1:o2"]);
+        assert_eq!(project(&record, "AA01")?[0]["status"], "Missing punch");
+
+        // Equal period totals cannot conceal hours in the wrong week.
+        record["weeklyTotals"] = json!([0, 4]);
+        assert_eq!(
+            project(&record, "AA01").unwrap_err().code,
+            "provider_hours_mismatch"
+        );
+        record["weeklyTotals"] = json!([4, 0]);
+
+        // Missing hours on an occupied leading row must still fail closed.
+        record["days"][0]["unresolvedSlots"] = json!(["o2"]);
+        assert_eq!(
+            project(&record, "AA01").unwrap_err().code,
+            "invalid_timecard_hours"
+        );
+        record["days"][0]["missingPunch"] = json!(false);
+        record["days"][0]["unresolvedSlots"] = json!([]);
+        record["days"][0]["punches"][0]["rowIndex"] = json!(0);
+        assert_eq!(
+            project(&record, "AA01").unwrap_err().code,
+            "invalid_timecard_hours"
+        );
         Ok(())
     }
 }
