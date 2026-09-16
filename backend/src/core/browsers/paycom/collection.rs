@@ -238,16 +238,23 @@ pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
         .find(|h| matches(h))
         .ok_or_else(|| Error::new("provider_hours_mismatch", 409))?;
     days.iter().enumerate().map(|(index,day)|{
-        let mut punches=Vec::new(); let mut pending=Value::Null; let mut row=Value::Null;
+        let mut punches=Vec::new(); let mut pending=Value::Null; let mut pending_kind=Value::Null; let mut row=Value::Null;
         for punch in day["punches"].as_array().ok_or_else(error)? {
-            if row!=punch["rowIndex"] && !pending.is_null() {punches.push(json!({"in":pending,"out":null,"hours":null}));pending=Value::Null;}
+            if row!=punch["rowIndex"] && !pending.is_null() {
+                punches.push(json!({"in":pending,"out":null,"hours":null,"inKind":pending_kind,"outKind":null}));
+                pending=Value::Null; pending_kind=Value::Null;
+            }
             row=punch["rowIndex"].clone();
+            let kind = if s(punch,"kind").is_empty() {Value::Null} else {punch["kind"].clone()};
             if s(punch,"slot").starts_with('i') {
-                if !pending.is_null() {punches.push(json!({"in":pending,"out":null,"hours":null}));}
-                pending=punch["displayTime"].clone();
-            } else {punches.push(json!({"in":pending,"out":punch["displayTime"],"hours":null}));pending=Value::Null;}
+                if !pending.is_null() {punches.push(json!({"in":pending,"out":null,"hours":null,"inKind":pending_kind,"outKind":null}));}
+                pending=punch["displayTime"].clone(); pending_kind=kind;
+            } else {
+                punches.push(json!({"in":pending,"out":punch["displayTime"],"hours":null,"inKind":pending_kind,"outKind":kind}));
+                pending=Value::Null; pending_kind=Value::Null;
+            }
         }
-        if !pending.is_null(){punches.push(json!({"in":pending,"out":null,"hours":null}));}
+        if !pending.is_null(){punches.push(json!({"in":pending,"out":null,"hours":null,"inKind":pending_kind,"outKind":null}));}
         Ok(json!({"employeeCode":employee,"date":day["date"],"hours":(values[index]*100.).round()/100.,"status":if day["missingPunch"]==true{"Missing punch"}else if punches.is_empty(){"No punches"}else{"Complete"},"punches":punches}))
     }).collect()
 }
@@ -668,7 +675,18 @@ mod tests {
         assert_eq!(day["status"], "Complete");
         assert_eq!(
             day["punches"],
-            json!([{"in":"08:00 AM","out":"10:00 AM","hours":null}])
+            json!([{"in":"08:00 AM","out":"10:00 AM","hours":null,"inKind":null,"outKind":null}])
+        );
+
+        record["days"][0]["punches"][0]["kind"] = json!("IN DAY");
+        record["days"][0]["punches"][1]["kind"] = json!("OUT LUNCH");
+        assert_eq!(
+            project(&record, "AA01")?[0]["punches"][0]["outKind"],
+            "OUT LUNCH"
+        );
+        assert_eq!(
+            project(&record, "AA01")?[0]["punches"][0]["inKind"],
+            "IN DAY"
         );
 
         // An unresolved punch on the additional row is still reported as such.

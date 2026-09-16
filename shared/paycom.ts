@@ -10,7 +10,7 @@ export type PaycomColumn = (typeof paycomColumns)[number][0];
 export interface PaycomPreferences {
   automatic_sync: boolean;
   sync_interval_seconds: number;
-  opening_page: 'timecards' | 'employees';
+  opening_page: 'timecards' | 'meal-breaks' | 'employees';
   rows_per_page: number;
   name_order: 'first_last' | 'last_first';
   default_sort: 'employeeName' | 'condition' | 'inDay';

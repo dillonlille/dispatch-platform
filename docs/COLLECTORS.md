@@ -110,6 +110,40 @@ path or executable supplied by a DSP.
    and the previous supported artifact. Update the architecture and operations
    documentation with any new retention or recovery requirements.
 
-Provider employee IDs remain provider-owned. If future products need unified
-employees across providers, introduce explicit DSP-wide identities and mappings;
-do not merge people by name or assume provider IDs mean the same thing.
+Provider employee IDs remain provider-owned. The Meal Breaks comparison uses
+explicit DSP-wide identities in `dispatch.sqlite`'s
+`settings['employees.provider_links']`: a generated identity ID, Paycom employee
+code, Cortex transporter ID, and a revision for the complete link set. Owners
+confirm links; normalized exact names are suggestions only. Each provider ID can
+belong to only one link. Changes validate both sources, commit atomically, and
+produce an audit entry. Removing a link keeps both source records intact. The
+setting is additive and ignored by the previous runtime, preserving rollback.
+
+## Meal Breaks comparison
+
+Paycom → Meal Breaks reads `GET /api/dsp/paycom/meal-breaks?date=YYYY-MM-DD`.
+The latest Paycom publication covering that date is combined with active Cortex
+scopes for the report date. Overlapping Cortex scopes use the newest observation
+of each service-area/itinerary, including newer observations with no meal.
+Employees appear when they have any nonempty Paycom punch or any Cortex meal;
+Paycom department/driver filters do not hide this union. Unlinked identities stay
+separate and the page explains how to review them. Source-only employees, partial
+meals, and multiple meals remain visible. Access requires the signed DSP view;
+`POST /api/dsp/paycom/employee-links` additionally requires owner settings access
+and CSRF. No request supplies a database path.
+
+The table reads existing four-timestamp Cortex records. It does not persist a
+second comparison dataset or collect deliveries. Paycom publishes optional
+`inKind`/`outKind` labels with its existing punch pairs so a partial lunch punch
+cannot be mistaken for a day boundary. Labels absent from provider provenance
+remain null. Older complete one/two-pair cards follow the existing Timecard
+ordering; incomplete/complex unlabeled cards require review and show their raw
+punches in the expanded row. Previously stored records are not rewritten.
+
+Cortex instants display in each station's timezone, with day offsets and precise
+timestamps in tooltips. Paycom supplies local clock strings, not UTC instants.
+Differences are signed displayed-minute differences (Cortex minus Paycom), not
+elapsed durations or compliance verdicts. Multiple meals appear in source time
+order; differing meal counts suppress differences and require review. Missing
+values remain missing. Source freshness and uncollected dates are explicit. The
+view never edits payroll or schedules a collection simply by opening a date.

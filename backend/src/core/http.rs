@@ -504,6 +504,8 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
             db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit(Some(actor),Some(id),"dsp.profile_completed","")?;Ok(Reply::ok())
         },
         ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !["owner","platform_owner"].contains(&c.role.as_str()){value["history"]=json!([]);}Ok(Reply::json(value))},
+        ("GET","/api/dsp/paycom/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_comparison(id,v::text(&i.query,"date",10,10)?,s(&c.dsp,"timezone"))?))},
+        ("POST","/api/dsp/paycom/employee-links")=>Ok(Reply::json(db.save_employee_links(id,actor,b)?)),
         ("POST","/api/dsp/paycom/settings")=>{v::fields(b,&["revision","values"])?;Ok(Reply::json(db.save_preferences(id,actor,v::integer(b,"revision",0,i64::MAX)?,&b["values"])?))},
         ("GET","/api/dsp/employees")=>{
             let q=&i.query;v::fields(q,&["q","direction","offset","limit"])?;let query=q.get("q").map(|_|v::text(q,"q",0,100)).transpose()?.unwrap_or("");let desc=direction(q)?;

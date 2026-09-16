@@ -5,6 +5,7 @@ import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } from './ui.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
+import { MealBreaksPage } from './meal-breaks.js';
 import { InvitationLink, type Perform } from './platform.js';
 
 export function HomePage() {
@@ -45,16 +46,8 @@ export function PaycomPage({
   const owner = ['owner', 'platform_owner'].includes(view.role);
   return (
     <div className="paycom-page">
-      <Header
-        title="Paycom"
-        subtitle={
-          owner && !data?.enabled
-            ? 'Connect Paycom to verify your login.'
-            : 'Daily timecards and employee records.'
-        }
-      />
-      {owner && (
-        <div className="paycom-settings-button">
+      <Header title="Paycom" subtitle="Timecards, meal breaks, and employee records.">
+        {owner && (
           <button
             onClick={() => {
               location.hash = `dsp/${view.dsp.id}/paycom-settings`;
@@ -62,10 +55,26 @@ export function PaycomPage({
           >
             Paycom settings
           </button>
-        </div>
-      )}
+        )}
+      </Header>
       {owner && <ErrorBox message={error} />}
-      {owner && !data && !error ? (
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={[
+          ['timecards', 'Timecard'],
+          ['meal-breaks', 'Meal Breaks'],
+          ['employees', 'Employees'],
+        ]}
+        label="Paycom"
+      />
+      {tab === 'meal-breaks' ? (
+        <MealBreaksPage
+          timezone={view.dsp.timezone}
+          owner={owner}
+          preferences={preferences.data?.values ?? paycomDefaults}
+        />
+      ) : owner && !data && !error ? (
         <Loading />
       ) : owner && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
         <section className="paycom-connection" aria-labelledby="paycom-connection-title">
@@ -129,15 +138,6 @@ export function PaycomPage({
               </button>
             </div>
           )}
-          <Tabs
-            value={tab}
-            onChange={setTab}
-            items={[
-              ['timecards', 'Timecard'],
-              ['employees', 'Employees'],
-            ]}
-            label="Paycom"
-          />
           <div className="embedded-page">
             {tab === 'employees' ? (
               <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />

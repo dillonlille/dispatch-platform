@@ -18,6 +18,10 @@ const labels: Record<string, string> = {
   settings_changed_reload_before_saving:
     'These settings changed in another session. Discard your draft and try again.',
   connect_paycom_before_automatic_sync: 'Connect Paycom before turning on automatic sync.',
+  employee_already_linked:
+    'A Paycom employee can only link to one Cortex driver. Review duplicate selections.',
+  employee_link_source_missing:
+    'This employee is no longer available. Refresh and review the links again.',
   invalid_login: 'The email or password is incorrect.',
   permission_denied: 'Your role does not allow this action.',
   view_changed: 'Your DSP access changed. Reopen the DSP to continue.',
