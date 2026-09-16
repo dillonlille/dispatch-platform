@@ -16,5 +16,5 @@ subprocess.run([
 environment["DISPATCH_TEST_NATIVE"] = "1"
 subprocess.run([
     "node", "node_modules/tsx/dist/cli.mjs", "--test", "--test-concurrency=1",
-    "tests/paycom-worker.test.ts", "tests/native-browser.test.ts",
+    "tests/paycom-worker.test.ts", "tests/native-browser.test.ts", "tests/multi-dsp-browser.test.ts",
 ], cwd=root, env=environment, check=True)

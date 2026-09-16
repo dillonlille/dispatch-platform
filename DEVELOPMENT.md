@@ -67,7 +67,7 @@ root; never point the fixture runner at the persistent Dev state. Frontend edits
 hot reload; restart this local API runner after backend changes. Feature work does
 not change the shared Dev environment before merge.
 
-`npm run build` writes the deployable artifact to `.build/`. It compiles the Rust platform API and CLI, bundles the isolated browser workers (using Cargo's ignored `target/` cache),
+`npm run build` writes the deployable artifact to `.build/`. It compiles the Rust platform API, CLI and BrowserOS worker (using Cargo's ignored `target/` cache),
 installs locked runtime dependencies, records the source commit, and produces the
 SHA-256 `release.json` inventory. Building alone does not activate it.
 

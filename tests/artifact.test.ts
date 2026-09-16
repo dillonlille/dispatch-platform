@@ -8,28 +8,25 @@ import { fixture } from './rust-support.js';
 import { verifyArtifact } from '../tooling/artifact.js';
 
 test(
-  'installed artifact serves the complete platform directly from Rust and contains only isolated Node workers',
+  'installed artifact serves the complete platform directly from Rust and has no Node runtime payload',
   { skip: process.env.DISPATCH_TEST_ARTIFACT !== '1', timeout: 60000 },
   async (t) => {
     const artifact = path.resolve('.build');
     const manifest = verifyArtifact(artifact);
-    assert.equal(manifest.format, 2);
+    assert.equal(manifest.format, 3);
     for (const name of [
-      'api/main.js',
+      'api',
+      'services/runtime',
+      'node_modules',
+      'package.json',
+      'package-lock.json',
       'tooling/cli.js',
       'tooling/supervisor.js',
-      'node_modules/fastify/package.json',
-      'node_modules/nodemailer/package.json',
     ])
       assert(!fs.existsSync(path.join(artifact, name)), name);
-    for (const name of [
-      'services/runtime/auth-worker.js',
-      'services/runtime/collection-worker.js',
-      'services/runtime/provider/auth/adapter.js',
-    ])
-      assert(fs.existsSync(path.join(artifact, name)), name);
+    assert(!('workerNodeMajor' in manifest));
     // The updater owns verification and restores executable permissions lost by extraction.
-    const script = `import importlib.util; from pathlib import Path; s=importlib.util.spec_from_file_location('u','tooling/update-dev.py'); u=importlib.util.module_from_spec(s); s.loader.exec_module(u); m=u.verify_artifact(Path('.build')); assert m['format']==2`;
+    const script = `import importlib.util; from pathlib import Path; s=importlib.util.spec_from_file_location('u','tooling/update-dev.py'); u=importlib.util.module_from_spec(s); s.loader.exec_module(u); m=u.verify_artifact(Path('.build')); assert m['format']==3`;
     execFileSync('python3', ['-c', script]);
     const f = await fixture({
       seed: false,

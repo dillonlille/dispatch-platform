@@ -10,6 +10,7 @@ import type {
 import { api, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
+import { JobPerformance } from './job-performance.js';
 import {
   Badge,
   Empty,
@@ -458,6 +459,7 @@ export function JobTable({
             <th>Progress</th>
             <th>Requested</th>
             <th>Attempt</th>
+            <th>Performance</th>
             {cancel && <th>Action</th>}
           </tr>
         </thead>
@@ -481,6 +483,9 @@ export function JobTable({
               <td>{time(job.createdAt)}</td>
               <td>
                 {job.attempt} / {job.maxAttempts}
+              </td>
+              <td>
+                <JobPerformance metrics={job.metrics} />
               </td>
               {cancel && (
                 <td>
@@ -545,6 +550,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
     runtime: { name: string; status: string; memoryBytes: number; browsers: number };
     dsps: { id: string; name: string; status: string }[];
   }>('/api/platform/diagnostics', 5000);
+  const jobs = useData<Job[]>('/api/platform/jobs', 3000);
   const [busy, setBusy] = useState(false);
   return (
     <>
@@ -608,6 +614,15 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
           </a>
         </>
       )}
+      <section className="diagnostics-jobs" aria-label="Platform collections">
+        <h2>Collections</h2>
+        <ErrorBox message={jobs.error} />
+        {jobs.data ? (
+          <JobTable jobs={jobs.data} perform={perform} refresh={jobs.refresh} />
+        ) : (
+          <Loading />
+        )}
+      </section>
     </>
   );
 }

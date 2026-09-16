@@ -38,7 +38,7 @@ GitHub and the external updater own deployments.
 
 ## Build integrity and rollback
 
-`.build/release.json` uses format 2 and records the version, Rust runtime, browser-worker Node major,
+`.build/release.json` uses format 3 and records the version, Rust runtime,
 compatibility schema 3, every
 runtime file hash/size and aggregate digest. `tooling/build-info.json` records the
 source commit. Symlinks, hardlinks, unexpected files and unsafe paths are rejected.

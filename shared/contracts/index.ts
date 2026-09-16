@@ -80,6 +80,27 @@ export interface Connection {
   lastVerifiedAt: string | null;
   accountLabel: string | null;
 }
+export interface JobMetrics {
+  attempt: number;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
+  error: string | null;
+  phase: 'starting' | 'authentication' | 'verification' | 'collection' | 'publication' | null;
+  queueMs: number;
+  elapsedMs: number;
+  authenticationMs: number | null;
+  verificationMs: number | null;
+  collectionMs: number | null;
+  publicationMs: number | null;
+  employees: number | null;
+  timecards: number | null;
+  peakRssBytes: number | null;
+  peakPssBytes: number | null;
+  peakPrivateBytes: number | null;
+  memorySamples: number;
+  incompleteMemorySamples: number;
+}
 export interface Job {
   id: string;
   dspId: string;
@@ -98,6 +119,7 @@ export interface Job {
   error: string | null;
   release: string;
   actorId: string | null;
+  metrics: JobMetrics[];
 }
 export interface Schedule {
   intervalSeconds?: number;

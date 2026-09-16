@@ -63,6 +63,15 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await expect(page.getByText('Sync complete', { exact: true })).toBeVisible({
     timeout: 15000,
   });
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  const collection = page.getByRole('row').filter({ hasText: 'Collection completed' }).first();
+  await collection.getByText('Attempt details', { exact: true }).click();
+  await expect(collection.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
+    '12 employees · 84 daily records',
+  );
+  await expect(collection).toContainText('Queue wait');
+  await expect(collection).toContainText('Not sampled');
+  await page.screenshot({ path: '/tmp/dispatch-job-metrics.png', fullPage: true });
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

@@ -262,6 +262,14 @@ impl Store {
         private_dir(&config.environment_root())?;
         private_dir(&config.root.join("dsps"))?;
         let key = key_file(&config.platform().join("platform.key"))?;
+        let jobs = Db::open(
+            &config.environment_root().join("jobs.sqlite"),
+            include_str!("jobSchema.sql"),
+            1,
+            true,
+        )?;
+        // Additive tables retain compatibility with the previous Rust release.
+        jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
         Ok(Self {
             platform: Db::open(
                 &config.platform().join("accounts.sqlite"),
@@ -269,12 +277,7 @@ impl Store {
                 3,
                 true,
             )?,
-            jobs: Db::open(
-                &config.environment_root().join("jobs.sqlite"),
-                include_str!("jobSchema.sql"),
-                1,
-                true,
-            )?,
+            jobs,
             config,
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),

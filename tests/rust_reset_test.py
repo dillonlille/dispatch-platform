@@ -106,6 +106,15 @@ root=Path(os.environ['DISPATCH_STATE_ROOT'])
             self.instance.activate(self.candidate, self.new)
         self.restored()
 
+    def test_fresh_cutover_accepts_rust_only_artifact(self):
+        bootstrap = (self.candidate / "services/rust/dispatch-backend").read_text()
+        shutil.rmtree(self.candidate)
+        artifact(self.candidate, self.new, bootstrap, rust_only=True)
+        self.instance.activate(self.candidate, self.new)
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.new)
+        self.assertEqual((self.root / "data/new-state").read_text(), "fresh")
+        self.preserved()
+
     def test_health_failure_restores_previous_platform(self):
         self.instance.healthy.side_effect = [False, True]
         with self.assertRaisesRegex(RuntimeError, "Rust Dev failed health"):

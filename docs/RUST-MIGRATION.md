@@ -13,8 +13,9 @@ Paycom authentication and collection now run through the Rust BrowserOS driver.
 The browser has a private profile, display, nested sandbox and inherited CDP pipe.
 Ready sessions close after 60 idle seconds; native PIN input, cooldowns and manual
 verification are covered by real BrowserOS fixture tests. See [BrowserOS](BROWSEROS.md).
-Node remains a frontend/build/test dependency. Archived Node worker files remain
-in the artifact for updater compatibility but are not used by DSP provider jobs.
+Node remains a frontend/build/test dependency. Deployment artifacts contain no
+Node dependencies or archived worker payload. Legacy source remains for regression
+tests; existing Dispatch and Hermes installations are independent.
 
 ## Runtime
 
@@ -44,22 +45,18 @@ A Node state directory cannot be opened as a Rust platform accidentally.
 
 ## Artifact and operations
 
-`npm run build` produces a format-2, schema-3 artifact containing:
+`npm run build` produces a format-3, schema-3 artifact containing:
 
 ```text
 services/rust/dispatch-backend
-services/runtime/auth-worker.js
-services/runtime/collection-worker.js
-services/runtime/provider/
 dashboard/
-node_modules/                     Playwright and Zod for isolated workers
-package.json / package-lock.json
 tooling/build-info.json
 release.json                     Full inventory, source metadata and digest
 ```
 
 The external Python updater verifies the exact successful merged-dev artifact,
-restores executable permissions after extraction, and rolls back compatible code
+accepts both the previous format 2 and the slim format 3, restores executable
+permissions after extraction, and rolls back compatible code
 on startup failure. The initial Node-to-Rust transition requires the explicitly
 authorized [fresh Dev cutover](DEV-SETUP.md#fresh-state-cutover-from-the-node-core).
 It bootstraps and verifies a new owner and empty permanent Dev DSP before erasing

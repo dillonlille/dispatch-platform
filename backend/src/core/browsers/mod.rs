@@ -33,6 +33,7 @@ pub struct Session {
     pub revision: i64,
     pub timezone: String,
     run: PathBuf,
+    process_id: std::sync::atomic::AtomicU32,
     status: AtomicU8, // 0 starting, 1 ready, 2 challenge, 3 closed
     worker: AsyncMutex<Option<Worker>>,
     commands: tokio::sync::Semaphore,
@@ -128,6 +129,11 @@ impl Manager {
     }
 }
 impl Session {
+    pub fn process_id(&self) -> Option<u32> {
+        let id = self.process_id.load(Ordering::Acquire);
+        (id != 0 && !self.closed()).then_some(id)
+    }
+
     pub fn ready(&self) -> bool {
         self.status.load(Ordering::SeqCst) == 1
     }
@@ -479,6 +485,7 @@ impl State {
             revision,
             timezone: s(&dsp, "timezone").into(),
             run: run.clone(),
+            process_id: std::sync::atomic::AtomicU32::new(0),
             status: AtomicU8::new(0),
             worker: AsyncMutex::new(None),
             commands: tokio::sync::Semaphore::new(32),
@@ -521,6 +528,7 @@ impl State {
                 } else { browseros::NetworkPolicy::Paycom };
                 let runtime=self.browsers.runtime(&self.config)?;
                 let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
+                session.process_id.store(browser.process_id(),Ordering::Release);
                 match paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
                     Ok(driver)=>*worker=Some(driver),
                     Err(error)=>{browser.close().await;return Err(error);},

@@ -148,9 +148,9 @@ worker, Playwright connection, or second browser launch.
 
 `DISPATCH_BROWSEROS_EXECUTABLE` defaults to the pinned installation. The legacy
 `DISPATCH_BROWSER_EXECUTABLE` setting does not select the DSP provider browser.
-The artifact still includes archived Node worker files for compatibility with the
-existing artifact inventory/updater; DSP authentication and collection do not run
-them. Removing those files requires a coordinated artifact/updater change.
+Format-3 deployment artifacts include only the Rust executable, dashboard assets
+and build metadata. The updater also accepts format 2 for rollback. Archived Node
+workers and their dependencies are excluded from the installed artifact.
 
 ## Live collection measurements
 
@@ -183,6 +183,10 @@ that this collector-only measurement excludes.
 ## Remaining work
 
 - Extend real-provider acceptance to additional DSP account variants.
-- Remove the unused Node worker artifact payload through an updater-compatible change.
 - If requested, add a separately enabled MCP gateway with DSP authorization and
   exclusive control handoffs between scripts, humans, and optional agents.
+
+## Collection diagnostics and capacity checks
+
+See [Collection operations](COLLECTION-OPERATIONS.md) for persisted attempt metrics,
+restart behavior and the repeatable three-DSP capacity check.

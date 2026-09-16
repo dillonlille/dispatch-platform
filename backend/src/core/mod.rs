@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod http;
+pub mod job_metrics;
 pub mod jobs;
 pub mod operations;
 pub mod tenants;

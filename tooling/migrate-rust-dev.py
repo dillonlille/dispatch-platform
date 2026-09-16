@@ -149,7 +149,7 @@ class FreshRustUpdater(updates.DevUpdater):
         current = self.git("rev-parse", "HEAD")
         old = updates.verify_artifact(self.live / ".build", current)
         updates.require(old["format"] == 1 and old["schema"] == 2 and
-                        manifest["format"] == 2 and manifest["schema"] == 3,
+                        manifest["format"] in (2, 3) and manifest["schema"] == 3,
                         "Fresh cutover requires the Node v2 state and Rust v3 artifact")
         self.git("merge-base", "--is-ancestor", current, commit)
         self.git("merge-base", "--is-ancestor", commit, "origin/dev")
