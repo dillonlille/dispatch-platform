@@ -30,7 +30,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: rustup show active-toolchain
-      - name: Install isolated BrowserOS proof runtime
+      - name: Install isolated BrowserOS runtime
         if: steps.validation.outputs.mode == 'full'
         run: |
           sudo apt-get update -qq

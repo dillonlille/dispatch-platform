@@ -1,31 +1,28 @@
-# BrowserOS runtime proof
+# Rust BrowserOS worker
 
-The first migration milestone is an opt-in Rust host check. The deployed Paycom
-driver remains unchanged. Legacy Dispatch and Hermes retain their existing Chrome
-installations, services, and profiles.
+The BrowserOS runtime now lives in the Rust backend, replacing the standalone
+proof program. It ships in the normal artifact and can be used by internal
+provider adapters. **The current Paycom driver still uses the existing Node
+workers.** Authentication and collection must be ported before selecting this
+runtime for provider jobs. Legacy Dispatch and Hermes retain their installations,
+services, and profiles.
 
-## What is installed
+## Installation
 
 `tooling/browseros-release.json` pins the upstream Linux x86_64 Debian asset, its
-GitHub SHA-256 digest, size, and source commit. `install-browseros.py` verifies the
-download before extracting it into `/opt/dispatch-browseros/<version>/`. It does
-not run package maintainer scripts or register a browser, service, or desktop app.
-It refuses to overwrite an existing installation and records file hashes in
-`dispatch-install.json`.
+SHA-256 digest, size, and source commit. `install-browseros.py` verifies the download
+before extracting it into `/opt/dispatch-browseros/<version>/`. It does not run
+package maintainer scripts or register desktop apps or services. It refuses to
+overwrite an installation and records installed file hashes.
 
-The extracted runtime excludes the bundled agent server (including Bun), desktop
-extensions, and ChromeDriver. BrowserOS control commands are implemented in the
-browser itself. The launcher additionally disables the managed server, extension
-loader, server updater, and background updates.
+The runtime excludes the bundled agent server (including Bun), desktop extensions,
+and ChromeDriver. BrowserOS control is built into the browser. The Rust launcher
+also disables the managed server, server updater, extension loader, and background
+updates. BrowserOS remains a Chromium fork; its binary is installed separately
+from Dispatch's artifact. No upstream Rust source is copied into Dispatch.
+[Upstream source and licensing](https://github.com/browseros-ai/BrowserOS/tree/96ff75aa8f3f023c526308df32cdd299331a3ec9).
 
-BrowserOS remains a Chromium fork. The upstream browser is independently installed
-software; it is not included in Dispatch's release artifact. No BrowserOS Rust
-source is copied into Dispatch. Upstream source and licensing remain available at
-[BrowserOS](https://github.com/browseros-ai/BrowserOS/tree/96ff75aa8f3f023c526308df32cdd299331a3ec9).
-
-## Run locally
-
-On a Linux x86_64 host with the pinned Rust toolchain, bubblewrap, Xvfb, and Chromium
+On Linux x86_64 with the pinned Rust toolchain, bubblewrap, Xvfb, and Chromium
 system libraries installed:
 
 ```bash
@@ -33,62 +30,88 @@ sudo python3 tooling/install-browseros.py
 npm run test:browseros
 ```
 
-The check uses `/usr/local/libexec/dispatch-dev/bwrap`, the dedicated root-owned
-launcher configured for Dev. `DISPATCH_BWRAP_EXECUTABLE` can select another
-root-owned launcher. Ubuntu hosts that restrict nested user namespaces need the
-profile in `tooling/host/dispatch-dev-bwrap.apparmor`; keep Chromium's namespace and
-seccomp sandboxes enabled. CI installs that profile for its disposable runner.
+The check uses the root-owned `/usr/local/libexec/dispatch-dev/bwrap` launcher;
+`DISPATCH_BWRAP_EXECUTABLE` can select another trusted launcher. Ubuntu hosts that
+restrict nested user namespaces need `tooling/host/dispatch-dev-bwrap.apparmor`.
+CI installs this profile on its disposable runner and runs the host checks during
+full validation. Merge validation still builds a fresh artifact and runs the
+platform smoke check when it reuses the exact PR tree's successful full checks.
 
-`npm run test:browseros` removes its own temporary profiles, screenshots and reports
-after completion. To retain synthetic evidence, pass a new output directory:
+## Runtime design
 
-```bash
-cargo run --locked --example browseros_probe -- \
-  /opt/dispatch-browseros/0.50.5/browseros \
-  /usr/local/libexec/dispatch-dev/bwrap \
-  /tmp/dispatch-browseros-report
-```
+`backend/src/core/browsers/browseros/` owns four pieces:
 
-The example is a verification program, not an HTTP route or a provider driver.
-Full CI checks run it; reused merge validation still requires the existing fresh
-artifact build and platform smoke check.
+- **Runtime and sessions:** one runtime per environment supplies a shared browser
+  capacity limit. Each session has one actor, one active command, and at most eight
+  queued commands. Commands are limited to 64 KiB, CDP frames to 8 MiB, and command
+  deadlines to 15 seconds including queue time. Idle sessions close after 60
+  seconds; total lifetime is capped at 30 minutes.
+- **Persistent profiles:** trusted host code derives a dedicated BrowserOS path
+  from the DSP registry, such as `state/browsers/browseros/paycom`. Never accept a
+  path from a DSP request or reuse a legacy browser's profile. An exclusive OS
+  file lock beside the profile prevents simultaneous use, including across runtime
+  instances. The lock and capacity permit remain held until the supervisor is
+  reaped. Profiles survive worker restart; disposable run directories do not.
+- **Sandbox and egress:** bubblewrap gives the worker private mount, PID, user,
+  network, IPC, and UTS namespaces. Only its profile is writable from host storage.
+  The egress socket and executables are mounted read-only. Host home directories,
+  platform databases, credentials, sibling DSP profiles, and the profile lock are
+  not mounted. A bounded Rust TCP-to-Unix bridge reaches the existing host egress
+  proxy. Production policy permits only the existing Paycom HTTPS allowlist and
+  public IPv4 destinations. Fixture policy permits only its exact synthetic host
+  and port. Chromium's loopback proxy bypass and QUIC are disabled.
+- **Browser control:** the hidden `browseros-worker` entrypoint runs before
+  platform configuration or database initialization. It verifies its isolation,
+  optionally starts a private Xvfb display, and uses the browser's inherited CDP
+  pipe. The browser's debugging listener remains inside its private network
+  namespace; there is no host CDP socket or raw browser-control HTTP endpoint.
 
-## What the proof checks
+Provider adapters call `Runtime::start`, then use the returned `Session` for
+serialized browser commands or script evaluation. This interface is for trusted
+Rust code, not user-submitted scripts. Authentication, collection, and any future
+manual/agent handoff must share the same session ownership rules.
 
-- A Rust worker and BrowserOS execute inside private mount, PID, network, IPC, and
-  UTS namespaces. Host home directories and platform/DSP data are not mounted.
-- Each invocation gets a new private profile. A synthetic HTTP server exists only
-  inside that network namespace. External networking is unavailable.
-- Rust speaks CDP over a private inherited socket pair, with bounded frames and
-  command deadlines. BrowserOS-specific `Browser.createTab` and `Browser.getTabs`
-  calls confirm that this is the intended browser runtime.
-- Headless and Xvfb windowed runs navigate, enter exact text, click a submit
-  button, read a structured fixture result, and capture a PNG.
-- Input comes through browser input commands, including trusted DOM input events.
-  The windowed check waits for the active page to paint before clicking.
-- `chrome://sandbox` reports enabled PID/network namespaces and seccomp.
-- A process-name allowlist rejects unexpected processes, including Node, Bun, and
-  agent servers. No model or MCP client participates in this check.
-- Normal browser close succeeds. A separate run forcibly kills and reaps the
-  bubblewrap supervisor, whose PID namespace contains its descendants. Timeouts
-  also terminate and reap the supervisor before removing temporary state.
+`Session::close` requests shutdown and waits for cleanup. Dropping the last handle,
+abandoning startup, or losing the caller of an in-flight command also closes the
+session. A canceled queued command is skipped. Transport failure or deadline expiry
+retires the session so a late reply cannot be mistaken for another command's result.
+The supervisor allows three seconds for normal shutdown, then kills and reaps the
+namespace if necessary. Callers can inspect the returned shutdown result and use
+`wait_closed` to observe automatic termination.
 
-The report contains timings and a snapshot of summed process RSS. Summed RSS counts
-shared mappings multiple times; it is neither PSS nor peak memory. The fixture
-timings are not Paycom throughput measurements or evidence of a performance gain.
+## Verification
+
+`backend/tests/browseros_host.rs` runs the actual backend worker binary against
+real BrowserOS with synthetic HTTP fixtures and temporary DSP directories. The
+wrapper enables these otherwise ignored host tests; ordinary Rust tests include
+the bounded CDP transport checks. Test state is removed after completion.
+
+The host checks cover:
+
+- Concurrent DSPs with separate namespaces, profiles, cookies, and local storage.
+- Exact scripted input, form submission, extraction, and PNG screenshots in
+  headless and windowed modes, with Chromium's internal sandbox enabled.
+- Cookie/local-storage persistence across graceful restart and profile locking
+  across independent runtime instances.
+- Allowed fixture traffic and denial of host loopback and other fixture ports.
+- Capacity exhaustion, oversized commands, queue saturation, command deadlines,
+  caller cancellation, failed/abandoned startup, and dropping the last handle.
+- Normal and forced shutdown, disappearance of descendant processes, released
+  profile leases, cleaned run directories, and successful restart.
+- A process allowlist containing only Rust, bubblewrap, BrowserOS and optional
+  Xvfb, with no Node/Bun or agent server in the worker namespace.
+
+These are synthetic functional checks, not Paycom performance benchmarks. They do
+not establish native X11 keyboard compatibility or a measured memory/speed gain.
 
 ## Remaining migration work
 
-1. Turn the proven launch/transport choices into the production Rust browser worker
-   with durable DSP profiles, queue limits, cancellation, and provider egress rules.
-2. Port Paycom authentication, PIN handling, cooldowns, recovery, and manual
-   assistance. This check's CDP input does **not** prove the native X11 keyboard
-   behavior required by the retained Paycom authentication implementation.
-3. Port collection and verify workforce/timecard parity and atomic publication.
-4. Add a separately enabled MCP gateway, scoped to an authorized browser session,
-   with exclusive control handoffs between scripts, humans, and optional agents.
-5. Benchmark complete collection and recovery, then replace the current platform's
-   Node workers. Shared legacy Dispatch/Hermes tooling remains independent.
-
-No real provider credentials, imported browser sessions, persistent DSP data, or
-external AI services are used by this milestone.
+1. Port Paycom authentication, PIN handling, cooldowns, recovery, and manual
+   assistance to this runtime. Verify the native input behavior required by the
+   retained authentication flow, then wire the adapter into the Rust session manager.
+2. Port collection, verify workforce/timecard parity and atomic publication, and
+   select the Rust worker for real provider jobs.
+3. Add a separately enabled MCP gateway with authorized session scope and exclusive
+   control handoffs between scripts, humans, and optional agents.
+4. Benchmark complete collection and recovery, then retire the platform's remaining
+   Node browser workers. Shared legacy Dispatch/Hermes tooling stays independent.
