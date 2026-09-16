@@ -168,7 +168,7 @@ cargo test --locked --lib measure_live_collection -- --ignored --nocapture
 Use the DSP's configured timezone. The profile lease rejects concurrent use of
 that same profile. The benchmark does not solve CAPTCHA or change credentials;
 an authentication challenge stops the measurement. Remove its empty runs directory
-afterward. Full API job timings include authentication and publication overhead
+afterward. Full API job timings can include authentication and publication overhead
 that this collector-only measurement excludes.
 
 ## Remaining work
