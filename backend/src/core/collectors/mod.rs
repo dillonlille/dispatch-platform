@@ -8,8 +8,9 @@ use super::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-// Enable only after this dual-layout reader has reached Dev's rollback artifact.
-pub(crate) const MIGRATE_ON_START: bool = false;
+// The dual-layout reader shipped in 9a63ef1 before migration was enabled.
+// The immediately previous Dev artifact can read and write the split layout.
+pub(crate) const MIGRATE_ON_START: bool = true;
 const LAYOUT: &str = "storage.collectors";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -348,6 +349,29 @@ mod tests {
             snapshot(&reopened.collector(&id, Provider::Paycom).unwrap()),
             before
         );
+    }
+    #[test]
+    fn startup_migrates_suspended_dsps_and_restored_legacy_backups() {
+        let (_root, store, id) = legacy();
+        store
+            .platform
+            .exec("UPDATE dsps SET status='suspended' WHERE id=?", [&id])
+            .unwrap();
+        let before = snapshot(&store.dsp(&id).unwrap());
+        let external = tempfile::tempdir().unwrap();
+        let backup = external.path().join("legacy-backup");
+        operations::backup(&store.config, &backup).unwrap();
+        let restored = external.path().join("restored");
+        operations::restore(&backup, &restored).unwrap();
+        let mut config = store.config.clone();
+        config.root = restored;
+        let reopened = Store::initialize(config).unwrap();
+        assert!(split_layout(&reopened.dsp(&id).unwrap()).unwrap());
+        assert_eq!(
+            snapshot(&reopened.collector(&id, Provider::Paycom).unwrap()),
+            before
+        );
+        assert_eq!(reopened.get_dsp(&id).unwrap()["status"], "suspended");
     }
     #[test]
     fn refuses_missing_cross_tenant_and_unsafe_storage() {

@@ -321,6 +321,20 @@ test('Rust backup and restore validate checksums, exclude runtime locks and revo
   db.close();
   const manifest = JSON.parse(fs.readFileSync(path.join(backup, 'backup.json'), 'utf8'));
   assert(!manifest.files.some((file: { path: string }) => file.path.endsWith('.lock')));
+  const providerFiles = manifest.files.filter((file: { path: string }) =>
+    file.path.endsWith('/data/paycom/paycom.sqlite'),
+  );
+  assert.equal(providerFiles.length, 3);
+  for (const file of providerFiles) {
+    const provider = new DatabaseSync(path.join(restored, file.path), { readOnly: true });
+    assert.equal(provider.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok');
+    assert.equal(
+      provider.prepare('SELECT provider FROM storage_identity').get()!.provider,
+      'paycom',
+    );
+    provider.close();
+  }
+
   fs.appendFileSync(path.join(backup, manifest.files[0].path), 'tampered');
   fs.rmSync(restored, { recursive: true });
   assert.throws(() => f.cli(['restore', backup, restored]), /backup_checksum_failed/);

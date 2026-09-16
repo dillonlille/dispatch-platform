@@ -43,10 +43,11 @@ schema and SQLite version; opening an unsupported version fails closed.
 
 ## Migration and rollback
 
-The rollout has two deployments. First deploy the dual-layout reader with
-`MIGRATE_ON_START=false`. Once that build is verified in Dev, enable the flag in
-a subsequent deployment. The previous artifact can then read migrated state if
-activation fails. Do not roll back to a build predating the dual-layout reader.
+The rollout uses two deployments. The dual-layout reader was introduced in
+`9a63ef1` (PR #29) with automatic migration disabled. The following deployment
+enables migration, after the compatible reader is verified in Dev. The previous
+artifact can read and write migrated state if activation fails. Do not roll back
+to a build predating `9a63ef1`. Migration is now enabled for startup/provisioning.
 Normal updater rollback retains the immediately previous compatible artifact.
 
 Migration runs under the exclusive platform process lock, before serving traffic
