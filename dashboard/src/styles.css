@@ -1395,6 +1395,7 @@ td small {
 }
 
 .collection-history {
+  align-items: stretch;
   margin-bottom: 24px;
 }
 .collection-history-heading {
