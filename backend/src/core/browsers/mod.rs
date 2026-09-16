@@ -25,6 +25,7 @@ use tokio::sync::{Mutex as AsyncMutex, watch};
 pub struct Manager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     operations: Mutex<HashMap<String, std::sync::Weak<AsyncMutex<()>>>>,
+    runtime: Mutex<Option<Arc<browseros::Runtime>>>,
 }
 pub struct Session {
     pub id: String,
@@ -43,6 +44,24 @@ pub struct Session {
 }
 type Worker = paycom::Driver;
 impl Manager {
+    fn runtime(&self, config: &super::config::Config) -> Result<Arc<browseros::Runtime>> {
+        let mut current = self
+            .runtime
+            .lock()
+            .map_err(|_| Error::new("browser_unavailable", 503))?;
+        if let Some(runtime) = current.as_ref() {
+            return Ok(runtime.clone());
+        }
+        let runtime = Arc::new(browseros::Runtime::new(
+            &config.browseros,
+            &config.sandbox,
+            &std::env::current_exe()?,
+            &config.environment_root().join("browser-runs"),
+            config.browser_capacity,
+        )?);
+        *current = Some(runtime.clone());
+        Ok(runtime)
+    }
     pub fn operation(&self, id: &str) -> Result<tokio::sync::OwnedMutexGuard<()>> {
         let lock = {
             let mut operations = self
@@ -500,10 +519,12 @@ impl State {
                 let policy=if let Some(value)=&self.config.fixture_url {
                     browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
                 } else { browseros::NetworkPolicy::Paycom };
-                let runtime=browseros::Runtime::new(&self.config.browseros,&self.config.sandbox,
-                    &std::env::current_exe()?, &run, self.config.browser_capacity)?;
+                let runtime=self.browsers.runtime(&self.config)?;
                 let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
-                *worker=Some(paycom::Driver::new(browser,&profile,self.config.fixture_url.as_deref()).await?);
+                match paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
+                    Ok(driver)=>*worker=Some(driver),
+                    Err(error)=>{browser.close().await;return Err(error);},
+                }
 
             }
             drop(worker);
