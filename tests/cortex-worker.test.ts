@@ -10,12 +10,12 @@ test(
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 240000 },
   async (t) => {
     let primary = 0;
-    let mode = 'otp';
+    let mode = 'password';
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url!, 'http://fixture.test');
       const html = (body: string) => {
         res.setHeader('content-type', 'text/html');
-        res.end(`<html><head><title>Cortex fixture</title></head><body>${body}</body></html>`);
+        res.end(`<html><head><title>DSP Console</title></head><body>${body}</body></html>`);
       };
       const redirect = (path: string) => {
         res.writeHead(302, { location: path });
@@ -23,11 +23,12 @@ test(
       };
       const cookie = (value: string) =>
         res.setHeader('set-cookie', `${value}; Path=/; Max-Age=3600`);
-      if (url.pathname === '/operations/execution') {
+      if (url.pathname === '/dspconsolev2') {
+        // A console title/path alone must never authenticate a loading shell.
         if (mode === 'blank') return html('<h1>Loading…</h1>');
         if (req.headers.cookie?.includes('authenticated=yes') && mode !== 'reject')
           return html(
-            '<h1>Delivery Execution</h1><nav>Routes · Drivers</nav><a href="/logout">Sign out</a>',
+            '<nav><a href="/scheduling/calendar-view/week">Weekly schedule</a></nav><a href="/ap/signin">Sign out</a>',
           );
         return redirect('/ap/signin');
       }
@@ -55,12 +56,12 @@ test(
         if (mode === 'reject') return html('<div>Your password is incorrect</div>');
         if (mode === 'otp') return redirect('/ap/mfa');
         cookie('authenticated=yes');
-        return redirect('/operations/execution');
+        return redirect('/dspconsolev2');
       }
       if (url.pathname === '/ap/mfa') {
         if (fields.get('otpCode') === '123456') {
           cookie('authenticated=yes');
-          return redirect('/operations/execution');
+          return redirect('/dspconsolev2');
         }
         return html(
           '<p>Two-step verification</p><form action="/ap/mfa" method="post"><input id="auth-mfa-otpcode" name="otpCode"><button type="submit">Verify</button></form>',
@@ -87,9 +88,13 @@ test(
     await owner.select(dsp.id);
     const credentials = { username: 'fixture-user', password: 'fixture-password' };
     let saved = await owner.post('/api/dsp/connections/cortex', credentials);
+    assert.equal(saved.value.status, 'ready', saved.body);
+    assert.equal(primary, 1);
+    mode = 'otp';
+    saved = await owner.post('/api/dsp/connections/cortex', credentials);
     assert.equal(saved.status, 200, saved.body);
     assert.equal(saved.value.status, 'needs_verification', saved.body);
-    assert.equal(primary, 1);
+    assert.equal(primary, 2);
     const sessionId = saved.value.verificationSessionId;
     assert.equal(
       (await owner.get(`/api/dsp/connections/cortex/screenshot?sessionId=${sessionId}`)).status,
@@ -107,18 +112,18 @@ test(
       (await owner.post('/api/dsp/connections/cortex/verify', { code: '123456' })).value.status,
       'ready',
     );
-    assert.equal(primary, 1);
+    assert.equal(primary, 2);
     await f.stop();
     await f.start();
     owner = await f.client();
     await owner.select(dsp.id);
     let checked = await owner.post('/api/dsp/connections/cortex/check');
     assert.equal(checked.value.status, 'ready', checked.body);
-    assert.equal(primary, 1);
+    assert.equal(primary, 2);
     mode = 'captcha';
     saved = await owner.post('/api/dsp/connections/cortex', credentials);
     assert.equal(saved.value.status, 'needs_verification', saved.body);
-    assert.equal(primary, 1);
+    assert.equal(primary, 2);
     const next = saved.value.verificationSessionId;
     assert.equal(
       (await owner.post('/api/dsp/connections/cortex/submit', { sessionId: next })).value.error,
@@ -130,7 +135,7 @@ test(
     });
     checked = await owner.post('/api/dsp/connections/cortex/submit', { sessionId: next });
     assert.equal(checked.value.status, 'ready', checked.body);
-    assert.equal(primary, 2);
+    assert.equal(primary, 3);
     mode = 'reject';
     checked = await owner.post('/api/dsp/connections/cortex/check');
     assert.equal(checked.value.error, 'invalid_credentials', checked.body);
@@ -138,10 +143,10 @@ test(
       (await owner.post('/api/dsp/connections/cortex/check')).value.error,
       'attempt_cooldown',
     );
-    assert.equal(primary, 3);
+    assert.equal(primary, 4);
     mode = 'blank';
     saved = await owner.post('/api/dsp/connections/cortex', credentials);
     assert.equal(saved.value.status, 'needs_verification', saved.body);
-    assert.equal(primary, 3);
+    assert.equal(primary, 4);
   },
 );
