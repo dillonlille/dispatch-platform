@@ -1,14 +1,8 @@
 import { BrowserVerification } from './browser-verification.js';
+import { PaycomDateControls } from './paycom-day-controls.js';
+import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
-import {
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpDown,
-  Plug,
-  RefreshCw,
-  ShieldCheck,
-} from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
 import {
   paycomDefaults,
@@ -239,44 +233,31 @@ function PunchCells({
     </>
   );
 }
-function today(timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  return ['year', 'month', 'day']
-    .map((name) => parts.find((p) => p.type === name)!.value)
-    .join('-');
-}
 export function TimecardsPage({
+  date: sharedDate,
+  refreshKey,
   timezone,
   preferences = paycomDefaults,
 }: {
+  date?: string;
+  refreshKey?: string | null;
   timezone: string;
   preferences?: PaycomPreferences;
 }) {
   const [offset, setOffset] = useState(0);
-  const businessToday = today(timezone);
-  const [date, setDate] = useState(businessToday),
-    [sort, setSort] = useState(
+  const businessToday = localDate(timezone);
+  const [localDay, setLocalDay] = useState(businessToday);
+  const date = sharedDate ?? localDay;
+  const [sort, setSort] = useState(
       preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
     ),
     [direction, setDirection] = useState('asc'),
     [selected, setSelected] = useState<Daily['rows'][number]>();
   const { data, error } = useData<Daily>(
     `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
+    0,
+    refreshKey,
   );
-  function move(days: number) {
-    const value = new Date(`${date}T12:00:00Z`);
-    value.setUTCDate(value.getUTCDate() + days);
-    const next = value.toISOString().slice(0, 10);
-    if (next <= businessToday) {
-      setDate(next);
-      setOffset(0);
-    }
-  }
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
     setSort(key);
@@ -294,35 +275,17 @@ export function TimecardsPage({
             · {timezone}
           </p>
         </div>
-        <div className="paycom-date-controls">
-          <button className="icon-button" aria-label="Previous day" onClick={() => move(-1)}>
-            <ChevronLeft size={16} />
-          </button>
-          <label>
-            Date
-            <input
-              type="date"
-              aria-label="Timecard date"
-              max={businessToday}
-              value={date}
-              onChange={(event) => {
-                if (event.target.value && event.target.value <= businessToday)
-                  setDate(event.target.value);
-              }}
-            />
-          </label>
-          <button
-            className="icon-button"
-            aria-label="Next day"
-            disabled={date >= businessToday}
-            onClick={() => move(1)}
-          >
-            <ChevronRight size={16} />
-          </button>
-          <button disabled={date === businessToday} onClick={() => setDate(businessToday)}>
-            Today
-          </button>
-        </div>
+        {!sharedDate && (
+          <PaycomDateControls
+            date={date}
+            today={businessToday}
+            label="Timecard date"
+            onChange={(value) => {
+              setLocalDay(value);
+              setOffset(0);
+            }}
+          />
+        )}
       </div>
       <ErrorBox message={error} />
       {!data ? (

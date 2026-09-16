@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Wrench, Plug, ArrowRight, RefreshCw, Plus, Search, Ellipsis } from 'lucide-react';
 import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
@@ -6,6 +6,7 @@ import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } from './ui.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
+import { PaycomDateControls, usePaycomDate } from './paycom-day-controls.js';
 import { InvitationLink, type Perform } from './platform.js';
 
 export function HomePage() {
@@ -22,6 +23,40 @@ export function HomePage() {
   );
 }
 
+type SyncSource = {
+  enabled: boolean;
+  active: boolean;
+  job: Job | null;
+  collectedAt: string | null;
+};
+
+function SourceSyncStatus({ name, source }: { name: string; source?: SyncSource }) {
+  const status = source?.job?.status;
+  return (
+    <div className="paycom-source-status">
+      <span className="muted">{name}</span>
+      <span role="status" aria-label={`${name} sync`}>
+        {!source
+          ? 'Checking…'
+          : status === 'failed'
+            ? 'Last collection failed'
+            : status === 'cancelled'
+              ? 'Sync cancelled'
+              : source.active
+                ? title(status ?? 'running')
+                : !source.enabled
+                  ? 'Sync paused'
+                  : status === 'succeeded'
+                    ? 'Sync complete'
+                    : 'Waiting for next sync'}
+      </span>
+      {source?.collectedAt && (
+        <span className="muted">Last successful sync {time(source.collectedAt)}</span>
+      )}
+    </div>
+  );
+}
+
 export function PaycomPage({
   view,
   perform,
@@ -31,18 +66,42 @@ export function PaycomPage({
   perform: Perform;
   canCollect: boolean;
 }) {
-  const [tab, setTab] = useState('timecards');
+  const [selectedTab, setTab] = useState<string>();
+  const [syncing, setSyncing] = useState(false);
+  const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
-  useEffect(() => {
-    if (preferences.data) setTab(preferences.data.values.opening_page);
-  }, [preferences.data]);
+  const tab = selectedTab ?? preferences.data?.values.opening_page ?? 'timecards';
   const overview = useData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
     jobs: Job[];
   }>('/api/dsp/overview', 5000);
+  const syncState = useData<{
+    date: string;
+    scopeAvailable: boolean;
+    paycom: SyncSource;
+    flex: SyncSource;
+  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000);
+  const sourceState = syncState.data?.date === date ? syncState.data : undefined;
   const { error, refresh } = overview;
   const data = overview.data?.connection;
+  const meals = tab === 'meal-breaks';
+  const activeSync = sourceState?.paycom.active || (meals && sourceState?.flex.active);
+  const collectedAt = overview.data?.workforce.collectedAt;
+  const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
+  const syncUnavailable = meals
+    ? !sourceState
+      ? 'Checking connections…'
+      : !sourceState.paycom.enabled
+        ? 'Connect Paycom in Settings → Connections to sync.'
+        : !sourceState.flex.enabled
+          ? 'Connect Cortex in Settings → Connections to sync Flex.'
+          : !sourceState.scopeAvailable
+            ? 'Flex needs an initial station collection before Sync now is available.'
+            : ''
+    : !data?.enabled
+      ? 'Connect Paycom to sync.'
+      : '';
   const owner = ['owner', 'platform_owner'].includes(view.role);
   return (
     <div className="paycom-page">
@@ -58,6 +117,7 @@ export function PaycomPage({
         )}
       </Header>
       {owner && <ErrorBox message={error} />}
+      {canCollect && <ErrorBox message={syncState.error} />}
       <Tabs
         value={tab}
         onChange={setTab}
@@ -68,8 +128,59 @@ export function PaycomPage({
         ]}
         label="Paycom"
       />
+      <section className="paycom-workspace-controls" aria-label="Date and sync">
+        <div className="paycom-controls-row">
+          {tab !== 'employees' && (
+            <PaycomDateControls date={date} today={today} onChange={selectDate} />
+          )}
+          {canCollect && (
+            <button
+              disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
+              title={
+                syncUnavailable ||
+                (meals
+                  ? `Sync Flex and Paycom for ${date}`
+                  : tab === 'employees'
+                    ? 'Sync Paycom’s current pay period'
+                    : `Sync Paycom for ${date}`)
+              }
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  await perform(
+                    async () => {
+                      await api(meals ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
+                        requestId: crypto.randomUUID(),
+                        ...(tab !== 'employees' ? { date } : {}),
+                      });
+                      refresh();
+                      syncState.refresh();
+                    },
+                    meals ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
+                  );
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+            >
+              <RefreshCw size={16} />
+              Sync now
+            </button>
+          )}
+        </div>
+        {canCollect && (
+          <div className="paycom-sync-status">
+            <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />
+            {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} />}
+            {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
+          </div>
+        )}
+      </section>
       {tab === 'meal-breaks' ? (
         <MealBreaksPage
+          key={date}
+          date={date}
+          refreshKey={refreshKey}
           timezone={view.dsp.timezone}
           owner={owner}
           preferences={preferences.data?.values ?? paycomDefaults}
@@ -103,53 +214,19 @@ export function PaycomPage({
           </div>
         </section>
       ) : (
-        <>
-          {canCollect && (
-            <div className="paycom-sync-status">
-              <span role="status" aria-label="Paycom sync">
-                {overview.data?.jobs[0]?.status === 'succeeded'
-                  ? 'Sync complete'
-                  : overview.data?.jobs[0]?.status === 'failed'
-                    ? 'Last collection failed'
-                    : ['queued', 'running', 'waiting_verification'].includes(
-                          overview.data?.jobs[0]?.status ?? '',
-                        )
-                      ? title(overview.data!.jobs[0]!.status)
-                      : data?.enabled
-                        ? 'Waiting for next sync'
-                        : 'Sync paused'}
-              </span>
-              {overview.data?.workforce.collectedAt && (
-                <span className="muted">
-                  Last successful sync {time(overview.data.workforce.collectedAt)}
-                </span>
-              )}
-              <button
-                disabled={!data?.enabled}
-                onClick={() =>
-                  void perform(async () => {
-                    await api('/api/dsp/jobs', { requestId: crypto.randomUUID() });
-                    refresh();
-                  }, 'Collection queued')
-                }
-              >
-                <RefreshCw size={16} />
-                Sync now
-              </button>
-            </div>
+        <div className="embedded-page">
+          {tab === 'employees' ? (
+            <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />
+          ) : (
+            <TimecardsPage
+              key={`${preferences.data?.revision ?? 'loading'}:${date}`}
+              date={date}
+              refreshKey={refreshKey}
+              timezone={view.dsp.timezone}
+              preferences={preferences.data?.values ?? paycomDefaults}
+            />
           )}
-          <div className="embedded-page">
-            {tab === 'employees' ? (
-              <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />
-            ) : (
-              <TimecardsPage
-                key={preferences.data?.revision ?? 'loading'}
-                timezone={view.dsp.timezone}
-                preferences={preferences.data?.values ?? paycomDefaults}
-              />
-            )}
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

@@ -102,7 +102,8 @@ test(
       (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
       'ready',
     );
-    const id = (await owner.post('/api/dsp/jobs', { requestId: 'data-ready' })).value.id;
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'data-ready', date: '2026-01-10' }))
+      .value.id;
     let job: any;
     await until(async () => {
       job = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
@@ -113,6 +114,11 @@ test(
     assert.equal(f.state.imagesFinished, 0);
     assert.equal(job.metrics[0].pageReads.earlyReady, 2);
     assert.equal(job.metrics[0].pageReads.retries, 0);
+    const selectedPeriod = f.collector(dsp.id, (db) =>
+      db.prepare('SELECT period_from,period_to FROM publications WHERE active=1').get(),
+    );
+    assert.equal(selectedPeriod?.period_from, '2026-01-04');
+    assert.equal(selectedPeriod?.period_to, '2026-01-17');
     const hours = f.collector(
       dsp.id,
       (db) =>

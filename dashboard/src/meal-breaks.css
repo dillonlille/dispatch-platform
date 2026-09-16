@@ -12,30 +12,9 @@
   margin: 0;
   font-size: 15px;
 }
-.meal-datebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px 0 16px;
-  border-bottom: 1px solid var(--border);
+.meal-timezone {
+  margin: 8px 0 16px;
   font-size: 13px;
-  flex-wrap: wrap;
-}
-.meal-date-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.meal-date-controls > button:first-child,
-.meal-date-controls > button:nth-child(3) {
-  padding: 8px;
-}
-.meal-date-controls input {
-  width: 172px;
-}
-.meal-date-controls > button:last-child {
-  margin-left: 8px;
 }
 .meal-toolbar {
   display: flex;
@@ -370,12 +349,6 @@
     border-right: 1px solid var(--border);
     min-width: 155px;
     max-width: 175px;
-  }
-  .meal-date-controls input {
-    width: 148px;
-  }
-  .meal-date-controls > button:last-child {
-    margin-left: 0;
   }
   .meal-provenance > span {
     display: block;

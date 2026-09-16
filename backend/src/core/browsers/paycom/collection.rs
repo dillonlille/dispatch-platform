@@ -262,6 +262,7 @@ impl Driver {
     pub async fn collect<F, Fut>(
         &mut self,
         timezone: &str,
+        selected_date: Option<NaiveDate>,
         metrics: &Recorder,
         checkpoint: Option<&Checkpoint>,
         mut progress: F,
@@ -307,8 +308,10 @@ impl Driver {
             .map_err(|_| Error::new("invalid_timezone", 400))?;
         let body: Value = serde_json::from_str(s(&observed, "postData"))
             .map_err(|_| Error::new("roster_not_complete", 409))?;
-        let (body, period, codes) =
-            selected_body(&body, chrono::Utc::now().with_timezone(&zone).date_naive())?;
+        let (body, period, codes) = selected_body(
+            &body,
+            selected_date.unwrap_or_else(|| chrono::Utc::now().with_timezone(&zone).date_naive()),
+        )?;
         let mut headers = serde_json::Map::new();
         if let Some(values) = observed["headers"].as_object() {
             for (key, value) in values {
@@ -638,6 +641,9 @@ mod tests {
         assert_eq!(period["start"], "2026-09-13");
         assert_eq!(period["end"], "2026-09-26");
         assert_eq!(selected["isAdvancedFilterApplied"], false);
+        let (_, historical, _) = selected_body(&body(), date("2026-01-10")?)?;
+        assert_eq!(historical["start"], "2026-01-04");
+        assert_eq!(historical["end"], "2026-01-17");
         for (key, value) in [
             ("q", json!("driver")),
             ("take", json!(1)),

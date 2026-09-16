@@ -1,13 +1,11 @@
-import { Fragment, useEffect, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
+import { Fragment, useState } from 'react';
+import { ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
 import { api, useData } from './api.js';
 import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
 import {
   cortexClock,
   fullName,
-  localDate,
   mealPairs,
-  shiftDate,
   type ClockTime,
   type MealComparison,
   type MealEmployee,
@@ -360,15 +358,18 @@ function LinkEmployees({
 }
 
 export function MealBreaksPage({
+  date,
+  refreshKey,
   timezone,
   owner,
   preferences,
 }: {
+  date: string;
+  refreshKey?: string | null;
   timezone: string;
   owner: boolean;
   preferences: PaycomPreferences;
 }) {
-  const [date, setDate] = useState(() => localDate(timezone));
   const [query, setQuery] = useState(''),
     [filter, setFilter] = useState('all'),
     [page, setPage] = useState(0),
@@ -378,24 +379,10 @@ export function MealBreaksPage({
   const request = useData<MealComparison>(
     `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`,
     30000,
+    refreshKey,
   );
   const data = request.data?.date === date ? request.data : undefined;
   const zone = data?.timezone ?? timezone;
-  const today = localDate(zone);
-  const [initialized, setInitialized] = useState(false);
-  useEffect(() => {
-    if (data && !initialized) {
-      setInitialized(true);
-      setDate(localDate(data.timezone));
-    }
-  }, [data, initialized]);
-  const selectDate = (value: string) => {
-    if (!value) return;
-    setInitialized(true);
-    setDate(value);
-    setPage(0);
-    setExpanded(new Set());
-  };
   const name = (row: MealEmployee) => {
     const value = fullName(row.name);
     const parts = value.split(' ');
@@ -433,31 +420,9 @@ export function MealBreaksPage({
         <h2 id="meal-heading">Meal Breaks</h2>
         <p>Compare Flex meal times with Paycom punches.</p>
       </header>
-      <div className="meal-datebar">
-        <div className="meal-date-controls">
-          <button aria-label="Previous day" onClick={() => selectDate(shiftDate(date, -1))}>
-            <ChevronLeft size={18} />
-          </button>
-          <input
-            type="date"
-            aria-label="Meal break date"
-            value={date}
-            max={today}
-            onChange={(e) => selectDate(e.target.value)}
-          />
-          <button
-            aria-label="Next day"
-            disabled={date >= today}
-            onClick={() => selectDate(shiftDate(date, 1))}
-          >
-            <ChevronRight size={18} />
-          </button>
-          <button onClick={() => selectDate(today)}>Today</button>
-        </div>
-        <span className="muted">
-          {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
-        </span>
-      </div>
+      <p className="meal-timezone muted">
+        {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
+      </p>
       <div className="meal-toolbar">
         <label className="search">
           <Search size={18} />

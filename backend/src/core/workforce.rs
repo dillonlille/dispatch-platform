@@ -483,11 +483,37 @@ pub fn validate_workforce(value: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub fn fixture(timezone: &str) -> Result<Value> {
+/// A missing date preserves scheduled/current-period collection behavior.
+pub fn collection_date(request: &Value, timezone: &str) -> Result<Option<chrono::NaiveDate>> {
+    v::fields(request, &["date"])?;
+    let Some(value) = request.get("date") else {
+        return Ok(None);
+    };
+    let value = value
+        .as_str()
+        .ok_or_else(|| Error::new("invalid_date", 400))?;
+    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| Error::new("invalid_date", 400))?;
     let tz: chrono_tz::Tz = timezone
         .parse()
         .map_err(|_| Error::new("invalid_timezone", 400))?;
-    let today = chrono::Utc::now().with_timezone(&tz).date_naive();
+    ensure(
+        date.to_string() == value
+            && value >= "2000-01-01"
+            && date <= chrono::Utc::now().with_timezone(&tz).date_naive(),
+        "invalid_date",
+        400,
+    )?;
+    Ok(Some(date))
+}
+pub fn fixture(timezone: &str) -> Result<Value> {
+    fixture_date(timezone, None)
+}
+pub fn fixture_date(timezone: &str, selected: Option<chrono::NaiveDate>) -> Result<Value> {
+    let tz: chrono_tz::Tz = timezone
+        .parse()
+        .map_err(|_| Error::new("invalid_timezone", 400))?;
+    let today = selected.unwrap_or_else(|| chrono::Utc::now().with_timezone(&tz).date_naive());
     let dates: Vec<_> = (0..7)
         .map(|i| (today - chrono::Duration::days(6 - i)).to_string())
         .collect();
