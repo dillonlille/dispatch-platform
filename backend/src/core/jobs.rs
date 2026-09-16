@@ -102,15 +102,22 @@ impl Store {
         })
     }
     pub fn cancel_job(&self, id: &str, dsp: &str) -> Result<Value> {
-        self.job(id, Some(dsp))?;
+        let row = self.job(id, Some(dsp))?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE id=? AND dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id,dsp])?;
+        if s(&row, "kind") == "paycom.collect" {
+            self.clear_checkpoint(dsp, Some(id))?;
+        }
         self.public_job(&self.job(id, Some(dsp))?)
     }
     pub fn cancel_provider(&self, id: &str, provider: Provider) -> Result<()> {
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND kind=? AND status IN ('queued','running','waiting_verification')",params![iso(),id,provider.job_kind()])?;
+        if provider == Provider::Paycom {
+            self.clear_checkpoint(id, None)?;
+        }
         Ok(())
     }
     pub fn cancel_dsp(&self, id: &str) -> Result<()> {
+        self.clear_checkpoint(id, None)?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id])?;
         Ok(())
     }
@@ -212,6 +219,9 @@ impl Store {
             .contains(&e)
         }) && n(&row, "attempt") < n(&row, "max_attempts");
         self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+retry_delay(id,n(&row,"attempt")),id])?;
+        if !retry && s(&row, "kind") == "paycom.collect" {
+            self.clear_checkpoint(s(&row, "dsp_id"), Some(id))?;
+        }
         Ok(())
     }
     pub fn schedule(&self, id: &str) -> Result<Value> {
@@ -303,11 +313,21 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
     let mut tasks = tokio::task::JoinSet::new();
     let mut running_dsps = std::collections::HashSet::new();
     let mut timer = tokio::time::interval(Duration::from_secs(1));
+    let mut checkpoint_cleanup = tokio::time::interval(Duration::from_secs(60));
     loop {
         tokio::select! {
             _=super::cancelled(&mut stop)=>break,
             result=tasks.join_next(),if !tasks.is_empty()=>{
                 match result {Some(Ok(dsp))=>{running_dsps.remove(&dsp);},Some(Err(_))=>return Err(Error::new("collector_task_failed",500)),None=>{}}
+            },
+            _=checkpoint_cleanup.tick()=>{
+                let result = state.run(|db| {
+                    for dsp in db.platform.all("SELECT id FROM dsps WHERE status IN ('active','suspended')", [])? {
+                        db.prune_checkpoints(s(&dsp,"id"))?;
+                    }
+                    Ok(())
+                }).await;
+                if let Err(error)=result { eprintln!("checkpoint_cleanup_failed: {}",error.code); }
             },
             _=timer.tick()=>{
                 state.expire_browsers().await;

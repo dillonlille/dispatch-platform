@@ -86,7 +86,7 @@ const employee = (code: string) => ({
   totals: { totalHours: 16, otHours: 0 },
   approvalPercentages: { employee: 100, supervisor: 100 },
 });
-function timecard(url: URL, mismatch: boolean) {
+function timecard(url: URL, mismatch: boolean, dailyHours = 8) {
   const start = Date.parse(url.searchParams.get('perioddates')!.split('_')[0]!);
   const rows = Array.from({ length: 14 }, (_, index) => {
     const date = new Date(start + index * 86400000),
@@ -94,12 +94,12 @@ function timecard(url: URL, mismatch: boolean) {
     const values: Record<string, string> = {
       date: `${['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][index % 7]} (${iso.slice(5).replace('-', '/')})`,
       paycode: 'REG',
-      hours: index % 7 === 0 ? '8' : '0',
-      total_hours: index % 7 === 0 ? '8' : '0',
+      hours: index % 7 === 0 ? String(dailyHours) : '0',
+      total_hours: index % 7 === 0 ? String(dailyHours) : '0',
     };
     if (index % 7 === 0) {
       values.i1 = '08:00 AM';
-      values.o1 = '04:00 PM';
+      values.o1 = dailyHours === 9 ? '05:00 PM' : '04:00 PM';
     }
     // Paycom can leave the dated row empty and put punches and totals on a
     // following pay-code row. Extraction folds those punches into the day.
@@ -110,10 +110,12 @@ function timecard(url: URL, mismatch: boolean) {
       (trailing
         ? render({ date: values.date! }) + render({ ...values, date: '', hours: '4' })
         : render(values)) +
-      (index % 7 === 6 ? `<tr><td>Weekly Totals</td><td>${mismatch ? 9 : 8}</td></tr>` : '')
+      (index % 7 === 6
+        ? `<tr><td>Weekly Totals</td><td>${mismatch ? 9 : dailyHours}</td></tr>`
+        : '')
     );
   }).join('');
-  return `<title>Timecard Editor</title><input type="password" hidden aria-label="Hidden account settings"><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">16</div>`;
+  return `<title>Timecard Editor</title><input type="password" hidden aria-label="Hidden account settings"><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">${dailyHours * 2}</div>`;
 }
 export async function paycomFixture() {
   const events: string[] = [];
@@ -128,7 +130,11 @@ export async function paycomFixture() {
     activeByAccount: new Map<string, number>(),
     peakByAccount: new Map<string, number>(),
     timecardDelayMs: 0,
-    beforeTimecard: undefined as ((account: string) => Promise<void>) | undefined,
+    beforeTimecard: undefined as ((account: string, code: string) => Promise<void>) | undefined,
+    slowImages: false,
+    hydrate: false,
+    hydrated: 0,
+    imagesFinished: 0,
     timecardsActive: 0,
     timecardsPeak: 0,
     timecardAccountsPeak: 0,
@@ -238,6 +244,24 @@ export async function paycomFixture() {
       const codes = state.incomplete ? ['AA01'] : accountCodes;
       return res.end(JSON.stringify({ eeCodes: codes, employees: codes.map(employee) }));
     }
+    if (url.pathname === '/fixture/image' || url.pathname === '/fixture/hydrate') {
+      const hydrate = url.pathname.endsWith('hydrate');
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, hydrate ? 3000 : 30000);
+        res.once('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      if (res.destroyed) return;
+      if (hydrate) {
+        state.hydrated++;
+        return html(timecard(url, false, 9));
+      }
+      state.imagesFinished++;
+      res.setHeader('Content-Type', 'image/png');
+      return res.end();
+    }
     if (url.pathname === '/v4/cl/web.php/timecard/index') {
       if (!accountCodes.includes(url.searchParams.get('firstrefno') ?? '')) {
         res.writeHead(403);
@@ -257,7 +281,7 @@ export async function paycomFixture() {
         [...state.activeByAccount.values()].filter((count) => count > 0).length,
       );
       try {
-        await state.beforeTimecard?.(account);
+        await state.beforeTimecard?.(account, code);
         await new Promise<void>((resolve) => {
           const stalled = (state.navigationStalls.get(code) ?? 0) > 0;
           if (stalled) state.navigationStalls.set(code, state.navigationStalls.get(code)! - 1);
@@ -282,7 +306,13 @@ export async function paycomFixture() {
         }
         if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
           url.searchParams.set('firstrefno', 'AA01');
-        return html(timecard(url, state.mismatch));
+        return html(
+          timecard(url, state.mismatch) +
+            (state.slowImages ? '<img src="/fixture/image">' : '') +
+            (state.hydrate
+              ? `<script>fetch('/fixture/hydrate${url.search}').then(r=>r.text()).then(html=>{const doc=new DOMParser().parseFromString(html,'text/html');document.querySelector('#tbltimesheet').replaceWith(doc.querySelector('#tbltimesheet'));document.querySelector('#periodtotals').textContent=doc.querySelector('#periodtotals').textContent;});</script>`
+              : ''),
+        );
       } finally {
         state.timecardsActive--;
         state.activeByAccount.set(account, (state.activeByAccount.get(account) ?? 1) - 1);

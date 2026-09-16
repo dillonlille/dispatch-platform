@@ -89,6 +89,8 @@ export interface PageRead {
   contentMs: number;
   extractionMs: number;
   error: string | null;
+  pendingRequests?: number | null;
+  documentState?: 'loading' | 'interactive' | 'complete' | null;
 }
 export interface JobMetrics {
   attempt: number;
@@ -116,6 +118,8 @@ export interface JobMetrics {
     completed: number;
     retries: number;
     recovered: number;
+    resumed?: number;
+    earlyReady?: number;
     totalMs: number;
     active: PageRead[];
     slowest: PageRead[];

@@ -20,6 +20,23 @@ fn store() -> (tempfile::TempDir, Store) {
     (root, store)
 }
 #[test]
+fn startup_removes_owned_browseros_runs_and_rejects_unknown_entries() {
+    let (_root, db) = store();
+    let runs = db::private_dir(&db.config.environment_root().join("browser-runs")).unwrap();
+    for prefix in ["run", "browseros"] {
+        db::private_dir(&runs.join(crypto::id(prefix).unwrap())).unwrap();
+    }
+    operations::clean_browser_runs(&db.config).unwrap();
+    assert_eq!(std::fs::read_dir(&runs).unwrap().count(), 0);
+    let unknown = runs.join("unrecognized");
+    db::private_dir(&unknown).unwrap();
+    assert_eq!(
+        operations::clean_browser_runs(&db.config).unwrap_err().code,
+        "unexpected_browser_run"
+    );
+    assert!(unknown.exists());
+}
+#[test]
 fn authenticated_encryption_binds_every_secret_to_its_tenant() {
     let key = crypto::random::<32>().unwrap();
     let value =

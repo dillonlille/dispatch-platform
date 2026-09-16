@@ -94,6 +94,8 @@ struct PageReads {
     completed: usize,
     retries: usize,
     recovered: usize,
+    resumed: usize,
+    early_ready: usize,
     total_ms: u64,
     active: Vec<PageRead>,
     slowest: Vec<PageRead>,
@@ -110,6 +112,8 @@ struct PageRead {
     content_ms: u64,
     extraction_ms: u64,
     error: Option<String>,
+    pending_requests: Option<usize>,
+    document_state: Option<&'static str>,
 }
 impl PageRead {
     fn add(&mut self, ms: u64) {
@@ -139,6 +143,17 @@ impl Recorder {
             pages: Vec::new(),
         })))
     }
+    pub fn resumed(&self, count: usize) {
+        self.0.lock().expect("job metrics").value.page_reads.resumed = count;
+    }
+    pub fn early_ready(&self) {
+        self.0
+            .lock()
+            .expect("job metrics")
+            .value
+            .page_reads
+            .early_ready += 1;
+    }
     pub fn page_start(&self, ordinal: usize, attempt: usize) {
         let mut clock = self.0.lock().expect("job metrics");
         if attempt > 1 {
@@ -154,6 +169,8 @@ impl Recorder {
                 content_ms: 0,
                 extraction_ms: 0,
                 error: None,
+                pending_requests: None,
+                document_state: None,
             },
             Instant::now(),
             Instant::now(),
@@ -170,6 +187,17 @@ impl Recorder {
             page.add(changed.elapsed().as_millis() as u64);
             page.stage = stage;
             *changed = Instant::now();
+        }
+    }
+    pub fn page_loading(&self, ordinal: usize, pending: Option<usize>, state: &'static str) {
+        let mut clock = self.0.lock().expect("job metrics");
+        if let Some((page, _, _)) = clock
+            .pages
+            .iter_mut()
+            .find(|(p, _, _)| p.ordinal == ordinal)
+        {
+            page.pending_requests = pending;
+            page.document_state = Some(state);
         }
     }
     pub fn page_finish(&self, ordinal: usize, error: Option<&str>) {

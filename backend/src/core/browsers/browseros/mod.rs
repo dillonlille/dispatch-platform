@@ -1,6 +1,7 @@
 //! Internal Rust browser runtime. Provider adapters own these handles; no raw CDP
 //! endpoint, client-supplied path, or script is exposed through the platform API.
 mod cdp;
+mod loading;
 mod native;
 mod sandbox;
 mod worker;
@@ -290,6 +291,13 @@ impl Session {
         })
         .await
     }
+    pub async fn loading(&self, session: &str, loader: &str) -> Result<Value> {
+        self.send(WireCommand::Loading {
+            session: session.into(),
+            loader: loader.into(),
+        })
+        .await
+    }
     pub async fn event(&self, session: &str) -> Result<Value> {
         self.send(WireCommand::Event {
             session: session.into(),
@@ -345,6 +353,10 @@ impl Session {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum WireCommand {
+    Loading {
+        session: String,
+        loader: String,
+    },
     Navigation {
         session: String,
         previous: String,

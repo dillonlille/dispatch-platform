@@ -397,7 +397,8 @@ pub fn clean_browser_runs(config: &Config) -> Result<()> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         ensure(
-            db::identifier(&entry.file_name().to_string_lossy(), "run_"),
+            db::identifier(&entry.file_name().to_string_lossy(), "run_")
+                || db::identifier(&entry.file_name().to_string_lossy(), "browseros_"),
             "unexpected_browser_run",
             503,
         )?;

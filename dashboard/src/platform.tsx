@@ -11,6 +11,8 @@ import { api, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
 import { JobPerformance } from './job-performance.js';
+import { CollectionHistory } from './collection-history-view.js';
+import { providerName } from './collection-history.js';
 import {
   Badge,
   Empty,
@@ -468,7 +470,9 @@ export function JobTable({
             <tr key={job.id}>
               <td>
                 <strong>{job.dspName}</strong>
-                <small>Paycom · {job.environment}</small>
+                <small>
+                  {providerName(job.kind)} · {job.environment}
+                </small>
               </td>
               <td>
                 <Badge value={job.status} />
@@ -531,12 +535,15 @@ export function JobsPage({
       <Header title="Collections" subtitle="Follow collection progress and recent results." />
       <ErrorBox message={error} />
       {data ? (
-        <JobTable
-          jobs={data}
-          perform={perform}
-          refresh={refresh}
-          cancel={!platform && canCollect}
-        />
+        <>
+          <CollectionHistory jobs={data} />
+          <JobTable
+            jobs={data}
+            perform={perform}
+            refresh={refresh}
+            cancel={!platform && canCollect}
+          />
+        </>
       ) : (
         <Loading />
       )}
@@ -622,7 +629,10 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
         <h2>Collections</h2>
         <ErrorBox message={jobs.error} />
         {jobs.data ? (
-          <JobTable jobs={jobs.data} perform={perform} refresh={jobs.refresh} />
+          <>
+            <CollectionHistory jobs={jobs.data} />
+            <JobTable jobs={jobs.data} perform={perform} refresh={jobs.refresh} />
+          </>
         ) : (
           <Loading />
         )}

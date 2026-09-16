@@ -333,7 +333,20 @@ impl Session {
         };
         let response = async {
             match worker {
-                Worker::Paycom(worker) => worker.collect(&self.timezone, metrics, progress).await,
+                Worker::Paycom(worker) => {
+                    worker
+                        .collect(
+                            &self.timezone,
+                            metrics,
+                            Some(&super::collection_checkpoint::Checkpoint::new(
+                                state.clone(),
+                                job,
+                                owner,
+                            )),
+                            progress,
+                        )
+                        .await
+                }
                 Worker::Cortex(worker) => {
                     worker
                         .collect(&serde_json::from_value(request.clone())?, metrics, progress)
