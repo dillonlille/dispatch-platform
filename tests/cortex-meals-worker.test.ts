@@ -55,7 +55,11 @@ test(
           stopProgress: { total: 2, completed: 2 },
           latestTaskExecutionTime: start + 2400000,
           breaks: grown
-            ? [br('meal#1', start, start + 1800000), br('meal#2', start + 3600000, start + 4500000)]
+            ? [
+                br('meal#1', start, start + 1800000),
+                br('meal#2', start + 3600000, start + 4500000),
+                { ...br('start-punch', start + 600, null), breakId: 'break-meal#1' },
+              ]
             : [],
         },
         {
@@ -90,6 +94,7 @@ test(
         p.isLoadingItineraryDetails = false;
         p.itineraryDetails = {
           ...c,
+          breaks: [...c.breaks].reverse(),
           localDate: [2026, 1, 10],
           serviceAreaId: 'area-1',
           stops: [
@@ -97,6 +102,7 @@ test(
             {
               stopId: 'stop#2',
               tasks: [
+                task('task.1', start - (mode === 'conflicting' ? 240000 : 300000)),
                 task('task.2', start + 1860000),
                 task('task.3', start + 1880000),
                 task('task.4', start + 4560000),
@@ -107,6 +113,11 @@ test(
           inactiveTasks: [],
         };
         if (mode === 'invalid') p.itineraryDetails.breaks = [br('bad', start, start - 1000)];
+        if (mode === 'meal-conflict' && id === 'itinerary-1')
+          p.itineraryDetails.breaks.push({
+            ...br('conflicting-punch', start, start + 1900000),
+            breakId: 'break-meal#1',
+          });
       }
       res.end(
         `<title>Delivery Execution</title><main id="application"></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:${JSON.stringify(p)}};</script>`,
@@ -175,8 +186,40 @@ test(
     assert.equal(failed.status, 'failed');
     assert.equal(failed.error, 'cortex_invalid_meal_evidence');
     assert.deepEqual((await publications()).value, initial);
+    mode = 'meal-conflict';
+    const mealConflict = await run('meal-conflict');
+    assert.equal(mealConflict.status, 'failed');
+    assert.equal(mealConflict.error, 'cortex_invalid_meal_evidence');
+    assert.deepEqual((await publications()).value, initial);
     mode = 'unavailable';
     assert.equal((await run('unknown')).status, 'succeeded');
     assert.equal((await publications()).value[0].verifiedGapPairs, 0);
+    mode = 'conflicting';
+    assert.equal((await run('conflict')).status, 'succeeded');
+    const conflict = (await publications()).value[0];
+    assert.equal(conflict.mealCount, 2);
+    assert.equal(conflict.verifiedGapPairs, 0);
+    f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT count(*) n FROM meal_delivery_events WHERE publication_id=? AND event_id='task.1'",
+            )
+            .get(conflict.id) as any
+        ).n,
+        0,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT count(*) n FROM meal_itineraries WHERE publication_id=? AND delivery_coverage='unavailable'",
+            )
+            .get(conflict.id) as any
+        ).n,
+        2,
+      );
+    });
   },
 );

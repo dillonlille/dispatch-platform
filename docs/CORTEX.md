@@ -65,6 +65,10 @@ must fail validation and receive adapter updates.
 Every itinerary is read, including those with no meal. Multiple itineraries for
 the same transporter and all recorded MEAL breaks are retained. REST breaks are
 outside this collector. Completed meals and ongoing meals have distinct states.
+Meals use Amazon's logical `breakId`, rather than an individual `punchId`. When
+the same break/sequence retains both an ON punch and an OFF record, the completed
+record supplies the meal interval, provided that it contains the ON timestamp.
+Identical copies collapse; conflicting completed intervals still fail validation.
 Seconds and milliseconds are normalized to full timestamps; no clock-only
 arithmetic or Pacific timezone assumption is used. The itinerary's operating date
 can include an overnight continuation, bounded to 48 hours from local midnight.
@@ -77,6 +81,11 @@ removed tasks determine delivery coverage. Unavailable delivery coverage preserv
 verified meal times while withholding gaps. A missing next event on an unfinished
 route is pending, not zero. A completed route with complete evidence can report
 verified absence. Intervals describe recorded events, not driver activity.
+
+Amazon can repeat the same task across overlapping stop groups. Identical task
+facts are stored once, with a deterministic supporting stop ID. Copies that
+disagree on task type, state, completion, time or transporter are excluded from
+delivery evidence and make that itinerary's gap coverage unavailable.
 
 The adapter requires repeated stable observations. After reading details it
 recaptures the list, comparing meal content, execution status and progress/event
