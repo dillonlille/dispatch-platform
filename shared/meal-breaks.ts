@@ -33,8 +33,13 @@ export interface MealComparison {
   paycomCollectedAt: string | null;
   cortexPublications: { station: string; timezone: string; collectedAt: string }[];
   employees: { code: string; name: string }[];
-  drivers: { id: string; name: string }[];
-  links: { revision: number; links: EmployeeLink[] };
+  drivers: {
+    id: string;
+    name: string;
+    paycomCode: string | null;
+    matchType: 'name' | 'saved' | 'separate' | 'unmatched';
+  }[];
+  links: { revision: number; links: EmployeeLink[]; separate?: string[] };
 }
 export interface ClockTime {
   minute: number;
@@ -51,12 +56,6 @@ export function fullName(name: string) {
   return (comma < 0 ? name : `${name.slice(comma + 1)} ${name.slice(0, comma)}`)
     .trim()
     .replace(/\s+/g, ' ');
-}
-// Suggestions are never identities. Saving a reviewed link is required.
-export function nameKey(name: string) {
-  return fullName(name)
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]/gu, '');
 }
 export function localDate(timezone: string, now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {

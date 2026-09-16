@@ -114,10 +114,13 @@ Provider employee IDs remain provider-owned. The Meal Breaks comparison uses
 explicit DSP-wide identities in `dispatch.sqlite`'s
 `settings['employees.provider_links']`: a generated identity ID, Paycom employee
 code, Cortex transporter ID, and a revision for the complete link set. Owners
-confirm links; normalized exact names are suggestions only. Each provider ID can
-belong to only one link. Changes validate both sources, commit atomically, and
-produce an audit entry. Removing a link keeps both source records intact. The
-setting is additive and ignored by the previous runtime, preserving rollback.
+can override automatic matches or link different names. Each provider ID can
+belong to only one saved link. Changes validate both sources, commit atomically, and
+produce an audit entry. A null `paycomCode` records an explicit keep-separate
+choice in the setting's `separate` transporter list; adding `automatic: true`
+clears that choice and the saved link so automatic matching can resume. Both
+source records remain intact. The setting is additive and ignored by the previous
+runtime, preserving rollback.
 
 ## Meal Breaks comparison
 
@@ -126,9 +129,17 @@ The latest Paycom publication covering that date is combined with active Cortex
 scopes for the report date. Overlapping Cortex scopes use the newest observation
 of each service-area/itinerary, including newer observations with no meal.
 Employees appear when they have any nonempty Paycom punch or any Cortex meal;
-Paycom department/driver filters do not hide this union. Unlinked identities stay
-separate and the page explains how to review them. Source-only employees, partial
-meals, and multiple meals remain visible. Access requires the signed DSP view;
+Paycom department/driver filters do not hide this union. Unique full names match
+automatically after normalizing comma order, capitalization, punctuation and
+spacing. Uniqueness uses the entire selected Paycom roster and effective Cortex
+itineraries, including employees without punches and drivers without meals.
+Saved links take precedence and reserve their Paycom targets; explicit
+keep-separate choices suppress automatic matches. Nicknames, omitted name
+components and ambiguous names remain separate for owner review. The API returns
+each displayed driver's effective Paycom code and match type, so the page counts
+only unresolved employees as needing review. Automatic associations are computed
+on read, never written back as identities or used to alter source records.
+Source-only employees, partial meals, and multiple meals remain visible. Access requires the signed DSP view;
 `POST /api/dsp/paycom/employee-links` additionally requires owner settings access
 and CSRF. No request supplies a database path.
 
