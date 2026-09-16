@@ -122,7 +122,7 @@ pub fn at(ms: i64) -> String {
 }
 pub struct Db(pub Connection);
 impl Db {
-    fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
+    pub(crate) fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
         private_file(file, initialize)?;
         for suffix in ["-wal", "-shm", "-journal"] {
             private_file(&PathBuf::from(format!("{}{suffix}", file.display())), false)?;
@@ -270,7 +270,7 @@ impl Store {
         )?;
         // Additive tables retain compatibility with the previous Rust release.
         jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
-        Ok(Self {
+        let store = Self {
             platform: Db::open(
                 &config.platform().join("accounts.sqlite"),
                 include_str!("platformSchema.sql"),
@@ -281,7 +281,20 @@ impl Store {
             config,
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
-        })
+        };
+        for row in store.platform.all(
+            "SELECT id FROM dsps WHERE status IN ('active','suspended')",
+            [],
+        )? {
+            let id = s(&row, "id");
+            if super::collectors::MIGRATE_ON_START {
+                store.migrate_collector_storage(id)?;
+            } else {
+                // The rollback reader validates split databases before readiness too.
+                store.collector(id, super::collectors::Provider::Paycom)?;
+            }
+        }
+        Ok(store)
     }
     pub fn open(config: Config, key: Vec<u8>) -> Result<Self> {
         Ok(Self {
@@ -305,35 +318,38 @@ impl Store {
     }
     pub fn dsp(&self, id: &str) -> Result<DspLease<'_>> {
         let path = self.area(id, "data")?.join("dispatch.sqlite");
-        private_file(&path, false)?;
+        self.cached_database(&path, 1)
+    }
+    pub(crate) fn cached_database(&self, path: &Path, version: i64) -> Result<DspLease<'_>> {
+        private_file(path, false)?;
+        ensure(path.is_file(), "storage_file_missing", 503)?;
+        let id = path.to_string_lossy();
         let cached = {
             let mut cache = self.dsp_cache.borrow_mut();
             cache
                 .iter()
-                .position(|(key, _)| key == id)
+                .position(|(key, _)| key == &id)
                 .map(|index| cache.remove(index).1)
         };
         let db = match cached {
             Some(db) => db,
-            None => {
-                let db = Db::open(&path, "", 1, false)?;
-                migrate_connections(&db)?;
-                db
-            }
+            None => Db::open(path, "", version, false)?,
         };
         Ok(DspLease {
-            id: id.into(),
+            id: id.into_owned(),
             db: Some(db),
             cache: &self.dsp_cache,
         })
     }
+    // Bootstrap the historical schema, then provisioning runs the same crash-safe
+    // migration as existing DSPs. Keep this frozen; collector schemas evolve alone.
     pub fn initialize_dsp(&self, id: &str) -> Result<Db> {
         for area in ["data", "config", "state", "secrets"] {
             self.area(id, area)?;
         }
         Db::open(
             &self.area(id, "data")?.join("dispatch.sqlite"),
-            include_str!("dspSchema.sql"),
+            include_str!("collectors/legacyDsp.sql"),
             1,
             true,
         )
@@ -354,29 +370,4 @@ impl Store {
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
         Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR a.dsp_id=?) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
     }
-}
-
-// Widen the provider constraint without changing user_version: the previous
-// runtime can still read/write Paycom and rollback without losing either row.
-fn migrate_connections(db: &Db) -> Result<()> {
-    let schema = db
-        .one(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='connections'",
-            [],
-        )?
-        .ok_or_else(|| super::Error::new("database_invalid", 500))?;
-    if !s(&schema, "sql").contains("'cortex'") {
-        db.transaction(|| {
-            db.exec("CREATE TABLE connections_next (provider TEXT PRIMARY KEY CHECK(provider IN ('paycom','cortex')), enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)), status TEXT NOT NULL DEFAULT 'not_connected', error TEXT, account_label TEXT, updated_at TEXT NOT NULL, verified_at TEXT, revision INTEGER NOT NULL DEFAULT 1)", [])?;
-            db.exec("INSERT INTO connections_next SELECT * FROM connections", [])?;
-            db.exec("DROP TABLE connections", [])?;
-            db.exec("ALTER TABLE connections_next RENAME TO connections", [])?;
-            Ok(())
-        })?;
-    }
-    db.exec(
-        "INSERT OR IGNORE INTO connections(provider,updated_at) VALUES ('cortex',?)",
-        [iso()],
-    )?;
-    Ok(())
 }

@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 use super::{
     Error, Result,
     accounts::{Auth, Context},
@@ -50,7 +51,11 @@ impl Store {
             409,
         )?;
         let result = (|| {
-            let db = self.initialize_dsp(id)?;
+            self.initialize_dsp(id)?;
+            if super::collectors::MIGRATE_ON_START {
+                self.migrate_collector_storage(id)?;
+            }
+            let db = self.collector(id, Provider::Paycom)?;
             db.exec(
                 "INSERT OR IGNORE INTO connections(provider,updated_at) VALUES ('paycom',?)",
                 [iso()],
@@ -111,7 +116,7 @@ impl Store {
             value["lastCollection"] = Value::Null;
             value["profile"] = profile_default();
             if ["active", "suspended"].contains(&s(&value, "status")) {
-                let db = self.dsp(&id)?;
+                let db = self.collector(&id, Provider::Paycom)?;
                 value["profile"] = self.profile(&id)?;
                 if let Some(r) =
                     db.one("SELECT status FROM connections WHERE provider='paycom'", [])?
@@ -185,7 +190,7 @@ impl Store {
             "UPDATE dsps SET name=?,timezone=?,revision=revision+1 WHERE id=?",
             [name, timezone, id],
         )?;
-        self.dsp(id)?
+        self.collector(id, Provider::Paycom)?
             .exec("UPDATE schedules SET timezone=?,next_run=NULL", [timezone])?;
         self.audit(
             Some(s(&c.auth.user, "id")),

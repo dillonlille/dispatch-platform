@@ -36,10 +36,11 @@ dispatch-platform/
   dev/data/preview/                 Dev jobs and worker runs
   dev/dsps/dsp_<random-id>/
     config/                         DSP configuration files
-    data/dispatch.sqlite            Connection/schedule settings and workforce
+    data/dispatch.sqlite            DSP profile and storage-layout metadata
+    data/paycom/paycom.sqlite       Paycom settings, schedule and workforce
     secrets/vault.key               Per-DSP credential encryption key
     secrets/paycom.enc               DSP-bound encrypted provider credentials
-    state/browsers/paycom/           Persistent private provider browser profile
+    state/browsers/paycom-browseros/           Persistent private provider browser profile
   archive/                          Retained previous workspace
 ```
 
@@ -51,6 +52,12 @@ DSP directories contain no executables, dashboard copies, plugin installations,
 package managers, or service definitions. DSP creation inserts a provisioning
 record, creates private directories and schemas, and activates the DSP. A failed
 provision can be retried. Browser binaries and provider logic are shared.
+
+Collector storage uses typed provider access and independently versioned schemas.
+See [Collector storage](COLLECTORS.md) for table ownership, the two-deployment
+migration, rollback compatibility and the contract for adding collectors. Startup
+migrates existing DSPs before serving traffic; provisioning creates the same
+separated layout. The previous compatibility build supports both layouts.
 
 ## Collection
 
@@ -96,7 +103,7 @@ Production publication/deployment automation is deferred to the Production setup
 Four database workers share a bounded queue of 64 operations with a two-second
 admission timeout. Writes serialize short state transitions; reads can run
 concurrently. Each worker reuses platform/job connections, caches prepared
-statements and retains at most four DSP database connections with 512 KiB SQLite
+statements and retains at most four DSP/core or collector database connections with 512 KiB SQLite
 page caches. Employee filtering, Unicode ordering and pagination run in SQLite.
 Password verification has a separate two-operation limit. Each browser session
 accepts at most 32 pending commands; commands revalidate authority after waiting.

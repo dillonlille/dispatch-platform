@@ -4,8 +4,7 @@ mod cortex;
 pub mod egress;
 mod page;
 mod paycom;
-mod provider;
-pub use provider::Provider;
+pub use super::collectors::Provider;
 pub mod sandbox;
 use super::{
     Error, Result, State,
@@ -356,7 +355,7 @@ impl Store {
         self.connection_for(id, Provider::Paycom)
     }
     pub fn connection_for(&self, id: &str, provider: Provider) -> Result<Value> {
-        let mut row=self.dsp(id)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider=?",[provider.name()])?.ok_or_else(||Error::new("connection_required",409))?;
+        let mut row=self.collector(id, provider)?.one("SELECT provider,enabled,status,error,updated_at updatedAt,verified_at lastVerifiedAt,account_label accountLabel FROM connections WHERE provider=?",[provider.id()])?.ok_or_else(||Error::new("connection_required",409))?;
         db::boolean(&mut row, &["enabled"]);
         Ok(row)
     }
@@ -368,7 +367,7 @@ impl Store {
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        self.dsp(id)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider=? AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),provider.name(),revision])?;
+        self.collector(id, provider)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider=? AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),provider.id(),revision])?;
         Ok(())
     }
     pub fn save_credentials(&self, c: &Context, value: &Value, provider: Provider) -> Result<()> {
@@ -378,39 +377,39 @@ impl Store {
         let area = self.area(id, "secrets")?;
         let key = db::key_file(&area.join("vault.key"))?;
         db::write_private(
-            &area.join(format!("{}.enc", provider.name())),
-            crypto::encrypt(&key, &format!("{id}:{}:2", provider.name()), value)?.as_bytes(),
+            &area.join(format!("{}.enc", provider.id())),
+            crypto::encrypt(&key, &format!("{id}:{}:2", provider.id()), value)?.as_bytes(),
         )?;
-        self.dsp(id)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[if provider == Provider::Paycom { s(value,"clientCode") } else { "" },&iso(),provider.name()])?;
-        self.clear_browser_state(id, provider)?;
+        self.collector(id, provider)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[if provider == Provider::Paycom { s(value,"clientCode") } else { "" },&iso(),provider.id()])?;
+        self.clear_collector_browser_state(id, provider)?;
         self.audit(
             Some(s(&c.auth.user, "id")),
             Some(id),
             "connection.credentials_saved",
-            provider.name(),
+            provider.id(),
         )
     }
     pub fn credentials(&self, id: &str, provider: Provider) -> Result<Value> {
         let area = self.area(id, "secrets")?;
-        let path = area.join(format!("{}.enc", provider.name()));
+        let path = area.join(format!("{}.enc", provider.id()));
         db::private_file(&path, false)?;
         let key = db::key_file(&area.join("vault.key"))?;
         crypto::decrypt(
             &key,
-            &format!("{id}:{}:2", provider.name()),
+            &format!("{id}:{}:2", provider.id()),
             &std::fs::read_to_string(path)?,
         )
     }
     pub fn disable(&self, c: &Context, remove: bool, provider: Provider) -> Result<()> {
         self.revalidate(c, "connections")?;
         let id = s(&c.dsp, "id");
-        let db = self.dsp(id)?;
-        db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.name().into()])?;db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?",[provider.name()])?;Ok(())})?;
-        self.clear_browser_state(id, provider)?;
+        let db = self.collector(id, provider)?;
+        db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;if provider == Provider::Paycom { db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?",[provider.id()])?; }Ok(())})?;
+        self.clear_collector_browser_state(id, provider)?;
         if remove {
             let file = self
                 .area(id, "secrets")?
-                .join(format!("{}.enc", provider.name()));
+                .join(format!("{}.enc", provider.id()));
             db::private_file(&file, false)?;
             if file.exists() {
                 std::fs::remove_file(file)?;
@@ -420,30 +419,10 @@ impl Store {
             Some(s(&c.auth.user, "id")),
             Some(id),
             "connection.disabled",
-            provider.name(),
+            provider.id(),
         )
     }
-    fn clear_browser_state(&self, id: &str, provider: Provider) -> Result<()> {
-        let root = self.area(id, "state")?.join("browsers");
-        if !root.exists() {
-            return Ok(());
-        }
-        db::private_dir(&root)?;
-        let profile = root.join(format!("{}-browseros", provider.name()));
-        if profile.exists() {
-            db::private_dir(&profile)?;
-            std::fs::remove_dir_all(profile)?;
-        }
-        // Only an explicit credential change/disable resets this provider's limiter.
-        for suffix in ["attempt.json", "diagnostics.json"] {
-            let file = root.join(format!("{}-{suffix}", provider.name()));
-            db::private_file(&file, false)?;
-            if file.exists() {
-                std::fs::remove_file(file)?;
-            }
-        }
-        Ok(())
-    }
+
 }
 impl State {
     pub async fn expire_browsers(self: &Arc<Self>) {
@@ -525,17 +504,17 @@ impl State {
                     409,
                 )?;
                 let connection = db
-                    .dsp(&dsp)?
+                    .collector(&dsp, provider)?
                     .one(
                         "SELECT enabled,revision FROM connections WHERE provider=?",
-                        [provider.name()],
+                        [provider.id()],
                     )?
                     .ok_or_else(|| Error::new("connection_required", 409))?;
                 ensure(flag(&connection, "enabled"), "connection_required", 409)?;
                 let runs = db::private_dir(&db.config.environment_root().join("browser-runs"))?;
                 let run = runs.join(crypto::id("run")?);
                 let profile = db::private_dir(&db.area(&dsp, "state")?.join("browsers"))?
-                    .join(format!("{}-browseros", provider.name()));
+                    .join(format!("{}-browseros", provider.id()));
                 Ok((
                     value,
                     db.credentials(&dsp, provider)?,
@@ -606,7 +585,7 @@ impl State {
             let dsp=id.to_owned();self.run(move|db| {
                 let tenant = db.get_dsp(&dsp)?;
                 ensure(s(&tenant,"status")=="active", "dsp_unavailable",409)?;
-                let connection = db.dsp(&dsp)?.one("SELECT enabled,revision FROM connections WHERE provider=?",[provider.name()])?.ok_or_else(||Error::new("connection_required",409))?;
+                let connection = db.collector(&dsp, provider)?.one("SELECT enabled,revision FROM connections WHERE provider=?",[provider.id()])?.ok_or_else(||Error::new("connection_required",409))?;
                 ensure(flag(&connection,"enabled") && n(&connection,"revision")==revision,"connection_changed",409)?;
                 db.connection_state(&dsp,provider,revision,"signing_in",None)
             }).await?;

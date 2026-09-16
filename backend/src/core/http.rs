@@ -820,7 +820,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                                 Some(s(&context.auth.user, "id")),
                                 Some(s(&context.dsp, "id")),
                                 "connection.verification_submitted",
-                                provider.name(),
+                                provider.id(),
                             )
                         })
                         .await?;

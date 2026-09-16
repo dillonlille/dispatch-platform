@@ -1,3 +1,4 @@
+import { collectorDatabase } from '../tooling/collector-storage.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -164,6 +165,8 @@ export async function fixture(
     request,
     client,
     database,
+    collector: <T>(dspId: string, callback: (db: DatabaseSync) => T): T =>
+      database(path.relative(root, collectorDatabase(root, dspId, 'paycom')), callback),
     pid: () => server!.pid!,
     close: async () => {
       await stop();

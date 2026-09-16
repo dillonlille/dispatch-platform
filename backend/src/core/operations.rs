@@ -1,3 +1,4 @@
+use super::collectors::Provider;
 use super::{
     Error, Result, State,
     config::Config,
@@ -147,7 +148,7 @@ pub fn seed(db: &Store) -> Result<()> {
             &area.join("paycom.enc"),
             crypto::encrypt(&key, &format!("{id}:paycom:2"), &credentials)?.as_bytes(),
         )?;
-        db.dsp(id)?.exec(
+        db.collector(id, Provider::Paycom)?.exec(
             "UPDATE connections SET enabled=1,status='ready',account_label='DEMO1',verified_at=?",
             [iso()],
         )?;
@@ -247,10 +248,20 @@ pub fn backup(config: &Config, destination: &Path) -> Result<Value> {
         )?;
         if stat.is_dir() {
             db::private_dir(&destination.join(relative))?;
+            let parts: Vec<_> = relative.iter().filter_map(|p| p.to_str()).collect();
+            let browser_pulse = parts.len() >= 5
+                && parts[0] == "dsps"
+                && db::identifier(parts[1], "dsp_")
+                && parts[2..4] == ["state", "browsers"]
+                && parts.last() == Some(&"pulse");
             for item in fs::read_dir(source)? {
                 let item = item?;
                 let name = item.file_name().to_string_lossy().into_owned();
-                if name.ends_with("-wal")
+                // Chromium retains this disposable OS runtime link after shutdown.
+                let pulse_runtime =
+                    browser_pulse && name.ends_with("-runtime") && item.file_type()?.is_symlink();
+                if pulse_runtime
+                    || name.ends_with("-wal")
                     || name.ends_with("-shm")
                     || name.ends_with(".lock")
                     || [

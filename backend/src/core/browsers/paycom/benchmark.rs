@@ -118,7 +118,7 @@ async fn measure_live_collection() -> Result<()> {
         }).await?;
         let elapsed=started.elapsed().as_millis();
         let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
-        let database=rusqlite::Connection::open_with_flags(dsp.join("data/dispatch.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let database=rusqlite::Connection::open_with_flags(crate::core::collectors::database_path(&dsp, crate::core::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();
         let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
         for value in statement.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,f64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
