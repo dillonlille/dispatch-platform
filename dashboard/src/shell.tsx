@@ -7,6 +7,7 @@ import { title } from './ui.js';
 export function Shell({
   session,
   view,
+  dspId,
   page,
   navigation,
   logout,
@@ -15,6 +16,7 @@ export function Shell({
 }: {
   session: SessionView;
   view?: DspView;
+  dspId?: string;
   page: string;
   navigation: { id: string; label: string; icon: LucideIcon }[];
   logout: () => void;
@@ -115,7 +117,7 @@ export function Shell({
           {navigation.map(({ id, label: itemLabel, icon: Icon }) => (
             <a
               key={id}
-              href={`#${view ? `dsp/${view.dsp.id}/` : ''}${id}`}
+              href={`#${dspId ? `dsp/${dspId}/` : ''}${id}`}
               className="nav-item"
               aria-current={
                 page === id ||
@@ -157,7 +159,7 @@ export function Shell({
             </summary>
             <div className="account-popover">
               <a
-                href={view ? `#dsp/${view.dsp.id}/settings` : '#account'}
+                href={dspId ? `#dsp/${dspId}/settings` : '#account'}
                 onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}
               >
                 Account settings

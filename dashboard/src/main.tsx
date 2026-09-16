@@ -209,6 +209,7 @@ function App() {
     <Shell
       session={session}
       view={view}
+      dspId={dspId}
       page={page}
       navigation={nav}
       logout={() => void perform(logout)}

@@ -155,8 +155,33 @@ test('archived account tabs preserve names, appearance and display timezone pref
 test('archived Paycom settings persist and affect the workspace', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: /Northline Logistics/ }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  let releaseView!: () => void;
+  let viewRequested!: () => void;
+  const viewPending = new Promise<void>((resolve) => (releaseView = resolve));
+  const requested = new Promise<void>((resolve) => (viewRequested = resolve));
+  await page.route('**/api/session/dsp', async (route) => {
+    viewRequested();
+    await viewPending;
+    await route.continue();
+  });
+  try {
+    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+    await requested;
+    const dspId = new URL(page.url()).hash.split('/')[1]!;
+    const paycom = page.getByRole('link', { name: 'Paycom', exact: true });
+    await expect(paycom).toHaveAttribute('href', `#dsp/${dspId}/paycom`);
+    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute(
+      'href',
+      `#dsp/${dspId}/settings`,
+    );
+    await expect(
+      page.locator('.account-popover a').filter({ hasText: 'Account settings' }),
+    ).toHaveAttribute('href', `#dsp/${dspId}/settings`);
+    await paycom.click();
+    expect(new URL(page.url()).hash).toBe(`#dsp/${dspId}/paycom`);
+  } finally {
+    releaseView();
+  }
   await expect(page.getByRole('tab', { name: 'Collections', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Paycom settings', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Paycom settings', exact: true })).toBeVisible();
