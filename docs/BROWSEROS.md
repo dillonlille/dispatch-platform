@@ -133,7 +133,12 @@ before Rust reconciles daily hours. Two tabs load timecards in bounded pairs wit
 the same browser and DSP session. Each tab owns its execution-context cache. A
 scripted navigation releases the serialized command channel while Paycom responds;
 the reader then requires a new document, the exact employee URL, a fully loaded
-table and all existing validation. Collection replaces each tab's history entry so
+table and all existing validation. After each pair is fully validated and its
+records are owned by Rust, collection asks both renderers to collect unreachable
+page objects through `HeapProfiler.collectGarbage`. This keeps the tabs and
+profile alive while reclaiming old page allocations between reads. It does not
+clear cookies or request another provider page. Collection also replaces each
+tab's history entry so
 completed employee pages cannot accumulate in the back/forward cache. Credentials
 remain confined to authentication.
 Throttling or server errors abort the pair and use the existing bounded job retry
@@ -152,10 +157,14 @@ them. Removing those files requires a coordinated artifact/updater change.
 An ignored operator benchmark can collect from an explicitly selected, idle DSP
 without publishing the result. It uses that DSP's saved credentials and profile,
 compares daily records with the active publication, and prints only aggregate
-timing, counts and process-tree RSS. Live provider changes may produce differences;
+timing, counts and process-tree memory. Live provider changes may produce differences;
 the benchmark re-reads changed employees through the original sequential path and
-fails if those fresh records disagree. RSS sums shared
-pages across processes and is not a measure of unique physical memory.
+fails if those fresh records disagree. Memory is sampled once per second. RSS sums
+shared pages across processes; PSS apportions shared pages and better estimates the
+physical footprint. Private memory excludes shared pages. PSS/private totals use
+Linux `smaps_rollup`; a nonzero `unreadableSmaps` means those totals are incomplete.
+Each reported peak is the maximum of that metric over the sampled browser process
+tree, including authentication, and excludes the parent platform/test process.
 
 ```bash
 DISPATCH_BENCHMARK_DSP=/absolute/environment/dsps/dsp_selected \

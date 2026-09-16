@@ -364,6 +364,12 @@ impl Driver {
                 read_timecard(&self.page, &self.origin, &employees[0], &period).await?
             };
             timecards.extend(result);
+            // Both pages are complete and their validated records are now owned
+            // by Rust. Reclaim unreachable page objects before loading more.
+            self.page.collect_garbage().await?;
+            if let Some(second) = &second {
+                second.collect_garbage().await?;
+            }
         }
         Ok(
             json!({"employees":employees,"timecards":timecards,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),

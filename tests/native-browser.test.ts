@@ -97,12 +97,16 @@ test(
 );
 
 test(
-  'Paycom overlaps at most two pages, handles an odd roster, and rejects cross-employee data',
+  'Paycom preserves paired collection through page cleanup and rejects cross-employee data',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
   async (t) => {
     const f = await paycomFixture();
     t.after(f.close);
-    f.state.codes = ['AA01', 'BB02', 'CC03', 'DD04', 'EE05'];
+    f.state.codes = [
+      'AA01',
+      'BB02',
+      ...Array.from({ length: 23 }, (_, i) => `CC${String(i).padStart(2, '0')}`),
+    ];
     f.state.timecardDelayMs = 600;
     const owner = await f.client();
     const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
@@ -132,7 +136,13 @@ test(
       2,
       'Two real document requests must overlap, with a hard limit of two',
     );
-    assert.equal((await owner.get('/api/dsp/employees')).value.total, 5);
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 25);
+    assert.equal(f.events.filter((event) => event === 'timecard').length, 25);
+    assert.equal(
+      f.events.filter((event) => event === 'primary').length,
+      1,
+      'Page cleanup must retain the authenticated browser profile',
+    );
     const publication = () =>
       f.database(
         `dsps/${dsp.id}/data/dispatch.sqlite`,
