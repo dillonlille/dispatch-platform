@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import secrets
-import shutil
 import subprocess
 from urllib.parse import urlparse
 
@@ -49,7 +48,7 @@ def main():
     updates.require(commit == updates.command("git", "rev-parse", "origin/dev", cwd=live),
                     "Setup requires merged dev HEAD")
     manifest = updates.verify_artifact(live / ".build", commit)
-    updates.require(manifest["format"] == 2, "Rust core artifact required")
+    updates.require(manifest["format"] in (2, 3), "Rust core artifact required")
     accounts = root / "data/platform/accounts.sqlite"
     updates.require(not accounts.exists() and not (root / "config/platform.env").exists(),
                     "Dev already configured; preserve existing accounts and configuration")
@@ -61,7 +60,6 @@ def main():
         "DISPATCH_ORIGIN": args.origin,
         "DISPATCH_PROVIDER_MODE": args.provider,
         "PORT": "5180",
-        "DISPATCH_WORKER_NODE": str(Path(shutil.which("node")).resolve()),
     }
     if args.sandbox_executable:
         executable = args.sandbox_executable.resolve()

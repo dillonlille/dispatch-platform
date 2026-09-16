@@ -41,10 +41,16 @@ if (mode === 'reuse') {
     ),
   );
   if (mode === 'full') {
+    const coreTests = npm('test');
+    const rustChecks = npm('check:rust');
     checks.push(
-      npm('test'),
-      npm('check:rust'),
-      npm('test:browseros'),
+      coreTests,
+      rustChecks,
+      // Real multi-DSP browsers need predictable headroom. Finish compilers and
+      // synthetic API suites before starting the native capacity measurement.
+      Promise.all([build, coreTests, rustChecks]).then(
+        (results) => results.every(Boolean) && npm('test:browseros'),
+      ),
       run('dependency audit', 'npm', ['audit', '--omit=dev', '--audit-level=high']),
       run('Python tests', 'python3', [
         '-m',

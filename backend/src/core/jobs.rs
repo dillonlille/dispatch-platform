@@ -2,6 +2,7 @@ use super::{
     Error, Result, State, crypto,
     db::{Store, at, flag, iso, n, now, s},
     ensure,
+    job_metrics::{self, Metrics, Phase, Recorder},
 };
 use rusqlite::params;
 use serde_json::{Value, json};
@@ -9,7 +10,7 @@ use std::{sync::Arc, time::Duration};
 impl Store {
     pub fn public_job(&self, row: &Value) -> Result<Value> {
         Ok(
-            json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":self.get_dsp(s(row,"dsp_id"))?["name"],"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"]}),
+            json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":self.get_dsp(s(row,"dsp_id"))?["name"],"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"],"metrics":self.metrics(s(row,"id"))?}),
         )
     }
     pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
@@ -103,8 +104,14 @@ impl Store {
         Ok(dsp)
     }
     pub fn recover_jobs(&self, all: bool) -> Result<()> {
-        self.jobs.exec("UPDATE jobs SET status=CASE WHEN attempt>=max_attempts THEN 'failed' ELSE 'queued' END,message='Recovered interrupted collection',error='worker_interrupted',available_at=?,completed_at=CASE WHEN attempt>=max_attempts THEN ? ELSE NULL END,lease_owner=NULL,lease_until=NULL WHERE status IN ('running','waiting_verification') AND (? OR lease_until<?)",params![now(),iso(),all,now()])?;
-        Ok(())
+        self.jobs.transaction(|| {
+            if all {
+                self.jobs.exec("UPDATE job_metrics SET owner='',metrics=json_set(metrics,'$.outcome','cancelled','$.error','job_cancelled','$.phase',NULL,'$.finishedAt',?) WHERE json_extract(metrics,'$.outcome')='running' AND job_id IN (SELECT id FROM jobs WHERE status='cancelled')",[iso()])?;
+            }
+            self.jobs.exec("UPDATE job_metrics SET owner='',metrics=json_set(metrics,'$.outcome','interrupted','$.error','worker_interrupted','$.phase',NULL,'$.finishedAt',?) WHERE json_extract(metrics,'$.outcome')='running' AND job_id IN (SELECT id FROM jobs WHERE status IN ('running','waiting_verification') AND (? OR lease_until<?))",params![iso(),all,now()])?;
+            self.jobs.exec("UPDATE jobs SET status=CASE WHEN attempt>=max_attempts THEN 'failed' ELSE 'queued' END,message='Recovered interrupted collection',error='worker_interrupted',available_at=?,completed_at=CASE WHEN attempt>=max_attempts THEN ? ELSE NULL END,lease_owner=NULL,lease_until=NULL WHERE status IN ('running','waiting_verification') AND (? OR lease_until<?)",params![now(),iso(),all,now()])?;
+            Ok(())
+        })
     }
     pub fn claim(&self, owner: &str, eligible: impl Fn(&str) -> bool) -> Result<Option<Value>> {
         self.jobs.transaction(|| {
@@ -112,7 +119,9 @@ impl Store {
             let rows=self.jobs.all("SELECT * FROM jobs j WHERE j.status='queued' AND j.available_at<=? AND NOT EXISTS (SELECT 1 FROM jobs active WHERE active.dsp_id=j.dsp_id AND active.status IN ('running','waiting_verification')) ORDER BY (SELECT COALESCE(MAX(completed_at),'') FROM jobs previous WHERE previous.dsp_id=j.dsp_id),j.created_at LIMIT 200",[now()])?;
             let Some(row)=rows.into_iter().find(|r|eligible(s(r,"dsp_id"))) else {return Ok(None);};
             self.jobs.exec("UPDATE jobs SET status='running',attempt=attempt+1,started_at=?,lease_owner=?,lease_until=?,message='Starting collection' WHERE id=?",params![iso(),owner,now()+120000,s(&row,"id")])?;
-            Ok(Some(self.job(s(&row,"id"),None)?))
+            let job=self.job(s(&row,"id"),None)?;
+            self.jobs.exec("INSERT INTO job_metrics(job_id,attempt,owner,metrics) VALUES (?,?,?,?)",params![s(&job,"id"),n(&job,"attempt"),owner,serde_json::to_string(&Metrics::new(&job))?])?;
+            Ok(Some(job))
         })
     }
     pub fn progress(
@@ -242,12 +251,15 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
 async fn execute(state: Arc<State>, job: Value, owner: String) {
     let id = s(&job, "id").to_owned();
     let dsp = s(&job, "dsp_id").to_owned();
+    let metrics = Recorder::new(&job);
     let task = async {
         let jid = id.clone();
         let worker = owner.clone();
         state.run(move |db| db.guard_job(&jid, &worker)).await?;
+        metrics.phase(Phase::Authentication);
         let session = state.ensure_browser(&dsp, false).await?;
         if session.challenge() {
+            metrics.phase(Phase::Verification);
             let jid = id.clone();
             let worker = owner.clone();
             state
@@ -274,23 +286,41 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                 db.progress(&jid, &worker, 10, "Collecting workforce", "running")
             })
             .await?;
+        metrics.phase(Phase::Collection);
         let data = session.collect(&state, &id, &owner).await?;
+        metrics.counts(&data);
+        metrics.phase(Phase::Publication);
         let jid = id.clone();
         let worker = owner.clone();
         let tenant = dsp.clone();
+        let completed_metrics = metrics.clone();
         state
             .run(move |db| {
                 db.guard_job(&jid, &worker)?;
                 db.publish(&tenant, &data)?;
-                db.finish(&jid, &worker, None)
+                completed_metrics.finish("succeeded", None);
+                db.jobs.transaction(|| {
+                    db.save_metrics(&jid, &worker, &completed_metrics.snapshot())?;
+                    db.finish(&jid, &worker, None)
+                })
             })
             .await
     };
     let mut task = Box::pin(task);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+    let mut sample = tokio::time::interval(Duration::from_secs(1));
+    sample.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = loop {
         tokio::select! {
             result=&mut task=>break result,
+            _=sample.tick()=>{
+                if let Some(pid)=state.browsers.get(&dsp).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
+                    && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
+                    metrics.observe(memory);
+                }
+                let jid=id.clone(); let worker=owner.clone(); let snapshot=metrics.snapshot();
+                let _=state.run(move|db|db.save_metrics(&jid,&worker,&snapshot)).await;
+            },
             _=heartbeat.tick()=>{
                 let jid=id.clone();let worker=owner.clone();
                 let guard=state.run(move|db|{db.guard_job(&jid,&worker)?;db.jobs.exec("UPDATE jobs SET lease_until=? WHERE id=? AND lease_owner=?",params![now()+120000,jid,worker])?;Ok(())}).await;
@@ -299,16 +329,47 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
         }
     };
     drop(task);
+    if let Err(error) = &result {
+        let jid = id.clone();
+        let cancelled = state
+            .run(move |db| Ok(s(&db.job(&jid, None)?, "status") == "cancelled"))
+            .await
+            .unwrap_or(false);
+        metrics.finish(
+            if cancelled
+                || [
+                    "job_cancelled",
+                    "permission_denied",
+                    "connection_changed",
+                    "dsp_unavailable",
+                ]
+                .contains(&error.code.as_str())
+            {
+                "cancelled"
+            } else {
+                "failed"
+            },
+            Some(if cancelled {
+                "job_cancelled"
+            } else {
+                &error.code
+            }),
+        );
+    }
     state
         .browsers
         .revoke_revision(&dsp, n(&job, "connection_revision"))
         .await;
     let error = result.err().map(|e| e.code);
     let actor = job["actor_id"].as_str().map(str::to_owned);
+    let snapshot = metrics.snapshot();
     let _ = state
         .run(move |db| {
             if let Some(ref error) = error {
-                db.finish(&id, &owner, Some(error))?;
+                db.jobs.transaction(|| {
+                    db.save_metrics(&id, &owner, &snapshot)?;
+                    db.finish(&id, &owner, Some(error))
+                })?;
             }
             db.audit(
                 actor.as_deref(),

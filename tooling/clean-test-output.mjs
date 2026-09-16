@@ -4,6 +4,7 @@ for (const file of [
   '/tmp/dispatch-browser-test-results',
   '/tmp/dispatch-dashboard-desktop.png',
   '/tmp/dispatch-dashboard-mobile.png',
+  '/tmp/dispatch-job-metrics.png',
   '/tmp/dispatch-verification-desktop.png',
   '/tmp/dispatch-verification-mobile.png',
   '/tmp/dispatch-native-failure.png',

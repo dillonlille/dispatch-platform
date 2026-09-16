@@ -1354,3 +1354,42 @@ td small {
     max-height: 48dvh;
   }
 }
+.job-performance {
+  min-width: 180px;
+}
+.job-performance summary {
+  cursor: pointer;
+  margin-top: 8px;
+}
+.job-attempts {
+  min-width: 260px;
+  max-width: 400px;
+  white-space: normal;
+}
+.job-attempts section {
+  padding-top: 12px;
+}
+.job-attempts dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 12px 0;
+}
+.job-attempts dd {
+  margin: 0;
+  text-align: right;
+}
+.job-attempts p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.collection-table td {
+  vertical-align: top;
+}
+.diagnostics-jobs {
+  margin-top: 28px;
+}
+.diagnostics-jobs > h2 {
+  margin: 0 0 16px;
+}

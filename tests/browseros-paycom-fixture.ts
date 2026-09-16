@@ -123,6 +123,10 @@ export async function paycomFixture() {
     incomplete: false,
     mismatch: false,
     codes: ['AA01', 'BB02'],
+    accounts: {} as Record<string, string[]>,
+    accountStarts: [] as string[],
+    activeByAccount: new Map<string, number>(),
+    peakByAccount: new Map<string, number>(),
     timecardDelayMs: 0,
     timecardsActive: 0,
     timecardsPeak: 0,
@@ -132,6 +136,10 @@ export async function paycomFixture() {
   };
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://fixture.invalid');
+    const account = decodeURIComponent(
+      req.headers.cookie?.match(/(?:^|; )fixture_account=([^;]+)/)?.[1] ?? credentials.username,
+    );
+    const accountCodes = state.accounts[account] ?? state.codes;
     const logged = !state.rejection && req.headers.cookie?.includes('fixture_session=one');
     const solved = req.headers.cookie?.includes('fixture_captcha=solved');
     const chunks: Buffer[] = [];
@@ -160,10 +168,15 @@ export async function paycomFixture() {
       if (
         state.rejection ||
         values.get('clientcode') !== credentials.clientCode ||
-        values.get('username') !== credentials.username ||
+        (values.get('username') !== credentials.username &&
+          !Object.hasOwn(state.accounts, values.get('username') ?? '')) ||
         values.get('password') !== credentials.password
       )
         return html(login + '<p>Invalid username or password</p>');
+      res.setHeader(
+        'Set-Cookie',
+        `fixture_account=${encodeURIComponent(values.get('username')!)}; Path=/; Max-Age=3600; HttpOnly`,
+      );
       return redirect(pinPath);
     }
     if (url.pathname === pinPath && req.method === 'POST') {
@@ -206,7 +219,7 @@ export async function paycomFixture() {
     }
     if (url.pathname === '/v4/cl/web.php/timecardsearch/index')
       return html(
-        `${authenticated}<title>Timecard Search</title><p>Employee Status Is Active</p><button>Export</button><script>fetch('/api/cl/timecard-search/employees',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'fixture-token'},body:JSON.stringify(${JSON.stringify({ ...requestBody, eeCodes: state.codes })})})</script>`,
+        `${authenticated}<title>Timecard Search</title><p>Employee Status Is Active</p><button>Export</button><script>fetch('/api/cl/timecard-search/employees',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'fixture-token'},body:JSON.stringify(${JSON.stringify({ ...requestBody, eeCodes: accountCodes })})})</script>`,
       );
     if (url.pathname === '/api/cl/timecard-search/employees' && req.method === 'POST') {
       const body = JSON.parse(text);
@@ -216,10 +229,18 @@ export async function paycomFixture() {
         return res.end();
       }
       res.setHeader('Content-Type', 'application/json');
-      const codes = state.incomplete ? ['AA01'] : state.codes;
+      const codes = state.incomplete ? ['AA01'] : accountCodes;
       return res.end(JSON.stringify({ eeCodes: codes, employees: codes.map(employee) }));
     }
     if (url.pathname === '/v4/cl/web.php/timecard/index') {
+      if (!accountCodes.includes(url.searchParams.get('firstrefno') ?? '')) {
+        res.writeHead(403);
+        return res.end('Employee not in this account');
+      }
+      if (url.searchParams.get('firstrefno') === accountCodes[0]) state.accountStarts.push(account);
+      const active = (state.activeByAccount.get(account) ?? 0) + 1;
+      state.activeByAccount.set(account, active);
+      state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
       events.push('timecard');
       state.timecardsActive++;
       state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
@@ -241,6 +262,7 @@ export async function paycomFixture() {
         return html(timecard(url, state.mismatch));
       } finally {
         state.timecardsActive--;
+        state.activeByAccount.set(account, (state.activeByAccount.get(account) ?? 1) - 1);
       }
     }
     res.writeHead(404);
@@ -260,9 +282,12 @@ export async function paycomFixture() {
     events,
     state,
     close: async () => {
-      await platform.close();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      try {
+        await platform.close();
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     },
   };
 }

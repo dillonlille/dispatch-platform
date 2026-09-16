@@ -4,18 +4,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 import { assert } from '../shared/errors.js';
-export const managed = [
-  'dashboard',
-  'api',
-  'services',
-  'integrations',
-  'shared',
-  'tooling',
-  'node_modules',
-  'package.json',
-  'package-lock.json',
-  'release.json',
-] as const;
+export const managed = ['dashboard', 'services', 'tooling', 'release.json'] as const;
 const fileSchema = z
   .object({
     path: z.string().min(1),
@@ -30,10 +19,9 @@ const common = {
 };
 const manifestSchema = z
   .object({
-    format: z.literal(2),
+    format: z.literal(3),
     version: common.version,
     runtime: z.literal('rust'),
-    workerNodeMajor: z.literal(22),
     schema: z.literal(3),
     files: common.files,
     digest: common.digest,
@@ -67,10 +55,9 @@ export function inventory(root: string): Artifact['files'] {
 }
 export function writeManifest(root: string, version: string): Artifact {
   const value = {
-    format: 2 as const,
+    format: 3 as const,
     version,
     runtime: 'rust' as const,
-    workerNodeMajor: 22 as const,
     schema: 3 as const,
     files: inventory(root),
   };
@@ -103,12 +90,11 @@ export function verifyArtifact(root: string): Artifact {
   assert(
     seen.has('services/rust/dispatch-backend') &&
       seen.has('dashboard/index.html') &&
-      seen.has('package.json') &&
-      seen.has('services/runtime/auth-worker.js') &&
-      seen.has('services/runtime/collection-worker.js') &&
-      ![...seen].some(
+      seen.has('tooling/build-info.json') &&
+      [...seen].every(
         (name) =>
-          name.startsWith('api/') || ['tooling/cli.js', 'tooling/supervisor.js'].includes(name),
+          name.startsWith('dashboard/') ||
+          ['services/rust/dispatch-backend', 'tooling/build-info.json'].includes(name),
       ),
     'artifact_incomplete',
   );

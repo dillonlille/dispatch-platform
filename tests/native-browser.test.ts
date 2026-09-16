@@ -202,3 +202,45 @@ test(
     assert.equal(publication(), id);
   },
 );
+
+test(
+  'retry diagnostics retain the failed attempt after a successful provider retry',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 45000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    f.state.timecardStatus = 429;
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-retry' })).value.id;
+    const current = async () =>
+      (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+    await until(async () => {
+      const job = await current();
+      return job.status === 'queued' && job.attempt === 1;
+    });
+    const failed = (await current()).metrics[0];
+    assert.equal(failed.outcome, 'failed');
+    assert.equal(failed.error, 'provider_unavailable');
+    assert.equal(failed.publicationMs, null);
+    f.state.timecardStatus = 200;
+    // Exercise the real scheduler retry without spending a minute in backoff.
+    f.database('data/preview/jobs.sqlite', (db) =>
+      db.prepare('UPDATE jobs SET available_at=0 WHERE id=?').run(id),
+    );
+    await until(async () => (await current()).status === 'succeeded', 20000);
+    const completed = await current();
+    assert.equal(completed.attempt, 2);
+    assert.deepEqual(completed.metrics[0], failed);
+    assert.equal(completed.metrics[1].outcome, 'succeeded');
+    assert.equal(completed.metrics[1].employees, 2);
+    assert.equal(completed.metrics[1].timecards, 28);
+    assert(completed.metrics[1].peakPssBytes > 0);
+    assert(completed.metrics[1].publicationMs !== null);
+  },
+);

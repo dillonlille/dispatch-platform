@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { build } from 'esbuild';
 import { build as viteBuild } from 'vite';
 import { writeManifest, verifyArtifact } from './artifact.js';
 const root = process.cwd(),
@@ -15,45 +14,9 @@ fs.copyFileSync(
   path.join(out, 'services/rust/dispatch-backend'),
 );
 await viteBuild();
-await build({
-  entryPoints: {
-    'services/runtime/auth-worker': 'services/browsers/auth-worker.ts',
-    'services/runtime/collection-worker': 'services/browsers/collection-worker.ts',
-  },
-  outdir: out,
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node22',
-  packages: 'external',
-  sourcemap: false,
-  define: { 'process.env.DISPATCH_BUNDLED': '"1"' },
-});
-fs.cpSync('integrations/paycom/provider', path.join(out, 'services/runtime/provider'), {
-  recursive: true,
-});
-fs.mkdirSync(path.join(out, 'services/runtime/node_modules'), { recursive: true });
-for (const name of ['package.json', 'package-lock.json'])
-  fs.copyFileSync(path.join('tooling/worker-runtime', name), path.join(out, name));
 fs.mkdirSync(path.join(out, 'tooling'), { recursive: true });
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 fs.writeFileSync(path.join(out, 'tooling/build-info.json'), JSON.stringify({ commit }) + '\n');
-execFileSync(
-  'npm',
-  ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--bin-links=false'],
-  { cwd: out, stdio: 'inherit' },
-);
-// Runtime artifacts have a complete regular-file inventory, no executable links.
-function removeBins(directory: string) {
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === '.bin') fs.rmSync(file, { recursive: true });
-      else removeBins(file);
-    }
-  }
-}
-removeBins(path.join(out, 'node_modules'));
 const manifest = writeManifest(out, JSON.parse(fs.readFileSync('package.json', 'utf8')).version);
 verifyArtifact(out);
 process.stdout.write(
