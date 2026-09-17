@@ -52,8 +52,8 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           },
         );
         await api('/api/auth/login', { email: accepted.email, password });
-        window.location.hash = `dsp/${accepted.dspId}/overview`;
         await onLogin();
+        window.location.hash = `dsp/${accepted.dspId}/overview`;
       }
     } catch (error) {
       setError((error as Error).message);

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 export async function capturedMail(
   root: string,
   to: string,
+  previousText?: string,
 ): Promise<{
   to: string;
   subject: string;
@@ -18,7 +19,7 @@ export async function capturedMail(
     for (const name of fs.existsSync(directory) ? fs.readdirSync(directory) : []) {
       const file = path.join(directory, name);
       const message = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (message.to === to) {
+      if (message.to === to && message.text !== previousText) {
         assert.equal(fs.statSync(file).mode & 0o077, 0);
         return message;
       }
