@@ -1,4 +1,4 @@
-//! Read-only comparison across provider snapshots. Unique full names can match
+//! Read-only comparison across provider snapshots. Unique names can match
 //! automatically; saved overrides live in DSP storage, never in source records.
 use super::{
     Result,
@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 
 const LINKS: &str = "employees.provider_links";
 
-// Normalize provider formatting, not nicknames or omitted name components.
+// Exact matches take priority over the more conservative name-variant pass.
 fn name_key(name: &str) -> String {
     let ordered = name
         .split_once(',')
@@ -25,10 +25,85 @@ fn name_key(name: &str) -> String {
         .collect()
 }
 
+struct Name {
+    given: String,
+    surnames: Vec<String>,
+    suffix: Option<String>,
+}
+
+impl Name {
+    fn new(name: &str) -> Self {
+        let ordered = name
+            .split_once(',')
+            .map(|(last, first)| format!("{first} {last}"));
+        let mut words: Vec<_> = ordered
+            .as_deref()
+            .unwrap_or(name)
+            .split_whitespace()
+            .map(name_key)
+            .filter(|word| !word.is_empty())
+            .collect();
+        let suffix = words.last().and_then(|word| match word.as_str() {
+            "jr" | "junior" => Some("jr"),
+            "sr" | "senior" => Some("sr"),
+            "ii" => Some("ii"),
+            "iii" => Some("iii"),
+            "iv" => Some("iv"),
+            _ => None,
+        });
+        let suffix = suffix.map(str::to_owned);
+        if suffix.is_some() {
+            words.pop();
+        }
+        let given = if words.is_empty() {
+            String::new()
+        } else {
+            words.remove(0)
+        };
+        // Supported short forms are explicit, never arbitrary first-name prefixes
+        // (e.g. Alex must not also match Alexis or Alexandra).
+        let given = if given == "alex" {
+            "alexander".into()
+        } else {
+            given
+        };
+        Self {
+            given,
+            surnames: words,
+            suffix,
+        }
+    }
+
+    fn matches(&self, other: &Self) -> bool {
+        if self.given.is_empty()
+            || self.given != other.given
+            || self.surnames.is_empty()
+            || other.surnames.is_empty()
+            || (self.suffix.is_some() && other.suffix.is_some() && self.suffix != other.suffix)
+        {
+            return false;
+        }
+        // One provider may omit a second surname or join surname words. Require
+        // the entire shorter surname at a word boundary, not a fuzzy substring.
+        let prefix = |short: &[String], long: &[String]| {
+            let short = short.concat();
+            let mut joined = String::new();
+            long.iter().any(|word| {
+                joined.push_str(word);
+                joined == short
+            })
+        };
+        prefix(&self.surnames, &other.surnames) || prefix(&other.surnames, &self.surnames)
+    }
+}
+
 fn match_drivers(drivers: &mut BTreeMap<String, Value>, roster: &[Value], settings: &Value) {
     let saved = settings["links"].as_array().cloned().unwrap_or_default();
     let separate = settings["separate"].as_array().cloned().unwrap_or_default();
-    let reserved: HashSet<_> = saved.iter().map(|l| s(l, "paycomCode")).collect();
+    let mut reserved: HashSet<String> = saved
+        .iter()
+        .map(|l| s(l, "paycomCode").to_owned())
+        .collect();
     let mut employees_by_name: BTreeMap<String, Vec<&Value>> = BTreeMap::new();
     let mut driver_counts: BTreeMap<String, usize> = BTreeMap::new();
     for employee in roster {
@@ -42,7 +117,7 @@ fn match_drivers(drivers: &mut BTreeMap<String, Value>, roster: &[Value], settin
             .entry(name_key(s(driver, "name")))
             .or_default() += 1;
     }
-    for (id, driver) in drivers {
+    for (id, driver) in drivers.iter_mut() {
         let key = name_key(s(driver, "name"));
         let candidates = employees_by_name.get(&key);
         let (code, kind) = if let Some(link) = saved.iter().find(|l| s(l, "cortexId") == id) {
@@ -59,8 +134,49 @@ fn match_drivers(drivers: &mut BTreeMap<String, Value>, roster: &[Value], settin
         } else {
             (Value::Null, "unmatched")
         };
+        if let Some(code) = code.as_str() {
+            reserved.insert(code.to_owned());
+        }
         driver["paycomCode"] = code;
         driver["matchType"] = json!(kind);
+    }
+
+    let mut employees_by_given: BTreeMap<String, Vec<(&Value, Name)>> = BTreeMap::new();
+    for employee in roster {
+        let name = Name::new(s(employee, "name"));
+        employees_by_given
+            .entry(name.given.clone())
+            .or_default()
+            .push((employee, name));
+    }
+    let mut candidates = BTreeMap::new();
+    let mut claims: BTreeMap<String, usize> = BTreeMap::new();
+    // Count every source identity, even one without punches/meals or with a saved
+    // override. Removing such a person must not make an ambiguous name look unique.
+    for (id, driver) in drivers.iter() {
+        let name = Name::new(s(driver, "name"));
+        let matches: Vec<_> = employees_by_given
+            .get(&name.given)
+            .into_iter()
+            .flatten()
+            .filter(|(_, employee_name)| name.matches(employee_name))
+            .map(|(employee, _)| s(employee, "code").to_owned())
+            .collect();
+        for code in &matches {
+            *claims.entry(code.clone()).or_default() += 1;
+        }
+        candidates.insert(id.clone(), matches);
+    }
+    for (id, driver) in drivers {
+        let matches = &candidates[id];
+        if s(driver, "matchType") == "unmatched"
+            && matches.len() == 1
+            && claims[&matches[0]] == 1
+            && !reserved.contains(&matches[0])
+        {
+            driver["paycomCode"] = json!(matches[0]);
+            driver["matchType"] = json!("name");
+        }
     }
 }
 
@@ -260,11 +376,11 @@ mod tests {
     }
 
     #[test]
-    fn manual_links_reserve_targets_and_different_names_are_not_guessed() {
+    fn manual_links_reserve_targets_and_unrecognized_names_are_not_guessed() {
         let mut drivers: BTreeMap<_, _> = [
             ("one".to_owned(), json!({"name":"Jamie Reed"})),
             ("two".to_owned(), json!({"name":"Different Name"})),
-            ("three".to_owned(), json!({"name":"Alex Jones"})),
+            ("three".to_owned(), json!({"name":"Al Jones"})),
             ("empty".to_owned(), json!({"name":"---"})),
         ]
         .into();
@@ -290,5 +406,120 @@ mod tests {
         assert_eq!(drivers["one"]["matchType"], "separate");
         match_drivers(&mut drivers, &roster, &json!({"links":[]}));
         assert_eq!(drivers["one"]["paycomCode"], "E1");
+    }
+
+    fn matches(names: &[&str], employees: &[&str], settings: Value) -> Vec<Value> {
+        let mut drivers = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (format!("D{i}"), json!({"name":name})))
+            .collect();
+        let roster = employees
+            .iter()
+            .enumerate()
+            .map(|(i, name)| json!({"code":format!("E{i}"),"name":name}))
+            .collect::<Vec<_>>();
+        match_drivers(&mut drivers, &roster, &settings);
+        drivers.into_values().collect()
+    }
+
+    #[test]
+    fn unique_name_variants_match_in_both_directions() {
+        for (left, right) in [
+            ("Jamie Reed Vega", "REED, JAMIE"),
+            ("Casey Molina Solis", "MOLINA, CASEY"),
+            ("Alexander Stone", "STONE, ALEX"),
+            ("Taylor Hart Jr.", "HART, TAYLOR"),
+            ("Morgan Hill III", "HILL, MORGAN"),
+            ("René O’Neill Cruz", "O'NEILL, RENÉ"),
+            ("Taylor MolinaReed Vega", "MOLINA REED, TAYLOR"),
+        ] {
+            for (driver, employee) in [(left, right), (right, left)] {
+                let result = matches(&[driver], &[employee], json!({}));
+                assert_eq!(result[0]["paycomCode"], "E0", "{driver} / {employee}");
+                assert_eq!(result[0]["matchType"], "name");
+            }
+        }
+    }
+
+    #[test]
+    fn variants_require_complete_name_components_and_compatible_suffixes() {
+        for (driver, employee) in [
+            ("Alex Stone", "Alexis Stone"),
+            ("Alex Stone", "Alexandra Stone"),
+            ("Jamie Reed", "Jamie Reeder"),
+            ("Jamie Reed Vega", "Jamie Reed Cruz"),
+            ("Jamie Reed Jr", "Jamie Reed Sr"),
+            ("Jamie Reed II", "Jamie Reed III"),
+            ("Jamie Reed", "J Reed"),
+            ("Jamie", "Jamie Reed"),
+            ("Reed", "Reed Jamie"),
+        ] {
+            assert_eq!(
+                matches(&[driver], &[employee], json!({}))[0]["paycomCode"],
+                Value::Null,
+                "{driver} / {employee}"
+            );
+        }
+    }
+
+    #[test]
+    fn variants_must_be_unique_across_both_complete_rosters() {
+        let drivers = ["Jamie Reed Vega", "Jamie Reed Cruz"];
+        let employees = ["REED, JAMIE"];
+        for settings in [
+            json!({}),
+            json!({"separate":["D1"]}),
+            json!({"links":[{"cortexId":"D1","paycomCode":"E1"}]}),
+        ] {
+            let result = matches(&drivers, &employees, settings);
+            assert_eq!(result[0]["matchType"], "unmatched");
+        }
+        let result = matches(
+            &["Jamie Reed"],
+            &["REED VEGA, JAMIE", "REED CRUZ, JAMIE"],
+            json!({}),
+        );
+        assert_eq!(result[0]["matchType"], "unmatched");
+        let result = matches(
+            &["Alexander Stone"],
+            &["STONE, ALEX", "STONE, ALEX"],
+            json!({}),
+        );
+        assert_eq!(result[0]["matchType"], "unmatched");
+    }
+
+    #[test]
+    fn exact_matches_and_saved_choices_take_priority_over_variants() {
+        let result = matches(
+            &["Jamie Reed", "Jamie Reed Vega"],
+            &["REED, JAMIE"],
+            json!({}),
+        );
+        assert_eq!(result[0]["paycomCode"], "E0");
+        assert_eq!(result[1]["matchType"], "unmatched");
+        let result = matches(
+            &["Jamie Reed Vega"],
+            &["REED, JAMIE", "REED VEGA, JAMIE"],
+            json!({}),
+        );
+        assert_eq!(result[0]["paycomCode"], "E1");
+        let drivers = ["Jamie Reed Vega", "Different Person"];
+        let employees = ["REED, JAMIE"];
+        let result = matches(
+            &drivers,
+            &employees,
+            json!({"links":[{"cortexId":"D1","paycomCode":"E0"}]}),
+        );
+        assert_eq!(result[0]["matchType"], "unmatched");
+        assert_eq!(result[1]["matchType"], "saved");
+        assert_eq!(
+            matches(&drivers, &employees, json!({"separate":["D0"]}))[0]["matchType"],
+            "separate"
+        );
+        assert_eq!(
+            matches(&drivers, &employees, json!({}))[0]["paycomCode"],
+            "E0"
+        );
     }
 }
