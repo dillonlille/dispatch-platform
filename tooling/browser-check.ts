@@ -16,6 +16,7 @@ const env = {
   DISPATCH_PROVIDER_MODE: 'fixture',
   DISPATCH_STANDALONE: '1',
   DISPATCH_ENVIRONMENT: 'preview',
+  DISPATCH_DEV_MAIL_MODE: 'capture',
   DISPATCH_STATE_ROOT: root,
   DISPATCH_ORIGIN: origin,
   DISPATCH_ARTIFACT_ROOT: path.resolve('.build'),
@@ -80,7 +81,7 @@ try {
       ['node_modules/@playwright/test/cli.js', 'test', ...args],
       {
         stdio: 'inherit',
-        env: { ...process.env, DISPATCH_TEST_URL: origin },
+        env: { ...process.env, DISPATCH_TEST_URL: origin, DISPATCH_TEST_STATE_ROOT: root },
       },
     );
     const code = await new Promise<number | null>((resolve, reject) => {

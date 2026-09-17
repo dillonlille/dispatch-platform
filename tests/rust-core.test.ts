@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { capturedMail } from './mail-support.js';
 import { fixture, until } from './rust-support.js';
 import { employeeName } from '../shared/paycom.js';
 const password = 'Dispatch-demo-2026!';
@@ -87,7 +88,13 @@ test('Rust provisioning, invitation acceptance, profile setup, removal and resto
   const id = created.value.dsp.id;
   for (const area of ['config', 'data', 'secrets', 'state'])
     assert.equal(fs.statSync(path.join(f.root, 'dsps', id, area)).mode & 0o077, 0);
-  const raw = created.value.invitationUrl.split('token=')[1];
+  assert.equal(created.value.invitationUrl, undefined);
+  assert.deepEqual(created.value.invitation, { email: 'new@dispatch.test', status: 'queued' });
+  const message = await capturedMail(f.root, 'new@dispatch.test');
+  assert.match(message.subject, /^\[Dispatch Dev\]/);
+  assert.match(message.html, />Start DSP onboarding<\/a>/);
+  assert.equal(message.origin, f.env.DISPATCH_ORIGIN);
+  const raw = /token=([A-Za-z0-9_-]{43})/.exec(message.text)![1];
   const invite = `/api/invitations/${raw}`;
   assert.equal((await f.request(invite)).value.email, 'new@dispatch.test');
   assert.equal(
@@ -453,7 +460,10 @@ test('existing-account invitations require the account password and revocation r
     role: 'manager',
   });
   assert.equal(invited.status, 200);
-  const token = invited.value.invitationUrl.split('token=')[1];
+  assert.equal(invited.value.invitationUrl, undefined);
+  const token = /token=([A-Za-z0-9_-]{43})/.exec(
+    (await capturedMail(f.root, 'member@dispatch.test')).text,
+  )![1];
   assert.equal(
     (
       await f.request(`/api/invitations/${token}/accept`, {
@@ -485,7 +495,10 @@ test('existing-account invitations require the account password and revocation r
     email: 'new@dispatch.test',
     role: 'member',
   });
-  const raw = pending.value.invitationUrl.split('token=')[1];
+  assert.equal(pending.value.invitationUrl, undefined);
+  const raw = /token=([A-Za-z0-9_-]{43})/.exec(
+    (await capturedMail(f.root, 'new@dispatch.test')).text,
+  )![1];
   assert.equal(
     (await member.post('/api/dsp/invitations/revoke', { email: 'new@dispatch.test' })).status,
     403,

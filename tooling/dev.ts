@@ -10,6 +10,7 @@ const env = {
   DISPATCH_STATE_ROOT: root,
   DISPATCH_STANDALONE: '1',
   DISPATCH_ENVIRONMENT: 'preview',
+  DISPATCH_DEV_MAIL_MODE: 'capture',
   DISPATCH_PROVIDER_MODE: 'fixture',
   DISPATCH_ORIGIN: 'http://127.0.0.1:5173',
 };

@@ -19,6 +19,9 @@ pub struct Config {
     pub browser: PathBuf,
     pub browseros: PathBuf,
     pub sandbox: PathBuf,
+    pub mail_mode: String,
+    pub mail_worker_url: Option<String>,
+    pub mail_worker_token: Option<String>,
     pub smtp_url: Option<String>,
     pub mail_from: Option<String>,
 }
@@ -31,12 +34,23 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or(env::current_dir()?);
         let development = variable("NODE_ENV", "development") != "production";
+        let environment = variable("DISPATCH_ENVIRONMENT", "preview");
+        let mail_prefix = if environment == "preview" {
+            "DISPATCH_DEV"
+        } else {
+            "DISPATCH_PRODUCTION"
+        };
+        let mail_variable = |suffix: &str| {
+            env::var(format!("{mail_prefix}_{suffix}"))
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        };
         let mut c = Self {
             root: PathBuf::from(variable(
                 "DISPATCH_STATE_ROOT",
                 "/tmp/dispatch-rust-development",
             )),
-            environment: variable("DISPATCH_ENVIRONMENT", "preview"),
+            environment,
             development,
             standalone: variable("DISPATCH_STANDALONE", "1") == "1",
             origin: variable("DISPATCH_ORIGIN", "http://127.0.0.1:5173"),
@@ -62,8 +76,12 @@ impl Config {
                 "/opt/dispatch-browseros/0.50.5/browseros",
             )),
             sandbox: PathBuf::from(variable("DISPATCH_BWRAP_EXECUTABLE", "/usr/bin/bwrap")),
-            smtp_url: env::var("DISPATCH_SMTP_URL").ok(),
-            mail_from: env::var("DISPATCH_MAIL_FROM").ok(),
+            mail_mode: mail_variable("MAIL_MODE")
+                .unwrap_or_else(|| if development { "capture" } else { "disabled" }.into()),
+            mail_worker_url: mail_variable("MAIL_WORKER_URL"),
+            mail_worker_token: mail_variable("MAIL_WORKER_TOKEN"),
+            smtp_url: mail_variable("SMTP_URL"),
+            mail_from: mail_variable("MAIL_FROM"),
         };
         if bundle.join("release.json").exists() {
             let manifest: serde_json::Value =
@@ -115,6 +133,43 @@ impl Config {
                 403,
             )?;
         }
+        ensure(
+            ["capture", "cloudflare", "smtp", "disabled"].contains(&c.mail_mode.as_str()),
+            "invalid_mail_mode",
+            400,
+        )?;
+        ensure(
+            c.mail_mode != "capture" || development,
+            "mail_capture_requires_development",
+            400,
+        )?;
+        if c.mail_mode == "cloudflare" {
+            let endpoint = c
+                .mail_worker_url
+                .as_deref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .ok_or_else(|| super::Error::new("mail_configuration_required", 400))?;
+            ensure(
+                (endpoint.scheme() == "https"
+                    || (development
+                        && endpoint.scheme() == "http"
+                        && endpoint.host_str() == Some("127.0.0.1")))
+                    && endpoint.username().is_empty()
+                    && endpoint.password().is_none()
+                    && endpoint.query().is_none()
+                    && endpoint.fragment().is_none()
+                    && c.mail_worker_token.as_ref().is_some_and(|t| t.len() >= 32),
+                "mail_configuration_required",
+                400,
+            )?;
+        }
+        if c.mail_mode == "smtp" {
+            ensure(
+                c.smtp_url.is_some() && c.mail_from.is_some(),
+                "mail_configuration_required",
+                400,
+            )?;
+        }
         ensure(c.standalone, "independent_environment_required", 400)?;
         Ok(c)
     }
@@ -125,8 +180,6 @@ impl Config {
         self.root.join("data").join(&self.environment)
     }
     pub fn mail_available(&self) -> bool {
-        self.development
-            || self.environment == "preview"
-            || (self.smtp_url.is_some() && self.mail_from.is_some())
+        self.mail_mode != "disabled"
     }
 }

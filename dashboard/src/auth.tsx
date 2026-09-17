@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Brand } from './brand.js';
-import { api } from './api.js';
+import { api, useData } from './api.js';
 import { ErrorBox } from './ui.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const hash = window.location.hash.slice(1),
@@ -15,6 +15,9 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
+  const invitation = useData<{ email: string; onboarding: boolean }>(
+    initial === 'invite' ? `/api/invitations/${encodeURIComponent(token ?? '')}` : '',
+  );
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -40,14 +43,17 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
         setNotice('Password updated. Sign in with your new password.');
       }
       if (mode === 'invite') {
-        await api(`/api/invitations/${token}/accept`, {
-          firstName: String(form.get('firstName')),
-          lastName: String(form.get('lastName')),
-          password,
-        });
-        window.location.hash = 'signin';
-        setMode('login');
-        setNotice('Invitation accepted. Sign in with your invited email address.');
+        const accepted = await api<{ email: string; dspId: string }>(
+          `/api/invitations/${token}/accept`,
+          {
+            firstName: String(form.get('firstName')),
+            lastName: String(form.get('lastName')),
+            password,
+          },
+        );
+        await api('/api/auth/login', { email: accepted.email, password });
+        await onLogin();
+        window.location.hash = `dsp/${accepted.dspId}/overview`;
       }
     } catch (error) {
       setError((error as Error).message);
@@ -59,7 +65,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     login: 'Sign in to Dispatch',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
-    invite: 'Join your team',
+    invite: invitation.data?.onboarding ? 'DSP onboarding' : 'Join your team',
   }[mode];
   return (
     <main className="auth-layout">
@@ -68,14 +74,14 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       </div>
       <section className="auth-panel">
         <h1>{heading}</h1>
-        <p className="auth-description">
-          {mode === 'login'
-            ? 'Welcome back. Sign in to your workspace.'
-            : mode === 'invite'
-              ? 'Use a new password, or your current password if you already have a Dispatch account.'
+        {mode !== 'invite' && (
+          <p className="auth-description">
+            {mode === 'login'
+              ? 'Welcome back. Sign in to your workspace.'
               : 'We’ll help you get back to your workspace.'}
-        </p>
-        <ErrorBox message={error} />
+          </p>
+        )}
+        <ErrorBox message={error || (mode === 'invite' ? invitation.error : '')} />
         {notice && (
           <div className="notice" role="status">
             {notice}
@@ -90,6 +96,10 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           )}
           {mode === 'invite' && (
             <>
+              <label>
+                Email address
+                <input type="email" readOnly value={invitation.data?.email ?? ''} />
+              </label>
               <label>
                 First name
                 <input name="firstName" autoComplete="given-name" required maxLength={100} />
@@ -125,7 +135,10 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
               Forgot password?
             </button>
           )}
-          <button className="primary full" disabled={busy}>
+          <button
+            className="primary full"
+            disabled={busy || (mode === 'invite' && !invitation.data)}
+          >
             {busy
               ? 'Please wait…'
               : mode === 'login'

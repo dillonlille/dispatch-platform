@@ -7,7 +7,7 @@ import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } fro
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { PaycomDateControls, usePaycomDate } from './paycom-day-controls.js';
-import { InvitationLink, type Perform } from './platform.js';
+import { type Perform } from './platform.js';
 
 export function HomePage() {
   return (
@@ -253,7 +253,6 @@ export function TeamPage({
   const [search, setSearch] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
-  const [link, setLink] = useState('');
   const [revoking, setRevoking] = useState<Invitation>();
   const members =
     data?.filter((member) =>
@@ -463,15 +462,17 @@ export function TeamPage({
             onSubmit={(event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
-              void perform(async () => {
-                const result = await api<{ invitationUrl: string }>('/api/dsp/members/invite', {
-                  email: form.get('email'),
-                  role: form.get('role'),
-                });
-                setLink(result.invitationUrl);
-                setInviting(false);
-                invitations.refresh();
-              }, 'Invitation created');
+              void perform(
+                async () => {
+                  await api('/api/dsp/members/invite', {
+                    email: form.get('email'),
+                    role: form.get('role'),
+                  });
+                  setInviting(false);
+                  invitations.refresh();
+                },
+                `Invitation email queued for ${form.get('email')}`,
+              );
             }}
           >
             <label>
@@ -490,7 +491,7 @@ export function TeamPage({
               <button type="button" onClick={() => setInviting(false)}>
                 Cancel
               </button>
-              <button className="primary">Create invitation</button>
+              <button className="primary">Send invitation</button>
             </div>
           </form>
         </Modal>
@@ -537,7 +538,6 @@ export function TeamPage({
           </form>
         </Modal>
       )}
-      {link && <InvitationLink link={link} close={() => setLink('')} />}
     </>
   );
 }

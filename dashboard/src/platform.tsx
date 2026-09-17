@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Plus, Search, Check, Copy, RefreshCw, Eye, FlaskConical } from 'lucide-react';
+import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type {
   DspSummary,
   AuditEvent,
@@ -34,7 +34,6 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     [suspending, setSuspending] = useState<DspSummary>(),
     [removing, setRemoving] = useState<DspSummary>(),
     [detail, setDetail] = useState<DspSummary>(),
-    [link, setLink] = useState(''),
     [busy, setBusy] = useState(false);
   const dsps = data ?? [],
     visible = dsps.filter(
@@ -52,13 +51,15 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setBusy(true);
-    const ok = await perform(async () => {
-      const result = await api<{ invitationUrl?: string }>('/api/platform/dsps', {
-        ownerEmail: form.get('ownerEmail'),
-      });
-      setLink(result.invitationUrl ?? '');
-      refresh();
-    }, 'DSP created');
+    const ok = await perform(
+      async () => {
+        await api('/api/platform/dsps', {
+          ownerEmail: form.get('ownerEmail'),
+        });
+        refresh();
+      },
+      `Invitation email queued for ${form.get('ownerEmail')}`,
+    );
     setBusy(false);
     if (ok) setCreating(false);
   }
@@ -365,7 +366,6 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
           </div>
         </Modal>
       )}
-      {link && <InvitationLink link={link} close={() => setLink('')} />}
       {suspending && (
         <Modal title={`Suspend ${suspending.name}?`} onClose={() => setSuspending(undefined)}>
           <p>Members lose access and active collections are cancelled until you resume this DSP.</p>
@@ -387,33 +387,6 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
         </Modal>
       )}
     </>
-  );
-}
-export function InvitationLink({ link, close }: { link: string; close: () => void }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Modal title="Invitation ready" onClose={close}>
-      <p>Share this private link with the invited person. It expires in seven days.</p>
-      <label>
-        Invitation link
-        <input readOnly value={link} onFocus={(e) => e.target.select()} />
-      </label>
-      <div className="form-actions">
-        <button
-          onClick={() =>
-            void navigator.clipboard
-              .writeText(link)
-              .then(() => setCopied(true))
-              .catch(() => setCopied(false))
-          }
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? 'Copied' : 'Copy link'}
-        </button>
-        <button className="primary" onClick={close}>
-          Done
-        </button>
-      </div>
-    </Modal>
   );
 }
 export function Activity({ events }: { events: AuditEvent[] }) {

@@ -28,6 +28,9 @@ const labels: Record<string, string> = {
     'A Paycom employee can only link to one Flex driver. Review duplicate selections.',
   employee_link_source_missing:
     'This employee is no longer available. Refresh and review the links again.',
+  email_unavailable: 'Email sending is not configured for this environment.',
+  invitation_expired: 'This invitation has expired or was revoked. Ask for a new invitation.',
+  sign_in_with_existing_password: 'Use your existing Dispatch password to accept this invitation.',
   invalid_login: 'The email or password is incorrect.',
   permission_denied: 'Your role does not allow this action.',
   view_changed: 'Your DSP access changed. Reopen the DSP to continue.',
@@ -79,7 +82,7 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
-      if (reading || document.hidden) return;
+      if (!url || reading || document.hidden) return;
       reading = true;
       try {
         const value = await api<T>(url, undefined, controller.signal);

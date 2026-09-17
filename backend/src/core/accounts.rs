@@ -5,6 +5,14 @@ use super::{
 };
 use rusqlite::params;
 use serde_json::{Value, json};
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
 #[derive(Clone)]
 pub struct Auth {
     pub user: Value,
@@ -174,6 +182,7 @@ impl Store {
     }
     pub fn invite(&self, a: &Auth, dsp: &str, email: &str, role: &str) -> Result<String> {
         self.context(a, dsp, "members")?;
+        ensure(self.config.mail_available(), "email_unavailable", 503)?;
         let raw = crypto::token()?;
         self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,expires_at,created_by) VALUES (?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),role,now()+7*86400000,s(&a.user,"id")])?;
         self.audit(Some(s(&a.user, "id")), Some(dsp), "member.invited", role)?;
@@ -181,7 +190,12 @@ impl Store {
     }
     pub fn invitation(&self, raw: &str) -> Result<Value> {
         ensure(raw.len() == 43, "invitation_expired", 404)?;
-        self.platform.one("SELECT i.email,i.dsp_id dspId,d.name dspName,i.role FROM invitations i JOIN dsps d ON d.id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL AND i.expires_at>? AND d.status='active'",params![crypto::sha(raw),now()])?.ok_or_else(||Error::new("invitation_expired",404))
+        let mut invitation = self.platform.one("SELECT i.email,i.dsp_id dspId,d.name dspName,i.role FROM invitations i JOIN dsps d ON d.id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL AND i.expires_at>? AND d.status='active' AND d.environment=?",params![crypto::sha(raw),now(),self.config.environment])?.ok_or_else(||Error::new("invitation_expired",404))?;
+        invitation["onboarding"] = json!(
+            s(&invitation, "role") == "owner"
+                && flag(&self.profile(s(&invitation, "dspId"))?, "setupRequired")
+        );
+        Ok(invitation)
     }
     pub fn accept_invitation(
         &self,
@@ -233,14 +247,44 @@ impl Store {
         )
     }
     pub fn mail(&self, to: &str, subject: &str, text: &str) -> Result<()> {
-        if !self.config.mail_available() {
-            return Ok(());
-        }
+        self.queue_mail(to, subject, text, None)
+    }
+    pub fn invitation_mail(&self, to: &str, dsp: &str, raw: &str, onboarding: bool) -> Result<()> {
+        let url = format!("{}/#invite?token={raw}", self.config.origin);
+        let action = if onboarding {
+            "Start DSP onboarding"
+        } else {
+            "Accept invitation"
+        };
+        let subject = if onboarding {
+            "Set up your DSP on Dispatch".to_owned()
+        } else {
+            format!("Join {dsp} on Dispatch")
+        };
+        let label = if self.config.environment == "preview" {
+            "Dispatch Dev"
+        } else {
+            "Dispatch"
+        };
+        let text = format!("{label}\n\n{action}: {url}\n\nThis invitation expires in seven days.");
+        let html = format!(
+            r#"<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182033;padding:32px"><h1>{label}</h1><p><a href="{}" style="display:inline-block;background:#4968ce;color:#fff;padding:14px 22px;border-radius:8px;text-decoration:none">{action}</a></p><p>This invitation expires in seven days.</p></body></html>"#,
+            escape_html(&url)
+        );
+        self.queue_mail(to, &subject, &text, Some(&html))
+    }
+    fn queue_mail(&self, to: &str, subject: &str, text: &str, html: Option<&str>) -> Result<()> {
+        ensure(self.config.mail_available(), "email_unavailable", 503)?;
+        let subject = if self.config.environment == "preview" {
+            format!("[Dispatch Dev] {subject}")
+        } else {
+            subject.to_owned()
+        };
         let id = crypto::id("mail")?;
         let encrypted = crypto::encrypt(
             &self.key,
             &id,
-            &json!({"to":to,"subject":subject,"text":text}),
+            &json!({"to":to,"subject":subject,"text":text,"html":html,"environment":self.config.environment,"origin":self.config.origin}),
         )?;
         self.platform.exec(
             "INSERT INTO outbox(id,encrypted_message,available_at) VALUES (?,?,?)",

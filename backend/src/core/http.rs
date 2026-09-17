@@ -370,13 +370,16 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
         if write && parts.len() == 4 && parts[3] == "accept" {
             db.throttle(&format!("invite:{}", i.ip), 20, 3600000)?;
             v::fields(b, &["firstName", "lastName", "password"])?;
+            let invitation = db.invitation(raw)?;
             db.accept_invitation(
                 raw,
                 &v::name(b, "firstName", 100)?,
                 &v::name(b, "lastName", 100)?,
                 v::text(b, "password", 12, 128)?,
             )?;
-            return Ok(Reply::ok());
+            return Ok(Reply::json(
+                json!({"email":invitation["email"],"dspId":invitation["dspId"]}),
+            ));
         }
     }
     if path.starts_with("/api/platform/") {
@@ -416,6 +419,9 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             } else {
                 None
             };
+            if email.is_some() {
+                ensure(db.config.mail_available(), "email_unavailable", 503)?;
+            }
             let dsp = db.create_dsp(&name, &tz, actor, false)?;
             let id = s(&dsp, "id");
             if b.get("name").is_none() {
@@ -423,14 +429,11 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             }
             let mut out = json!({"dsp":dsp});
             if let Some(email) = email {
-                let raw = db.invite(&a, id, &email, "owner")?;
-                let url = format!("{}/#invite?token={raw}", db.config.origin);
-                db.mail(
-                    &email,
-                    &format!("Join {name} on Dispatch"),
-                    &format!("Open {url} to accept your invitation."),
-                )?;
-                out["invitationUrl"] = json!(url);
+                db.platform.transaction(|| {
+                    let raw = db.invite(&a, id, &email, "owner")?;
+                    db.invitation_mail(&email, &name, &raw, b.get("name").is_none())
+                })?;
+                out["invitation"] = json!({"email":email,"status":"queued"});
             }
             Ok(Reply::status(out, 201))
         }
@@ -544,7 +547,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/members")=>Ok(Reply::json(db.members(id)?)),
         ("GET","/api/dsp/invitations")=>Ok(Reply::json(json!(db.platform.all("SELECT email,role,expires_at expiresAt,used_at IS NOT NULL accepted FROM invitations WHERE dsp_id=? ORDER BY expires_at DESC LIMIT 100",[id])?))),
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
-        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=v::choice(b,"role",&["owner","manager","member"])?;let raw=db.invite(&c.auth,id,&email,role)?;let url=format!("{}/#invite?token={raw}",db.config.origin);db.mail(&email,&format!("Join {} on Dispatch",s(&c.dsp,"name")),&format!("Open {url} to accept your invitation."))?;Ok(Reply::json(json!({"invitationUrl":url})))},
+        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=v::choice(b,"role",&["owner","manager","member"])?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,role)?;db.invitation_mail(&email,s(&c.dsp,"name"),&raw,role=="owner" && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audits(Some(id),200)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
