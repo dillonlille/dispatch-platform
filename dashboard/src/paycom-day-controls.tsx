@@ -43,17 +43,19 @@ export function PaycomDateControls({
   today,
   onChange,
   label = 'Paycom date',
+  compact = false,
 }: {
   date: string;
   today: string;
   onChange: (date: string) => void;
   label?: string;
+  compact?: boolean;
 }) {
   const select = (value: string) => {
     if (validDay(value, today)) onChange(value);
   };
   return (
-    <div className="paycom-date-controls">
+    <div className={`paycom-date-controls${compact ? ' paycom-date-controls-compact' : ''}`}>
       <button
         className="icon-button"
         aria-label="Previous day"
@@ -63,7 +65,7 @@ export function PaycomDateControls({
         <ChevronLeft size={16} />
       </button>
       <label>
-        Date
+        <span className={compact ? 'sr-only' : undefined}>Date</span>
         <input
           type="date"
           aria-label={label}
