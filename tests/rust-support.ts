@@ -32,6 +32,8 @@ export async function fixture(
     NODE_ENV: 'development',
     DISPATCH_STANDALONE: '1',
     DISPATCH_ENVIRONMENT: 'preview',
+    DISPATCH_DEV_MAIL_MODE: 'capture',
+    DISPATCH_PRODUCTION_MAIL_MODE: 'capture',
     DISPATCH_STATE_ROOT: root,
     DISPATCH_PROVIDER_MODE: 'fixture',
     DISPATCH_ORIGIN: origin,

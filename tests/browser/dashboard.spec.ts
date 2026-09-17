@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { capturedMail } from '../mail-support.js';
 async function login(page: Page, email = 'owner@dispatch.test') {
   await page.goto('/');
   await page.getByLabel('Email address').fill(email);
@@ -109,22 +110,36 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
 test('create a DSP and accept its owner invitation while another account is signed in', async ({
   page,
 }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await login(page);
   await page.getByRole('button', { name: 'Create new DSP', exact: true }).click();
   await page.getByLabel('Owner email').fill('invited-owner@dispatch.test');
   await page.getByRole('dialog').getByRole('button', { name: 'Create DSP', exact: true }).click();
-  const link = await page.getByLabel('Invitation link').inputValue();
-  await page.goto(link);
-  await expect(page.getByRole('heading', { name: 'Join your team' })).toBeVisible();
+  await expect(
+    page.getByText('Invitation email queued for invited-owner@dispatch.test', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Invitation link')).toHaveCount(0);
+  const message = await capturedMail(
+    process.env.DISPATCH_TEST_STATE_ROOT!,
+    'invited-owner@dispatch.test',
+  );
+  await page.setContent(message.html);
+  await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'DSP onboarding' })).toBeVisible();
+  await expect(page.getByLabel('Email address')).toHaveValue('invited-owner@dispatch.test');
   await page.getByLabel('First name', { exact: true }).fill('Invited');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
   await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
-  await expect(page.getByLabel('Email address')).toBeVisible();
-  await page.getByLabel('Email address').fill('invited-owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/dispatch-invite-onboarding.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: '/tmp/dispatch-invite-onboarding-mobile.png', fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  expect(errors).toEqual([]);
   await page.getByLabel('DSP name', { exact: true }).fill('Invitation Test DSP');
   await page.getByLabel('Abbreviation (optional)', { exact: true }).fill('TEST');
   await page.getByLabel('Station code', { exact: true }).fill('DEMO1');

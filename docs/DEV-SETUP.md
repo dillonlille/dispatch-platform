@@ -40,8 +40,9 @@ and remove that initial-login file. Never commit or paste it into a PR.
 
 `--provider fixture` explicitly selects synthetic provider data. Native is the
 default. Both run the compiled application with secure cookies and their own
-account database. Dev email is always captured privately in
-`data/platform/development-mail/`; it is not sent externally.
+account database. Hosted Dev sends invitation email through its dedicated
+Cloudflare mail Worker; configure it using [Invitation email](EMAIL.md). Local
+fixtures capture mail privately and never use hosted mail credentials.
 
 After reviewing the units, copy the reviewed `tooling/systemd/dispatch-dev*` units into
 `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then enable/start

@@ -194,14 +194,36 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
 }
 fn deliver(config: &Config, key: &[u8], row: &Value) -> Result<()> {
     let value = crypto::decrypt(key, s(row, "id"), s(row, "encrypted_message"))?;
-    if config.development || config.environment == "preview" {
+    if config.mail_mode == "capture" {
         let directory = db::private_dir(&config.platform().join("development-mail"))?;
         db::write_private(
             &directory.join(format!("{}.json", s(row, "id"))),
             &serde_json::to_vec(&value)?,
         )?;
+    } else if config.mail_mode == "cloudflare" {
+        ensure(
+            s(&value, "environment") == config.environment && s(&value, "origin") == config.origin,
+            "email_environment_mismatch",
+            503,
+        )?;
+        let error = || Error::new("email_delivery_failed", 503);
+        let response = reqwest::blocking::Client::builder()
+            .user_agent("Dispatch-Mail/1.0")
+            .timeout(Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| error())?
+            .post(config.mail_worker_url.as_deref().ok_or_else(error)?)
+            .bearer_auth(config.mail_worker_token.as_deref().ok_or_else(error)?)
+            .json(&value)
+            .send()
+            .map_err(|_| error())?;
+        ensure(response.status().is_success(), "email_delivery_failed", 503)?;
     } else {
-        use lettre::Transport;
+        use lettre::{
+            Transport,
+            message::{MultiPart, SinglePart},
+        };
         let error = || Error::new("email_delivery_failed", 503);
         let message = lettre::Message::builder()
             .from(
@@ -213,9 +235,17 @@ fn deliver(config: &Config, key: &[u8], row: &Value) -> Result<()> {
                     .map_err(|_| error())?,
             )
             .to(s(&value, "to").parse().map_err(|_| error())?)
-            .subject(s(&value, "subject"))
-            .body(s(&value, "text").to_owned())
-            .map_err(|_| error())?;
+            .subject(s(&value, "subject"));
+        let message = if let Some(html) = value["html"].as_str() {
+            message.multipart(
+                MultiPart::alternative()
+                    .singlepart(SinglePart::plain(s(&value, "text").to_owned()))
+                    .singlepart(SinglePart::html(html.to_owned())),
+            )
+        } else {
+            message.body(s(&value, "text").to_owned())
+        }
+        .map_err(|_| error())?;
         let transport =
             lettre::SmtpTransport::from_url(config.smtp_url.as_deref().ok_or_else(error)?)
                 .map_err(|_| error())?
