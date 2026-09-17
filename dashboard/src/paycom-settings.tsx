@@ -103,7 +103,7 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
       <a className="plugin-settings-back" href={`#dsp/${dspId}/paycom`}>
         ← Back
       </a>
-      <Header title="Paycom settings" />
+      <Header title="Timecard Settings" />
       <ErrorBox message={query.error || overview.error} />
       {newer && (
         <div className="notice">
@@ -119,7 +119,7 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
             update Driver departments.
           </p>
         )}
-      <Tabs value={tab} onChange={setTab} items={sections} label="Paycom settings sections" />
+      <Tabs value={tab} onChange={setTab} items={sections} label="Timecard Settings sections" />
       <div className="plugin-settings-fields">
         {tab === 'sync' && (
           <>
