@@ -255,7 +255,7 @@ function LinkEmployees({
   return (
     <Modal
       title="Link employees"
-      description="Unique full names match automatically. Override a match or link different names here. Saved choices apply to all dates in this DSP."
+      description="Unique names match automatically, including supported name variations. Override a match or link different names here. Saved choices apply to all dates in this DSP."
       onClose={() => {
         if (!busy) close();
       }}
@@ -274,8 +274,9 @@ function LinkEmployees({
         </label>
       </div>
       <p className="muted">
-        Automatic matching ignores capitalization, punctuation and spacing. Different or ambiguous
-        names stay separate until you select the correct employee.
+        Automatic matching handles capitalization, punctuation, spacing, extra surnames, omitted
+        suffixes and supported short names such as Alex/Alexander. Each match must be unique in both
+        sources. Ambiguous names stay separate until you select the correct employee.
       </p>
       {!data.employees.length && (
         <p>
@@ -308,7 +309,7 @@ function LinkEmployees({
                     ? `Automatic · ${fullName(data.employees.find((e) => e.code === driver.paycomCode)?.name ?? '')}`
                     : driver.matchType === 'unmatched'
                       ? 'Automatic · no unique match'
-                      : 'Automatic · unique full name'}
+                      : 'Automatic · unique name'}
                 </option>
                 <option value="">Keep separate</option>
                 {data.employees.map((e) => (

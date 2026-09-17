@@ -160,9 +160,14 @@ Paycom department/driver filters do not hide this union. Unique full names match
 automatically after normalizing comma order, capitalization, punctuation and
 spacing. Uniqueness uses the entire selected Paycom roster and effective Cortex
 itineraries, including employees without punches and drivers without meals.
-Saved links take precedence and reserve their Paycom targets; explicit
-keep-separate choices suppress automatic matches. Nicknames, omitted name
-components and ambiguous names remain separate for owner review. The API returns
+After exact matches, a second pass accepts additional trailing surnames, omitted
+generational suffixes and the explicit Alex/Alexander short form. It requires the
+complete shorter surname at a word boundary, compatible suffixes when both are
+present, and exactly one candidate in each direction across both full rosters.
+It never uses punch times, first-name prefixes or fuzzy spelling to infer identity.
+Saved links take precedence and reserve their Paycom targets; exact matches also
+reserve targets, and explicit keep-separate choices suppress automatic matches.
+Unrecognized or ambiguous names remain separate for owner review. The API returns
 each displayed driver's effective Paycom code and match type, so the page counts
 only unresolved employees as needing review. Automatic associations are computed
 on read, never written back as identities or used to alter source records.
