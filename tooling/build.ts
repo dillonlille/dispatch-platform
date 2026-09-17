@@ -12,7 +12,7 @@ if (fs.existsSync(path.join(root, '.runtime')))
     'Build in an isolated checkout; the installed runtime is managed by the updater.',
   );
 const manifest = await replaceBuild(out, async (staging) => {
-  execFileSync('cargo', ['build', '--release', '--locked'], { stdio: 'inherit' });
+  execFileSync('python3', ['tooling/cargo-build.py', '--release'], { stdio: 'inherit' });
   const metadata = JSON.parse(
     execFileSync('cargo', ['metadata', '--no-deps', '--format-version=1', '--locked'], {
       encoding: 'utf8',

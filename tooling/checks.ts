@@ -1,13 +1,19 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 
 const mode = process.argv[2] ?? 'full';
-if (!['full', 'styles', 'reuse'].includes(mode)) throw new Error('Unknown validation mode');
+if (
+  !['full', 'dashboard', 'reuse', 'build-full', 'build-dashboard', 'build-reuse', 'core'].includes(
+    mode,
+  )
+)
+  throw new Error('Unknown validation mode');
 const started = Date.now();
 const failures: string[] = [];
-async function run(name: string, command: string, args: string[]) {
+async function run(name: string, command: string, args: string[], env = process.env) {
   const start = Date.now();
   process.stdout.write(`[start] ${name}\n`);
-  const child = spawn(command, args, { stdio: 'inherit' });
+  const child = spawn(command, args, { stdio: 'inherit', env });
   const ok = await new Promise<boolean>((resolve) => {
     child.once('error', () => resolve(false));
     child.once('exit', (code) => resolve(code === 0));
@@ -19,59 +25,82 @@ async function run(name: string, command: string, args: string[]) {
   return ok;
 }
 const npm = (name: string) => run(name, 'npm', ['run', name]);
-
-// One runner shares the build; independent suites use separate fixture state/ports.
-// Always wait for every child before cleanup or reporting success.
-const rustChecks = mode === 'full' ? npm('check:rust') : Promise.resolve(true);
-const debugBuild =
-  mode === 'full'
-    ? rustChecks.then((ok) => ok && run('debug build', 'cargo', ['build', '--locked']))
-    : Promise.resolve(true);
-const build = debugBuild.then((ok) => ok && npm('build'));
-const checks: Promise<unknown>[] = [build];
-if (mode === 'reuse') {
-  checks.push(build.then((ok) => ok && npm('test:smoke')));
-} else {
-  checks.push(npm('check'), npm('format:check'));
+async function build(scope: string) {
+  const built = npm('build');
+  if (scope === 'reuse') {
+    if (await built) await npm('test:smoke');
+    return;
+  }
   const browsers = run('browser setup', 'npx', [
     'playwright',
     'install',
     ...(process.env.CI === 'true' ? ['--with-deps'] : []),
     'chromium',
   ]);
-  checks.push(browsers);
-  checks.push(
-    Promise.all([build, browsers]).then(
-      ([built, installed]) => built && installed && npm('test:ui'),
-    ),
-  );
-  if (mode === 'full') {
-    const coreTests = debugBuild.then(
-      (ok) => ok && run('test', 'npm', ['--ignore-scripts', 'test']),
-    );
-    checks.push(
-      coreTests,
-      rustChecks,
-      // Real multi-DSP browsers need predictable headroom. Finish compilers and
-      // synthetic API suites before starting the native capacity measurement.
-      Promise.all([build, coreTests, rustChecks]).then(
-        (results) => results.every(Boolean) && npm('test:browseros'),
-      ),
-      run('dependency audit', 'npm', ['audit', '--audit-level=high']),
-      run('Python tests', 'python3', [
-        '-m',
-        'unittest',
-        'discover',
-        '-s',
-        'tests',
-        '-p',
-        '*_test.py',
-      ]),
-      build.then((ok) => ok && npm('test:artifact')),
-    );
-  }
+  await Promise.all([
+    built,
+    browsers,
+    npm('check'),
+    npm('format:check'),
+    built.then(async (ok) => {
+      if (!ok) return;
+      await Promise.all([
+        npm('test:artifact'),
+        run(
+          'dashboard logic',
+          process.execPath,
+          [
+            'node_modules/tsx/dist/cli.mjs',
+            '--test',
+            '--test-concurrency=1',
+            'tests/meal-breaks.test.ts',
+            'tests/collection-history.test.ts',
+          ],
+          { ...process.env, DISPATCH_TEST_BINARY: '.build/services/rust/dispatch-backend' },
+        ),
+      ]);
+    }),
+    Promise.all([built, browsers]).then(([ok, installed]) => ok && installed && npm('test:ui')),
+  ]);
 }
-await Promise.all(checks);
+async function core() {
+  const python = run('Python tests', 'python3', [
+    '-m',
+    'unittest',
+    'discover',
+    '-s',
+    'tests',
+    '-p',
+    '*_test.py',
+  ]);
+  const audit = run('dependency audit', 'npm', ['audit', '--audit-level=high']);
+  if (await run('debug build', 'python3', ['tooling/cargo-build.py'])) {
+    // Compile once before starting API fixtures; clippy/test no longer compete
+    // with a second debug build. Release builds run on a separate CI runner.
+    await Promise.all([
+      npm('check:rust'),
+      run('core API tests', process.execPath, [
+        'node_modules/tsx/dist/cli.mjs',
+        '--test',
+        '--test-concurrency=1',
+        ...fs
+          .readdirSync('tests')
+          .filter((name) => name.endsWith('.test.ts'))
+          .sort()
+          .map((name) => `tests/${name}`),
+      ]),
+    ]);
+  }
+  await Promise.all([python, audit]);
+}
+if (mode === 'core') await core();
+else if (mode === 'full') {
+  // CI shards compile on separate runners; local runs share Cargo's build lock.
+  await core();
+  if (!failures.length) await build('full');
+  // Local full checks still isolate capacity measurements from compilers.
+  if (!failures.length) await npm('test:browseros');
+} else await build(mode.replace('build-', ''));
 process.stdout.write(`Validation ${mode}: ${((Date.now() - started) / 1000).toFixed(1)}s\n`);
 if (failures.length) {
   process.stderr.write(`Failed checks: ${failures.join(', ')}\n`);

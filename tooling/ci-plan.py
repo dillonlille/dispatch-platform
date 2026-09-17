@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import zipfile
@@ -26,11 +27,30 @@ def github(endpoint, binary=False):
 
 
 def scope(paths):
-    # Renames are expanded into delete/add pairs by the caller. Unknown/mixed
-    # changes (including dependencies, tests and CI itself) take the full path.
-    return "styles" if paths and all(
-        name.startswith("dashboard/") and name.endswith(".css") for name in paths
-    ) else "full"
+    # Renames include both paths. New shared modules, contracts, dependencies,
+    # test infrastructure and build configuration deliberately require full CI.
+    dashboard = {"dashboard/index.html", "shared/meal-breaks.ts",
+                 "tests/meal-breaks.test.ts", "tests/collection-history.test.ts"}
+    allowed = lambda name: (name in dashboard
+                            or name.startswith("dashboard/src/")
+                            or name.startswith("dashboard/public/")
+                            or (name.startswith("tests/browser/") and name.endswith(".spec.ts")))
+    if not paths or not all(allowed(name) for name in paths):
+        return "full"
+    # This helper is browser-only today. Fail closed if a non-dashboard runtime
+    # starts consuming it, even when that consumer did not change in this PR.
+    if "shared/meal-breaks.ts" in paths:
+        for root in (Path("shared"), Path("tooling"), Path("backend")):
+            for file in root.rglob("*"):
+                if file.is_file() and file.suffix in {".ts", ".tsx", ".js", ".mjs", ".rs"}:
+                    content = file.read_text()
+                    imported = re.search(
+                        r'''(?:from\s*|import\s*\(?|require\s*\()\s*['"][^'"]*meal-breaks(?:\.js|\.ts)?['"]''', content)
+                    embedded = file.suffix == ".rs" and re.search(
+                        r'''include_(?:str|bytes)!\s*\(\s*"[^"]*meal-breaks\.(?:ts|js)"''', content)
+                    if file.as_posix() != "shared/meal-breaks.ts" and (imported or embedded):
+                        return "full"
+    return "dashboard"
 
 
 def changes(base, commit="HEAD"):
@@ -99,6 +119,8 @@ def validated_run(context):
 
 
 def plan(event_name, ref, event):
+    if event_name == "pull_request" and event["pull_request"].get("draft"):
+        return "draft", "Draft PR: expensive checks start when marked ready for review"
     if event_name == "push" and ref == "refs/heads/dev":
         context = merge_context()
         if context:
@@ -117,13 +139,13 @@ def plan(event_name, ref, event):
         selected = scope(changes(base)) if base else "full"
     except subprocess.SubprocessError:
         selected = "full"
-    return selected, "Stylesheets only" if selected == "styles" else "Application, mixed or unknown changes"
+    return selected, "Dashboard and its tests only" if selected == "dashboard" else "Backend, shared contracts, infrastructure or unknown changes"
 
 
 def receipt(event, selected):
     context = merge_context()
     pr = event["pull_request"]
-    if (not context or selected not in ("styles", "full") or pr["base"]["ref"] != "dev"
+    if (not context or pr.get("draft") or selected not in ("dashboard", "full") or pr["base"]["ref"] != "dev"
             or pr["base"]["repo"]["full_name"] != REPOSITORY
             or (pr["head"]["repo"] or {}).get("full_name") != REPOSITORY
             or context["commit"] != os.environ["GITHUB_SHA"]
@@ -139,7 +161,7 @@ def receipt(event, selected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["plan", "receipt"])
-    parser.add_argument("--scope", choices=["styles", "full"])
+    parser.add_argument("--scope", choices=["dashboard", "full"])
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
