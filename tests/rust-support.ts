@@ -40,7 +40,6 @@ export async function fixture(
     DISPATCH_PROVIDER_MODE: 'fixture',
     DISPATCH_ORIGIN: origin,
     PORT: String(port),
-    DISPATCH_WORKER_NODE: process.execPath,
     ...overrides,
   };
   const cli = (args: string[], input?: string) =>

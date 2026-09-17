@@ -16,16 +16,20 @@ SHARDS = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shard", choices=["all", *SHARDS], default="all")
-    shard = parser.parse_args().shard
+    parser.add_argument("--host-only", action="store_true")
+    args = parser.parse_args()
+    shard = args.shard
     root = Path(__file__).resolve().parent.parent
     environment = dict(os.environ)
     environment.setdefault("DISPATCH_BWRAP_EXECUTABLE", "/usr/local/libexec/dispatch-dev/bwrap")
     subprocess.run(["python3", "tooling/cargo-build.py"], cwd=root, env=environment, check=True)
-    if shard in ("all", "capacity"):
+    if args.host_only or shard in ("all", "capacity"):
         subprocess.run([
             "cargo", "test", "--locked", "--test", "browseros_host", "--",
             "--ignored", "--nocapture", "--test-threads=1",
         ], cwd=root, env=environment, check=True)
+    if args.host_only:
+        return
     environment["DISPATCH_TEST_NATIVE"] = "1"
     files = [file for group in SHARDS.values() for file in group] if shard == "all" else SHARDS[shard]
     subprocess.run([

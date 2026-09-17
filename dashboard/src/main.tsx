@@ -29,7 +29,7 @@ import { PaycomSettingsPage } from './paycom-settings.js';
 import { Shell } from './shell.js';
 import { SettingsPage } from './settings.js';
 import { PaycomPage, HomePage, TeamPage } from './workspace.js';
-type Session = SessionView & { separatePreview?: boolean };
+type Session = SessionView;
 import { readAppearance, applyAppearance } from './appearance.js';
 import { initializePreferences } from './preferences.js';
 function App() {
@@ -145,22 +145,10 @@ function App() {
       return false;
     }
   };
-  const navigate = (next: string) => {
-    window.location.hash = dspId ? `dsp/${dspId}/${next}` : next;
-  };
   function open(dsp: DspSummary) {
-    const prefix = dsp.environment === 'preview' && session?.separatePreview ? '/preview/' : '/';
-    if (window.location.pathname !== prefix && session?.separatePreview) {
-      window.location.assign(`${prefix}#dsp/${dsp.id}/overview`);
-      return;
-    }
     window.location.hash = `dsp/${dsp.id}/overview`;
   }
   function platform() {
-    if (window.location.pathname === '/preview/') {
-      window.location.assign('/#dsps');
-      return;
-    }
     window.location.hash = 'dsps';
   }
   if (session === undefined)
@@ -246,7 +234,7 @@ function App() {
             ) : page === 'jobs' ? (
               <JobsPage platform={false} perform={perform} canCollect={canCollect} />
             ) : page === 'settings' ? (
-              <SettingsPage session={session} view={view} perform={perform} reopen={reopen} />
+              <SettingsPage session={session} view={view} perform={perform} />
             ) : (
               <ErrorBox message="This page is not available for your role." />
             )}
@@ -260,7 +248,7 @@ function App() {
         ) : page === 'jobs' ? (
           <DiagnosticsPage perform={perform} />
         ) : page === 'releases' ? (
-          <ReleasesPage perform={perform} />
+          <ReleasesPage />
         ) : page === 'audit' ? (
           <AuditPage />
         ) : (
@@ -268,7 +256,7 @@ function App() {
         )
       ) : (
         <>
-          <Header title="Your DSPs" subtitle="Choose a workspace to continue." />
+          <Header title="Your DSPs" />
           <div className="workspace-grid">
             {session.dsps
               .filter((d) => d.status === 'active')

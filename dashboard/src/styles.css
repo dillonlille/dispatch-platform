@@ -1,7 +1,7 @@
-@import './archive/styles.css';
-@import './archive/paycom-workforce.css';
+@import './base.css';
+@import './paycom-workforce.css';
 
-/* Native controls and current shared-service views use the archived presentation. */
+/* Shared native controls. */
 button {
   display: inline-flex;
   align-items: center;

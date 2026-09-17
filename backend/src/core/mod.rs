@@ -25,11 +25,13 @@ use tokio::sync::Semaphore;
 pub struct State {
     pub config: config::Config,
     pub key: Vec<u8>,
+    pub assets: std::collections::HashMap<String, http::Asset>,
     pub db_slots: Arc<Semaphore>,
     pub db_queue: Arc<Semaphore>,
     // Serializes short state transitions across the platform, jobs and tenant databases.
     pub transition: RwLock<()>,
     pub pool: Mutex<Vec<db::Store>>,
+    pub schedule_revision: std::sync::atomic::AtomicU64,
     pub password_slots: Arc<Semaphore>,
     pub browsers: browsers::Manager,
     pub updates: live_collection::Updates,
@@ -47,11 +49,13 @@ impl State {
         }
         Ok(Arc::new(Self {
             key: store.key.clone(),
+            assets: http::assets(&config.dashboard)?,
             config,
             db_slots: Arc::new(Semaphore::new(4)),
             db_queue: Arc::new(Semaphore::new(64)),
             transition: RwLock::new(()),
             pool: Mutex::new(vec![store]),
+            schedule_revision: std::sync::atomic::AtomicU64::new(0),
             password_slots: Arc::new(Semaphore::new(2)),
             browsers: browsers::Manager::default(),
             updates: live_collection::Updates::new()?,

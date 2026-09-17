@@ -52,9 +52,7 @@ impl Store {
         )?;
         let result = (|| {
             self.initialize_dsp(id)?;
-            if super::collectors::MIGRATE_ON_START {
-                self.migrate_collector_storage(id)?;
-            }
+            self.initialize_collectors(id)?;
             let db = self.collector(id, Provider::Paycom)?;
             db.exec(
                 "INSERT OR IGNORE INTO connections(provider,updated_at) VALUES ('paycom',?)",
@@ -75,43 +73,31 @@ impl Store {
         result
     }
     pub fn dsps(&self, a: &Auth) -> Result<Value> {
-        let rows = if flag(&a.user, "platformOwner") {
-            self.platform
-                .all("SELECT * FROM dsps ORDER BY permanent DESC,name", [])?
-        } else {
-            self.platform.all("SELECT d.* FROM dsps d JOIN memberships m ON m.dsp_id=d.id WHERE m.user_id=? ORDER BY d.permanent DESC,d.name",[s(&a.user,"id")])?
-        };
+        let rows = self.platform.all("SELECT d.*,m.role member_role,(SELECT MIN(u.email) FROM memberships o JOIN users u ON u.id=o.user_id WHERE o.dsp_id=d.id AND o.role='owner' AND u.status='active') owner_email,CASE WHEN d.permanent=1 THEN (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,(SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name",params![now(),s(&a.user,"id"),flag(&a.user,"platformOwner")])?;
         let mut result = Vec::new();
         for row in rows {
-            let mut value = dsp(row);
-            let id = s(&value, "id").to_owned();
-            let mut owner=self.platform.one("SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? AND m.role='owner' AND u.status='active' ORDER BY u.email LIMIT 1",[&id])?;
-            if owner.is_none() && flag(&value, "permanent") {
-                owner=self.platform.one("SELECT email FROM users WHERE platform_owner=1 AND status='active' ORDER BY email LIMIT 1",[])?;
-            }
-            let invite=self.platform.one("SELECT email FROM invitations WHERE dsp_id=? AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1",params![id,now()])?;
-            value["ownerStatus"] = json!(if owner.is_some() {
+            let owner = row["owner_email"]
+                .as_str()
+                .or(row["platform_email"].as_str());
+            let invite = row["invite_email"].as_str();
+            let owner_status = if owner.is_some() {
                 "active"
             } else if invite.is_some() {
                 "invited"
             } else {
                 "missing"
-            });
-            value["ownerEmail"] = owner
-                .or(invite)
-                .map(|r| r["email"].clone())
-                .unwrap_or(Value::Null);
-            value["role"] = if flag(&a.user, "platformOwner") {
+            };
+            let email = json!(owner.or(invite));
+            let role = if flag(&a.user, "platformOwner") {
                 json!("platform_owner")
             } else {
-                self.platform
-                    .one(
-                        "SELECT role FROM memberships WHERE user_id=? AND dsp_id=?",
-                        [s(&a.user, "id"), &id],
-                    )?
-                    .map(|r| r["role"].clone())
-                    .unwrap_or(Value::Null)
+                row["member_role"].clone()
             };
+            let mut value = dsp(row);
+            let id = s(&value, "id").to_owned();
+            value["ownerStatus"] = json!(owner_status);
+            value["ownerEmail"] = email;
+            value["role"] = role;
             value["paycom"] = json!("not_connected");
             value["lastCollection"] = Value::Null;
             value["profile"] = profile_default();

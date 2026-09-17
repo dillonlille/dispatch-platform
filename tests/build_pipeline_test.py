@@ -41,7 +41,7 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(cache.cache_eligible(root, env))
 
     def test_gate_requires_every_job_and_rejects_failure_cancellation_and_wrong_skips(self):
-        jobs = {name: {"result": "success"} for name in ["plan", "build", "core", "collectors"]}
+        jobs = {name: {"result": "success"} for name in ["plan", "build", "core", "collectors", "rust-advisories"]}
         jobs["plan"]["outputs"] = {"mode": "full"}
         self.assertEqual(gate.validate(jobs), "full")
         for name in jobs:

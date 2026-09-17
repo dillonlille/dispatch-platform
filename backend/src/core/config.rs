@@ -13,10 +13,7 @@ pub struct Config {
     pub fixture: bool,
     pub fixture_url: Option<String>,
     pub browser_capacity: usize,
-    pub bundle: PathBuf,
     pub dashboard: PathBuf,
-    pub node: PathBuf,
-    pub browser: PathBuf,
     pub browseros: PathBuf,
     pub sandbox: PathBuf,
     pub mail_mode: String,
@@ -62,15 +59,7 @@ impl Config {
             fixture: variable("DISPATCH_PROVIDER_MODE", "fixture") == "fixture",
             fixture_url: env::var("DISPATCH_FIXTURE_PROVIDER_URL").ok(),
             browser_capacity: 2,
-            bundle: env::var_os("DISPATCH_RUNTIME_BUNDLE")
-                .map(PathBuf::from)
-                .unwrap_or(bundle.join("services/runtime")),
             dashboard: bundle.join("dashboard"),
-            node: PathBuf::from(variable("DISPATCH_WORKER_NODE", "/usr/bin/node")),
-            browser: PathBuf::from(variable(
-                "DISPATCH_BROWSER_EXECUTABLE",
-                "/opt/google/chrome/chrome",
-            )),
             browseros: PathBuf::from(variable(
                 "DISPATCH_BROWSEROS_EXECUTABLE",
                 "/opt/dispatch-browseros/0.50.5/browseros",

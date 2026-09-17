@@ -1,11 +1,10 @@
 node_modules/
 .build/
-integrations/paycom/provider/
 package-lock.json
-docs/design/
-dashboard/src/archive/styles.css
+dashboard/src/base.css
 
-dashboard/src/archive/paycom-workforce.css
-tests/archived-paycom/
+dashboard/src/paycom-workforce.css
 target/
 Cargo.lock
+
+.build-staging-*/

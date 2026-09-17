@@ -1,12 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
-import type {
-  DspSummary,
-  AuditEvent,
-  Job,
-  ReleaseSummary,
-  PlatformHealth,
-} from '../../shared/contracts/index.js';
+import type { DspSummary, AuditEvent, Job, PlatformHealth } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
@@ -65,7 +59,7 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
   }
   return (
     <>
-      <Header title="DSPs" subtitle="Manage your DSPs and onboarding.">
+      <Header title="DSPs">
         <button className="primary" onClick={() => setCreating(true)}>
           <Plus size={17} />
           Create new DSP
@@ -505,7 +499,7 @@ export function JobsPage({
   );
   return (
     <>
-      <Header title="Collections" subtitle="Follow collection progress and recent results." />
+      <Header title="Collections" />
       <ErrorBox message={error} />
       {data ? (
         <>
@@ -535,7 +529,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
   const [busy, setBusy] = useState(false);
   return (
     <>
-      <Header title="Diagnostics" subtitle="Check runtime health and create test DSPs." />
+      <Header title="Diagnostics" />
       <ErrorBox message={error || health.error} />
       {!data ? (
         <Loading />
@@ -617,212 +611,66 @@ export function AuditPage() {
   const { data, error } = useData<AuditEvent[]>('/api/platform/audit', 10000);
   return (
     <>
-      <Header title="Audit log" subtitle="A record of account, workspace, and platform activity." />
+      <Header title="Audit log" />
       <ErrorBox message={error} />
       <Section title="Latest events">{data ? <Activity events={data} /> : <Loading />}</Section>
     </>
   );
 }
-export function ReleasesPage({ perform }: { perform: Perform }) {
+export function ReleasesPage() {
   const { data, error, refresh } = useData<{
-    releases: ReleaseSummary[];
-    deploymentEnabled: boolean;
-    standalone?: boolean;
     version?: string | null;
     release: string;
     update?: { status: string; commit?: string; updatedAt: string } | null;
   }>('/api/platform/releases', 5000);
-  const [pending, setPending] = useState<{ digest: string; environment: string }>();
-  if (data?.standalone)
+  if (!data)
     return (
       <>
-        <Header title="Updates" subtitle="Review releases for your platform and DSPs.">
-          <button onClick={refresh}>
-            <RefreshCw size={16} />
-            Refresh
-          </button>
-        </Header>
         <ErrorBox message={error} />
-        <div id="platform-updates-content" className="archived-updates">
-          {data.update && (
-            <section
-              className="archived-card update-status"
-              role="status"
-              aria-label="Update status"
-            >
-              <h2>{title(data.update.status)}</h2>
-              <p className="muted">Last update status {time(data.update.updatedAt)}</p>
-            </section>
-          )}
-          {['Core', 'DSP'].map((product) => (
-            <section
-              key={product}
-              className="archived-card archived-release-card"
-              aria-label={`${product} release`}
-            >
-              <div className="release-card-heading">
-                <div>
-                  <h2>{product}</h2>
-                  <p className="muted">Installed: {data.version ?? data.release.slice(0, 12)}</p>
-                </div>
-                <span className="muted">Updates automatically</span>
-              </div>
-              <p className="muted">
-                {product === 'Core'
-                  ? 'The Platform Owner dashboard, shared API and Core services.'
-                  : 'All DSPs use the same installed services and dashboard.'}
-              </p>
-              <div className="release-card-notes">
-                <h3>{data.version ? `Version ${data.version}` : 'Current build'}</h3>
-                <p className="muted">
-                  Successful merged-dev builds update the complete Dev platform together.
-                </p>
-                <p className="muted">
-                  Build {data.release.slice(0, 12)}
-                  {data.update?.commit ? ` · Commit ${data.update.commit.slice(0, 12)}` : ''}
-                </p>
-              </div>
-            </section>
-          ))}
-        </div>
+        <Loading />
       </>
     );
-
   return (
     <>
-      <Header
-        title="Releases"
-        subtitle="Test a candidate on the Dev DSP before promoting it to every production DSP."
-      />
+      <Header title="Updates">
+        <button onClick={refresh}>
+          <RefreshCw size={16} />
+          Refresh
+        </button>
+      </Header>
       <ErrorBox message={error} />
-      {data && !data.deploymentEnabled && (
-        <div className="notice">
-          Deployment is disabled in this development workspace. Builds and release imports stay
-          local.
-        </div>
-      )}
-      <div className="release-flow">
-        <div>
-          <span>01</span>
-          <strong>Build once</strong>
-          <p>Create a verified release artifact.</p>
-        </div>
-        <div>
-          <span>02</span>
-          <strong>Test on Dev</strong>
-          <p>Update Preview and verify the Dev DSP.</p>
-        </div>
-        <div>
-          <span>03</span>
-          <strong>Promote</strong>
-          <p>Activate the same artifact for Production.</p>
-        </div>
-      </div>
-      <Section title="Release inventory">
-        {!data ? (
-          <Loading />
-        ) : !data.releases.length ? (
-          <Empty title="No releases imported">
-            Build the repository and import its artifact with the Dispatch CLI.
-          </Empty>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th>Release</th>
-                  <th>Validation</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.releases.map((release) => (
-                  <tr key={release.digest}>
-                    <td>
-                      <strong>{release.version}</strong>
-                      <small>{time(release.createdAt)}</small>
-                    </td>
-                    <td>
-                      <code>{release.digest.slice(0, 12)}</code>
-                      <div className="badge-row">
-                        {release.preview && <Badge value="preview" />}
-                        {release.production && <Badge value="production" />}
-                      </div>
-                    </td>
-                    <td>{release.testedAt ? 'Dev testing approved' : 'Awaiting Dev testing'}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          disabled={!data.deploymentEnabled || release.preview}
-                          onClick={() =>
-                            setPending({ digest: release.digest, environment: 'preview' })
-                          }
-                        >
-                          Update Dev
-                        </button>
-                        {release.preview && !release.testedAt && (
-                          <button
-                            onClick={() =>
-                              void perform(async () => {
-                                await api(`/api/platform/releases/${release.digest}/tested`, {});
-                                refresh();
-                              }, 'Dev testing approved')
-                            }
-                          >
-                            Mark tested
-                          </button>
-                        )}
-                        <button
-                          disabled={
-                            !data.deploymentEnabled ||
-                            !release.testedAt ||
-                            !release.preview ||
-                            release.production
-                          }
-                          onClick={() =>
-                            setPending({ digest: release.digest, environment: 'production' })
-                          }
-                        >
-                          Promote
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <div id="platform-updates-content" className="archived-updates">
+        {data.update && (
+          <section className="archived-card update-status" role="status" aria-label="Update status">
+            <h2>{title(data.update.status)}</h2>
+            <p className="muted">Last update status {time(data.update.updatedAt)}</p>
+          </section>
         )}
-      </Section>
-      {pending && (
-        <Modal
-          title={pending.environment === 'preview' ? 'Update Dev DSP' : 'Promote to Production'}
-          onClose={() => setPending(undefined)}
-        >
-          <p>
-            This restarts the {pending.environment} services with release{' '}
-            <code>{pending.digest.slice(0, 12)}</code>. Collections drain before activation.
-          </p>
-          <div className="form-actions">
-            <button onClick={() => setPending(undefined)}>Cancel</button>
-            <button
-              className="primary"
-              onClick={() =>
-                void perform(async () => {
-                  await api(`/api/platform/releases/${pending.digest}/deploy`, {
-                    environment: pending.environment,
-                  });
-                  setPending(undefined);
-                  refresh();
-                }, 'Activation requested')
-              }
-            >
-              Confirm update
-            </button>
-          </div>
-        </Modal>
-      )}
+        {['Core', 'DSP'].map((product) => (
+          <section
+            key={product}
+            className="archived-card archived-release-card"
+            aria-label={`${product} release`}
+          >
+            <div className="release-card-heading">
+              <div>
+                <h2>{product}</h2>
+                <p className="muted">Installed: {data.version ?? data.release.slice(0, 12)}</p>
+              </div>
+              <span className="muted">Updates automatically</span>
+            </div>
+
+            <div className="release-card-notes">
+              <h3>{data.version ? `Version ${data.version}` : 'Current build'}</h3>
+
+              <p className="muted">
+                Build {data.release.slice(0, 12)}
+                {data.update?.commit ? ` · Commit ${data.update.commit.slice(0, 12)}` : ''}
+              </p>
+            </div>
+          </section>
+        ))}
+      </div>
     </>
   );
 }
@@ -835,36 +683,4 @@ function browserMemoryStatus(memory: PlatformHealth['browsers']['memory']) {
       ? 'Available memory unknown'
       : `${(memory.availableBytes / 1024 ** 2).toFixed(0)} MiB available`;
   return `${status} · ${available} · ${(memory.requiredBytes / 1024 ** 2).toFixed(0)} MiB needed`;
-}
-
-export function HealthPanel() {
-  const { data, error } = useData<PlatformHealth>('/api/platform/health', 10000);
-  return (
-    <Section title="Platform status">
-      <ErrorBox message={error} />
-      {data ? (
-        <dl className="details">
-          <dt>Release</dt>
-          <dd>
-            <code>{data.release.slice(0, 16)}</code>
-          </dd>
-          <dt>Data provider</dt>
-          <dd>
-            {data.providerMode === 'fixture' ? 'Synthetic development fixtures' : 'Native browser'}
-          </dd>
-          <dt>Browser workers</dt>
-          <dd>
-            {data.browsers.active} / {data.browsers.capacity} active
-            <small>{browserMemoryStatus(data.browsers.memory)}</small>
-          </dd>
-          <dt>Email</dt>
-          <dd>{data.email ? 'Configured' : 'Not configured'}</dd>
-          <dt>DSPs</dt>
-          <dd>{data.dsps}</dd>
-        </dl>
-      ) : (
-        <Loading />
-      )}
-    </Section>
-  );
 }

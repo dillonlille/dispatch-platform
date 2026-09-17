@@ -103,7 +103,7 @@ jobs:
   # Keep one stable required check. No receipt or deployable artifact is published
   # until every required job has succeeded, including every collector shard.
   platform:
-    needs: [plan, build, core, collectors]
+    needs: [plan, build, core, collectors, rust-advisories]
     if: always() && needs.plan.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -143,3 +143,22 @@ jobs:
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 14
+
+  rust-advisories:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Cache audit tool
+        id: audit-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit-0.22.2
+      - name: Install audit tool
+        if: steps.audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --deny warnings

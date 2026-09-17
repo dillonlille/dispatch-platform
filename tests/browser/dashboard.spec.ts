@@ -14,7 +14,10 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await login(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Northline Logistics' })).toBeVisible();
-  await page.screenshot({ path: '/tmp/dispatch-dashboard-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-dashboard-desktop.png'),
+    fullPage: true,
+  });
   await page.getByLabel('Search DSPs').fill('Summit');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await page.getByLabel('Search DSPs').fill('');
@@ -77,7 +80,10 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   );
   await expect(collection).toContainText('Queue wait');
   await expect(collection).toContainText('Not sampled');
-  await page.screenshot({ path: '/tmp/dispatch-job-metrics.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-job-metrics.png'),
+    fullPage: true,
+  });
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Platform collections' })).toContainText(
@@ -101,7 +107,10 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   await page.getByRole('link', { name: 'Paycom', exact: true }).click();
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByLabel('Search employees')).toBeVisible();
-  await page.screenshot({ path: '/tmp/dispatch-dashboard-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-dashboard-mobile.png'),
+    fullPage: true,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -134,9 +143,15 @@ test('create a DSP and accept its owner invitation while another account is sign
   await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
-  await page.screenshot({ path: '/tmp/dispatch-invite-onboarding.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-invite-onboarding.png'),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/dispatch-invite-onboarding-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-invite-onboarding-mobile.png'),
+    fullPage: true,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );

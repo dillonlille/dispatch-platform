@@ -157,6 +157,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
     await route.fulfill({ json: data.links });
   });
   await page.setViewportSize({ width: 1586, height: 992 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await open(page);
   await expect(page.getByRole('tablist', { name: 'Paycom' }).getByRole('tab')).toHaveText([
     'Timecard',
@@ -170,7 +171,10 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await expect(page.getByRole('button', { name: 'Missing data 3', exact: true })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Alex Morgan' })).toContainText('2:33 PM');
   await expect(page.getByRole('row').filter({ hasText: 'Alex Morgan' })).toContainText('+4m');
-  await page.screenshot({ path: '/tmp/dispatch-meal-breaks-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-meal-breaks-desktop.png'),
+    fullPage: true,
+  });
   await page.getByRole('button', { name: 'Different times 1', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Missing data 3', exact: true }).click();
@@ -199,7 +203,10 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await page.getByRole('button', { name: 'Next day', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/dispatch-meal-breaks-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-meal-breaks-mobile.png'),
+    fullPage: true,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const scroll = page.getByRole('region', { name: 'Meal break comparison', exact: true });
   expect(await scroll.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -210,7 +217,11 @@ test('approved comparison table, filters, details, links, date errors and mobile
   ).toBeInViewport();
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.setViewportSize({ width: 1586, height: 992 });
-  await page.screenshot({ path: '/tmp/dispatch-meal-breaks-dark.png', fullPage: true });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-meal-breaks-dark.png'),
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
 });
 test('Flex gap badges and employee filter preserve comparison statuses and expose later meals', async ({
@@ -250,6 +261,7 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
     }),
   );
   await page.setViewportSize({ width: 1586, height: 992 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await open(page, true);
   const jordan = page.getByRole('row').filter({ hasText: 'Jordan Lee' });
   const alex = page.getByRole('row').filter({ hasText: 'Alex Morgan' });
@@ -274,7 +286,10 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
   await expect(page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true })).toBeVisible();
   await expect(page.getByRole('columnheader')).toHaveCount(8);
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.screenshot({ path: '/tmp/dispatch-flex-gaps-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-flex-gaps-desktop.png'),
+    fullPage: true,
+  });
   await page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
   await expect(
@@ -301,7 +316,10 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: '/tmp/dispatch-flex-gaps-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-flex-gaps-mobile.png'),
+    fullPage: true,
+  });
 });
 test('members can open real collected punch data without management controls', async ({ page }) => {
   await open(page, true);
@@ -334,7 +352,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
       },
     }),
   );
-  await page.route('**/api/dsp/overview', (route) =>
+  await page.route('**/api/dsp/paycom/status', (route) =>
     route.fulfill({
       json: {
         connection: { enabled: true, status: 'ready' },
@@ -413,6 +431,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     });
   }
   await page.setViewportSize({ width: 1586, height: 992 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText(
     'Sync complete',
   );

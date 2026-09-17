@@ -1,5 +1,5 @@
 import { useCollectionUpdates } from './live-collection.js';
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
 import { api, useData } from './api.js';
 import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
@@ -428,7 +428,10 @@ export function MealBreaksPage({
         : `${parts.at(-1)}, ${parts.slice(0, -1).join(' ')}`
       : value;
   };
-  const rows = (data?.rows ?? []).map((row) => ({ row, summary: mealPairs(row, date) }));
+  const rows = useMemo(
+    () => (data?.rows ?? []).map((row) => ({ row, summary: mealPairs(row, date) })),
+    [data, date],
+  );
   const counts = {
     all: rows.length,
     different: rows.filter((r) => r.summary.different).length,
@@ -460,7 +463,6 @@ export function MealBreaksPage({
     <section className="meal-page" aria-labelledby="meal-heading">
       <header className="meal-heading">
         <h2 id="meal-heading">Meal Breaks</h2>
-        <p>Compare Flex meal times with Paycom punches.</p>
       </header>
       <p className="meal-timezone muted">
         {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}

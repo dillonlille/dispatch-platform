@@ -120,6 +120,20 @@ pub fn at(ms: i64) -> String {
         .unwrap_or_default()
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
+fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let mut out = serde_json::Map::new();
+    for i in 0..row.as_ref().column_count() {
+        let name = row.as_ref().column_name(i)?;
+        let value = match row.get_ref(i)? {
+            ValueRef::Null | ValueRef::Blob(_) => Value::Null,
+            ValueRef::Integer(n) => json!(n),
+            ValueRef::Real(n) => json!(n),
+            ValueRef::Text(s) => json!(String::from_utf8_lossy(s)),
+        };
+        out.insert(name.to_owned(), value);
+    }
+    Ok(Value::Object(out))
+}
 pub struct Db(pub Connection);
 impl Db {
     pub(crate) fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
@@ -170,27 +184,17 @@ impl Db {
     }
     pub fn all(&self, sql: &str, p: impl Params) -> Result<Vec<Value>> {
         let mut stmt = self.0.prepare_cached(sql)?;
-        let names: Vec<String> = stmt.column_names().into_iter().map(str::to_owned).collect();
-        let rows = stmt
-            .query_map(p, |row| {
-                let mut out = serde_json::Map::new();
-                for (i, name) in names.iter().enumerate() {
-                    let value = match row.get_ref(i)? {
-                        ValueRef::Null => Value::Null,
-                        ValueRef::Integer(n) => json!(n),
-                        ValueRef::Real(n) => json!(n),
-                        ValueRef::Text(s) => json!(String::from_utf8_lossy(s)),
-                        ValueRef::Blob(_) => Value::Null,
-                    };
-                    out.insert(name.clone(), value);
-                }
-                Ok(Value::Object(out))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
+        Ok(stmt
+            .query_map(p, row_json)?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
     }
     pub fn one(&self, sql: &str, p: impl Params) -> Result<Option<Value>> {
-        Ok(self.all(sql, p)?.into_iter().next())
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .0
+            .prepare_cached(sql)?
+            .query_row(p, row_json)
+            .optional()?)
     }
     pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         let tx = self.0.unchecked_transaction()?;
@@ -283,17 +287,20 @@ impl Store {
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
+        store
+            .platform
+            .0
+            .execute_batch(include_str!("platformIndexes.sql"))?;
+        store
+            .jobs
+            .0
+            .execute_batch("CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created_at DESC)")?;
         for row in store.platform.all(
             "SELECT id FROM dsps WHERE status IN ('active','suspended')",
             [],
         )? {
             let id = s(&row, "id");
-            if super::collectors::MIGRATE_ON_START {
-                store.migrate_collector_storage(id)?;
-            } else {
-                // The rollback reader validates split databases before readiness too.
-                store.collector(id, super::collectors::Provider::Paycom)?;
-            }
+            store.migrate_collector_storage(id)?;
         }
         Ok(store)
     }
@@ -342,15 +349,14 @@ impl Store {
             cache: &self.dsp_cache,
         })
     }
-    // Bootstrap the historical schema, then provisioning runs the same crash-safe
-    // migration as existing DSPs. Keep this frozen; collector schemas evolve alone.
+    // Core settings are separate from provider-owned data from initial provisioning.
     pub fn initialize_dsp(&self, id: &str) -> Result<Db> {
         for area in ["data", "config", "state", "secrets"] {
             self.area(id, area)?;
         }
         Db::open(
             &self.area(id, "data")?.join("dispatch.sqlite"),
-            include_str!("collectors/legacyDsp.sql"),
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
             1,
             true,
         )

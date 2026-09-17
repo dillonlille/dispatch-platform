@@ -16,18 +16,12 @@ updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 
 
-def artifact(root, commit, marker="candidate", rust=False, schema=None, rust_only=False):
-    rust = rust or rust_only
+def artifact(root, commit, marker="candidate"):
     root.mkdir(mode=0o700, parents=True)
     contents = {
-        ("services/rust/dispatch-backend" if rust else "api/main.js"): marker, "dashboard/index.html": "<h1>Dispatch</h1>",
-        "package.json": '{"type":"module"}',
+        "services/rust/dispatch-backend": marker, "dashboard/index.html": "<h1>Dispatch</h1>",
         "tooling/build-info.json": json.dumps({"commit": commit}),
     }
-    if rust_only:
-        contents.pop("package.json")
-    if rust and not rust_only:
-        contents.update({"services/runtime/auth-worker.js": "worker", "services/runtime/collection-worker.js": "worker"})
     for name, contents in contents.items():
         target = root / name
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -38,11 +32,7 @@ def artifact(root, commit, marker="candidate", rust=False, schema=None, rust_onl
             files.append({"path": item.relative_to(root).as_posix(),
                           "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
                           "size": item.stat().st_size})
-    manifest = ({"format": 2, "version": "0.1.0-dev.0", "runtime": "rust", "workerNodeMajor": 22, "schema": 3, "files": files} if rust else
-                {"format": 1, "version": "0.1.0-dev.0", "nodeMajor": 22, "schema": schema or 1, "files": files})
-    if rust_only:
-        manifest["format"] = 3
-        manifest.pop("workerNodeMajor")
+    manifest = {"format": 3, "version": "0.1.0-dev.0", "runtime": "rust", "schema": 3, "files": files}
     manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
     (root / "release.json").write_text(json.dumps(manifest))
     return manifest
@@ -139,7 +129,7 @@ class DevUpdaterTests(unittest.TestCase):
     def test_inventory_rejects_changed_files_and_wrong_source(self):
         with self.assertRaisesRegex(RuntimeError, "another commit"):
             updater.verify_artifact(self.candidate, self.old)
-        (self.candidate / "api/main.js").write_text("tampered")
+        (self.candidate / "services/rust/dispatch-backend").write_text("tampered")
         with self.assertRaisesRegex(RuntimeError, "verification failed"):
             updater.verify_artifact(self.candidate, self.new)
 
@@ -160,22 +150,6 @@ class DevUpdaterTests(unittest.TestCase):
                     updater.unpack(package, self.root / f"unpacked-{number}")
         self.assertFalse((self.root / "outside").exists())
 
-
-class RustDevUpdaterTests(DevUpdaterTests):
-    def setUp(self):
-        super().setUp()
-        shutil.rmtree(self.live / ".build")
-        shutil.rmtree(self.candidate)
-        self.old_artifact = artifact(self.live / ".build", self.old, "old Rust", rust=True)
-        self.manifest = artifact(self.candidate, self.new, "new Rust", rust=True)
-
-    def test_inventory_rejects_changed_files_and_wrong_source(self):
-        with self.assertRaisesRegex(RuntimeError, "another commit"):
-            updater.verify_artifact(self.candidate, self.old)
-        (self.candidate / "services/rust/dispatch-backend").write_text("tampered")
-        with self.assertRaisesRegex(RuntimeError, "verification failed"):
-            updater.verify_artifact(self.candidate, self.new)
-
     def test_activate_restores_executable_bit_from_untrusted_archive_modes(self):
         (self.candidate / "services/rust/dispatch-backend").chmod(0o600)
         with patch.object(self.instance, "service"), patch.object(self.instance, "healthy", return_value=True):
@@ -192,16 +166,8 @@ class RustDevUpdaterTests(DevUpdaterTests):
                                   "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
         manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
         (self.candidate / "release.json").write_text(json.dumps(manifest))
-        with self.assertRaisesRegex(RuntimeError, "retired Node core"):
+        with self.assertRaisesRegex(RuntimeError, "retired runtime files"):
             updater.verify_artifact(self.candidate, self.new)
-
-
-class RustOnlyTransitionTests(RustDevUpdaterTests):
-    """Exercise activation and rollback from deployed format 2 to format 3."""
-    def setUp(self):
-        super().setUp()
-        shutil.rmtree(self.candidate)
-        self.manifest = artifact(self.candidate, self.new, "Rust only", rust_only=True)
 
     def test_runtime_payload_is_rejected_even_with_valid_inventory(self):
         target = self.candidate / "node_modules/unused/index.js"
@@ -216,13 +182,12 @@ class RustOnlyTransitionTests(RustDevUpdaterTests):
         with self.assertRaisesRegex(RuntimeError, "retired runtime files"):
             updater.verify_artifact(self.candidate, self.new)
 
-
-class RustOnlyUpdaterTests(RustOnlyTransitionTests):
-    """Once upgraded, future format-3 updates keep the same recovery guarantees."""
-    def setUp(self):
-        super().setUp()
-        shutil.rmtree(self.live / ".build")
-        self.old_artifact = artifact(self.live / ".build", self.old, "previous Rust only", rust_only=True)
+    def test_retired_artifact_formats_are_rejected(self):
+        for format in [1, 2]:
+            manifest = dict(self.manifest, format=format)
+            (self.candidate / "release.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(RuntimeError, "Unsupported artifact format/schema"):
+                updater.verify_artifact(self.candidate, self.new)
 
 
 if __name__ == "__main__":

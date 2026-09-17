@@ -13,7 +13,7 @@ def validate(needs):
     mode = needs.get("plan", {}).get("outputs", {}).get("mode")
     if mode not in {"full", "dashboard", "reuse"}:
         raise ValueError("Missing or unknown validation plan")
-    expected = {"plan": "success", "build": "success",
+    expected = {"plan": "success", "build": "success", "rust-advisories": "success",
                 "core": "success" if mode == "full" else "skipped",
                 "collectors": "success" if mode == "full" else "skipped"}
     for job, result in expected.items():

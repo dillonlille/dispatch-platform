@@ -1,3 +1,4 @@
+import { dateFormatter } from './date-format.js';
 import type { Punch } from './contracts/index.js';
 
 export interface CortexMeal {
@@ -88,7 +89,7 @@ export function fullName(name: string) {
     .replace(/\s+/g, ' ');
 }
 export function localDate(timezone: string, now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
+  return dateFormatter('en-CA', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
@@ -118,7 +119,7 @@ function parseClock(value: string | null) {
 export function cortexClock(value: string | null, date: string, zone: string): ClockTime | null {
   if (!value) return null;
   const d = new Date(value);
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = dateFormatter('en-US', {
     timeZone: zone,
     hourCycle: 'h23',
     hour: '2-digit',
@@ -135,7 +136,7 @@ export function cortexClock(value: string | null, date: string, zone: string): C
     minute,
     day,
     label: label(minute),
-    detail: `${new Intl.DateTimeFormat('en-US', { timeZone: zone, dateStyle: 'medium', timeStyle: 'long' }).format(d)} · ${zone}`,
+    detail: `${dateFormatter('en-US', { timeZone: zone, dateStyle: 'medium', timeStyle: 'long' }).format(d)} · ${zone}`,
   };
 }
 export function paycomDay(source: MealEmployee['paycom']) {

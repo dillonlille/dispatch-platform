@@ -74,8 +74,7 @@ export function PaycomPage({
   const overview = useData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
-    jobs: Job[];
-  }>('/api/dsp/overview', 5000);
+  }>('/api/dsp/paycom/status', 5000);
   const syncState = useData<{
     date: string;
     scopeAvailable: boolean;
@@ -105,7 +104,7 @@ export function PaycomPage({
   const owner = ['owner', 'platform_owner'].includes(view.role);
   return (
     <div className="paycom-page">
-      <Header title="Paycom" subtitle="Timecards, meal breaks, and employee records.">
+      <Header title="Paycom">
         {owner && (
           <button
             onClick={() => {
@@ -244,7 +243,7 @@ export function TeamPage({
     ) ?? [];
   return (
     <>
-      <Header title="Team & Roles" subtitle="Manage your team and their access.">
+      <Header title="Team & Roles">
         <button className="primary" onClick={() => setInviting(true)}>
           <Plus size={16} />
           Invite member

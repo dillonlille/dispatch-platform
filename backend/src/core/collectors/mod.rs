@@ -1,5 +1,5 @@
 //! Collector-owned databases. Provider identities and paths are compiled code,
-//! never user-controlled paths. See docs/COLLECTORS.md for the extension contract.
+//! never user-controlled paths.
 use super::{
     Result,
     db::{self, Db, DspLease, Store, s},
@@ -8,9 +8,6 @@ use super::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-// The dual-layout reader shipped in 9a63ef1 before migration was enabled.
-// The immediately previous Dev artifact can read and write the split layout.
-pub(crate) const MIGRATE_ON_START: bool = true;
 const LAYOUT: &str = "storage.collectors";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -165,6 +162,26 @@ impl Store {
         Ok(db)
     }
 
+    pub(crate) fn initialize_collectors(&self, id: &str) -> Result<()> {
+        let provider = Provider::Paycom;
+        let data = self.area(id, "data")?;
+        db::private_dir(&data.join(provider.id()))?;
+        let schema = format!(
+            "{}\nINSERT INTO storage_identity VALUES ('{}','paycom','paycom-v1');",
+            provider.schema(),
+            id
+        );
+        let target = Db::open(
+            &data.join(provider.relative_path()),
+            &schema,
+            provider.version(),
+            true,
+        )?;
+        identity(&target, id, provider)?;
+        self.dsp(id)?.set(LAYOUT, &json!(1))?;
+        self.initialize_cortex(id)?;
+        self.initialize_live(id)
+    }
     // Called only during startup/provisioning under the platform lock, before
     // serving requests. The source remains authoritative until its final commit.
     pub(crate) fn migrate_collector_storage(&self, id: &str) -> Result<()> {
@@ -350,6 +367,15 @@ mod tests {
         let id = crate::core::crypto::id("dsp").unwrap();
         store.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES (?,'Legacy','preview','active','UTC',?)", [&id, &db::iso()]).unwrap();
         store.initialize_dsp(&id).unwrap();
+        store
+            .dsp(&id)
+            .unwrap()
+            .0
+            .execute_batch(&include_str!("legacyDsp.sql").replace(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+                "",
+            ))
+            .unwrap();
         let core = store.dsp(&id).unwrap();
         core.exec("INSERT INTO connections(provider,enabled,status,updated_at,revision) VALUES ('paycom',1,'ready',?,7)", [db::iso()]).unwrap();
         core.exec("INSERT INTO schedules(provider,enabled,timezone,next_run) VALUES ('paycom',1,'UTC','2099-01-01T00:00:00.000Z')", []).unwrap();

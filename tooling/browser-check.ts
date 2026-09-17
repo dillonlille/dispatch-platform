@@ -2,13 +2,17 @@ import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import assert from 'node:assert/strict';
 const demo = { email: 'owner@dispatch.test', password: 'Dispatch-demo-2026!' };
 const args = process.argv.slice(2);
 const smokeOnly = args.length === 1 && args[0] === '--smoke-only';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-ui-check-'));
-const port = 5190,
-  origin = `http://127.0.0.1:${port}`;
+const listener = net.createServer();
+await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+const port = (listener.address() as net.AddressInfo).port;
+await new Promise<void>((resolve) => listener.close(() => resolve()));
+const origin = `http://127.0.0.1:${port}`;
 const binary = path.resolve('.build/services/rust/dispatch-backend');
 const env = {
   ...process.env,
@@ -62,7 +66,6 @@ try {
     headers.cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     const session = await (await request('/api/session')).json();
     assert.equal(session.user.email, demo.email);
-    assert.equal(session.standalone, true);
     headers['x-csrf-token'] = session.csrf;
     const dsp = session.dsps.find(
       (value: { name: string }) => value.name === 'Northline Logistics',

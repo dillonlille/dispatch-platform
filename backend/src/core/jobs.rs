@@ -7,7 +7,7 @@ use super::{
 };
 use rusqlite::params;
 use serde_json::{Value, json};
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 // Preserve the original user_version so the prior runtime can still operate Paycom
 // after rollback. The new request column has a default for its old INSERTs.
 pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
@@ -27,20 +27,62 @@ pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
     db.0.execute_batch("PRAGMA foreign_keys=ON")?;
     result
 }
+fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Value {
+    json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":name,"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"],"metrics":metrics})
+}
 impl Store {
     pub fn public_job(&self, row: &Value) -> Result<Value> {
-        Ok(
-            json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":self.get_dsp(s(row,"dsp_id"))?["name"],"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"],"metrics":self.metrics(s(row,"id"))?}),
-        )
+        Ok(public_job(
+            row,
+            &self.get_dsp(s(row, "dsp_id"))?["name"],
+            self.metrics(s(row, "id"))?,
+        ))
     }
     pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
-        let rows = self.jobs.all(
-            "SELECT * FROM jobs WHERE (? IS NULL OR dsp_id=?) ORDER BY created_at DESC LIMIT 200",
-            params![id, id],
-        )?;
+        self.recent_jobs(id, 200)
+    }
+    pub fn recent_jobs(&self, id: Option<&str>, limit: usize) -> Result<Value> {
+        let limit = limit.min(200) as i64;
+        let rows = match id {
+            Some(id) => self.jobs.all(
+                "SELECT * FROM jobs WHERE dsp_id=? ORDER BY created_at DESC LIMIT ?",
+                params![id, limit],
+            )?,
+            None => self.jobs.all(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
+                [limit],
+            )?,
+        };
+        if rows.is_empty() {
+            return Ok(json!([]));
+        }
+        let ids = serde_json::to_string(&rows.iter().map(|r| s(r, "id")).collect::<Vec<_>>())?;
+        let dsps = serde_json::to_string(&rows.iter().map(|r| s(r, "dsp_id")).collect::<Vec<_>>())?;
+        let names: HashMap<String, Value> = self
+            .platform
+            .all(
+                "SELECT id,name FROM dsps WHERE id IN (SELECT value FROM json_each(?))",
+                [dsps],
+            )?
+            .into_iter()
+            .map(|r| (s(&r, "id").to_owned(), r["name"].clone()))
+            .collect();
+        let mut metrics: HashMap<String, Vec<Value>> = HashMap::new();
+        for row in self.jobs.all("SELECT job_id,metrics FROM job_metrics WHERE job_id IN (SELECT value FROM json_each(?)) ORDER BY attempt", [ids])? {
+            metrics.entry(s(&row,"job_id").to_owned()).or_default().push(serde_json::from_str(s(&row,"metrics"))?);
+        }
         Ok(json!(
             rows.iter()
-                .map(|r| self.public_job(r))
+                .map(|row| {
+                    let name = names
+                        .get(s(row, "dsp_id"))
+                        .ok_or_else(|| Error::new("dsp_not_found", 404))?;
+                    Ok(public_job(
+                        row,
+                        name,
+                        metrics.remove(s(row, "id")).unwrap_or_default(),
+                    ))
+                })
                 .collect::<Result<Vec<_>>>()?
         ))
     }
@@ -279,35 +321,55 @@ impl Store {
         db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
         self.schedule(id)
     }
-    pub fn schedule_tick(&self) -> Result<()> {
+    pub fn schedule_deadlines(&self) -> Result<Vec<(String, i64)>> {
+        let mut deadlines = Vec::new();
         for dsp in self.platform.all(
             "SELECT id FROM dsps WHERE status='active' AND environment=?",
             [&self.config.environment],
         )? {
             let id = s(&dsp, "id");
             let schedule = self.schedule(id)?;
-            if !flag(&schedule, "enabled") {
-                continue;
-            }
-            let next = if schedule["nextRun"].is_null() {
-                let next = next_scheduled(&schedule, now())?;
-                self.collector(id, Provider::Paycom)?
-                    .exec("UPDATE schedules SET next_run=?", [&next])?;
-                next
-            } else {
-                s(&schedule, "nextRun").to_owned()
-            };
-            if next > iso() {
-                continue;
-            }
-            if self.enqueue(id, None, &format!("schedule:{next}")).is_ok() {
-                self.collector(id, Provider::Paycom)?.exec(
-                    "UPDATE schedules SET next_run=?",
-                    [next_scheduled(&schedule, now())?],
-                )?;
+            if flag(&schedule, "enabled") {
+                let deadline = schedule["nextRun"]
+                    .as_str()
+                    .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+                    .map_or(0, |date| date.timestamp_millis());
+                deadlines.push((id.to_owned(), deadline));
             }
         }
-        Ok(())
+        Ok(deadlines)
+    }
+    pub fn schedule_due(&self, id: &str) -> Result<Option<i64>> {
+        let dsp = self.get_dsp(id)?;
+        if s(&dsp, "status") != "active" || s(&dsp, "environment") != self.config.environment {
+            return Ok(None);
+        }
+        let schedule = self.schedule(id)?;
+        if !flag(&schedule, "enabled") {
+            return Ok(None);
+        }
+        let next = if let Some(next) = schedule["nextRun"].as_str() {
+            next.to_owned()
+        } else {
+            next_scheduled(&schedule, now())?
+        };
+        let next = if next <= iso() {
+            if self.enqueue(id, None, &format!("schedule:{next}")).is_err() {
+                return Ok(Some(now() + 5000));
+            }
+            next_scheduled(&schedule, now())?
+        } else {
+            next
+        };
+        self.collector(id, Provider::Paycom)?.exec(
+            "UPDATE schedules SET next_run=? WHERE provider='paycom'",
+            [&next],
+        )?;
+        Ok(Some(
+            chrono::DateTime::parse_from_rfc3339(&next)
+                .map_err(|_| Error::new("invalid_schedule", 500))?
+                .timestamp_millis(),
+        ))
     }
 }
 pub fn next_occurrence(time: &str, tz: &str, after: i64) -> Result<String> {
@@ -350,6 +412,10 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
     let mut tasks = tokio::task::JoinSet::new();
     let mut running_dsps = std::collections::HashSet::new();
     let mut timer = tokio::time::interval(Duration::from_secs(1));
+    let mut deadlines = std::collections::HashMap::<String, i64>::new();
+    let mut schedule_revision = u64::MAX;
+    let mut refreshed = 0;
+    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut checkpoint_cleanup = tokio::time::interval(Duration::from_secs(60));
     loop {
         tokio::select! {
@@ -359,6 +425,14 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
             },
             _=checkpoint_cleanup.tick()=>{
                 let result = state.run(|db| {
+                    // Expired access tokens have no remaining authentication purpose.
+                    db.platform.transaction(|| {
+                        db.platform.exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
+                        db.platform.exec("DELETE FROM resets WHERE expires_at<?", [now()])?;
+                        db.platform.exec("DELETE FROM invitations WHERE expires_at<?", [now()])?;
+                        db.platform.exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
+                        Ok(())
+                    })?;
                     for dsp in db.platform.all("SELECT id FROM dsps WHERE status IN ('active','suspended')", [])? {
                         db.prune_checkpoints(s(&dsp,"id"))?;
                     }
@@ -368,8 +442,31 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
             },
             _=timer.tick()=>{
                 state.expire_browsers().await;
-                let result=state.run(|db|{db.recover_jobs(false)?;db.schedule_tick()}).await;
-                if let Err(error)=result {eprintln!("scheduler_tick_failed: {}",error.code);}
+                let revision = state.schedule_revision.load(std::sync::atomic::Ordering::Acquire);
+                if revision != schedule_revision || now()-refreshed >= 60000 {
+                    match state.read(|db| db.schedule_deadlines()).await {
+                        Ok(values) => { deadlines = values.into_iter().collect(); schedule_revision = revision; refreshed = now(); },
+                        Err(error) => eprintln!("scheduler_refresh_failed: {}",error.code),
+                    }
+                }
+                let due: Vec<_> = deadlines.iter().filter(|(_,at)| **at <= now()).map(|(id,_)| id.clone()).collect();
+                for id in due {
+                    let dsp = id.clone();
+                    match state.run(move |db| db.schedule_due(&dsp)).await {
+                        Ok(Some(next)) => { deadlines.insert(id,next); },
+                        Ok(None) => { deadlines.remove(&id); },
+                        Err(error) => { deadlines.insert(id,now()+5000); eprintln!("scheduler_tick_failed: {}",error.code); },
+                    }
+                }
+                // Poll indexed queue/lease state without a write lock. Recovery
+                // still runs on the first tick after expiry, including quiet DSPs.
+                let ready = match state.read(|db| db.jobs.one("SELECT EXISTS(SELECT 1 FROM jobs WHERE status='queued' AND available_at<=?1) queued,EXISTS(SELECT 1 FROM jobs WHERE status IN ('running','waiting_verification') AND lease_until<?1) expired",[now()])).await {
+                    Ok(Some(value)) => value,
+                    Ok(None) => continue,
+                    Err(error) => { eprintln!("job_poll_failed: {}",error.code); continue; },
+                };
+                if flag(&ready,"expired") && let Err(error) = state.run(|db| db.recover_jobs(false)).await { eprintln!("job_recovery_failed: {}",error.code); }
+                if !flag(&ready,"queued") && !flag(&ready,"expired") { continue; }
                 while tasks.len()<state.config.browser_capacity {
                     let pool=state.clone();let claim_owner=owner.clone();
                     let running=running_dsps.clone();

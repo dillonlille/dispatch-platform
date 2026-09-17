@@ -1,10 +1,5 @@
 import { useState } from 'react';
 import { readAppearance, saveAppearance, type Appearance as Theme } from './appearance.js';
-const themePack = {
-  id: 'precision',
-  name: 'Precision',
-  description: 'Clear typography, quiet surfaces, and a cobalt accent.',
-};
 
 const choices: { value: Theme; label: string; description: string }[] = [
   { value: 'light', label: 'Light', description: 'A bright, clean workspace.' },
@@ -21,7 +16,7 @@ function ThemePreview({ mode }: { mode: 'light' | 'dark' }) {
     <span
       className="theme-preview-ui theme-preview-scope"
       data-theme={mode}
-      data-theme-pack={themePack.id}
+      data-theme-pack="precision"
     >
       <span className="theme-preview-sidebar">
         <i />
@@ -55,16 +50,8 @@ export function ThemeSection({ userId }: { userId: string }) {
   }
   return (
     <section className="theme-section">
-      <div className="theme-pack-field">
-        <label htmlFor="theme-pack">Theme</label>
-        <select id="theme-pack" value={themePack.id} aria-describedby="theme-pack-description">
-          <option value={themePack.id}>{themePack.name}</option>
-        </select>
-        <p id="theme-pack-description">{themePack.description}</p>
-      </div>
-      <fieldset aria-describedby="theme-description theme-persistence">
+      <fieldset aria-describedby="theme-persistence">
         <legend>Appearance</legend>
-        <p id="theme-description">Choose how Dispatch looks for you.</p>
         <div className="theme-options">
           {choices.map(({ value, label, description }) => (
             <label className="theme-option" key={value}>

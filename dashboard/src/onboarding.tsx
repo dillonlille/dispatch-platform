@@ -13,9 +13,7 @@ export function DspOnboarding({ complete }: { complete: () => Promise<void> }) {
       <section className="auth-panel">
         <p className="muted onboarding-step">Step 2 of 2 · DSP details</p>
         <h1>Set up your DSP</h1>
-        <p className="auth-description">
-          Your account is ready. Add your DSP details while we prepare your workspace.
-        </p>
+
         <form
           onSubmit={(event) => {
             event.preventDefault();

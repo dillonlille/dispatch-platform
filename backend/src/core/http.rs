@@ -104,6 +104,76 @@ impl IntoResponse for Reply {
         response
     }
 }
+pub struct Asset {
+    bytes: axum::body::Bytes,
+    etag: String,
+    mime: &'static str,
+    cache: &'static str,
+}
+// Artifacts are immutable for the process lifetime. Deployment restarts the core.
+// Load once so both GET and HEAD need no filesystem work on the request path.
+pub fn assets(root: &std::path::Path) -> Result<HashMap<String, Asset>> {
+    let mut files = vec![("/".to_owned(), root.join("index.html"))];
+    let directory = root.join("assets");
+    if directory.is_dir() {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                files.push((
+                    format!("/assets/{}", entry.file_name().to_string_lossy()),
+                    entry.path(),
+                ));
+            }
+        }
+    }
+    let mut result = HashMap::new();
+    let mut size = 0;
+    for (route, file) in files {
+        if !file.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&file)?;
+        size += bytes.len();
+        ensure(size <= 64 * 1024 * 1024, "dashboard_too_large", 503)?;
+        let extension = file.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let stem = file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .as_bytes();
+        let hashed = ["js", "css"].contains(&extension)
+            && stem.len() > 9
+            && stem[stem.len() - 9] == b'-'
+            && stem[stem.len() - 8..]
+                .iter()
+                .all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'-');
+        let mime = match extension {
+            "html" => "text/html; charset=utf-8",
+            "js" => "text/javascript; charset=utf-8",
+            "css" => "text/css; charset=utf-8",
+            "svg" => "image/svg+xml",
+            "png" => "image/png",
+            "woff2" => "font/woff2",
+            _ => "application/octet-stream",
+        };
+        result.insert(
+            route.clone(),
+            Asset {
+                etag: format!("\"{}\"", crypto::sha(&bytes)),
+                bytes: bytes.into(),
+                mime,
+                cache: if route == "/" {
+                    "no-store"
+                } else if hashed {
+                    "public, max-age=31536000, immutable"
+                } else {
+                    "public, no-cache"
+                },
+            },
+        );
+    }
+    Ok(result)
+}
 pub fn router(state: Arc<State>) -> Router {
     Router::new().fallback(dispatch).with_state(state)
 }
@@ -119,13 +189,15 @@ async fn dispatch(AxumState(state): AxumState<Arc<State>>, request: Request) -> 
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "same-origin"),
         ("x-frame-options", "DENY"),
-        ("cache-control", "no-store"),
     ] {
         headers.insert(
             axum::http::HeaderName::from_static(name),
             value.parse().unwrap(),
         );
     }
+    headers
+        .entry("cache-control")
+        .or_insert("no-store".parse().unwrap());
     let csp = format!(
         "default-src 'self'; script-src 'self'{}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'{}; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         if development { " 'unsafe-inline'" } else { "" },
@@ -176,31 +248,37 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
             "not_found",
             404,
         )?;
-        let file = state.config.dashboard.join(if path == "/" {
-            "index.html"
-        } else {
-            path.trim_start_matches('/')
-        });
-        let bytes = tokio::fs::read(&file)
-            .await
-            .map_err(|_| Error::new("not_found", 404))?;
-        let mime = match file.extension().and_then(|s| s.to_str()).unwrap_or("") {
-            "html" => "text/html; charset=utf-8",
-            "js" => "text/javascript; charset=utf-8",
-            "css" => "text/css; charset=utf-8",
-            "svg" => "image/svg+xml",
-            "png" => "image/png",
-            "woff2" => "font/woff2",
-            _ => "application/octet-stream",
-        };
-        let mut reply = Response::new(if method == "HEAD" {
+        let asset = state
+            .assets
+            .get(&path)
+            .ok_or_else(|| Error::new("not_found", 404))?;
+        let unchanged = path != "/"
+            && headers
+                .get("if-none-match")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|tags| {
+                    tags.split(',').any(|tag| {
+                        tag.trim().trim_start_matches("W/") == asset.etag || tag.trim() == "*"
+                    })
+                });
+        let mut reply = Response::new(if method == "HEAD" || unchanged {
             Body::empty()
         } else {
-            Body::from(bytes)
+            Body::from(asset.bytes.clone())
         });
-        reply
-            .headers_mut()
-            .insert("content-type", mime.parse().unwrap());
+        if unchanged {
+            *reply.status_mut() = StatusCode::NOT_MODIFIED;
+        }
+        let h = reply.headers_mut();
+        h.insert("content-type", asset.mime.parse().unwrap());
+        h.insert("etag", asset.etag.parse().unwrap());
+        h.insert("cache-control", asset.cache.parse().unwrap());
+        if !unchanged {
+            h.insert(
+                "content-length",
+                asset.bytes.len().to_string().parse().unwrap(),
+            );
+        }
         return Ok(reply);
     }
     ensure(["GET", "POST"].contains(&method.as_str()), "not_found", 404)?;
@@ -279,15 +357,67 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         )
         .into_response());
     }
+    if input.method == "POST" {
+        let b = &input.body;
+        let auth_input = input.clone();
+        if input.path == "/api/auth/password" {
+            v::fields(b, &["currentPassword", "password"])?;
+            let current = v::text(b, "currentPassword", 0, 128)?.to_owned();
+            let password = v::text(b, "password", 12, 128)?.to_owned();
+            let auth = state.read(move |db| auth_input.auth(db)).await?;
+            state.change_password(auth, current, password).await?;
+            return Ok(Reply::cookie(
+                json!({"ok":true}),
+                "dispatch_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into(),
+            )
+            .into_response());
+        }
+        if input.path == "/api/auth/reset-password" {
+            v::fields(b, &["token", "password"])?;
+            let token = v::text(b, "token", 43, 43)?.to_owned();
+            let password = v::text(b, "password", 12, 128)?.to_owned();
+            state
+                .run(move |db| db.throttle(&format!("reset:{}", auth_input.ip), 30, 3600000))
+                .await?;
+            state.reset_password(token, password).await?;
+            return Ok(Reply::ok().into_response());
+        }
+        let parts: Vec<_> = input.path.trim_start_matches('/').split('/').collect();
+        if parts.len() == 4 && parts[..2] == ["api", "invitations"] && parts[3] == "accept" {
+            v::fields(b, &["firstName", "lastName", "password"])?;
+            let token = parts[2].to_owned();
+            let first = v::name(b, "firstName", 100)?;
+            let last = v::name(b, "lastName", 100)?;
+            let password = v::text(b, "password", 12, 128)?.to_owned();
+            state
+                .run(move |db| db.throttle(&format!("invite:{}", auth_input.ip), 20, 3600000))
+                .await?;
+            return Ok(Json(
+                state
+                    .accept_invitation(token, first, last, password)
+                    .await?,
+            )
+            .into_response());
+        }
+    }
     if let Some(reply) = asynchronous(&state, &input).await? {
         return Ok(reply.into_response());
     }
+    let invalidate_schedule = input.method == "POST"
+        && (input.path.contains("/dsps")
+            || input.path.ends_with("/schedule")
+            || input.path.ends_with("/settings"));
     let pool = state.clone();
     let reply = if input.method == "GET" && !input.path.starts_with("/api/invitations/") {
         state.read(move |db| synchronous(db, &input, &pool)).await?
     } else {
         state.run(move |db| synchronous(db, &input, &pool)).await?
     };
+    if invalidate_schedule {
+        state
+            .schedule_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
     Ok(reply.into_response())
 }
 fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
@@ -303,15 +433,6 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
             db.recovery(&email)?;
             return Ok(Reply::status(json!({"ok":true}), 202));
         }
-        ("POST", "/api/auth/reset-password") => {
-            v::fields(b, &["token", "password"])?;
-            db.throttle(&format!("reset:{}", i.ip), 30, 3600000)?;
-            db.reset_password(
-                v::text(b, "token", 43, 43)?,
-                v::text(b, "password", 12, 128)?,
-            )?;
-            return Ok(Reply::ok());
-        }
         ("POST", "/api/auth/logout") => {
             let a = i.auth(db)?;
             db.platform
@@ -321,23 +442,10 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
                 "dispatch_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into(),
             ));
         }
-        ("POST", "/api/auth/password") => {
-            let a = i.auth(db)?;
-            v::fields(b, &["currentPassword", "password"])?;
-            db.change_password(
-                &a,
-                v::text(b, "currentPassword", 0, 128)?,
-                v::text(b, "password", 12, 128)?,
-            )?;
-            return Ok(Reply::cookie(
-                json!({"ok":true}),
-                "dispatch_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into(),
-            ));
-        }
         ("GET", "/api/session") => {
             let a = i.auth(db)?;
             return Ok(Reply::json(
-                json!({"user":a.user,"csrf":a.csrf,"dsps":db.dsps(&a)?,"development":db.config.development,"environment":db.config.environment,"release":db.config.release,"separatePreview":false,"standalone":true,"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
+                json!({"user":a.user,"csrf":a.csrf,"dsps":db.dsps(&a)?,"development":db.config.development,"environment":db.config.environment,"release":db.config.release,"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
             ));
         }
         ("POST", "/api/session/dsp") => {
@@ -366,20 +474,6 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
         if !write && parts.len() == 3 {
             db.throttle(&format!("invite-read:{}", i.ip), 60, 60000)?;
             return Ok(Reply::json(db.invitation(raw)?));
-        }
-        if write && parts.len() == 4 && parts[3] == "accept" {
-            db.throttle(&format!("invite:{}", i.ip), 20, 3600000)?;
-            v::fields(b, &["firstName", "lastName", "password"])?;
-            let invitation = db.invitation(raw)?;
-            db.accept_invitation(
-                raw,
-                &v::name(b, "firstName", 100)?,
-                &v::name(b, "lastName", 100)?,
-                v::text(b, "password", 12, 128)?,
-            )?;
-            return Ok(Reply::json(
-                json!({"email":invitation["email"],"dspId":invitation["dspId"]}),
-            ));
         }
     }
     if path.starts_with("/api/platform/") {
@@ -473,7 +567,7 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             let file = db.config.platform().join("dev-update.json");
             let update=std::fs::read(file).ok().and_then(|s|serde_json::from_slice::<Value>(&s).ok()).map(|v|json!({"status":v["status"],"commit":v["commit"],"updatedAt":v["updatedAt"]}));
             Ok(Reply::json(
-                json!({"releases":[],"deploymentEnabled":false,"version":db.config.version,"standalone":true,"environment":db.config.environment,"release":db.config.release,"update":update}),
+                json!({"version":db.config.version,"environment":db.config.environment,"release":db.config.release,"update":update}),
             ))
         }
         _ => {
@@ -521,7 +615,11 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         Ok(value)
     };
     match (i.method.as_str(),i.path.as_str()) {
-        ("GET","/api/dsp/overview")=>{let mut jobs=db.list_jobs(Some(id))?;jobs.as_array_mut().unwrap().truncate(8);Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":db.employees(id,"",0,5,false)?,"audit":db.audits(Some(id),10)?})))},
+        ("GET","/api/dsp/paycom/status") => {
+            let publication = db.collector(id,super::collectors::Provider::Paycom)?.one("SELECT collected_at FROM publications WHERE active=1",[])?;
+            Ok(Reply::json(json!({"connection":connection()?,"schedule":db.schedule(id)?,"workforce":{"collectedAt":publication.map(|p|p["collected_at"].clone())}})))
+        },
+        ("GET","/api/dsp/overview")=>{let jobs=db.recent_jobs(Some(id),8)?;Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":db.employees(id,"",0,5,false)?,"audit":db.audits(Some(id),10)?})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
         ("POST","/api/dsp/jobs")=>{v::fields(b,&["requestId","date"])?;let key=v::text(b,"requestId",1,128)?;let job=if b.get("date").is_some(){db.enqueue_paycom_date(id,Some(actor),key,v::text(b,"date",10,10)?)?}else{db.enqueue(id,Some(actor),key)?};db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},

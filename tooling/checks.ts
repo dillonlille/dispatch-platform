@@ -73,7 +73,7 @@ async function core() {
     '-p',
     '*_test.py',
   ]);
-  const audit = run('dependency audit', 'npm', ['audit', '--omit=dev', '--audit-level=high']);
+  const audit = run('dependency audit', 'npm', ['audit', '--audit-level=high']);
   if (await run('debug build', 'python3', ['tooling/cargo-build.py'])) {
     // Compile once before starting API fixtures; clippy/test no longer compete
     // with a second debug build. Release builds run on a separate CI runner.
@@ -95,7 +95,9 @@ async function core() {
 }
 if (mode === 'core') await core();
 else if (mode === 'full') {
-  await Promise.all([build('full'), core()]);
+  // CI shards compile on separate runners; local runs share Cargo's build lock.
+  await core();
+  if (!failures.length) await build('full');
   // Local full checks still isolate capacity measurements from compilers.
   if (!failures.length) await npm('test:browseros');
 } else await build(mode.replace('build-', ''));

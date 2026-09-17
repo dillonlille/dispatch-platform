@@ -305,3 +305,194 @@ fn cortex_network_policy_keeps_provider_hosts_separate() {
         assert!(!egress::allowed_cortex_host(host));
     }
 }
+
+#[test]
+fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
+    use dispatch_backend::core::collectors::Provider;
+    let (_root, db) = store();
+    let boot = operations::bootstrap(
+        &db,
+        "owner@example.test",
+        "Test",
+        "Owner",
+        "test-password-long",
+    )
+    .unwrap();
+    let id = s(&boot["dsp"], "id");
+    let mut data = workforce::fixture("UTC").unwrap();
+    db.publish(id, &data).unwrap();
+    let provider = db.collector(id, Provider::Paycom).unwrap();
+    let first = provider
+        .one("SELECT id FROM publications WHERE active=1", [])
+        .unwrap()
+        .unwrap();
+    data["collectedAt"] = json!("2099-01-01T00:00:00.000Z");
+    data["employees"].as_array_mut().unwrap().reverse();
+    data["timecards"].as_array_mut().unwrap().reverse();
+    db.publish(id, &data).unwrap();
+    assert_eq!(
+        provider.all("SELECT id FROM publications", []).unwrap(),
+        vec![first.clone()]
+    );
+    assert_eq!(
+        db.employees(id, "", 0, 100, false).unwrap()["collectedAt"],
+        data["collectedAt"]
+    );
+    data["timecards"][0]["hours"] = json!(7.25);
+    data["collectedAt"] = json!("2099-01-02T00:00:00.000Z");
+    db.publish(id, &data).unwrap();
+    assert_eq!(
+        provider
+            .all("SELECT id FROM publications", [])
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        provider
+            .one("SELECT id FROM publications WHERE id=?", [s(&first, "id")])
+            .unwrap()
+            .is_some()
+    );
+    // A rollback runtime can publish without maintaining the new fingerprint.
+    provider
+        .exec(
+            "DELETE FROM settings WHERE key='paycom.publicationFingerprint'",
+            [],
+        )
+        .unwrap();
+    data["collectedAt"] = json!("2099-01-03T00:00:00.000Z");
+    db.publish(id, &data).unwrap();
+    assert_eq!(
+        provider
+            .all("SELECT id FROM publications", [])
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsps = db
+        .platform
+        .all("SELECT id,name FROM dsps ORDER BY id", [])
+        .unwrap();
+    for index in 0..12 {
+        let dsp = &dsps[index % dsps.len()];
+        let job = format!("job-{index}");
+        db.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,?,'preview','paycom.collect','succeeded',0,?,'test',1,?)",rusqlite::params![job,s(dsp,"id"),format!("2026-09-{:02}",index+1),job]).unwrap();
+        for attempt in [2, 1] {
+            db.jobs
+                .exec(
+                    "INSERT INTO job_metrics(job_id,attempt,owner,metrics) VALUES (?,?,'test',?)",
+                    rusqlite::params![job, attempt, json!({"attempt":attempt}).to_string()],
+                )
+                .unwrap();
+        }
+    }
+    let recent = db.recent_jobs(None, 8).unwrap();
+    assert_eq!(recent.as_array().unwrap().len(), 8);
+    assert_eq!(recent[0]["id"], "job-11");
+    assert_eq!(recent[0]["metrics"], json!([{"attempt":1},{"attempt":2}]));
+    let dsp = &dsps[0];
+    for row in db
+        .recent_jobs(Some(s(dsp, "id")), 200)
+        .unwrap()
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(row["dspId"], dsp["id"]);
+        assert_eq!(row["dspName"], dsp["name"]);
+    }
+    assert_eq!(db.recent_jobs(None, 0).unwrap(), json!([]));
+}
+
+#[test]
+fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
+    use dispatch_backend::core::collectors::Provider;
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsp = db
+        .platform
+        .one("SELECT id FROM dsps WHERE name='Northline Logistics'", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&dsp, "id");
+    db.set_schedule(id, false, "06:00", "UTC").unwrap();
+    assert!(
+        !db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(d, _)| d == id)
+    );
+    db.set_schedule(id, true, "06:00", "UTC").unwrap();
+    assert!(
+        db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(d, at)| d == id && *at > db::now())
+    );
+    db.collector(id, Provider::Paycom)
+        .unwrap()
+        .exec(
+            "UPDATE schedules SET next_run='2026-01-01T00:00:00.000Z'",
+            [],
+        )
+        .unwrap();
+    assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
+    assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
+    assert_eq!(db.list_jobs(Some(id)).unwrap().as_array().unwrap().len(), 1);
+    db.set_schedule(id, false, "06:00", "UTC").unwrap();
+    assert_eq!(db.schedule_due(id).unwrap(), None);
+}
+
+#[tokio::test]
+async fn concurrent_password_resets_cannot_reuse_a_consumed_token() {
+    use dispatch_backend::core::State;
+    let (_root, db) = store();
+    operations::bootstrap(
+        &db,
+        "owner@example.test",
+        "Test",
+        "Owner",
+        "test-password-long",
+    )
+    .unwrap();
+    let user = db
+        .platform
+        .one("SELECT * FROM users WHERE email='owner@example.test'", [])
+        .unwrap()
+        .unwrap();
+    let token = crypto::token().unwrap();
+    db.platform
+        .exec(
+            "INSERT INTO resets(hash,user_id,user_version,expires_at) VALUES (?,?,?,?)",
+            rusqlite::params![
+                crypto::sha(&token),
+                s(&user, "id"),
+                db::n(&user, "version"),
+                db::now() + 60000
+            ],
+        )
+        .unwrap();
+    let config = db.config.clone();
+    drop(db);
+    let state = State::new(config).unwrap();
+    let (a, b) = tokio::join!(
+        state.reset_password(token.clone(), "first-replacement-password".into()),
+        state.reset_password(token.clone(), "second-replacement-password".into())
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert_eq!(a.err().or(b.err()).unwrap().code, "reset_expired");
+    assert_eq!(
+        state
+            .reset_password(token, "third-replacement-password".into())
+            .await
+            .unwrap_err()
+            .code,
+        "reset_expired"
+    );
+}

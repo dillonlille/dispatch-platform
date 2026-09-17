@@ -6,7 +6,6 @@ pub mod egress;
 mod page;
 mod paycom;
 pub use super::collectors::Provider;
-pub mod sandbox;
 use super::{
     Error, Result, State,
     accounts::Context,
@@ -534,10 +533,6 @@ impl State {
             value["verificationSessionId"] = json!(session.id);
         }
         Ok(value)
-    }
-    pub async fn ensure_browser(self: &Arc<Self>, id: &str, retry: bool) -> Result<Arc<Session>> {
-        self.ensure_provider_browser(id, retry, Provider::Paycom)
-            .await
     }
     pub async fn ensure_provider_browser(
         self: &Arc<Self>,

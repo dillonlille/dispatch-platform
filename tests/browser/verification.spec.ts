@@ -92,7 +92,7 @@ test('Paycom window scales input, supports drag/scroll/keyboard, and only contin
     await expect
       .poll(() => window.evaluate((image: HTMLImageElement) => image.naturalWidth))
       .toBe(1600);
-    await dialog.screenshot({ path: '/tmp/dispatch-verification-desktop.png' });
+    await dialog.screenshot({ path: test.info().outputPath('dispatch-verification-desktop.png') });
     await dialog.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText('Paycom still needs verification');
     await expect(dialog).toBeVisible();
@@ -149,7 +149,7 @@ test('Paycom window scales input, supports drag/scroll/keyboard, and only contin
     await dialog.getByLabel('Text to type in Paycom').fill('!');
     await dialog.getByRole('button', { name: 'Type', exact: true }).click();
     await expect(provider.getByLabel('Provider text')).toHaveValue(/!/);
-    await dialog.screenshot({ path: '/tmp/dispatch-verification-mobile.png' });
+    await dialog.screenshot({ path: test.info().outputPath('dispatch-verification-mobile.png') });
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await page.getByRole('button', { name: 'Open verification window' }).click();
