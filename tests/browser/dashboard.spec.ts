@@ -124,6 +124,7 @@ test('create a DSP and accept its owner invitation while another account is sign
     process.env.DISPATCH_TEST_STATE_ROOT!,
     'invited-owner@dispatch.test',
   );
+  await page.goto('about:blank');
   await page.setContent(message.html);
   await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'DSP onboarding' })).toBeVisible();
