@@ -764,33 +764,8 @@ td small {
 .paycom-subnav {
   margin-top: 12px;
 }
-.paycom-connection {
+.paycom-connect {
   margin-top: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.paycom-connection-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 24px;
-  border-bottom: 1px solid var(--border);
-}
-.paycom-connection-identity {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.paycom-connection-body {
-  padding: 28px 24px;
-}
-.paycom-connection-body h2 {
-  font-size: 18px;
-}
-.paycom-connection-body p {
-  margin: 8px 0 20px;
-  color: var(--muted-foreground);
 }
 @media (max-width: 760px) {
   .desktop-sidebar {
