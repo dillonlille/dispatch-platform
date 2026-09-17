@@ -165,3 +165,93 @@ test('meal API requires DSP context, exposes the punch union to members, restric
     await f.close();
   }
 });
+
+test('name variants combine existing source records without recollection or losing punches and meals', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const owner = await f.client();
+  const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+  await owner.select(dsp.id);
+  const names = [
+    ['REED, JAMIE', 'Jamie Reed Vega'],
+    ['STONE, ALEX', 'Alexander Stone'],
+    ['MOLINA, CASEY', 'Casey Molina Solis'],
+    ['HART, TAYLOR', 'Taylor Hart Jr'],
+  ];
+  const date = f.collector(dsp.id, (db) => {
+    const date = (db.prepare('SELECT max(date) date FROM timecards').get() as { date: string })
+      .date;
+    names.forEach(([paycom], i) => {
+      db.prepare('UPDATE employees SET name=? WHERE code=?').run(paycom!, `E00${i + 1}`);
+    });
+    return date;
+  });
+  const endpoint = `/api/dsp/paycom/meal-breaks?date=${date}`;
+  const before = (await owner.get(endpoint)).value;
+  f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
+    db.prepare(
+      `INSERT INTO meal_publications VALUES
+       ('variant-pub','variant-job',?,'DEMO1','area-1','ALL_DRIVERS','UTC',?,?,1,4,5,5,3)`,
+    ).run(date, `${date}T23:00:00Z`, `${date}T23:01:00Z`);
+    names.forEach(([, flex], i) => {
+      db.prepare(
+        `INSERT INTO meal_itineraries VALUES
+         ('variant-pub',?,?,?,'R1',?,1,'complete','recorded')`,
+      ).run(`route-${i}`, `driver-${i}`, flex!, `${date}T23:00:00Z`);
+      for (const meal of i === 0 ? [0, 1] : [0]) {
+        const hour = 12 + meal * 4;
+        db.prepare(
+          `INSERT INTO meal_records VALUES ('variant-pub',?,?,?,?,?,?,'verified','verified')`,
+        ).run(
+          `route-${i}`,
+          `meal-${meal}`,
+          `${date}T${hour - 1}:58:00Z`,
+          `${date}T${hour}:00:00Z`,
+          `${date}T${hour}:30:00Z`,
+          `${date}T${hour}:32:00Z`,
+        );
+      }
+    });
+  });
+  const response = await owner.get(endpoint);
+  assert.equal(response.status, 200);
+  const combined = response.value;
+  assert.equal(combined.rows.length, before.rows.length);
+  assert.equal(combined.drivers.length, 4);
+  assert(combined.drivers.every((d: any) => d.matchType === 'name'));
+  assert.equal(combined.rows.flatMap((r: MealEmployee) => r.cortex).length, 5);
+  for (const previous of before.rows) {
+    const row = combined.rows.find((r: MealEmployee) => r.id === previous.id);
+    assert.deepEqual(row.paycom, previous.paycom);
+  }
+  names.forEach(([, flex], i) => {
+    const row = combined.rows.find((r: MealEmployee) => r.id === `paycom:E00${i + 1}`);
+    assert.equal(row.cortex.length, i === 0 ? 2 : 1);
+    assert.equal(row.cortex[0].driverName, flex);
+    assert.equal(row.cortex[0].lastDelivery, `${date}T11:58:00Z`);
+    assert.equal(row.cortex[0].start, `${date}T12:00:00Z`);
+    assert.equal(row.cortex[0].end, `${date}T12:30:00Z`);
+    assert.equal(row.cortex[0].firstDelivery, `${date}T12:32:00Z`);
+  });
+  // Saved choices must still override the new automatic rules immediately.
+  assert.equal(
+    (
+      await owner.post('/api/dsp/paycom/employee-links', {
+        revision: 0,
+        changes: [{ cortexId: 'driver-0', paycomCode: null }],
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await owner.get(endpoint)).value.rows.length, before.rows.length + 1);
+  assert.equal(
+    (
+      await owner.post('/api/dsp/paycom/employee-links', {
+        revision: 1,
+        changes: [{ cortexId: 'driver-0', paycomCode: null, automatic: true }],
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await owner.get(endpoint)).value.rows.length, before.rows.length);
+});
