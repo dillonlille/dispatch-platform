@@ -30,9 +30,9 @@ export function Shell({
   const label =
     navigation.find((item) => item.id === page)?.label ??
     ({
-      'paycom-settings': 'Paycom',
-      employees: 'Paycom',
-      timecards: 'Paycom',
+      'paycom-settings': 'Timecard',
+      employees: 'Timecard',
+      timecards: 'Timecard',
       connections: 'Settings',
       account: 'Settings',
       audit: 'Settings',

@@ -105,7 +105,7 @@ async function open(page: Page, member = false, selectedDate: string | null = da
   await expect(page.getByRole('heading', { name: 'Currently under development' })).toBeVisible();
   if (page.viewportSize()!.width < 700)
     await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
   if (selectedDate) await page.getByLabel('Paycom date').fill(selectedDate);
 }
@@ -159,7 +159,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await page.setViewportSize({ width: 1586, height: 992 });
   await page.evaluate(() => window.scrollTo(0, 0));
   await open(page);
-  await expect(page.getByRole('tablist', { name: 'Paycom' }).getByRole('tab')).toHaveText([
+  await expect(page.getByRole('tablist', { name: 'Timecard' }).getByRole('tab')).toHaveText([
     'Timecard',
     'Meal Breaks',
     'Employees',
@@ -459,7 +459,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await meals.click();
   await expect(dateInput).toHaveValue(date);
   await page.getByRole('link', { name: 'Home Page', exact: true }).click();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await expect(dateInput).toHaveValue(date);
   await page.reload();
   await expect(dateInput).toHaveValue(date);
@@ -474,7 +474,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     .getByRole('button', { name: /Summit Delivery/ })
     .click();
   await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await expect(dateInput).toBeVisible();
   await expect(dateInput).not.toHaveValue('2026-09-14');
   expect(errors).toEqual([]);
@@ -543,7 +543,7 @@ test.describe('local calendar dates', () => {
     await open(page, true, null);
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByLabel('Display timezone').selectOption('UTC');
-    await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+    await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     const input = page.getByLabel('Paycom date');
     await expect(input).toHaveValue('2026-09-17');
     await expect(page.getByText('Calendar timezone: UTC', { exact: true })).toBeVisible();
@@ -553,7 +553,7 @@ test.describe('local calendar dates', () => {
     await expect(input).toHaveValue('2026-09-17');
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByLabel('Display timezone').selectOption('');
-    await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+    await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
     await expect(
