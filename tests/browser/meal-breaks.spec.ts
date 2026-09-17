@@ -87,7 +87,7 @@ function sample(): MealComparison {
     },
   };
 }
-async function open(page: Page, member = false) {
+async function open(page: Page, member = false, selectedDate: string | null = date) {
   await page.goto('/');
   await page
     .getByLabel('Email address')
@@ -107,7 +107,7 @@ async function open(page: Page, member = false) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Paycom', exact: true }).click();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-  await page.getByLabel('Paycom date').fill(date);
+  if (selectedDate) await page.getByLabel('Paycom date').fill(selectedDate);
 }
 test('approved comparison table, filters, details, links, date errors and mobile overflow', async ({
   page,
@@ -369,4 +369,86 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await expect(dateInput).toBeVisible();
   await expect(dateInput).not.toHaveValue('2026-09-14');
   expect(errors).toEqual([]);
+});
+
+test.describe('local calendar dates', () => {
+  // Personal calendar preferences work for members as well as owners.
+  test.use({ timezoneId: 'America/Los_Angeles' });
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/dsp/paycom/settings', (route) =>
+      route.fulfill({
+        json: {
+          revision: 0,
+          values: paycomDefaults,
+          history: [],
+          options: { departments: [], stations: [] },
+        },
+      }),
+    );
+  });
+
+  test('UTC midnight keeps the local day across tabs and rejects a saved tomorrow', async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
+    await open(page, true, null);
+    const input = page.getByLabel('Paycom date');
+    await expect(input).toHaveValue('2026-09-16');
+    await expect(input).toHaveAttribute('max', '2026-09-16');
+    await expect(
+      page.getByText('Calendar timezone: America/Los Angeles', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Next day', exact: true })).toBeDisabled();
+    await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+    await expect(input).toHaveValue('2026-09-16');
+    await expect(
+      page.getByRole('heading', { name: 'Today’s timecards', exact: true }),
+    ).toBeVisible();
+    const dspId = new URL(page.url()).hash.split('/')[1]!;
+    await page.evaluate(
+      (id) => sessionStorage.setItem(`dispatch:paycom-date:${id}`, '2026-09-17'),
+      dspId,
+    );
+    await page.reload();
+    await expect(input).toHaveValue('2026-09-16');
+    await input.fill('2026-09-15');
+    await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
+    await page.reload();
+    await expect(input).toHaveValue('2026-09-15');
+    await page.getByRole('button', { name: 'Today', exact: true }).click();
+    await expect(input).toHaveValue('2026-09-16');
+    await page.clock.setFixedTime(new Date('2026-09-17T07:01:00Z'));
+    await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+    await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
+    await expect(input).toHaveAttribute('max', '2026-09-17');
+    await expect(input).toHaveValue('2026-09-16');
+    await page.getByRole('button', { name: 'Today', exact: true }).click();
+    await expect(input).toHaveValue('2026-09-17');
+  });
+
+  test('calendar follows the saved display timezone and returning to Automatic uses the device', async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
+    await open(page, true, null);
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByLabel('Display timezone').selectOption('UTC');
+    await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+    const input = page.getByLabel('Paycom date');
+    await expect(input).toHaveValue('2026-09-17');
+    await expect(page.getByText('Calendar timezone: UTC', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Previous day', exact: true }).click();
+    await page.getByRole('button', { name: 'Today', exact: true }).click();
+    await page.reload();
+    await expect(input).toHaveValue('2026-09-17');
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByLabel('Display timezone').selectOption('');
+    await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+    await expect(input).toHaveValue('2026-09-16');
+    await expect(input).toHaveAttribute('max', '2026-09-16');
+    await expect(
+      page.getByText('Calendar timezone: America/Los Angeles', { exact: true }),
+    ).toBeVisible();
+  });
 });

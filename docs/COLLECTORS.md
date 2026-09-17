@@ -130,7 +130,12 @@ its API fields, provider IDs and stored records retain their existing names.
 
 Timecard and Meal Breaks share a date picker and sync toolbar above their content.
 The selected date stays in browser-session storage, scoped by DSP, across tabs,
-navigation and reloads. Loading Flex data never replaces that selection.
+navigation and reloads. The default day, Today button and date limit use the
+account's display timezone, falling back to the device timezone in Automatic mode.
+A saved date beyond the user's local today falls back to today; earlier dates stay
+selected. The toolbar names this calendar timezone. Paycom punch times and Flex
+station times retain their source meaning. Loading Flex data never replaces the
+selection.
 Timecard sync collects the Paycom period containing the selected day; Employees
 and scheduled syncs continue collecting the current period.
 

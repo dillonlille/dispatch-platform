@@ -90,7 +90,7 @@ export function SettingsPage({
           <section className="settings-section">
             <div>
               <h2>Date &amp; time</h2>
-              <p>Choose how event times appear for you.</p>
+              <p>Choose the timezone for calendar dates and event times.</p>
             </div>
             <div className="theme-pack-field">
               <label htmlFor="display-timezone">Display timezone</label>
@@ -112,9 +112,9 @@ export function SettingsPage({
                 ))}
               </select>
               <p>
-                Sync and activity times use{' '}
-                {timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}. Timecards keep the
-                DSP’s business timezone.
+                Calendar dates, sync and activity times use{' '}
+                {timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}. Paycom punches keep
+                the DSP’s business time; Flex times keep the station’s timezone.
               </p>
               <p>Saved for your account on this browser.</p>
             </div>

@@ -68,7 +68,7 @@ export function PaycomPage({
 }) {
   const [selectedTab, setTab] = useState<string>();
   const [syncing, setSyncing] = useState(false);
-  const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
+  const { date, today, timezone, selectDate } = usePaycomDate(view.dsp.id);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
   const tab = selectedTab ?? preferences.data?.values.opening_page ?? 'timecards';
   const overview = useData<{
@@ -168,6 +168,11 @@ export function PaycomPage({
             </button>
           )}
         </div>
+        {tab !== 'employees' && (
+          <p className="paycom-calendar-note muted">
+            Calendar timezone: {timezone.replaceAll('_', ' ')}
+          </p>
+        )}
         {canCollect && (
           <div className="paycom-sync-status">
             <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />

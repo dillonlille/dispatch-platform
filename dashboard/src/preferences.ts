@@ -16,6 +16,9 @@ export function initializePreferences(userId: string) {
 export function displayTimezone() {
   return timezone;
 }
+export function calendarTimezone() {
+  return displayTimezone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
 export function saveTimezone(value: string) {
   if (value) new Intl.DateTimeFormat('en', { timeZone: value });
   timezone = value || undefined;

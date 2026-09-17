@@ -1,5 +1,6 @@
 import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
+import { calendarTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -245,9 +246,9 @@ export function TimecardsPage({
   preferences?: PaycomPreferences;
 }) {
   const [offset, setOffset] = useState(0);
-  const businessToday = localDate(timezone);
-  const [localDay, setLocalDay] = useState(businessToday);
-  const date = sharedDate ?? localDay;
+  const calendarToday = localDate(calendarTimezone());
+  const [localDay, setLocalDay] = useState(calendarToday);
+  const date = sharedDate ?? (localDay > calendarToday ? calendarToday : localDay);
   const [sort, setSort] = useState(
       preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
     ),
@@ -267,18 +268,18 @@ export function TimecardsPage({
     <div className="paycom-data-view">
       <div className="paycom-day-toolbar">
         <div>
-          <h2>{date === businessToday ? 'Today’s timecards' : 'Daily timecards'}</h2>
+          <h2>{date === calendarToday ? 'Today’s timecards' : 'Daily timecards'}</h2>
           <p className="paycom-source-note">
             {new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' }).format(
               new Date(`${date}T12:00:00Z`),
             )}{' '}
-            · {timezone}
+            · Paycom business time: {timezone}
           </p>
         </div>
         {!sharedDate && (
           <PaycomDateControls
             date={date}
-            today={businessToday}
+            today={calendarToday}
             label="Timecard date"
             onChange={(value) => {
               setLocalDay(value);
