@@ -225,7 +225,7 @@ export function PaycomPage({
             }}
           >
             {daily && <Settings size={16} />}
-            Paycom settings
+            Settings
           </button>
         )}
       </Header>

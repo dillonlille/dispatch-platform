@@ -383,7 +383,7 @@ export function TimecardsPage({
                     : 'No employees match your Timecard settings'
                 }
               >
-                Your DSP owner can choose which departments appear in Paycom settings.
+                Your DSP owner can choose which departments appear in Timecard Settings.
               </Empty>
             )}
           </>

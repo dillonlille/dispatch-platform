@@ -191,7 +191,7 @@ test('archived account tabs preserve names, appearance and display timezone pref
   await expect(page.getByRole('alert')).toHaveText('The new passwords must match.');
 });
 
-test('archived Paycom settings persist and affect the workspace', async ({ page }) => {
+test('Timecard Settings persist and affect the workspace', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: /Northline Logistics/ }).click();
   let releaseView!: () => void;
@@ -222,8 +222,8 @@ test('archived Paycom settings persist and affect the workspace', async ({ page 
     releaseView();
   }
   await expect(page.getByRole('tab', { name: 'Collections', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Paycom settings', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Paycom settings', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Timecard Settings', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Workspace view', exact: true }).click();
   await page.getByLabel('Opening page', { exact: true }).selectOption('employees');
   await page.getByLabel('Name order', { exact: true }).selectOption('last_first');
