@@ -76,6 +76,8 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
     let active = true;
     setError('');
     let reading = false;
+    let failures = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
       if (reading || document.hidden) return;
       reading = true;
@@ -84,10 +86,21 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
         if (active) {
           setData(value);
           setError('');
+          failures = 0;
+          if (retry) clearTimeout(retry);
         }
       } catch (error) {
-        if (active && error instanceof Error && error.name !== 'AbortError')
+        if (active && error instanceof Error && error.name !== 'AbortError') {
           setError(error.message);
+          // A missed table response must recover even when no further driver arrives.
+          if (!(error instanceof ApiError) || error.status >= 500 || error.status === 429) {
+            if (retry) clearTimeout(retry);
+            retry = setTimeout(
+              () => void read(),
+              Math.min(15000, 1000 * 2 ** Math.min(failures++, 4)),
+            );
+          }
+        }
       } finally {
         reading = false;
       }
@@ -103,6 +116,7 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
       controller.abort();
       document.removeEventListener('visibilitychange', visible);
       if (timer) clearInterval(timer);
+      if (retry) clearTimeout(retry);
     };
   }, [url, revision, poll, refreshKey]);
   return { data, error, refresh };

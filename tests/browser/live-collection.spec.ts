@@ -26,6 +26,7 @@ test('driver results update open timecards and meal breaks without resetting the
   };
   let meals: any[] = [];
   let rowReads = 0;
+  let failNextRead = false;
   await page.route('**/api/dsp/collection-updates?*', async (route) => {
     const after = new URL(route.request().url()).searchParams.get('after');
     if (after !== String(revision)) await route.fulfill({ json: { revision: String(revision) } });
@@ -43,6 +44,13 @@ test('driver results update open timecards and meal breaks without resetting the
   });
   await page.route('**/api/dsp/paycom/meal-breaks?*', (route) => {
     rowReads++;
+    if (failNextRead) {
+      failNextRead = false;
+      return route.fulfill({
+        status: 503,
+        json: { error: 'platform_busy', message: 'Retrying live data' },
+      });
+    }
     const selected = new URL(route.request().url()).searchParams.get('date');
     return route.fulfill({
       json: {
@@ -112,12 +120,18 @@ test('driver results update open timecards and meal breaks without resetting the
     'true',
   );
   await expect(page.getByLabel('Paycom date')).toHaveValue(date);
+  failNextRead = true;
+  meals = [{ ...meals[0], lastDelivery: `${date}T21:28:00Z` }];
+  await announce();
+  await expect(page.getByText('Retrying live data')).toBeVisible();
+  await expect(page.locator('.meal-table')).toContainText('2:28 PM');
+  await expect(page.getByText('Retrying live data')).not.toBeVisible();
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
   const hiddenReads = rowReads;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:28:00Z` }];
+  meals = [{ ...meals[0], lastDelivery: `${date}T21:27:00Z` }];
   await announce();
   await page.waitForTimeout(350);
   expect(rowReads).toBe(hiddenReads);
@@ -125,7 +139,7 @@ test('driver results update open timecards and meal breaks without resetting the
     Reflect.deleteProperty(document, 'hidden');
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(page.locator('.meal-table')).toContainText('2:28 PM');
+  await expect(page.locator('.meal-table')).toContainText('2:27 PM');
 
   await page.getByLabel('Paycom date').fill('2026-09-14');
   await announce();
