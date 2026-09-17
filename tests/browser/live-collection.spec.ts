@@ -121,17 +121,19 @@ test('driver results update open timecards and meal breaks without resetting the
   );
   await expect(page.getByLabel('Paycom date')).toHaveValue(date);
   failNextRead = true;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:28:00Z` }];
+  meals = [{ ...meals[0], lastDelivery: `${date}T21:24:00Z` }];
   await announce();
   await expect(page.getByText('Retrying live data')).toBeVisible();
-  await expect(page.locator('.meal-table')).toContainText('2:28 PM');
+  await expect(page.locator('.meal-table')).toContainText('2:24 PM');
+  await expect(page.locator('.meal-gap.over-limit')).toHaveText(['6m before lunch']);
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 1', exact: true })).toBeVisible();
   await expect(page.getByText('Retrying live data')).not.toBeVisible();
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
   const hiddenReads = rowReads;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:27:00Z` }];
+  meals = [{ ...meals[0], lastDelivery: `${date}T21:25:00Z` }];
   await announce();
   await page.waitForTimeout(350);
   expect(rowReads).toBe(hiddenReads);
@@ -139,7 +141,9 @@ test('driver results update open timecards and meal breaks without resetting the
     Reflect.deleteProperty(document, 'hidden');
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(page.locator('.meal-table')).toContainText('2:27 PM');
+  await expect(page.locator('.meal-table')).toContainText('2:25 PM');
+  await expect(page.locator('.meal-gap.over-limit')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 0', exact: true })).toBeVisible();
 
   await page.getByLabel('Paycom date').fill('2026-09-14');
   await announce();

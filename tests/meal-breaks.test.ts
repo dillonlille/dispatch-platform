@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cortexClock, mealPairs, paycomDay, type MealEmployee } from '../shared/meal-breaks.js';
+import {
+  cortexClock,
+  flexDeliveryGaps,
+  mealPairs,
+  paycomDay,
+  type MealEmployee,
+} from '../shared/meal-breaks.js';
 import { fixture } from './rust-support.js';
 
 function employee(): MealEmployee {
@@ -35,6 +41,90 @@ function employee(): MealEmployee {
     ],
   };
 }
+test('Flex delivery gaps use only the corresponding Flex endpoints and exact five-minute threshold', () => {
+  const row = employee();
+  const meal = row.cortex[0]!;
+  meal.lastDelivery = '2026-09-15T21:33:00Z';
+  meal.start = '2026-09-15T21:38:00Z';
+  meal.end = '2026-09-15T22:08:00Z';
+  meal.firstDelivery = '2026-09-15T22:13:01Z';
+  const expected = {
+    before: { milliseconds: 300000, label: '5m', overLimit: false },
+    after: { milliseconds: 301000, label: '5m 1s', overLimit: true },
+  };
+  assert.deepEqual(flexDeliveryGaps(meal), expected);
+  assert.deepEqual(mealPairs(row, '2026-09-15').pairs[0]!.gaps, expected);
+  row.paycom!.punches = [{ in: '01:00', out: '23:00', hours: null }];
+  assert.deepEqual(mealPairs(row, '2026-09-15').pairs[0]!.gaps, expected);
+  row.paycom = null;
+  assert.deepEqual(mealPairs(row, '2026-09-15').pairs[0]!.gaps, expected);
+  assert.equal(mealPairs(row, '2026-09-15').longGap, true);
+  meal.firstDelivery = meal.end;
+  assert.deepEqual(flexDeliveryGaps(meal).after, {
+    milliseconds: 0,
+    label: '0m',
+    overLimit: false,
+  });
+  for (const [milliseconds, overLimit, label] of [
+    [299999, false, '5m'],
+    [300000, false, '5m'],
+    [300001, true, '5m 1s'],
+    [360000, true, '6m'],
+  ] as const) {
+    meal.start = new Date(Date.parse(meal.lastDelivery!) + milliseconds).toISOString();
+    assert.deepEqual(flexDeliveryGaps(meal).before, { milliseconds, overLimit, label });
+  }
+});
+test('Flex delivery gaps keep unknown boundaries unavailable and never substitute Paycom lunches', () => {
+  const row = employee();
+  const original = row.cortex[0]!;
+  assert.deepEqual(flexDeliveryGaps(undefined), { before: null, after: null });
+  for (const override of [
+    { lastDelivery: null },
+    { start: 'invalid' },
+    { lastDelivery: '2026-09-15T22:00:00Z' },
+    { beforeStatus: 'unavailable' },
+    { beforeStatus: 'absent' },
+  ])
+    assert.equal(flexDeliveryGaps({ ...original, ...override }).before, null);
+  for (const override of [
+    { firstDelivery: null },
+    { end: null },
+    { firstDelivery: 'invalid' },
+    { firstDelivery: '2026-09-15T21:00:00Z' },
+    { afterStatus: 'unavailable' },
+    { afterStatus: 'pending' },
+    { afterStatus: 'absent' },
+  ])
+    assert.equal(flexDeliveryGaps({ ...original, ...override }).after, null);
+  row.cortex[0] = { ...original, lastDelivery: null, firstDelivery: null };
+  const summary = mealPairs(row, '2026-09-15');
+  assert.deepEqual(summary.pairs[0]!.gaps, { before: null, after: null });
+  assert.equal(summary.longGap, false);
+});
+test('Flex delivery gaps retain elapsed time across midnight and DST and include later meals', () => {
+  const row = employee();
+  const original = row.cortex[0]!;
+  // Clocks repeat at DST fall-back, but the elapsed gap is still six minutes.
+  const meal = {
+    ...original,
+    lastDelivery: '2026-11-01T01:58:00-07:00',
+    start: '2026-11-01T01:04:00-08:00',
+    end: '2026-11-01T23:59:00-08:00',
+    firstDelivery: '2026-11-02T00:05:00-08:00',
+  };
+  const gaps = flexDeliveryGaps(meal);
+  assert.equal(gaps.before!.milliseconds, 360000);
+  assert.equal(gaps.after!.milliseconds, 360000);
+  row.cortex[0] = { ...original, lastDelivery: original.start, firstDelivery: original.end };
+  assert.equal(mealPairs(row, '2026-09-15').longGap, false);
+  row.cortex.push({ ...original, mealId: 'second-meal' });
+  const summary = mealPairs(row, '2026-09-15');
+  assert.equal(summary.longGap, true);
+  assert.equal(summary.pairs[0]!.gaps.before!.overLimit, false);
+  assert.equal(summary.pairs[1]!.gaps.before!.label, '5m 53s');
+  assert.equal(summary.pairs[1]!.gaps.after!.label, '1m 18s');
+});
 test('minute-precision differences, provider ordering and missing values', () => {
   const row = employee();
   let summary = mealPairs(row, '2026-09-15');

@@ -1,4 +1,7 @@
 .meal-page {
+  --meal-gap-foreground: #a8321c;
+  --meal-gap-border: #d35c40;
+  --meal-gap-background: #ffede7;
   padding-top: 24px;
 }
 .meal-heading h2 {
@@ -44,6 +47,13 @@
   background: var(--accent);
   border-color: var(--primary);
   color: var(--primary);
+}
+.meal-filters button.meal-gap-filter {
+  color: var(--meal-gap-foreground);
+  border-color: var(--meal-gap-border);
+}
+.meal-filters button.meal-gap-filter[aria-pressed='true'] {
+  background: var(--meal-gap-background);
 }
 .meal-refresh {
   margin-left: auto;
@@ -180,6 +190,45 @@
   color: var(--muted-foreground);
   font-weight: 400;
 }
+.meal-gap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 132px;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+}
+.meal-gap-duration {
+  white-space: nowrap;
+}
+.meal-gap.over-limit {
+  background: var(--meal-gap-background);
+  color: var(--meal-gap-foreground);
+  border: 1px solid var(--meal-gap-border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-weight: 500;
+}
+.meal-gap svg {
+  flex-shrink: 0;
+}
+.meal-table .meal-delivery.has-gap,
+.meal-table tbody tr:not(.meal-detail):hover > .meal-delivery.has-gap {
+  background: color-mix(in srgb, var(--meal-gap-foreground) 7%, var(--background));
+}
+.meal-employee small.meal-other-gap {
+  color: var(--meal-gap-foreground);
+}
+.meal-gap-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
 .meal-status {
   display: inline-block;
   border: 1px solid var(--border);
@@ -312,6 +361,11 @@
 [data-theme='dark'] .meal-status.attention {
   background: #493713;
   color: #ffe0a4;
+}
+[data-theme='dark'] .meal-page {
+  --meal-gap-foreground: #ff9c83;
+  --meal-gap-border: #df856b;
+  --meal-gap-background: #40251f;
 }
 @media (max-width: 700px) {
   .meal-page {

@@ -213,6 +213,96 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await page.screenshot({ path: '/tmp/dispatch-meal-breaks-dark.png', fullPage: true });
   expect(errors).toEqual([]);
 });
+test('Flex gap badges and employee filter preserve comparison statuses and expose later meals', async ({
+  page,
+}) => {
+  const data = sample();
+  const instant = (clock: string) => new Date(`${date}T${clock}-07:00`).toISOString();
+  Object.assign(data.rows[1]!.cortex[0]!, {
+    lastDelivery: instant('13:31:00'),
+    firstDelivery: instant('14:16:00'),
+  });
+  Object.assign(data.rows[2]!.cortex[0]!, {
+    lastDelivery: instant('14:11:59'),
+    firstDelivery: instant('14:53:00'),
+  });
+  data.rows[4]!.cortex.push({
+    ...data.rows[4]!.cortex[0]!,
+    mealId: 'second-meal',
+    lastDelivery: instant('16:52:00'),
+    start: instant('17:00:00'),
+    end: instant('17:30:00'),
+    firstDelivery: instant('17:37:00'),
+  });
+  await page.route('**/api/dsp/paycom/settings', (route) =>
+    route.fulfill({
+      json: {
+        revision: 0,
+        values: paycomDefaults,
+        history: [],
+        options: { departments: [], stations: [] },
+      },
+    }),
+  );
+  await page.route('**/api/dsp/paycom/meal-breaks?*', (route) =>
+    route.fulfill({
+      json: { ...data, date: new URL(route.request().url()).searchParams.get('date') },
+    }),
+  );
+  await page.setViewportSize({ width: 1586, height: 992 });
+  await open(page, true);
+  const jordan = page.getByRole('row').filter({ hasText: 'Jordan Lee' });
+  const alex = page.getByRole('row').filter({ hasText: 'Alex Morgan' });
+  const taylor = page.getByRole('row').filter({ hasText: 'Taylor Reed' });
+  await expect(jordan.locator('.meal-gap.over-limit')).toHaveText([
+    '9m before lunch',
+    '6m after lunch',
+  ]);
+  await expect(jordan.locator('.meal-status')).toHaveText('Same times');
+  await expect(jordan.locator('.meal-gap').first()).toHaveAttribute(
+    'title',
+    /Last delivery → Flex OUT LUNCH/,
+  );
+  await expect(jordan.locator('.meal-gap').last()).toHaveAttribute(
+    'title',
+    /Flex IN LUNCH → first delivery/,
+  );
+  await expect(alex.locator('.meal-gap.over-limit')).toHaveCount(0);
+  await expect(alex.locator('.meal-gap').first()).toHaveText('5m before lunch');
+  await expect(taylor.locator('.meal-gap.over-limit')).toHaveText(['6m 1s before lunch']);
+  await expect(taylor.locator('.meal-gap').last()).toHaveText('5m after lunch');
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true })).toBeVisible();
+  await expect(page.getByRole('columnheader')).toHaveCount(8);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.screenshot({ path: '/tmp/dispatch-flex-gaps-desktop.png', fullPage: true });
+  await page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true }).click();
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
+  await expect(
+    page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }),
+  ).toContainText('Gap over 5m on another meal');
+  await page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }).click();
+  await expect(page.locator('.meal-extra .meal-gap.over-limit')).toHaveText([
+    '8m before lunch',
+    '7m after lunch',
+  ]);
+  await page.getByLabel('Search meal break employees').fill('Jordan');
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
+  data.rows[1]!.cortex[0]!.firstDelivery = null;
+  data.rows[1]!.cortex[0]!.afterStatus = 'unavailable';
+  await page.getByRole('button', { name: 'Refresh meal breaks', exact: true }).click();
+  await expect(jordan.locator('.meal-gap').last()).toHaveText('Gap unavailable');
+  await expect(jordan.locator('.meal-gap.over-limit')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByLabel('Search meal break employees')).toHaveValue('Jordan');
+  await page.getByLabel('Search meal break employees').fill('');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '/tmp/dispatch-flex-gaps-mobile.png', fullPage: true });
+});
 test('members can open real collected punch data without management controls', async ({ page }) => {
   await open(page, true);
   await page.getByRole('button', { name: 'Today', exact: true }).click();

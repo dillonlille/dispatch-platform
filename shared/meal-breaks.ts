@@ -51,6 +51,36 @@ export interface Lunch {
   out: ClockTime | null;
   in: ClockTime | null;
 }
+export interface DeliveryGap {
+  milliseconds: number;
+  label: string;
+  overLimit: boolean;
+}
+
+// Both endpoints belong to the same Flex meal. Never use Paycom punches or
+// displayed clock minutes: elapsed instants also handle midnight and DST.
+export function flexDeliveryGaps(meal: CortexMeal | undefined) {
+  const gap = (start: string | null, end: string | null, status: string): DeliveryGap | null => {
+    if (status !== 'verified' || !start || !end) return null;
+    const milliseconds = Date.parse(end) - Date.parse(start);
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+    // Keep sub-minute precision visible, particularly around the five-minute
+    // boundary. Round display upwards to the second, never the threshold itself.
+    const seconds = Math.ceil(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return {
+      milliseconds,
+      label: remainder ? `${minutes ? `${minutes}m ` : ''}${remainder}s` : `${minutes}m`,
+      overLimit: milliseconds > 5 * 60 * 1000,
+    };
+  };
+  return {
+    before: meal ? gap(meal.lastDelivery, meal.start, meal.beforeStatus) : null,
+    after: meal ? gap(meal.end, meal.firstDelivery, meal.afterStatus) : null,
+  };
+}
+
 export function fullName(name: string) {
   const comma = name.indexOf(',');
   return (comma < 0 ? name : `${name.slice(comma + 1)} ${name.slice(0, comma)}`)
@@ -187,6 +217,7 @@ export function mealPairs(row: MealEmployee, date: string) {
         comparable && a && b ? b.minute - a.minute : null;
       return {
         cortex,
+        gaps: flexDeliveryGaps(cortex),
         lunch,
         out,
         into,
@@ -200,6 +231,7 @@ export function mealPairs(row: MealEmployee, date: string) {
       (p.outDifference !== null && p.outDifference !== 0) ||
       (p.inDifference !== null && p.inDifference !== 0),
   );
+  const longGap = pairs.some((p) => p.gaps.before?.overLimit || p.gaps.after?.overLimit);
   const missing =
     !row.paycom ||
     !row.cortex.length ||
@@ -231,5 +263,5 @@ export function mealPairs(row: MealEmployee, date: string) {
               : different
                 ? 'Different times'
                 : 'Same times';
-  return { paycom, pairs, different, missing, status };
+  return { paycom, pairs, different, missing, status, longGap };
 }
