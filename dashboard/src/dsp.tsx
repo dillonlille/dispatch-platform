@@ -1,3 +1,4 @@
+import { useCollectionUpdates } from './live-collection.js';
 import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
 import { calendarTimezone } from './preferences.js';
@@ -253,12 +254,14 @@ export function TimecardsPage({
       preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
     ),
     [direction, setDirection] = useState('asc'),
-    [selected, setSelected] = useState<Daily['rows'][number]>();
+    [selectedCode, setSelectedCode] = useState<string>();
+  const liveRevision = useCollectionUpdates(date);
   const { data, error } = useData<Daily>(
     `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
     0,
-    refreshKey,
+    `${refreshKey}:${liveRevision}`,
   );
+  const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
     setSort(key);
@@ -342,7 +345,7 @@ export function TimecardsPage({
                         <button
                           className="employee-timecard"
                           aria-label={`View punches for ${card.name}`}
-                          onClick={() => setSelected(card)}
+                          onClick={() => setSelectedCode(card.employeeCode)}
                         >
                           {card.name}
                         </button>
@@ -386,13 +389,16 @@ export function TimecardsPage({
             )}
           </div>
           <p className="paycom-source-note">
-            Last collected {time(data.collectedAt)}. Times reflect the last collection, and hours
-            may change after corrections.
+            Last completed collection {time(data.collectedAt)}. Times update during collection, and
+            hours may change after corrections.
           </p>
         </>
       )}
       {selected && (
-        <Modal title={`${selected.name} · ${selected.date}`} onClose={() => setSelected(undefined)}>
+        <Modal
+          title={`${selected.name} · ${selected.date}`}
+          onClose={() => setSelectedCode(undefined)}
+        >
           <div className="table-wrap">
             <table>
               <thead>

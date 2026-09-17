@@ -6,7 +6,10 @@ use super::{
 };
 use rusqlite::params;
 use serde_json::{Value, json};
-use std::{cmp::Ordering, collections::HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashSet},
+};
 const COLUMNS: [&str; 6] = [
     "inDay",
     "outLunch",
@@ -331,17 +334,55 @@ impl Store {
         ));
         Ok(json!({"employee":row,"timecards":timecards}))
     }
+    /// Overlay only completed employee pages from the current guarded attempt.
+    pub fn daily_source(
+        &self,
+        id: &str,
+        date: &str,
+    ) -> Result<(Option<Value>, Vec<Value>, Vec<Value>)> {
+        let db = self.collector(id, Provider::Paycom)?;
+        let publication = db.one("SELECT id,collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC,id DESC LIMIT 1", [date,date])?;
+        let mut roster = BTreeMap::new();
+        let mut rows = BTreeMap::new();
+        if let Some(p) = &publication {
+            for employee in db.all(
+                "SELECT code,name FROM employees WHERE publication_id=?",
+                [s(p, "id")],
+            )? {
+                roster.insert(s(&employee, "code").to_owned(), employee);
+            }
+            for row in cards(
+                &db,
+                "SELECT t.employee_code employeeCode,e.name,e.department,e.station,t.date,t.hours,t.status,t.punches FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code WHERE t.publication_id=? AND t.date=?",
+                [s(p, "id"), date],
+            )? {
+                rows.insert(s(&row, "employeeCode").to_owned(), row);
+            }
+        }
+        for (metadata, items) in self.live_results(id, Provider::Paycom, date)? {
+            for employee in metadata["roster"].as_array().into_iter().flatten() {
+                roster.insert(
+                    s(employee, "code").to_owned(),
+                    json!({"code":employee["code"],"name":employee["name"]}),
+                );
+            }
+            for row in items {
+                rows.insert(s(&row, "employeeCode").to_owned(), row);
+            }
+        }
+        Ok((
+            publication,
+            roster.into_values().collect(),
+            rows.into_values().collect(),
+        ))
+    }
     pub fn daily(&self, id: &str, date: &str, sort: &str, desc: bool) -> Result<Value> {
         v::date(date)?;
         let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let p = &settings["values"];
-        let Some(publication)=db.one("SELECT id,collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC LIMIT 1",[date,date])? else {return Ok(json!({"rows":[],"collectedAt":null,"available":false}));};
-        let mut rows = cards(
-            &db,
-            "SELECT t.employee_code employeeCode,e.name,e.department,e.station,t.date,t.hours,t.status,t.punches FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code WHERE t.publication_id=? AND t.date=?",
-            [s(&publication, "id"), date],
-        )?;
+        let (publication, _, mut rows) = self.daily_source(id, date)?;
+        let available = publication.is_some() || !rows.is_empty();
         rows.retain(|r| visible(r, p, true));
         for row in &mut rows {
             row["name"] = json!(display_name(s(row, "name"), s(p, "name_order")));
@@ -361,7 +402,9 @@ impl Store {
             (if desc { ord.reverse() } else { ord })
                 .then_with(|| compare(s(a, "employeeCode"), s(b, "employeeCode")))
         });
-        Ok(json!({"rows":rows,"collectedAt":publication["collected_at"],"available":true}))
+        Ok(
+            json!({"rows":rows,"collectedAt":publication.map(|p|p["collected_at"].clone()),"available":available}),
+        )
     }
 }
 fn sort_key<'a>(row: &'a Value, sort: &str) -> &'a Value {

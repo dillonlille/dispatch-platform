@@ -172,6 +172,7 @@ impl Store {
         if split_layout(&core)? {
             self.collector(id, Provider::Paycom)?;
             self.initialize_cortex(id)?;
+            self.initialize_live(id)?;
             return self.prune_checkpoints(id);
         }
         self.copy_legacy_paycom(id)?;
@@ -181,7 +182,15 @@ impl Store {
             core.set(LAYOUT, &json!(1))
         })?;
         self.initialize_cortex(id)?;
+        self.initialize_live(id)?;
         self.prune_checkpoints(id)
+    }
+
+    fn initialize_live(&self, id: &str) -> Result<()> {
+        for provider in Provider::ALL {
+            super::live_collection::initialize(&*self.collector(id, *provider)?)?;
+        }
+        Ok(())
     }
 
     // New provider storage is additive and initialized before serving traffic.

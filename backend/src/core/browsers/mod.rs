@@ -353,7 +353,12 @@ impl Session {
                 }
                 Worker::Cortex(worker) => {
                     worker
-                        .collect(&serde_json::from_value(request.clone())?, metrics, progress)
+                        .collect(
+                            &serde_json::from_value(request.clone())?,
+                            metrics,
+                            &super::live_collection::Writer::new(state.clone(), job, owner),
+                            progress,
+                        )
                         .await
                 }
             }

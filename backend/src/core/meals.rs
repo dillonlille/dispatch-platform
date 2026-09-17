@@ -266,6 +266,10 @@ fn boundaries(route: &Itinerary, meal: &Meal) -> Boundaries {
         },
     }
 }
+pub fn comparison_meal(route: &Itinerary, meal: &Meal) -> Value {
+    let b = boundaries(route, meal);
+    json!({"mealId":meal.id,"lastDelivery":b.prior.map(at),"start":at(meal.start),"end":meal.end.map(at),"firstDelivery":b.next.map(at),"beforeStatus":b.before,"afterStatus":b.after})
+}
 impl Store {
     pub fn publish_meals(
         &self,

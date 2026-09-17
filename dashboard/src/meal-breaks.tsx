@@ -1,3 +1,4 @@
+import { useCollectionUpdates } from './live-collection.js';
 import { Fragment, useState } from 'react';
 import { ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
 import { api, useData } from './api.js';
@@ -376,10 +377,11 @@ export function MealBreaksPage({
     [descending, setDescending] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()),
     [linking, setLinking] = useState(false);
+  const liveRevision = useCollectionUpdates(date);
   const request = useData<MealComparison>(
     `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`,
-    30000,
-    refreshKey,
+    0,
+    `${refreshKey}:${liveRevision}`,
   );
   const data = request.data?.date === date ? request.data : undefined;
   const zone = data?.timezone ?? timezone;

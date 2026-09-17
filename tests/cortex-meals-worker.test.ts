@@ -7,6 +7,11 @@ test(
   'Cortex BrowserOS captures changed meals, multiple itineraries, and four meal timestamps before atomic publication',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 180000 },
   async (t) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    t.after(() => release());
     let lists = 0;
     let mode = 'growing';
     const visits: Record<string, number> = {};
@@ -28,7 +33,7 @@ test(
       actualExecutionTime: time / 1000,
       transporterId: null,
     });
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
       const url = new URL(req.url!, 'http://fixture.test');
       res.setHeader('content-type', 'text/html');
       if (url.pathname === '/dspconsolev2') {
@@ -43,7 +48,10 @@ test(
         return;
       }
       const detail = url.pathname.includes('/documentType/');
-      if (!detail) lists++;
+      if (!detail) {
+        lists++;
+        if (lists === 3) await gate;
+      }
       const grown = mode !== 'growing' || lists >= 2;
       const summaries = [
         {
@@ -178,7 +186,23 @@ test(
       }, 70000);
       return job;
     };
-    assert.equal((await run('first')).status, 'succeeded');
+    const first = run('first');
+    await until(async () => {
+      const comparison = (await owner.get('/api/dsp/paycom/meal-breaks?date=2026-01-10')).value;
+      return comparison.rows.some((row: any) => row.cortex.length === 2);
+    }, 25000);
+    assert.equal(
+      (await owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10')).value.length,
+      0,
+      'The complete snapshot is still unpublished',
+    );
+    assert(
+      (await owner.get('/api/dsp/jobs')).value.some(
+        (job: any) => job.kind === 'cortex.meal_breaks.collect' && job.status === 'running',
+      ),
+    );
+    release();
+    assert.equal((await first).status, 'succeeded');
     assert(visits['itinerary-1']! >= 2, 'Changed existing meals must be re-read');
     const publications = () => owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10');
     const initial = (await publications()).value;

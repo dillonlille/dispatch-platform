@@ -9,6 +9,7 @@ pub mod error;
 pub mod http;
 pub mod job_metrics;
 pub mod jobs;
+pub mod live_collection;
 pub mod meal_comparison;
 pub mod meal_sync;
 pub mod meals;
@@ -31,6 +32,7 @@ pub struct State {
     pub pool: Mutex<Vec<db::Store>>,
     pub password_slots: Arc<Semaphore>,
     pub browsers: browsers::Manager,
+    pub updates: live_collection::Updates,
 }
 impl State {
     pub fn new(config: config::Config) -> Result<Arc<Self>> {
@@ -52,6 +54,7 @@ impl State {
             pool: Mutex::new(vec![store]),
             password_slots: Arc::new(Semaphore::new(2)),
             browsers: browsers::Manager::default(),
+            updates: live_collection::Updates::new()?,
         }))
     }
     pub async fn run<T: Send + 'static>(

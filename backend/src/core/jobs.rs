@@ -134,9 +134,11 @@ impl Store {
         if s(&row, "kind") == "paycom.collect" {
             self.clear_checkpoint(dsp, Some(id))?;
         }
+        self.clear_live(dsp, Provider::from_job_kind(s(&row, "kind"))?, Some(id))?;
         self.public_job(&self.job(id, Some(dsp))?)
     }
     pub fn cancel_provider(&self, id: &str, provider: Provider) -> Result<()> {
+        self.clear_live(id, provider, None)?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND kind=? AND status IN ('queued','running','waiting_verification')",params![iso(),id,provider.job_kind()])?;
         if provider == Provider::Paycom {
             self.clear_checkpoint(id, None)?;
@@ -144,6 +146,9 @@ impl Store {
         Ok(())
     }
     pub fn cancel_dsp(&self, id: &str) -> Result<()> {
+        for provider in Provider::ALL {
+            self.clear_live(id, *provider, None)?;
+        }
         self.clear_checkpoint(id, None)?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id])?;
         Ok(())
@@ -246,6 +251,11 @@ impl Store {
             .contains(&e)
         }) && n(&row, "attempt") < n(&row, "max_attempts");
         self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+retry_delay(id,n(&row,"attempt")),id])?;
+        self.clear_live(
+            s(&row, "dsp_id"),
+            Provider::from_job_kind(s(&row, "kind"))?,
+            Some(id),
+        )?;
         if !retry && s(&row, "kind") == "paycom.collect" {
             self.clear_checkpoint(s(&row, "dsp_id"), Some(id))?;
         }
@@ -533,6 +543,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     let error = result.err().map(|e| e.code);
     let actor = job["actor_id"].as_str().map(str::to_owned);
     let snapshot = metrics.snapshot();
+    let changed_dsp = dsp.clone();
     let _ = state
         .run(move |db| {
             if let Some(ref error) = error {
@@ -553,6 +564,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
             )
         })
         .await;
+    state.updates.notify(&changed_dsp);
 }
 
 #[cfg(test)]

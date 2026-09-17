@@ -185,3 +185,37 @@ elapsed durations or compliance verdicts. Multiple meals appear in source time
 order; differing meal counts suppress differences and require review. Missing
 values remain missing. Source freshness and uncollected dates are explicit. The
 view never edits payroll or schedules a collection simply by opening a date.
+
+## Updates during collection
+
+Timecard and Meal Breaks overlay validated driver results from the running attempt
+as soon as a complete employee page (Paycom) or itinerary (Flex) has been read.
+The existing Paycom lanes and Cortex source reads supply these results; viewing a
+page adds no provider requests. Flex still retains only the four meal timestamps.
+There are no per-driver collection status labels.
+
+Each provider database has additive `collection_live_runs` and
+`collection_live_items` tables. Items are indexed by job, date and provider identity.
+Reads require the current job lease, connection revision, DSP and actor permissions.
+Paycom exposes the full roster for safe name matching before individual punches
+arrive; Cortex includes all discovered driver identities, including meal-free
+ones. Completed empty observations replace old values; uncollected drivers retain
+previous information. Date selection, source timezone and saved links still apply.
+
+These are temporary views, not historical publications. Full collection validation
+and atomic publication are unchanged. Terminal attempts discard temporary rows;
+failed/cancelled/replaced attempts immediately stop contributing to reads. Startup
+clears temporary views, and Paycom's separately validated resume checkpoint can
+repopulate them. Previous runtimes ignore the additive tables during rollback.
+Last-collected timestamps continue to identify completed collections.
+
+`GET /api/dsp/collection-updates?after=<revision>` uses the normal session and
+signed DSP header. It waits up to 20 seconds for a tenant-specific notification,
+without holding a database connection or worker thread, then returns only an
+opaque revision. Authentication is rechecked before returning. A new server epoch
+and every new subscription's initial response force a fresh read after reconnect.
+The dashboard holds one request for the visible table, coalesces updates for
+150 milliseconds, pauses when hidden, reconnects when visible and backs off on
+transport failures. Existing table data stays visible during reads; search,
+expanded rows and open punch details survive updates. Normal polling is also
+paused in hidden tabs and never overlaps a previous read.
