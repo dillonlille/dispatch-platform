@@ -191,6 +191,20 @@ order; differing meal counts suppress differences and require review. Missing
 values remain missing. Source freshness and uncollected dates are explicit. The
 view never edits payroll or schedules a collection simply by opening a date.
 
+Delivery gap badges appear below the last/first delivery times. They derive only
+from each Flex meal's stored timestamps: `start - lastDelivery` before lunch and
+`firstDelivery - end` after lunch. Paycom times never contribute or substitute for
+a missing Flex endpoint. Both boundaries must be present and verified; pending,
+absent, unavailable, invalid or reversed intervals remain unavailable.
+Warnings use exact elapsed time strictly greater than 300,000 milliseconds, so
+midnight and DST do not distort them. Badge labels round upward to the second;
+nonzero seconds remain visible so a warning never looks like exactly five minutes.
+The Gaps > 5 min filter counts employees with any qualifying meal, independently
+of Paycom comparison/missing-data filters. A collapsed employee row indicates a
+gap on a later meal, available by expanding the row. Live source updates recompute
+badges and counts with the existing table refresh; no additional requests,
+collection, stored delivery history or derived database columns are needed.
+
 ## Updates during collection
 
 Timecard and Meal Breaks overlay validated driver results from the running attempt

@@ -1,6 +1,6 @@
 import { useCollectionUpdates } from './live-collection.js';
 import { Fragment, useState } from 'react';
-import { ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
 import { api, useData } from './api.js';
 import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
 import {
@@ -8,6 +8,7 @@ import {
   fullName,
   mealPairs,
   type ClockTime,
+  type DeliveryGap,
   type MealComparison,
   type MealEmployee,
 } from '../../shared/meal-breaks.js';
@@ -72,20 +73,47 @@ function LunchCell({
     </td>
   );
 }
+function GapBadge({ gap, side }: { gap: DeliveryGap | null; side: 'before' | 'after' }) {
+  const endpoints =
+    side === 'before' ? 'Last delivery → Flex OUT LUNCH' : 'Flex IN LUNCH → first delivery';
+  const detail = `${endpoints}: ${gap ? `${gap.label}${gap.overLimit ? ' · over 5 minutes' : ''}` : 'gap unavailable'}`;
+  return (
+    <span
+      className={`meal-gap${gap?.overLimit ? ' over-limit' : ''}`}
+      title={detail}
+      aria-label={detail}
+    >
+      {gap?.overLimit && <AlertTriangle size={14} aria-hidden="true" />}
+      <span>
+        {gap ? (
+          <>
+            <span className="meal-gap-duration">{gap.label}</span> {side} lunch
+          </>
+        ) : (
+          'Gap unavailable'
+        )}
+      </span>
+    </span>
+  );
+}
 function EmployeeRows({
   row,
+  summary,
   date,
   name,
   expanded,
   toggle,
 }: {
   row: MealEmployee;
+  summary: ReturnType<typeof mealPairs>;
   date: string;
   name: string;
   expanded: boolean;
   toggle: () => void;
 }) {
-  const summary = mealPairs(row, date);
+  const hiddenGap =
+    !expanded &&
+    summary.pairs.slice(1).some((p) => p.gaps.before?.overLimit || p.gaps.after?.overLimit);
   return (
     <>
       {(expanded ? summary.pairs : summary.pairs.slice(0, 1)).map((pair, index) => (
@@ -102,6 +130,9 @@ function EmployeeRows({
                 <span>
                   {name}
                   {summary.pairs.length > 1 && <small>{summary.pairs.length} meals</small>}
+                  {hiddenGap && (
+                    <small className="meal-other-gap">Gap over 5m on another meal</small>
+                  )}
                 </span>
               </button>
             ) : (
@@ -111,7 +142,7 @@ function EmployeeRows({
           <td>
             <Clock value={index === 0 ? summary.paycom.inDay : null} />
           </td>
-          <td>
+          <td className={`meal-delivery${pair.gaps.before?.overLimit ? ' has-gap' : ''}`}>
             <Clock
               value={
                 pair.cortex
@@ -119,10 +150,11 @@ function EmployeeRows({
                   : null
               }
             />
+            {pair.cortex && <GapBadge gap={pair.gaps.before} side="before" />}
           </td>
           <LunchCell paycom={pair.lunch?.out} cortex={pair.out} difference={pair.outDifference} />
           <LunchCell paycom={pair.lunch?.in} cortex={pair.into} difference={pair.inDifference} />
-          <td>
+          <td className={`meal-delivery${pair.gaps.after?.overLimit ? ' has-gap' : ''}`}>
             <Clock
               value={
                 pair.cortex
@@ -130,6 +162,7 @@ function EmployeeRows({
                   : null
               }
             />
+            {pair.cortex && <GapBadge gap={pair.gaps.after} side="after" />}
           </td>
           <td>
             <Clock value={index === 0 ? summary.paycom.outDay : null} />
@@ -400,11 +433,17 @@ export function MealBreaksPage({
     all: rows.length,
     different: rows.filter((r) => r.summary.different).length,
     missing: rows.filter((r) => r.summary.missing).length,
+    gaps: rows.filter((r) => r.summary.longGap).length,
   };
   const filtered = rows
     .filter(
       ({ row, summary }) =>
-        (filter === 'all' || (filter === 'different' ? summary.different : summary.missing)) &&
+        (filter === 'all' ||
+          (filter === 'different'
+            ? summary.different
+            : filter === 'gaps'
+              ? summary.longGap
+              : summary.missing)) &&
         `${name(row)} ${row.paycom?.employeeCode ?? ''} ${row.cortex.map((m) => m.driverName).join(' ')}`
           .toLowerCase()
           .includes(query.toLowerCase()),
@@ -445,16 +484,19 @@ export function MealBreaksPage({
               ['all', 'All'],
               ['different', 'Different times'],
               ['missing', 'Missing data'],
+              ['gaps', 'Gaps > 5 min'],
             ] as const
           ).map(([key, label]) => (
             <button
               key={key}
+              className={key === 'gaps' ? 'meal-gap-filter' : undefined}
               aria-pressed={filter === key}
               onClick={() => {
                 setFilter(key);
                 setPage(0);
               }}
             >
+              {key === 'gaps' && <AlertTriangle size={15} aria-hidden="true" />}
               {label}
               <span>{counts[key]}</span>
             </button>
@@ -558,10 +600,11 @@ export function MealBreaksPage({
                 </tr>
               </thead>
               <tbody>
-                {visible.map(({ row }) => (
+                {visible.map(({ row, summary }) => (
                   <Fragment key={row.id}>
                     <EmployeeRows
                       row={row}
+                      summary={summary}
                       date={date}
                       name={name(row)}
                       expanded={expanded.has(row.id)}
@@ -589,6 +632,10 @@ export function MealBreaksPage({
             </span>
             <span>Employees with a Flex meal or any Paycom punch on this date.</span>
           </footer>
+          <p className="meal-gap-note">
+            Delivery gaps use Flex only: last delivery → OUT LUNCH, and IN LUNCH → first delivery.
+            Only gaps over 5 minutes are flagged.
+          </p>
           {filtered.length > pageSize && (
             <div className="meal-pagination">
               <button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
