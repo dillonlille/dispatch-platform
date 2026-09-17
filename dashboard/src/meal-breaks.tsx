@@ -1,6 +1,15 @@
 import { useCollectionUpdates } from './live-collection.js';
 import { Fragment, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Link2, RefreshCw, Search } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Globe,
+  Info,
+  Link2,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import { api, useData } from './api.js';
 import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
 import {
@@ -13,6 +22,8 @@ import {
   type MealEmployee,
 } from '../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../shared/paycom.js';
+import { PaycomDateControls } from './paycom-day-controls.js';
+import { calendarTimezone } from './preferences.js';
 import './meal-breaks.css';
 
 function Source({ name }: { name: 'Paycom' | 'Flex' }) {
@@ -394,12 +405,16 @@ function LinkEmployees({
 
 export function MealBreaksPage({
   date,
+  today,
+  onDateChange,
   refreshKey,
   timezone,
   owner,
   preferences,
 }: {
   date: string;
+  today: string;
+  onDateChange: (date: string) => void;
   refreshKey?: string | null;
   timezone: string;
   owner: boolean;
@@ -416,6 +431,7 @@ export function MealBreaksPage({
     `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`,
     0,
     `${refreshKey}:${liveRevision}`,
+    date,
   );
   const data = request.data?.date === date ? request.data : undefined;
   const zone = data?.timezone ?? timezone;
@@ -461,12 +477,29 @@ export function MealBreaksPage({
   const zones = new Set(data?.cortexPublications.map((p) => p.timezone));
   return (
     <section className="meal-page" aria-labelledby="meal-heading">
-      <header className="meal-heading">
-        <h2 id="meal-heading">Meal Breaks</h2>
+      <header className="paycom-table-heading paycom-timecard-heading meal-heading">
+        <div className="paycom-timecard-title">
+          <h2 id="meal-heading">Meal Breaks</h2>
+          {data && (
+            <span className="paycom-employee-count">
+              {filtered.length}
+              {filtered.length !== counts.all && ` of ${counts.all}`}{' '}
+              {counts.all === 1 ? 'employee' : 'employees'}
+            </span>
+          )}
+        </div>
+        <PaycomDateControls
+          date={date}
+          today={today}
+          compact
+          onChange={(value) => {
+            onDateChange(value);
+            setPage(0);
+            setExpanded(new Set());
+            setLinking(false);
+          }}
+        />
       </header>
-      <p className="meal-timezone muted">
-        {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
-      </p>
       <div className="meal-toolbar">
         <label className="search">
           <Search size={18} />
@@ -491,14 +524,14 @@ export function MealBreaksPage({
           ).map(([key, label]) => (
             <button
               key={key}
-              className={key === 'gaps' ? 'meal-gap-filter' : undefined}
+              className={key === 'gaps' && counts.gaps > 0 ? 'meal-gap-filter' : undefined}
               aria-pressed={filter === key}
               onClick={() => {
                 setFilter(key);
                 setPage(0);
               }}
             >
-              {key === 'gaps' && <AlertTriangle size={15} aria-hidden="true" />}
+              {key === 'gaps' && counts.gaps > 0 && <AlertTriangle size={15} aria-hidden="true" />}
               {label}
               <span>{counts[key]}</span>
             </button>
@@ -514,7 +547,9 @@ export function MealBreaksPage({
       </div>
       <ErrorBox message={request.error} />
       {request.error && data && (
-        <p role="status">Showing the last loaded results. Refresh to try again.</p>
+        <p className="meal-load-notice" role="status">
+          Showing the last loaded results. Refresh to try again.
+        </p>
       )}
       {data && (unlinked > 0 || (owner && data.drivers.length > 0)) && (
         <div className="meal-link-notice">
@@ -551,11 +586,13 @@ export function MealBreaksPage({
       ) : (
         <>
           {(!data.paycomCollectedAt || !data.cortexPublications.length) && (
-            <p className="meal-source-notice">
-              {!data.paycomCollectedAt
-                ? 'Paycom has no collection for this date.'
-                : 'Flex has no collection for this date.'}{' '}
-              Available records are shown below.
+            <p className="meal-source-notice" role="status">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span>
+                {!data.paycomCollectedAt
+                  ? 'Paycom has no collection for this date. Showing Flex records.'
+                  : 'Flex has no collection for this date. Showing Paycom records.'}
+              </span>
             </p>
           )}
           <div
@@ -627,17 +664,6 @@ export function MealBreaksPage({
           {!filtered.length && (
             <Empty title="No matching employees">Try another name or filter.</Empty>
           )}
-          <footer className="meal-footer">
-            <span>
-              {filtered.length} {filtered.length === 1 ? 'employee' : 'employees'}
-              {filtered.length !== counts.all && ` of ${counts.all}`}
-            </span>
-            <span>Employees with a Flex meal or any Paycom punch on this date.</span>
-          </footer>
-          <p className="meal-gap-note">
-            Delivery gaps use Flex only: last delivery → OUT LUNCH, and IN LUNCH → first delivery.
-            Only gaps over 5 minutes are flagged.
-          </p>
           {filtered.length > pageSize && (
             <div className="meal-pagination">
               <button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
@@ -656,24 +682,47 @@ export function MealBreaksPage({
           )}
         </>
       )}
-      {data && (
-        <div className="meal-provenance">
+      <footer className="paycom-timecard-footer" aria-label="Meal break timezones">
+        <span>
+          <Globe size={16} aria-hidden="true" />
+          Calendar: {calendarTimezone().replaceAll('_', ' ')}
+        </span>
+        <div className="paycom-timecard-business-time">
           <span>
-            Paycom collected:{' '}
-            {data.paycomCollectedAt ? time(data.paycomCollectedAt) : 'No collection'}
+            Comparison:{' '}
+            {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
           </span>
-          <span>
-            Flex collected:{' '}
-            {data.cortexPublications[0]
-              ? time(data.cortexPublications[0].collectedAt)
-              : 'No collection'}
-          </span>
-          <p>
-            Differences use displayed minutes: Flex minus Paycom. Paycom punches use their recorded
-            local clock time; Flex times use the station’s timezone. A missing value is shown as —.
-          </p>
+          <details className="paycom-timecard-info">
+            <summary aria-label="About meal break data">
+              <Info size={16} aria-hidden="true" />
+            </summary>
+            <p>
+              {data ? (
+                <>
+                  Paycom collected:{' '}
+                  {data.paycomCollectedAt ? time(data.paycomCollectedAt) : 'No collection'}.<br />
+                  Flex collected:{' '}
+                  {data.cortexPublications[0]
+                    ? time(data.cortexPublications[0].collectedAt)
+                    : 'No collection'}
+                  .<br />
+                  <br />
+                </>
+              ) : null}
+              Employees with a Flex meal or any Paycom punch on this date.
+              <br />
+              <br />
+              Differences use displayed minutes: Flex minus Paycom. Paycom punches use their
+              recorded local clock time; Flex times use the station’s timezone. A missing value is
+              shown as —.
+              <br />
+              <br />
+              Delivery gaps use Flex only: last delivery → OUT LUNCH, and IN LUNCH → first delivery.
+              Only gaps over 5 minutes are flagged.
+            </p>
+          </details>
         </div>
-      )}
+      </footer>
       {linking && data && (
         <LinkEmployees
           data={data}
