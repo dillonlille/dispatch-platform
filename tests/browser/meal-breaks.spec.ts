@@ -372,6 +372,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
 });
 
 test.describe('local calendar dates', () => {
+  // Personal calendar preferences work for members as well as owners.
   test.use({ timezoneId: 'America/Los_Angeles' });
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/dsp/paycom/settings', (route) =>
@@ -390,7 +391,7 @@ test.describe('local calendar dates', () => {
     page,
   }) => {
     await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
-    await open(page, false, null);
+    await open(page, true, null);
     const input = page.getByLabel('Paycom date');
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
@@ -430,7 +431,7 @@ test.describe('local calendar dates', () => {
     page,
   }) => {
     await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
-    await open(page, false, null);
+    await open(page, true, null);
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByLabel('Display timezone').selectOption('UTC');
     await page.getByRole('link', { name: 'Paycom', exact: true }).click();
