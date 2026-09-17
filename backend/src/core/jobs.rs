@@ -53,6 +53,9 @@ impl Store {
                 [limit],
             )?,
         };
+        if rows.is_empty() {
+            return Ok(json!([]));
+        }
         let ids = serde_json::to_string(&rows.iter().map(|r| s(r, "id")).collect::<Vec<_>>())?;
         let dsps = serde_json::to_string(&rows.iter().map(|r| s(r, "dsp_id")).collect::<Vec<_>>())?;
         let names: HashMap<String, Value> = self

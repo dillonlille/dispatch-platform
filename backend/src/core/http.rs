@@ -198,9 +198,6 @@ async fn dispatch(AxumState(state): AxumState<Arc<State>>, request: Request) -> 
     headers
         .entry("cache-control")
         .or_insert("no-store".parse().unwrap());
-    if !headers.contains_key("cache-control") {
-        headers.insert("cache-control", "no-store".parse().unwrap());
-    }
     let csp = format!(
         "default-src 'self'; script-src 'self'{}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'{}; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         if development { " 'unsafe-inline'" } else { "" },
