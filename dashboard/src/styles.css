@@ -1033,6 +1033,10 @@ td small {
 .paycom-controls-row > button {
   margin-left: auto;
 }
+.paycom-calendar-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
 .paycom-sync-status {
   display: flex;
   align-items: center;

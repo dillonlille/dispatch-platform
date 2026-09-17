@@ -52,7 +52,9 @@ impl Store {
         }))
     }
     pub fn meal_sync_status(&self, id: &str, date: &str) -> Result<Value> {
-        workforce::collection_date(&json!({"date":date}), s(&self.get_dsp(id)?, "timezone"))?;
+        // Reading a calendar date is valid even when the viewer is a day ahead
+        // of the DSP. Collection still validates each provider's business date.
+        super::validate::date(date)?;
         Ok(
             json!({"date":date,"scopeAvailable":!self.meal_sync_scopes(id,date)?.is_empty(),
             "paycom":self.sync_source(id,date,Provider::Paycom)?,

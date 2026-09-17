@@ -203,3 +203,23 @@ fn successful_station_does_not_hide_a_failed_station_in_the_same_sync() {
     assert_eq!(status["flex"]["active"], false);
     assert_eq!(status["paycom"]["job"]["status"], "succeeded");
 }
+
+#[test]
+fn status_reads_allow_a_viewer_date_ahead_of_the_dsp_but_collection_does_not() {
+    let (_root, db, id, actor) = fixture();
+    let tomorrow = (chrono::Utc::now().date_naive() + chrono::Duration::days(1)).to_string();
+    assert_eq!(
+        db.meal_sync_status(&id, &tomorrow).unwrap()["date"],
+        tomorrow
+    );
+    assert_eq!(
+        db.enqueue_meal_sync(&id, &actor, "future", &tomorrow)
+            .unwrap_err()
+            .code,
+        "invalid_date"
+    );
+    assert_eq!(
+        db.meal_sync_status(&id, "2026-02-30").unwrap_err().code,
+        "invalid_date"
+    );
+}
