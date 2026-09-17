@@ -7,7 +7,9 @@ import net from 'node:net';
 import http from 'node:http';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-const defaultBinary = path.resolve('target/debug/dispatch-backend');
+const defaultBinary = path.resolve(
+  process.env.DISPATCH_TEST_BINARY ?? 'target/debug/dispatch-backend',
+);
 const password = 'Dispatch-demo-2026!';
 export async function fixture(
   options: boolean | { seed?: boolean; env?: NodeJS.ProcessEnv; binary?: string } = true,

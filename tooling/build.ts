@@ -7,7 +7,7 @@ const root = process.cwd(),
   out = path.join(root, '.build');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
-execFileSync('cargo', ['build', '--release', '--locked'], { stdio: 'inherit' });
+execFileSync('python3', ['tooling/cargo-build.py', '--release'], { stdio: 'inherit' });
 fs.mkdirSync(path.join(out, 'services/rust'), { recursive: true });
 fs.copyFileSync(
   'target/release/dispatch-backend',
