@@ -373,6 +373,18 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
 
 test.describe('local calendar dates', () => {
   test.use({ timezoneId: 'America/Los_Angeles' });
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/dsp/paycom/settings', (route) =>
+      route.fulfill({
+        json: {
+          revision: 0,
+          values: paycomDefaults,
+          history: [],
+          options: { departments: [], stations: [] },
+        },
+      }),
+    );
+  });
 
   test('UTC midnight keeps the local day across tabs and rejects a saved tomorrow', async ({
     page,
