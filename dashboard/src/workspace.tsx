@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wrench, Plug, ArrowRight, RefreshCw, Plus, Search, Ellipsis } from 'lucide-react';
+import { Wrench, ArrowRight, RefreshCw, Plus, Search, Ellipsis } from 'lucide-react';
 import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
@@ -193,31 +193,15 @@ export function PaycomPage({
       ) : owner && !data && !error ? (
         <Loading />
       ) : owner && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
-        <section className="paycom-connection" aria-labelledby="paycom-connection-title">
-          <header className="paycom-connection-header">
-            <div className="paycom-connection-identity">
-              <Plug size={24} />
-              <div>
-                <h2 id="paycom-connection-title">Workforce connection</h2>
-                <p className="muted">Confirm that your Paycom login works.</p>
-              </div>
-            </div>
-            <Badge value={data.status} />
-          </header>
-          <div className="paycom-connection-body">
-            <h3>Connect your Paycom account</h3>
-            <p>Paycom is not connected. You can keep using your DSP and connect it later.</p>
-            <button
-              className="primary"
-              onClick={() => {
-                location.hash = `dsp/${view.dsp.id}/settings?tab=connections`;
-              }}
-            >
-              Connection settings
-              <ArrowRight size={16} />
-            </button>
-          </div>
-        </section>
+        <button
+          className="primary paycom-connect"
+          onClick={() => {
+            location.hash = `dsp/${view.dsp.id}/settings?tab=connections`;
+          }}
+        >
+          Connect Paycom
+          <ArrowRight size={16} />
+        </button>
       ) : (
         <div className="embedded-page">
           {tab === 'employees' ? (
