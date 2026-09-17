@@ -68,8 +68,8 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
   }
   return value as T;
 }
-export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
-  const [data, setData] = useState<T>(),
+export function useData<T>(url: string, poll = 0, refreshKey?: string | null, dataScope?: string) {
+  const [result, setResult] = useState<{ data: T; scope: string | undefined }>(),
     [error, setError] = useState(''),
     [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((v) => v + 1), []);
@@ -86,7 +86,7 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
       try {
         const value = await api<T>(url, undefined, controller.signal);
         if (active) {
-          setData(value);
+          setResult({ data: value, scope: dataScope });
           setError('');
           failures = 0;
           if (retry) clearTimeout(retry);
@@ -120,6 +120,8 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
       if (timer) clearInterval(timer);
       if (retry) clearTimeout(retry);
     };
-  }, [url, revision, poll, refreshKey]);
+  }, [url, revision, poll, refreshKey, dataScope]);
+  // A date-scoped view can keep its controls mounted without showing the previous day's rows.
+  const data = result?.scope === dataScope ? result?.data : undefined;
   return { data, error, refresh };
 }

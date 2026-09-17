@@ -4,7 +4,7 @@ import { PaycomDateControls } from './paycom-day-controls.js';
 import { calendarTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
 import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
 import {
   paycomDefaults,
@@ -237,11 +237,13 @@ function PunchCells({
 }
 export function TimecardsPage({
   date: sharedDate,
+  onDateChange,
   refreshKey,
   timezone,
   preferences = paycomDefaults,
 }: {
   date?: string;
+  onDateChange?: (date: string) => void;
   refreshKey?: string | null;
   timezone: string;
   preferences?: PaycomPreferences;
@@ -260,6 +262,7 @@ export function TimecardsPage({
     `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
     0,
     `${refreshKey}:${liveRevision}`,
+    date,
   );
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
   function order(key: string) {
@@ -269,42 +272,38 @@ export function TimecardsPage({
   }
   return (
     <div className="paycom-data-view">
-      <div className="paycom-day-toolbar">
-        <div>
-          <h2>{date === calendarToday ? 'Today’s timecards' : 'Daily timecards'}</h2>
-          <p className="paycom-source-note">
-            {new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' }).format(
-              new Date(`${date}T12:00:00Z`),
-            )}{' '}
-            · Paycom business time: {timezone}
-          </p>
-        </div>
-        {!sharedDate && (
+      <div className="paycom-data-table paycom-timecard-table">
+        <div className="paycom-table-heading paycom-timecard-heading">
+          <div className="paycom-timecard-title">
+            <h2>Employee timecards</h2>
+            {data?.available && (
+              <span className="paycom-employee-count">{data.rows.length} employees</span>
+            )}
+          </div>
           <PaycomDateControls
             date={date}
             today={calendarToday}
-            label="Timecard date"
+            label={sharedDate ? 'Paycom date' : 'Timecard date'}
+            compact
             onChange={(value) => {
-              setLocalDay(value);
+              if (onDateChange) onDateChange(value);
+              else setLocalDay(value);
               setOffset(0);
+              setSelectedCode(undefined);
             }}
           />
-        )}
-      </div>
-      <ErrorBox message={error} />
-      {!data ? (
-        <Loading />
-      ) : !data.available ? (
-        <Empty title="No collection covers this date">
-          Choose another date or collect the current pay period.
-        </Empty>
-      ) : (
-        <>
-          <div className="paycom-data-table">
-            <div className="paycom-table-heading">
-              <h2>Employee timecards</h2>
-              <span>{data.rows.length} employees</span>
-            </div>
+        </div>
+        <ErrorBox message={error} />
+        {!data ? (
+          error ? null : (
+            <Loading />
+          )
+        ) : !data.available ? (
+          <Empty title="No collection covers this date">
+            Choose another date or collect the current pay period.
+          </Empty>
+        ) : (
+          <>
             <div className="table-wrap">
               <table className="paycom-day-table" aria-label="Daily employee timecards">
                 <thead>
@@ -387,13 +386,27 @@ export function TimecardsPage({
                 Your DSP owner can choose which departments appear in Paycom settings.
               </Empty>
             )}
+          </>
+        )}
+        <footer className="paycom-timecard-footer" aria-label="Timecard timezones">
+          <span>
+            <Globe size={16} aria-hidden="true" />
+            Calendar: {calendarTimezone().replaceAll('_', ' ')}
+          </span>
+          <div className="paycom-timecard-business-time">
+            <span>Paycom: {timezone.replaceAll('_', ' ')}</span>
+            <details className="paycom-timecard-info">
+              <summary aria-label="About timecard data">
+                <Info size={16} aria-hidden="true" />
+              </summary>
+              <p>
+                Last completed collection {time(data?.collectedAt)}. Times update during collection,
+                and hours may change after corrections.
+              </p>
+            </details>
           </div>
-          <p className="paycom-source-note">
-            Last completed collection {time(data.collectedAt)}. Times update during collection, and
-            hours may change after corrections.
-          </p>
-        </>
-      )}
+        </footer>
+      </div>
       {selected && (
         <Modal
           title={`${selected.name} · ${selected.date}`}

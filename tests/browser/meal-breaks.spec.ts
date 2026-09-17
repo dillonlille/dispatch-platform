@@ -404,6 +404,8 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   const timecards = page.getByRole('tab', { name: 'Timecard', exact: true });
   const meals = page.getByRole('tab', { name: 'Meal Breaks', exact: true });
   await timecards.click();
+  await page.getByRole('button', { name: 'Previous day', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Previous day', exact: true })).toBeFocused();
   await dateInput.fill('2026-09-14');
   await dateInput.fill(date);
   for (const viewport of [
@@ -413,18 +415,35 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     await page.setViewportSize(viewport);
     await timecards.click();
     await expect(dateInput).toHaveValue(date);
-    const dateBox = (await dateInput.boundingBox())!;
-    const syncBox = (await sync.boundingBox())!;
+    await expect(page.locator('.paycom-timecard-heading').getByLabel('Paycom date')).toHaveValue(
+      date,
+    );
+    await expect(
+      page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.paycom-timecard-footer')).toContainText('Calendar:');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: test.info().outputPath(`timecard-header-${viewport.width}.png`),
+      fullPage: true,
+    });
     await meals.click();
     await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
     await expect(dateInput).toHaveValue(date);
     expect(mealDates.at(-1)).toBe(date);
-    const mealDateBox = (await dateInput.boundingBox())!;
-    const mealSyncBox = (await sync.boundingBox())!;
-    for (const axis of ['x', 'y'] as const) {
-      expect(mealDateBox[axis]).toBeCloseTo(dateBox[axis], 0);
-      expect(mealSyncBox[axis]).toBeCloseTo(syncBox[axis], 0);
-    }
+    await expect(
+      page.getByRole('region', { name: 'Date and sync' }).getByLabel('Paycom date'),
+    ).toHaveValue(date);
+    await expect(
+      page
+        .getByRole('region', { name: 'Date and sync' })
+        .getByRole('button', { name: 'Sync now', exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
     await page.screenshot({
       path: `/tmp/dispatch-shared-day-${viewport.width}.png`,
       fullPage: true,
@@ -512,7 +531,7 @@ test.describe('local calendar dates', () => {
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
     await expect(
-      page.getByRole('heading', { name: 'Today’s timecards', exact: true }),
+      page.getByRole('heading', { name: 'Employee timecards', exact: true }),
     ).toBeVisible();
     const dspId = new URL(page.url()).hash.split('/')[1]!;
     await page.evaluate(
@@ -546,7 +565,7 @@ test.describe('local calendar dates', () => {
     await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     const input = page.getByLabel('Paycom date');
     await expect(input).toHaveValue('2026-09-17');
-    await expect(page.getByText('Calendar timezone: UTC', { exact: true })).toBeVisible();
+    await expect(page.getByText('Calendar: UTC', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Previous day', exact: true }).click();
     await page.getByRole('button', { name: 'Today', exact: true }).click();
     await page.reload();
@@ -556,8 +575,6 @@ test.describe('local calendar dates', () => {
     await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
-    await expect(
-      page.getByText('Calendar timezone: America/Los Angeles', { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText('Calendar: America/Los Angeles', { exact: true })).toBeVisible();
   });
 });

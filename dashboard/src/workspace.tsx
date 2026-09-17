@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wrench, ArrowRight, RefreshCw, Plus, Search, Ellipsis } from 'lucide-react';
+import { Wrench, ArrowRight, RefreshCw, Plus, Search, Ellipsis, Settings } from 'lucide-react';
 import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
@@ -7,6 +7,8 @@ import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } fro
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { PaycomDateControls, usePaycomDate } from './paycom-day-controls.js';
+import { calendarTimezone, displayTimezone } from './preferences.js';
+import { localDate } from '../../shared/meal-breaks.js';
 import { type Perform } from './platform.js';
 
 export function HomePage() {
@@ -30,25 +32,74 @@ type SyncSource = {
   collectedAt: string | null;
 };
 
-function SourceSyncStatus({ name, source }: { name: string; source?: SyncSource }) {
+function SourceSyncStatus({
+  name,
+  source,
+  compact = false,
+}: {
+  name: string;
+  source?: SyncSource;
+  compact?: boolean;
+}) {
   const status = source?.job?.status;
+  const message = !source
+    ? 'Checking…'
+    : status === 'failed'
+      ? 'Last collection failed'
+      : status === 'cancelled'
+        ? 'Sync cancelled'
+        : source.active
+          ? title(status ?? 'running')
+          : !source.enabled
+            ? 'Sync paused'
+            : status === 'succeeded'
+              ? 'Sync complete'
+              : 'Waiting for next sync';
+  if (compact) {
+    const collectedAt = source?.collectedAt;
+    const collectedToday =
+      collectedAt &&
+      localDate(calendarTimezone(), new Date(collectedAt)) === localDate(calendarTimezone());
+    const timestamp = collectedAt
+      ? collectedToday
+        ? new Intl.DateTimeFormat('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone: displayTimezone(),
+          }).format(new Date(collectedAt))
+        : time(collectedAt)
+      : null;
+    return (
+      <div className="paycom-header-sync" role="status" aria-label={`${name} sync`}>
+        <Badge
+          value={
+            message === 'Sync complete'
+              ? 'succeeded'
+              : source?.active
+                ? (status ?? 'running')
+                : status === 'failed'
+                  ? 'failed'
+                  : 'pending'
+          }
+        >
+          {name} {message === 'Sync complete' ? 'synced' : message.toLowerCase()}
+        </Badge>
+        {collectedAt && (
+          <span className="paycom-sync-timestamp">
+            ·{' '}
+            <time dateTime={collectedAt} title={`Last successful sync ${time(collectedAt)}`}>
+              {timestamp}
+            </time>
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="paycom-source-status">
       <span className="muted">{name}</span>
       <span role="status" aria-label={`${name} sync`}>
-        {!source
-          ? 'Checking…'
-          : status === 'failed'
-            ? 'Last collection failed'
-            : status === 'cancelled'
-              ? 'Sync cancelled'
-              : source.active
-                ? title(status ?? 'running')
-                : !source.enabled
-                  ? 'Sync paused'
-                  : status === 'succeeded'
-                    ? 'Sync complete'
-                    : 'Waiting for next sync'}
+        {message}
       </span>
       {source?.collectedAt && (
         <span className="muted">Last successful sync {time(source.collectedAt)}</span>
@@ -85,6 +136,7 @@ export function PaycomPage({
   const { error, refresh } = overview;
   const data = overview.data?.connection;
   const meals = tab === 'meal-breaks';
+  const timecards = tab === 'timecards';
   const activeSync = sourceState?.paycom.active || (meals && sourceState?.flex.active);
   const collectedAt = overview.data?.workforce.collectedAt;
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
@@ -102,15 +154,54 @@ export function PaycomPage({
       ? 'Connect Paycom to sync.'
       : '';
   const owner = ['owner', 'platform_owner'].includes(view.role);
+  const syncButton = canCollect && (
+    <button
+      disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
+      title={
+        syncUnavailable ||
+        (meals
+          ? `Sync Flex and Paycom for ${date}`
+          : tab === 'employees'
+            ? 'Sync Paycom’s current pay period'
+            : `Sync Paycom for ${date}`)
+      }
+      onClick={async () => {
+        setSyncing(true);
+        try {
+          await perform(
+            async () => {
+              await api(meals ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
+                requestId: crypto.randomUUID(),
+                ...(tab !== 'employees' ? { date } : {}),
+              });
+              refresh();
+              syncState.refresh();
+            },
+            meals ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
+          );
+        } finally {
+          setSyncing(false);
+        }
+      }}
+    >
+      <RefreshCw size={16} />
+      Sync now
+    </button>
+  );
   return (
-    <div className="paycom-page">
+    <div className={`paycom-page${timecards ? ' paycom-timecards-page' : ''}`}>
       <Header title="Timecard">
+        {timecards && canCollect && (
+          <SourceSyncStatus name="Paycom" source={sourceState?.paycom} compact />
+        )}
+        {timecards && syncButton}
         {owner && (
           <button
             onClick={() => {
               location.hash = `dsp/${view.dsp.id}/paycom-settings`;
             }}
           >
+            {timecards && <Settings size={16} />}
             Paycom settings
           </button>
         )}
@@ -127,59 +218,31 @@ export function PaycomPage({
         ]}
         label="Timecard"
       />
-      <section className="paycom-workspace-controls" aria-label="Date and sync">
-        <div className="paycom-controls-row">
+      {!timecards && (
+        <section className="paycom-workspace-controls" aria-label="Date and sync">
+          <div className="paycom-controls-row">
+            {tab !== 'employees' && (
+              <PaycomDateControls date={date} today={today} onChange={selectDate} />
+            )}
+            {syncButton}
+          </div>
           {tab !== 'employees' && (
-            <PaycomDateControls date={date} today={today} onChange={selectDate} />
+            <p className="paycom-calendar-note muted">
+              Calendar timezone: {timezone.replaceAll('_', ' ')}
+            </p>
           )}
           {canCollect && (
-            <button
-              disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
-              title={
-                syncUnavailable ||
-                (meals
-                  ? `Sync Flex and Paycom for ${date}`
-                  : tab === 'employees'
-                    ? 'Sync Paycom’s current pay period'
-                    : `Sync Paycom for ${date}`)
-              }
-              onClick={async () => {
-                setSyncing(true);
-                try {
-                  await perform(
-                    async () => {
-                      await api(meals ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-                        requestId: crypto.randomUUID(),
-                        ...(tab !== 'employees' ? { date } : {}),
-                      });
-                      refresh();
-                      syncState.refresh();
-                    },
-                    meals ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
-                  );
-                } finally {
-                  setSyncing(false);
-                }
-              }}
-            >
-              <RefreshCw size={16} />
-              Sync now
-            </button>
+            <div className="paycom-sync-status">
+              <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />
+              {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} />}
+              {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
+            </div>
           )}
-        </div>
-        {tab !== 'employees' && (
-          <p className="paycom-calendar-note muted">
-            Calendar timezone: {timezone.replaceAll('_', ' ')}
-          </p>
-        )}
-        {canCollect && (
-          <div className="paycom-sync-status">
-            <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />
-            {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} />}
-            {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
+      {timecards && canCollect && syncUnavailable && (
+        <p className="paycom-sync-unavailable muted">{syncUnavailable}</p>
+      )}
       {tab === 'meal-breaks' ? (
         <MealBreaksPage
           key={date}
@@ -207,8 +270,9 @@ export function PaycomPage({
             <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />
           ) : (
             <TimecardsPage
-              key={`${preferences.data?.revision ?? 'loading'}:${date}`}
+              key={preferences.data?.revision ?? 'loading'}
               date={date}
+              onDateChange={selectDate}
               refreshKey={refreshKey}
               timezone={view.dsp.timezone}
               preferences={preferences.data?.values ?? paycomDefaults}

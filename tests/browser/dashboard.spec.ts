@@ -64,9 +64,12 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('button', { name: 'Sync now', exact: true }).click();
-  await expect(page.getByText('Sync complete', { exact: true })).toBeVisible({
-    timeout: 15000,
-  });
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'Paycom synced',
+    {
+      timeout: 15000,
+    },
+  );
   await page.getByRole('link', { name: 'Collections', exact: true }).click();
   const history = page.getByRole('region', { name: 'Collection performance history' });
   await expect(history).toContainText('Last successful collection');

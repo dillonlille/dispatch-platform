@@ -1472,3 +1472,159 @@ td small {
   gap: 6px 12px;
   align-items: center;
 }
+
+.paycom-timecards-page .heading-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+.paycom-timecards-page .page-heading {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.paycom-header-sync {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.paycom-header-sync .status-indicator {
+  color: inherit;
+}
+.paycom-sync-timestamp {
+  white-space: nowrap;
+}
+.paycom-sync-unavailable {
+  margin-top: 16px;
+  font-size: 12px;
+}
+.paycom-timecard-heading {
+  flex-wrap: wrap;
+}
+.paycom-timecard-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.paycom-employee-count {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.paycom-date-controls-compact {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.paycom-date-controls-compact label {
+  width: 165px;
+  min-width: 0;
+}
+.paycom-date-controls-compact input {
+  min-height: 36px;
+  height: 36px;
+}
+.paycom-date-controls-compact > button {
+  flex-shrink: 0;
+  min-height: 36px;
+  height: 36px;
+  padding-block: 6px;
+}
+.paycom-timecard-table > .error {
+  margin: 0 18px 18px;
+}
+.paycom-timecard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 14px 18px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.paycom-timecard-footer > span,
+.paycom-timecard-business-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.paycom-timecard-footer svg {
+  flex-shrink: 0;
+}
+.paycom-timecard-business-time {
+  margin-left: auto;
+}
+.paycom-timecard-info {
+  position: relative;
+}
+.paycom-timecard-info summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  list-style: none;
+}
+.paycom-timecard-info summary::-webkit-details-marker {
+  display: none;
+}
+.paycom-timecard-info summary:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.paycom-timecard-info p {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 1;
+  width: min(280px, calc(100vw - 96px));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .paycom-timecards-page .heading-actions {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 600px) {
+  .paycom-header-sync {
+    flex-basis: 100%;
+  }
+  .paycom-timecard-heading,
+  .paycom-timecard-footer {
+    padding: 12px;
+  }
+  .paycom-date-controls-compact label {
+    width: auto;
+    flex: 1;
+  }
+}
+@media (max-width: 380px) {
+  .paycom-date-controls-compact {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+  }
+  .paycom-date-controls-compact > button:last-child {
+    grid-column: 1 / -1;
+  }
+}
