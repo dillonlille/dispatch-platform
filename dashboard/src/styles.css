@@ -1473,7 +1473,7 @@ td small {
   align-items: center;
 }
 
-.paycom-timecards-page .heading-actions {
+.paycom-daily-page .heading-actions {
   display: flex;
   align-items: center;
   flex-shrink: 1;
@@ -1482,7 +1482,7 @@ td small {
   min-width: 0;
   max-width: 100%;
 }
-.paycom-timecards-page .page-heading {
+.paycom-daily-page .page-heading {
   flex-wrap: wrap;
   gap: 16px;
 }
@@ -1496,6 +1496,15 @@ td small {
 }
 .paycom-header-sync .status-indicator {
   color: inherit;
+}
+.paycom-sync-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.paycom-sync-failed svg {
+  color: var(--warning);
+  flex-shrink: 0;
 }
 .paycom-sync-timestamp {
   white-space: nowrap;
@@ -1602,7 +1611,7 @@ td small {
   line-height: 1.6;
 }
 @media (max-width: 760px) {
-  .paycom-timecards-page .heading-actions {
+  .paycom-daily-page .heading-actions {
     justify-content: flex-start;
   }
 }

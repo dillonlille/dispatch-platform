@@ -166,6 +166,12 @@ test('approved comparison table, filters, details, links, date errors and mobile
   ]);
   await expect(page.getByRole('heading', { name: 'Meal Breaks', exact: true })).toBeVisible();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
+  await expect(page.getByRole('button', { name: 'Gaps > 5 min 0', exact: true })).not.toHaveClass(
+    /meal-gap-filter/,
+  );
+  await page.getByLabel('About meal break data').click();
+  await expect(page.getByText('Delivery gaps use Flex only:', { exact: false })).toBeVisible();
+  await page.getByLabel('About meal break data').click();
   await expect(page.getByText('4 matched automatically.', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Different times 1', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Missing data 3', exact: true })).toBeVisible();
@@ -198,6 +204,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('4 matched automatically.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Previous day', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Previous day', exact: true })).toBeFocused();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.locator('.meal-table')).toHaveCount(0);
   await page.getByRole('button', { name: 'Next day', exact: true }).click();
@@ -433,39 +440,39 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
     await expect(dateInput).toHaveValue(date);
     expect(mealDates.at(-1)).toBe(date);
+    await expect(page.locator('.meal-heading').getByLabel('Paycom date')).toHaveValue(date);
     await expect(
-      page.getByRole('region', { name: 'Date and sync' }).getByLabel('Paycom date'),
-    ).toHaveValue(date);
-    await expect(
-      page
-        .getByRole('region', { name: 'Date and sync' })
-        .getByRole('button', { name: 'Sync now', exact: true }),
+      page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
     ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
     await page.screenshot({
-      path: `/tmp/dispatch-shared-day-${viewport.width}.png`,
+      path: test.info().outputPath(`meal-header-${viewport.width}.png`),
       fullPage: true,
     });
   }
   await page.setViewportSize({ width: 1586, height: 992 });
   await page.evaluate(() => window.scrollTo(0, 0));
-  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText(
-    'Sync complete',
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'Paycom synced',
   );
   await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toHaveText(
-    'Last collection failed',
+    'Flex failed',
   );
   const before = mealReads;
   await sync.click();
-  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText('Queued');
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'queued',
+  );
   await expect(sync).toBeDisabled();
-  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toHaveText('Queued');
+  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toContainText(
+    'queued',
+  );
   syncStatus = 'succeeded';
   collectedAt = '2026-09-16T06:05:00Z';
-  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toHaveText(
-    'Sync complete',
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'Paycom synced',
     { timeout: 10000 },
   );
   await expect(sync).toBeDisabled();
@@ -523,9 +530,7 @@ test.describe('local calendar dates', () => {
     const input = page.getByLabel('Paycom date');
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
-    await expect(
-      page.getByText('Calendar timezone: America/Los Angeles', { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText('Calendar: America/Los Angeles', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Next day', exact: true })).toBeDisabled();
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();

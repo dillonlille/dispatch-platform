@@ -1,12 +1,21 @@
 import { useState } from 'react';
-import { Wrench, ArrowRight, RefreshCw, Plus, Search, Ellipsis, Settings } from 'lucide-react';
+import {
+  Wrench,
+  ArrowRight,
+  RefreshCw,
+  Plus,
+  Search,
+  Ellipsis,
+  Settings,
+  AlertTriangle,
+} from 'lucide-react';
 import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } from './ui.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
-import { PaycomDateControls, usePaycomDate } from './paycom-day-controls.js';
+import { usePaycomDate } from './paycom-day-controls.js';
 import { calendarTimezone, displayTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { type Perform } from './platform.js';
@@ -70,21 +79,31 @@ function SourceSyncStatus({
         : time(collectedAt)
       : null;
     return (
-      <div className="paycom-header-sync" role="status" aria-label={`${name} sync`}>
-        <Badge
-          value={
-            message === 'Sync complete'
-              ? 'succeeded'
-              : source?.active
-                ? (status ?? 'running')
-                : status === 'failed'
-                  ? 'failed'
+      <div
+        className="paycom-header-sync"
+        role="status"
+        aria-label={`${name} sync`}
+        title={collectedAt ? `Last successful sync ${time(collectedAt)}` : undefined}
+      >
+        {status === 'failed' && !source?.active ? (
+          <span className="paycom-sync-failed">
+            <AlertTriangle size={15} aria-hidden="true" />
+            {name} failed
+          </span>
+        ) : (
+          <Badge
+            value={
+              message === 'Sync complete'
+                ? 'succeeded'
+                : source?.active
+                  ? (status ?? 'running')
                   : 'pending'
-          }
-        >
-          {name} {message === 'Sync complete' ? 'synced' : message.toLowerCase()}
-        </Badge>
-        {collectedAt && (
+            }
+          >
+            {name} {message === 'Sync complete' ? 'synced' : message.toLowerCase()}
+          </Badge>
+        )}
+        {collectedAt && message === 'Sync complete' && (
           <span className="paycom-sync-timestamp">
             ·{' '}
             <time dateTime={collectedAt} title={`Last successful sync ${time(collectedAt)}`}>
@@ -119,7 +138,7 @@ export function PaycomPage({
 }) {
   const [selectedTab, setTab] = useState<string>();
   const [syncing, setSyncing] = useState(false);
-  const { date, today, timezone, selectDate } = usePaycomDate(view.dsp.id);
+  const { date, today, selectDate } = usePaycomDate(view.dsp.id);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
   const tab = selectedTab ?? preferences.data?.values.opening_page ?? 'timecards';
   const overview = useData<{
@@ -137,6 +156,7 @@ export function PaycomPage({
   const data = overview.data?.connection;
   const meals = tab === 'meal-breaks';
   const timecards = tab === 'timecards';
+  const daily = timecards || meals;
   const activeSync = sourceState?.paycom.active || (meals && sourceState?.flex.active);
   const collectedAt = overview.data?.workforce.collectedAt;
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
@@ -189,19 +209,22 @@ export function PaycomPage({
     </button>
   );
   return (
-    <div className={`paycom-page${timecards ? ' paycom-timecards-page' : ''}`}>
+    <div className={`paycom-page${daily ? ' paycom-daily-page' : ''}`}>
       <Header title="Timecard">
-        {timecards && canCollect && (
-          <SourceSyncStatus name="Paycom" source={sourceState?.paycom} compact />
+        {daily && canCollect && (
+          <>
+            <SourceSyncStatus name="Paycom" source={sourceState?.paycom} compact />
+            {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} compact />}
+          </>
         )}
-        {timecards && syncButton}
+        {daily && syncButton}
         {owner && (
           <button
             onClick={() => {
               location.hash = `dsp/${view.dsp.id}/paycom-settings`;
             }}
           >
-            {timecards && <Settings size={16} />}
+            {daily && <Settings size={16} />}
             Paycom settings
           </button>
         )}
@@ -218,35 +241,25 @@ export function PaycomPage({
         ]}
         label="Timecard"
       />
-      {!timecards && (
+      {!daily && (
         <section className="paycom-workspace-controls" aria-label="Date and sync">
-          <div className="paycom-controls-row">
-            {tab !== 'employees' && (
-              <PaycomDateControls date={date} today={today} onChange={selectDate} />
-            )}
-            {syncButton}
-          </div>
-          {tab !== 'employees' && (
-            <p className="paycom-calendar-note muted">
-              Calendar timezone: {timezone.replaceAll('_', ' ')}
-            </p>
-          )}
+          <div className="paycom-controls-row">{syncButton}</div>
           {canCollect && (
             <div className="paycom-sync-status">
               <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />
-              {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} />}
               {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
             </div>
           )}
         </section>
       )}
-      {timecards && canCollect && syncUnavailable && (
+      {daily && canCollect && syncUnavailable && (
         <p className="paycom-sync-unavailable muted">{syncUnavailable}</p>
       )}
       {tab === 'meal-breaks' ? (
         <MealBreaksPage
-          key={date}
           date={date}
+          today={today}
+          onDateChange={selectDate}
           refreshKey={refreshKey}
           timezone={view.dsp.timezone}
           owner={owner}
