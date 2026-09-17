@@ -1,13 +1,19 @@
 import { test, expect } from '@playwright/test';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const {
-  SNAPSHOT,
-  classify,
-  loginExpression,
-  challengeExpression,
-} = require('../../integrations/paycom/provider/auth/adapter.js');
+import fs from 'node:fs';
+const auth = fs
+  .readFileSync('backend/src/core/browsers/paycom/auth.js', 'utf8')
+  .trim()
+  .replace(/;$/, '');
+function expression(input: Record<string, unknown>) {
+  return `(${auth})(${JSON.stringify({ origin, ...input })})`;
+}
+const classify = (observation: { state: string }) => observation.state;
+const loginExpression = (credentials: Record<string, string>) =>
+  expression({ action: 'login', credentials });
+const challengeExpression = (credentials: Record<string, string>, challenge: { index: number }[]) =>
+  expression({ action: 'pins', credentials, challenge });
 const origin = 'https://www.paycomonline.net';
+const SNAPSHOT = expression({ action: 'observe' });
 const securityPath = '/v4/cl/web.php/security/security-question/login';
 
 function challenge(first = 2, second = 5) {
@@ -18,7 +24,7 @@ function challenge(first = 2, second = 5) {
     <button name="continue" type="submit">Continue</button></form>`;
 }
 
-test('archived credential entry invokes the provider submit handler on the exact login form', async ({
+test('Paycom credential entry invokes the provider submit handler on the exact login form', async ({
   page,
   context,
 }) => {
@@ -49,7 +55,7 @@ test('archived credential entry invokes the provider submit handler on the exact
   });
 });
 
-test('archived PIN recognition verifies numbered fields and exact values without assigning secrets', async ({
+test('Paycom PIN recognition verifies numbered fields and exact values without assigning secrets', async ({
   page,
   context,
 }) => {
@@ -58,8 +64,12 @@ test('archived PIN recognition verifies numbered fields and exact values without
     route.fulfill({ contentType: 'text/html', body: challenge() }),
   );
   await page.goto(origin + securityPath);
-  const snapshot = await page.evaluate<{ challenge: { index: number }[] }>(SNAPSHOT);
-  expect(classify(snapshot)).toBe('security_questions_required');
+  const observation = await page.evaluate<{
+    state: string;
+    snapshot: { challenge: { index: number }[] };
+  }>(SNAPSHOT);
+  const snapshot = observation.snapshot;
+  expect(classify(observation)).toBe('security_questions_required');
   expect(snapshot.challenge.map((field: { index: number }) => field.index)).toEqual([2, 5]);
   const credentials = { pin2: '00Two !', pin5: ' Five? ' };
   expect(
@@ -82,7 +92,7 @@ test('archived PIN recognition verifies numbered fields and exact values without
   ).toBe('challenge_layout_changed');
 });
 
-test('archived classifier requires authenticated page markers and keeps verification manual', async ({
+test('Paycom classifier requires authenticated page markers and keeps verification manual', async ({
   page,
   context,
 }) => {

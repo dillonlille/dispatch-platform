@@ -1,9 +1,10 @@
+import { dateFormatter } from '../../shared/date-format.js';
 import { useEffect, useRef, useId, type ReactNode } from 'react';
-import { X, LoaderCircle, ArrowUpRight, Inbox } from 'lucide-react';
+import { X, LoaderCircle, Inbox } from 'lucide-react';
 import { displayTimezone } from './preferences.js';
 export const time = (value: string | null | undefined) =>
   value
-    ? new Intl.DateTimeFormat('en-US', {
+    ? dateFormatter('en-US', {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
@@ -65,20 +66,11 @@ export function Tabs({
     </div>
   );
 }
-export function Header({
-  title: label,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children?: ReactNode;
-}) {
+export function Header({ title: label, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="page-heading">
       <div>
         <h1>{label}</h1>
-        <p>{subtitle}</p>
       </div>
       <div className="heading-actions">{children}</div>
     </div>
@@ -208,12 +200,5 @@ export function Modal({
         )}
       </div>
     </div>
-  );
-}
-export function OpenButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button className="text-button" onClick={onClick}>
-      Open <ArrowUpRight size={15} />
-    </button>
   );
 }

@@ -2,6 +2,7 @@
 """Verify the production Rust worker against BrowserOS using temporary DSPs."""
 
 import os
+import sys
 from pathlib import Path
 import subprocess
 
@@ -12,6 +13,9 @@ subprocess.run([
     "cargo", "test", "--locked", "--test", "browseros_host", "--",
     "--ignored", "--nocapture", "--test-threads=1",
 ], cwd=root, env=environment, check=True)
+
+if "--host-only" in sys.argv:
+    sys.exit(0)
 
 environment["DISPATCH_TEST_NATIVE"] = "1"
 subprocess.run([

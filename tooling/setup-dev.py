@@ -48,7 +48,7 @@ def main():
     updates.require(commit == updates.command("git", "rev-parse", "origin/dev", cwd=live),
                     "Setup requires merged dev HEAD")
     manifest = updates.verify_artifact(live / ".build", commit)
-    updates.require(manifest["format"] in (2, 3), "Rust core artifact required")
+    updates.require(manifest["format"] == 3, "Rust core artifact required")
     accounts = root / "data/platform/accounts.sqlite"
     updates.require(not accounts.exists() and not (root / "config/platform.env").exists(),
                     "Dev already configured; preserve existing accounts and configuration")

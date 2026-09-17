@@ -18,7 +18,7 @@ const sections = [
 export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform: Perform }) {
   const query = useData<Snapshot>('/api/dsp/paycom/settings', 5000);
   const overview = useData<{ schedule: Schedule; workforce: { collectedAt: string | null } }>(
-    '/api/dsp/overview',
+    '/api/dsp/paycom/status',
     5000,
   );
   const [base, setBase] = useState<Snapshot>();
@@ -103,7 +103,7 @@ export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform:
       <a className="plugin-settings-back" href={`#dsp/${dspId}/paycom`}>
         ← Back
       </a>
-      <Header title="Paycom settings" subtitle="Make Paycom work the way your team does." />
+      <Header title="Paycom settings" />
       <ErrorBox message={query.error || overview.error} />
       {newer && (
         <div className="notice">

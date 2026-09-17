@@ -227,7 +227,21 @@ impl Store {
     pub fn publish(&self, id: &str, value: &Value) -> Result<Value> {
         validate_workforce(value)?;
         let db = self.collector(id, Provider::Paycom)?;
+        let mut employees = value["employees"].as_array().unwrap().clone();
+        employees.sort_by(|a, b| s(a, "code").cmp(s(b, "code")));
+        let mut timecards = value["timecards"].as_array().unwrap().clone();
+        timecards.sort_by(|a, b| {
+            (s(a, "employeeCode"), s(a, "date")).cmp(&(s(b, "employeeCode"), s(b, "date")))
+        });
+        let fingerprint = crypto::sha(serde_json::to_vec(
+            &json!({"from":value["from"],"to":value["to"],"employees":employees,"timecards":timecards}),
+        )?);
         db.transaction(|| {
+            let previous = db.setting("paycom.publicationFingerprint",Value::Null)?;
+            if s(&previous,"digest") == fingerprint {
+                let updated = db.exec("UPDATE publications SET collected_at=? WHERE id=? AND active=1 AND collected_at<=?",[s(value,"collectedAt"),s(&previous,"id"),s(value,"collectedAt")])?;
+                if updated == 1 { return Ok(()); }
+            }
             let publication = crypto::id("pub")?;
             db.exec(
                 "INSERT INTO publications(id,collected_at,period_from,period_to) VALUES (?,?,?,?)",
@@ -270,6 +284,7 @@ impl Store {
                 "UPDATE publications SET active=1 WHERE id=?",
                 [&publication],
             )?;
+            db.set("paycom.publicationFingerprint",&json!({"id":publication,"digest":fingerprint}))?;
             Ok(())
         })?;
         Ok(

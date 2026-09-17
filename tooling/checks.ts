@@ -22,7 +22,12 @@ const npm = (name: string) => run(name, 'npm', ['run', name]);
 
 // One runner shares the build; independent suites use separate fixture state/ports.
 // Always wait for every child before cleanup or reporting success.
-const build = npm('build');
+const rustChecks = mode === 'full' ? npm('check:rust') : Promise.resolve(true);
+const debugBuild =
+  mode === 'full'
+    ? rustChecks.then((ok) => ok && run('debug build', 'cargo', ['build', '--locked']))
+    : Promise.resolve(true);
+const build = debugBuild.then((ok) => ok && npm('build'));
 const checks: Promise<unknown>[] = [build];
 if (mode === 'reuse') {
   checks.push(build.then((ok) => ok && npm('test:smoke')));
@@ -41,8 +46,9 @@ if (mode === 'reuse') {
     ),
   );
   if (mode === 'full') {
-    const coreTests = npm('test');
-    const rustChecks = npm('check:rust');
+    const coreTests = debugBuild.then(
+      (ok) => ok && run('test', 'npm', ['--ignore-scripts', 'test']),
+    );
     checks.push(
       coreTests,
       rustChecks,
@@ -51,7 +57,7 @@ if (mode === 'reuse') {
       Promise.all([build, coreTests, rustChecks]).then(
         (results) => results.every(Boolean) && npm('test:browseros'),
       ),
-      run('dependency audit', 'npm', ['audit', '--omit=dev', '--audit-level=high']),
+      run('dependency audit', 'npm', ['audit', '--audit-level=high']),
       run('Python tests', 'python3', [
         '-m',
         'unittest',

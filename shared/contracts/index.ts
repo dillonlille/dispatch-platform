@@ -1,6 +1,5 @@
 export type Environment = 'production' | 'preview';
 export type Role = 'owner' | 'manager' | 'member';
-export type Permission = 'read' | 'collect' | 'connections' | 'settings' | 'members';
 export type DspStatus = 'provisioning' | 'active' | 'suspended' | 'failed';
 export type ConnectionStatus =
   | 'not_connected'
@@ -61,7 +60,6 @@ export interface SessionView {
   development: boolean;
   environment: Environment;
   release: string;
-  standalone?: boolean;
   providerMode?: 'fixture' | 'native';
 }
 export interface DspView {
@@ -192,15 +190,6 @@ export interface AuditEvent {
   action: string;
   detail: string;
 }
-export interface ReleaseSummary {
-  digest: string;
-  version: string;
-  createdAt: string;
-  testedAt: string | null;
-  production: boolean;
-  preview: boolean;
-  notes: string;
-}
 export interface PlatformHealth {
   environment: Environment;
   release: string;
@@ -213,8 +202,4 @@ export interface PlatformHealth {
   dsps: number;
   email: boolean;
   providerMode: 'fixture' | 'native';
-}
-export interface ApiFailure {
-  error: string;
-  message: string;
 }

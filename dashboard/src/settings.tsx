@@ -11,12 +11,10 @@ export function SettingsPage({
   session,
   view,
   perform,
-  reopen,
 }: {
   session: SessionView;
   view?: DspView;
   perform: Perform;
-  reopen?: () => Promise<void>;
 }) {
   const [requestedTab, setTab] = useState(
     new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'general',
@@ -36,12 +34,7 @@ export function SettingsPage({
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
   return (
     <>
-      <Header
-        title="Settings"
-        subtitle={
-          view ? 'Your account, workspace, and security.' : 'Your platform account and security.'
-        }
-      />
+      <Header title="Settings" />
       <Tabs
         value={tab}
         onChange={(value) => {
@@ -60,11 +53,6 @@ export function SettingsPage({
           <section className="settings-section">
             <div>
               <h2>Account</h2>
-              <p>
-                {view && session.user.platformOwner
-                  ? 'You are signed in with your platform account.'
-                  : 'Your Dispatch sign-in details.'}
-              </p>
             </div>
             <dl className="detail-list">
               <div>
@@ -90,7 +78,6 @@ export function SettingsPage({
           <section className="settings-section">
             <div>
               <h2>Date &amp; time</h2>
-              <p>Choose the timezone for calendar dates and event times.</p>
             </div>
             <div className="theme-pack-field">
               <label htmlFor="display-timezone">Display timezone</label>
@@ -123,7 +110,6 @@ export function SettingsPage({
             <section className="settings-section">
               <div>
                 <h2>Workspace</h2>
-                <p>Your current DSP context.</p>
               </div>
               <dl className="detail-list">
                 <div>

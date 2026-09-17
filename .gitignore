@@ -19,3 +19,5 @@ __pycache__/
 *.pyc
 dispatch-dev.tar.gz
 target/
+
+.build-staging-*/

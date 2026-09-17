@@ -669,6 +669,54 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn mixed_pay_code_totals_and_cross_row_punches_remain_exact() -> Result<()> {
+        let days = (0..14).map(|i| json!({"date":format!("day{i}"),"hours":null,"totalHours":null,"missingPunch":false,"punches":[]})).collect::<Vec<_>>();
+        let mut record = json!({"days":days,"additionalRows":[
+            {"date":"day0","hours":2,"totalHours":null},
+            {"date":"day2","hours":1.5,"totalHours":8},
+            {"date":"day7","hours":0.75,"totalHours":0.75},
+            {"date":"day10","hours":0.5,"totalHours":null}
+        ],"weeklyTotals":[18,7.5],"periodTotalHours":25.5});
+        for (i, hours, total) in [
+            (0, 8., Some(10.)),
+            (2, 6.5, None),
+            (7, 4.25, Some(4.25)),
+            (10, 2., None),
+        ] {
+            record["days"][i]["hours"] = json!(hours);
+            record["days"][i]["totalHours"] = json!(total);
+        }
+        let projected = project(&record, "AA01")?;
+        assert_eq!(
+            projected
+                .iter()
+                .map(|d| d["hours"].as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![10., 0., 8., 0., 0., 0., 0., 5., 0., 0., 2.5, 0., 0., 0.]
+        );
+        record["weeklyTotals"] = json!([17, 8.5]);
+        assert_eq!(
+            project(&record, "AA01").unwrap_err().code,
+            "provider_hours_mismatch"
+        );
+        record["weeklyTotals"] = json!([18, 7.5]);
+        record["periodTotalHours"] = json!(24.5);
+        assert_eq!(
+            project(&record, "AA01").unwrap_err().code,
+            "provider_hours_mismatch"
+        );
+        record["periodTotalHours"] = json!(25.5);
+        record["days"][0]["missingPunch"] = json!(true);
+        record["days"][0]["punches"] = json!([{"slot":"i1","rowIndex":0,"displayTime":"08:00 AM"},{"slot":"o1","rowIndex":1,"displayTime":"12:00 PM"}]);
+        let projected = project(&record, "AA01")?;
+        assert_eq!(projected[0]["status"], "Missing punch");
+        assert_eq!(
+            projected[0]["punches"],
+            json!([{"in":"08:00 AM","out":null,"hours":null,"inKind":null,"outKind":null},{"in":null,"out":"12:00 PM","hours":null,"inKind":null,"outKind":null}])
+        );
+        Ok(())
+    }
+    #[test]
     fn blank_leading_row_uses_additional_totals_and_preserves_punches() -> Result<()> {
         let days = (0..14).map(|i| json!({"date":format!("day{i}"),"hours":null,"totalHours":null,"missingPunch":false,"unresolvedSlots":[],"punches":[]})).collect::<Vec<_>>();
         let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":4}],"weeklyTotals":[4,0],"periodTotalHours":4});

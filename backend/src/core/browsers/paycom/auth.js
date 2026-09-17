@@ -1,4 +1,3 @@
-// DOM checks adapted from integrations/paycom/provider/auth/adapter.js.
 // Executed in a fresh isolated world; Rust owns retries, credentials and lifecycle.
 (input) => {
   const ORIGIN = input.origin;
@@ -276,9 +275,6 @@
     )
       return result('logged_out');
     return result('pending', 'page_unrecognized');
-  }
-  function classify(snapshot, context) {
-    return classifyState(snapshot, context).state;
   }
 
   function loginExpression(credentials) {

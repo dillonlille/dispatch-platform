@@ -9,7 +9,6 @@ WorkingDirectory=%h/dispatch-platform/dev/live/.build
 EnvironmentFile=%h/dispatch-platform/dev/config/platform.env
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=DISPATCH_WORKER_NODE=%h/.local/bin/node
 ExecStartPre=/usr/bin/python3 %h/dispatch-platform/dev/live/tooling/update-dev.py --root %h/dispatch-platform/dev --verify
 ExecStart=%h/dispatch-platform/dev/live/.build/services/rust/dispatch-backend serve
 Restart=on-failure

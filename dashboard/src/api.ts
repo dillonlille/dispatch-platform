@@ -42,7 +42,6 @@ const labels: Record<string, string> = {
   connection_busy: 'The browser is busy. Please try again in a moment.',
   verification_expired: 'Verification expired. Check the connection to start again.',
   browser_capacity: 'Browser capacity is full. Try again shortly.',
-  preview_test_required: 'Test this release on the Dev DSP first.',
   rate_limited: 'Too many attempts. Wait a few minutes and try again.',
   invalid_credentials: 'The provider could not verify those credentials.',
 };

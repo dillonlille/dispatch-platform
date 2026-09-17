@@ -74,13 +74,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       </div>
       <section className="auth-panel">
         <h1>{heading}</h1>
-        {mode !== 'invite' && (
-          <p className="auth-description">
-            {mode === 'login'
-              ? 'Welcome back. Sign in to your workspace.'
-              : 'We’ll help you get back to your workspace.'}
-          </p>
-        )}
+
         <ErrorBox message={error || (mode === 'invite' ? invitation.error : '')} />
         {notice && (
           <div className="notice" role="status">

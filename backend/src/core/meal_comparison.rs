@@ -7,7 +7,7 @@ use super::{
     ensure, validate as v, workforce,
 };
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const LINKS: &str = "employees.provider_links";
 
@@ -295,9 +295,15 @@ impl Store {
             }
         }
         for p in &publications {
+            let mut by_itinerary: HashMap<String, Vec<Value>> = HashMap::new();
+            for mut meal in cortex.all("SELECT itinerary_id,meal_id mealId,last_delivery_at lastDelivery,started_at start,ended_at end,first_delivery_at firstDelivery,before_status beforeStatus,after_status afterStatus FROM meal_records WHERE publication_id=? ORDER BY itinerary_id,started_at,meal_id", [s(p,"id")])? {
+                let id = s(&meal, "itinerary_id").to_owned();
+                meal.as_object_mut().unwrap().remove("itinerary_id");
+                by_itinerary.entry(id).or_default().push(meal);
+            }
             for itinerary in cortex.all("SELECT itinerary_id,transporter_id,driver_name FROM meal_itineraries WHERE publication_id=? ORDER BY itinerary_id",[s(p,"id")])? {
                 if !itineraries.insert((s(p,"serviceAreaId").to_owned(),s(&itinerary,"itinerary_id").to_owned())) {continue;}
-                let meals = cortex.all("SELECT meal_id mealId,last_delivery_at lastDelivery,started_at start,ended_at end,first_delivery_at firstDelivery,before_status beforeStatus,after_status afterStatus FROM meal_records WHERE publication_id=? AND itinerary_id=? ORDER BY started_at,meal_id",[s(p,"id"),s(&itinerary,"itinerary_id")])?;
+                let meals = by_itinerary.remove(s(&itinerary,"itinerary_id")).unwrap_or_default();
                 let transporter = s(&itinerary,"transporter_id");
                 // Include meal-free drivers in uniqueness checks so a name shared by
                 // two drivers cannot match just because one did not take a meal.
@@ -306,6 +312,10 @@ impl Store {
             }
         }
         match_drivers(&mut drivers, &roster, &links);
+        let roster_by_code: HashMap<_, _> = roster
+            .iter()
+            .map(|employee| (s(employee, "code"), employee))
+            .collect();
         let mut meal_drivers = HashSet::new();
         for (p, itinerary, meals) in observations {
             if meals.is_empty() {
@@ -318,7 +328,7 @@ impl Store {
                 .map(|c| format!("paycom:{c}"))
                 .unwrap_or_else(|| format!("cortex:{transporter}"));
             let name = code
-                .and_then(|c| roster.iter().find(|e| s(e, "code") == c))
+                .and_then(|c| roster_by_code.get(c))
                 .map(|e| e["name"].clone())
                 .unwrap_or(itinerary["driver_name"].clone());
             let row = rows

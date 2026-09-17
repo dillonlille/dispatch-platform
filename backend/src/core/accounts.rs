@@ -154,19 +154,6 @@ impl Store {
         )?;
         Ok(fresh)
     }
-    pub fn change_password(&self, a: &Auth, current: &str, password: &str) -> Result<()> {
-        let row = self
-            .platform
-            .one("SELECT password FROM users WHERE id=?", [s(&a.user, "id")])?
-            .ok_or_else(|| Error::new("sign_in_required", 401))?;
-        ensure(
-            crypto::check_password(current, s(&row, "password")),
-            "invalid_password",
-            403,
-        )?;
-        let encoded = crypto::hash_password(password)?;
-        self.replace_password(s(&a.user, "id"), &encoded, "account.password_changed")
-    }
     fn replace_password(&self, id: &str, encoded: &str, action: &str) -> Result<()> {
         self.platform.transaction(|| {
             self.platform.exec(
@@ -197,32 +184,6 @@ impl Store {
         );
         Ok(invitation)
     }
-    pub fn accept_invitation(
-        &self,
-        raw: &str,
-        first: &str,
-        last: &str,
-        password: &str,
-    ) -> Result<()> {
-        let invite = self.invitation(raw)?;
-        let existing = self
-            .platform
-            .one("SELECT * FROM users WHERE email=?", [s(&invite, "email")])?;
-        if let Some(ref row) = existing {
-            ensure(
-                s(row, "status") == "active"
-                    && crypto::check_password(password, s(row, "password")),
-                "sign_in_with_existing_password",
-                403,
-            )?;
-        }
-        self.platform.transaction(|| {
-            let id=if let Some(row)=existing {s(&row,"id").to_owned()} else {s(&self.create_user(s(&invite,"email"),first,last,password,false)?,"id").to_owned()};
-            self.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),s(&invite,"role")])?;
-            self.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(raw)])?;
-            self.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined","")
-        })
-    }
     pub fn recovery(&self, email: &str) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
         if let Some(user) = self.platform.one(
@@ -238,13 +199,8 @@ impl Store {
         }
         Ok(())
     }
-    pub fn reset_password(&self, raw: &str, password: &str) -> Result<()> {
-        let row=self.platform.one("SELECT r.user_id FROM resets r JOIN users u ON u.id=r.user_id WHERE r.hash=? AND r.used_at IS NULL AND r.expires_at>? AND r.user_version=u.version AND u.status='active'",params![crypto::sha(raw),now()])?.ok_or_else(||Error::new("reset_expired",400))?;
-        self.replace_password(
-            s(&row, "user_id"),
-            &crypto::hash_password(password)?,
-            "account.password_reset",
-        )
+    fn reset_user(&self, raw: &str) -> Result<Value> {
+        self.platform.one("SELECT u.* FROM resets r JOIN users u ON u.id=r.user_id WHERE r.hash=? AND r.used_at IS NULL AND r.expires_at>? AND r.user_version=u.version AND u.status='active'",params![crypto::sha(raw),now()])?.ok_or_else(||Error::new("reset_expired",400))
     }
     pub fn mail(&self, to: &str, subject: &str, text: &str) -> Result<()> {
         self.queue_mail(to, subject, text, None)
@@ -294,6 +250,133 @@ impl Store {
     }
 }
 impl super::State {
+    async fn password_work<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let permit = self
+            .password_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Error::new("login_busy", 429))?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work()
+        })
+        .await
+        .map_err(|_| Error::new("password_operation_failed", 500))?
+    }
+    pub async fn change_password(
+        self: &std::sync::Arc<Self>,
+        auth: Auth,
+        current: String,
+        password: String,
+    ) -> Result<()> {
+        let a = auth.clone();
+        let row = self
+            .read(move |db| {
+                let a = db.authenticate(&a.raw)?;
+                db.platform
+                    .one("SELECT * FROM users WHERE id=?", [s(&a.user, "id")])?
+                    .ok_or_else(|| Error::new("sign_in_required", 401))
+            })
+            .await?;
+        let expected = row.clone();
+        let encoded = self
+            .password_work(move || {
+                ensure(
+                    crypto::check_password(&current, s(&expected, "password")),
+                    "invalid_password",
+                    403,
+                )?;
+                crypto::hash_password(&password)
+            })
+            .await?;
+        self.run(move |db| {
+            db.authenticate(&auth.raw)?;
+            let fresh = db
+                .platform
+                .one("SELECT * FROM users WHERE id=?", [s(&row, "id")])?;
+            ensure(
+                fresh
+                    .as_ref()
+                    .is_some_and(|fresh| same_password_user(fresh, &row)),
+                "sign_in_required",
+                401,
+            )?;
+            db.replace_password(s(&row, "id"), &encoded, "account.password_changed")
+        })
+        .await
+    }
+    pub async fn reset_password(
+        self: &std::sync::Arc<Self>,
+        raw: String,
+        password: String,
+    ) -> Result<()> {
+        let token = raw.clone();
+        let row = self.read(move |db| db.reset_user(&token)).await?;
+        let encoded = self
+            .password_work(move || crypto::hash_password(&password))
+            .await?;
+        self.run(move |db| {
+            let fresh = db.reset_user(&raw)?;
+            ensure(same_password_user(&fresh, &row), "reset_expired", 400)?;
+            db.replace_password(s(&row, "id"), &encoded, "account.password_reset")
+        })
+        .await
+    }
+    pub async fn accept_invitation(
+        self: &std::sync::Arc<Self>,
+        raw: String,
+        first: String,
+        last: String,
+        password: String,
+    ) -> Result<Value> {
+        let token = raw.clone();
+        let (invite, existing) = self
+            .read(move |db| {
+                let invite = db.invitation(&token)?;
+                let existing = db
+                    .platform
+                    .one("SELECT * FROM users WHERE email=?", [s(&invite, "email")])?;
+                Ok((invite, existing))
+            })
+            .await?;
+        let expected = existing.clone();
+        let encoded = self
+            .password_work(move || {
+                if let Some(row) = expected {
+                    ensure(
+                        s(&row, "status") == "active"
+                            && crypto::check_password(&password, s(&row, "password")),
+                        "sign_in_with_existing_password",
+                        403,
+                    )?;
+                    Ok(None)
+                } else {
+                    Ok(Some(crypto::hash_password(&password)?))
+                }
+            })
+            .await?;
+        self.run(move |db| db.platform.transaction(|| {
+            let fresh_invite = db.invitation(&raw)?;
+            ensure(fresh_invite == invite,"invitation_expired",404)?;
+            let fresh = db.platform.one("SELECT * FROM users WHERE email=?",[s(&invite,"email")])?;
+            let id = match (existing.as_ref(), fresh.as_ref()) {
+                (Some(before),Some(after)) if same_password_user(before,after) => s(after,"id").to_owned(),
+                (None,None) => {
+                    let id = crypto::id("usr")?;
+                    db.platform.exec("INSERT INTO users(id,email,first_name,last_name,password,created_at) VALUES (?,?,?,?,?,?)",params![id,s(&invite,"email"),first,last,encoded,iso()])?;
+                    id
+                },
+                _ => return Err(Error::new("sign_in_with_existing_password",403)),
+            };
+            db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),s(&invite,"role")])?;
+            db.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(&raw)])?;
+            db.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined","")?;
+            Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
+        })).await
+    }
     pub async fn login(
         self: &std::sync::Arc<Self>,
         email: String,
@@ -364,5 +447,60 @@ impl super::State {
             Ok(raw)
         })
         .await
+    }
+}
+
+fn same_password_user(a: &Value, b: &Value) -> bool {
+    ["id", "version", "password"]
+        .iter()
+        .all(|key| a[key] == b[key])
+        && s(a, "status") == "active"
+        && s(b, "status") == "active"
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+    #[tokio::test]
+    async fn password_work_is_bounded_without_holding_database_slots() {
+        let root = tempfile::tempdir().unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = crate::core::config::Config::load().unwrap();
+        config.root = root.path().into();
+        let state = crate::core::State::new(config).unwrap();
+        let mut workers = Vec::new();
+        let mut release = Vec::new();
+        for _ in 0..2 {
+            let (began, started) = tokio::sync::oneshot::channel();
+            let (send, wait) = std::sync::mpsc::channel();
+            release.push(send);
+            let state = Arc::clone(&state);
+            workers.push(tokio::spawn(async move {
+                state
+                    .password_work(move || {
+                        let _ = began.send(());
+                        let _ = wait.recv();
+                        Ok(())
+                    })
+                    .await
+            }));
+            started.await.unwrap();
+        }
+        let busy = state.password_work(|| Ok(())).await;
+        let read = tokio::time::timeout(
+            Duration::from_secs(2),
+            state.read(|db| db.platform.one("SELECT 1 ready", [])),
+        )
+        .await;
+        for send in release {
+            send.send(()).unwrap();
+        }
+        for worker in workers {
+            worker.await.unwrap().unwrap();
+        }
+        assert_eq!(busy.unwrap_err().code, "login_busy");
+        assert_eq!(read.unwrap().unwrap().unwrap()["ready"], 1);
+        assert_eq!(state.password_slots.available_permits(), 2);
     }
 }

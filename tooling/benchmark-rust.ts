@@ -9,11 +9,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 
-// The baseline is code only. Never read the installed platform's state or secrets.
-const baseline = process.env.DISPATCH_BENCHMARK_BASELINE;
-assert(baseline, 'Set DISPATCH_BENCHMARK_BASELINE to the previous Node artifact directory');
-const artifact = path.resolve(baseline);
-assert(fs.existsSync(path.join(artifact, 'api/main.js')), 'Node baseline artifact required');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-core-benchmark-'));
 const employees = 3000,
   days = 30,
@@ -77,7 +72,8 @@ function dataset(root: string) {
     db.close();
   }
 }
-async function run(runtime: 'node' | 'rust') {
+async function run() {
+  const runtime = 'rust';
   const root = path.join(temporary, runtime);
   fs.mkdirSync(root, { mode: 0o700 });
   const listener = net.createServer();
@@ -95,25 +91,16 @@ async function run(runtime: 'node' | 'rust') {
     DISPATCH_ORIGIN: origin,
     PORT: String(port),
   };
-  const executable =
-    runtime === 'rust' ? path.resolve('target/release/dispatch-backend') : process.execPath;
-  const cwd = runtime === 'rust' ? process.cwd() : artifact;
-  execFileSync(
-    executable,
-    runtime === 'rust' ? ['seed'] : [path.join(artifact, 'tooling/cli.js'), 'seed'],
-    { env, cwd, stdio: 'pipe' },
-  );
+  const executable = path.resolve('target/release/dispatch-backend');
+  const cwd = process.cwd();
+  execFileSync(executable, ['seed'], { env, cwd, stdio: 'pipe' });
   const id = dataset(root);
   let server: ChildProcess | undefined;
   let peak = 0;
   let timer: NodeJS.Timeout | undefined;
   try {
     const start = performance.now();
-    server = spawn(
-      executable,
-      runtime === 'rust' ? ['serve'] : [path.join(artifact, 'api/main.js')],
-      { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    server = spawn(executable, ['serve'], { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let logs = '';
     server.stderr!.on('data', (data) => (logs += data));
     server.stdout!.on('data', () => {});
@@ -158,7 +145,7 @@ async function run(runtime: 'node' | 'rust') {
       '/api/dsp/timecards?date=2026-08-15&sort=totalHours&direction=desc',
       '/api/session',
     ];
-    // Validate the workload before measuring either implementation.
+    // Validate the workload before measuring throughput.
     const list = (await (await request(routes[0]!)).json()) as { total: number };
     assert.equal(list.total, employees);
     const daily = (await (await request(routes[3]!)).json()) as { rows: unknown[] };
@@ -223,18 +210,12 @@ async function run(runtime: 'node' | 'rust') {
   }
 }
 try {
-  const { semanticResponses: nodeResponses, ...node } = await run('node'),
-    { semanticResponses: rustResponses, ...rust } = await run('rust');
-  assert.deepEqual(rustResponses, nodeResponses, 'Workforce API responses differ between cores');
+  const { semanticResponses: _responses, ...rust } = await run();
   console.log(
     JSON.stringify(
       {
         employees,
         timecards: employees * days,
-        baselineCommit: JSON.parse(
-          fs.readFileSync(path.join(artifact, 'tooling/build-info.json'), 'utf8'),
-        ).commit,
-        node,
         rust,
         note: 'Same local TCP HTTP workload, synthetic data, including authentication/view checks and complete response transfer. RSS includes all core descendants. Chromium/provider network excluded; concurrency 16 also exercises admission limits.',
       },

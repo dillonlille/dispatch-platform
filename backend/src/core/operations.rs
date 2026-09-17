@@ -167,12 +167,24 @@ pub fn seed(db: &Store) -> Result<()> {
 }
 pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bool>) {
     let mut timer = tokio::time::interval(Duration::from_secs(5));
+    let mut transport = None;
     loop {
         tokio::select! {_=super::cancelled(&mut stop)=>break,_=timer.tick()=>{}};
         if !state.config.mail_available() {
             continue;
         }
-        let pending=state.run(|db|db.platform.all("SELECT id,encrypted_message,attempts FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",[db::now()])).await;
+        if transport.is_none() {
+            let config = state.config.clone();
+            transport = tokio::task::spawn_blocking(move || MailTransport::new(&config))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .map(Arc::new);
+            if transport.is_none() {
+                continue;
+            }
+        }
+        let pending=state.read(|db|db.platform.all("SELECT id,encrypted_message,attempts FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",[db::now()])).await;
         let Ok(rows) = pending else {
             continue;
         };
@@ -183,8 +195,10 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
             let config = state.config.clone();
             let key = state.key.clone();
             let message = row.clone();
+            let client = transport.as_ref().unwrap().clone();
             let result =
-                tokio::task::spawn_blocking(move || deliver(&config, &key, &message)).await;
+                tokio::task::spawn_blocking(move || deliver(&config, &key, &message, &client))
+                    .await;
             let sent = matches!(result, Ok(Ok(())));
             let id = s(&row, "id").to_owned();
             let attempts = n(&row, "attempts");
@@ -192,27 +206,49 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
         }
     }
 }
-fn deliver(config: &Config, key: &[u8], row: &Value) -> Result<()> {
+enum MailTransport {
+    Capture,
+    Cloudflare(reqwest::blocking::Client),
+    Smtp(lettre::SmtpTransport),
+}
+impl MailTransport {
+    fn new(config: &Config) -> Result<Self> {
+        let error = || Error::new("email_delivery_failed", 503);
+        Ok(match config.mail_mode.as_str() {
+            "capture" => Self::Capture,
+            "cloudflare" => Self::Cloudflare(
+                reqwest::blocking::Client::builder()
+                    .user_agent("Dispatch-Mail/1.0")
+                    .timeout(Duration::from_secs(15))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .map_err(|_| error())?,
+            ),
+            _ => Self::Smtp(
+                lettre::SmtpTransport::from_url(config.smtp_url.as_deref().ok_or_else(error)?)
+                    .map_err(|_| error())?
+                    .timeout(Some(Duration::from_secs(15)))
+                    .build(),
+            ),
+        })
+    }
+}
+fn deliver(config: &Config, key: &[u8], row: &Value, transport: &MailTransport) -> Result<()> {
     let value = crypto::decrypt(key, s(row, "id"), s(row, "encrypted_message"))?;
-    if config.mail_mode == "capture" {
+    if let MailTransport::Capture = transport {
         let directory = db::private_dir(&config.platform().join("development-mail"))?;
         db::write_private(
             &directory.join(format!("{}.json", s(row, "id"))),
             &serde_json::to_vec(&value)?,
         )?;
-    } else if config.mail_mode == "cloudflare" {
+    } else if let MailTransport::Cloudflare(client) = transport {
         ensure(
             s(&value, "environment") == config.environment && s(&value, "origin") == config.origin,
             "email_environment_mismatch",
             503,
         )?;
         let error = || Error::new("email_delivery_failed", 503);
-        let response = reqwest::blocking::Client::builder()
-            .user_agent("Dispatch-Mail/1.0")
-            .timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| error())?
+        let response = client
             .post(config.mail_worker_url.as_deref().ok_or_else(error)?)
             .bearer_auth(config.mail_worker_token.as_deref().ok_or_else(error)?)
             .json(&value)
@@ -246,11 +282,9 @@ fn deliver(config: &Config, key: &[u8], row: &Value) -> Result<()> {
             message.body(s(&value, "text").to_owned())
         }
         .map_err(|_| error())?;
-        let transport =
-            lettre::SmtpTransport::from_url(config.smtp_url.as_deref().ok_or_else(error)?)
-                .map_err(|_| error())?
-                .timeout(Some(Duration::from_secs(15)))
-                .build();
+        let MailTransport::Smtp(transport) = transport else {
+            unreachable!()
+        };
         transport.send(&message).map_err(|_| error())?;
     }
     Ok(())

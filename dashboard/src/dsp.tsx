@@ -13,7 +13,7 @@ import {
   type PaycomColumn,
 } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
-import { Badge, Empty, ErrorBox, Header, Loading, Modal, Section, time, title } from './ui.js';
+import { Badge, Empty, ErrorBox, Loading, Modal, time, title } from './ui.js';
 import { type Perform } from './platform.js';
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
 type Daily = {
@@ -435,9 +435,6 @@ export function ConnectionsPage({
     <section className="connections-view" aria-labelledby="connections-heading">
       <div>
         <h2 id="connections-heading">Connections</h2>
-        <p className="muted">
-          Connect the services your DSP uses. All supported features share these connections.
-        </p>
       </div>
       <div className="connection-cards">
         <ConnectionCard provider="paycom" perform={perform} development={development} />
@@ -520,11 +517,6 @@ function ConnectionCard({
               <Plug size={20} />
               {name}
             </h3>
-            <p className="muted">
-              {provider === 'paycom'
-                ? 'Workforce and timecards'
-                : 'Amazon Delivery Execution · Collectors coming later'}
-            </p>
           </header>
           <div className="archived-connection-content">
             <div role="status">

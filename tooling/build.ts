@@ -2,23 +2,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { build as viteBuild } from 'vite';
-import { writeManifest, verifyArtifact } from './artifact.js';
+import { writeManifest } from './artifact.js';
+import { replaceBuild } from './build-output.js';
+
 const root = process.cwd(),
   out = path.join(root, '.build');
-fs.rmSync(out, { recursive: true, force: true });
-fs.mkdirSync(out, { recursive: true });
-execFileSync('cargo', ['build', '--release', '--locked'], { stdio: 'inherit' });
-fs.mkdirSync(path.join(out, 'services/rust'), { recursive: true });
-fs.copyFileSync(
-  'target/release/dispatch-backend',
-  path.join(out, 'services/rust/dispatch-backend'),
-);
-await viteBuild();
-fs.mkdirSync(path.join(out, 'tooling'), { recursive: true });
-const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-fs.writeFileSync(path.join(out, 'tooling/build-info.json'), JSON.stringify({ commit }) + '\n');
-const manifest = writeManifest(out, JSON.parse(fs.readFileSync('package.json', 'utf8')).version);
-verifyArtifact(out);
+if (fs.existsSync(path.join(root, '.runtime')))
+  throw new Error(
+    'Build in an isolated checkout; the installed runtime is managed by the updater.',
+  );
+const manifest = await replaceBuild(out, async (staging) => {
+  execFileSync('cargo', ['build', '--release', '--locked'], { stdio: 'inherit' });
+  const metadata = JSON.parse(
+    execFileSync('cargo', ['metadata', '--no-deps', '--format-version=1', '--locked'], {
+      encoding: 'utf8',
+    }),
+  );
+  fs.mkdirSync(path.join(staging, 'services/rust'), { recursive: true });
+  fs.copyFileSync(
+    path.join(metadata.target_directory, 'release/dispatch-backend'),
+    path.join(staging, 'services/rust/dispatch-backend'),
+  );
+  await viteBuild({ build: { outDir: path.join(staging, 'dashboard') } });
+  fs.mkdirSync(path.join(staging, 'tooling'));
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(
+    path.join(staging, 'tooling/build-info.json'),
+    JSON.stringify({ commit }) + '\n',
+  );
+  writeManifest(staging, JSON.parse(fs.readFileSync('package.json', 'utf8')).version);
+});
 process.stdout.write(
   `Built ${manifest.version}: ${manifest.digest}\n${manifest.files.length} verified files in ${out}\n`,
 );
