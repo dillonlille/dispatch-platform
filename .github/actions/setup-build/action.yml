@@ -1,0 +1,25 @@
+name: Build tools and Rust cache
+description: Pinned tools with separate release/debug caches maintained by trusted branches.
+inputs:
+  profile:
+    description: Cache partition, release or debug.
+    required: true
+  save:
+    description: Allow this job to maintain the cache on dev/main.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version: 22.23.2
+        cache: npm
+    - run: npm ci --ignore-scripts
+      shell: bash
+    - run: rustup show active-toolchain
+      shell: bash
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      with:
+        shared-key: dispatch-${{ inputs.profile }}
+        cache-bin: 'false'
+        save-if: ${{ inputs.save == 'true' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}

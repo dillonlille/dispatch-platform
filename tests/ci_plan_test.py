@@ -34,13 +34,32 @@ class CiPlanTests(unittest.TestCase):
         data = output.getvalue()
         return data, "sha256:" + hashlib.sha256(data).hexdigest()
 
-    def test_only_dashboard_stylesheets_use_shorter_checks(self):
-        self.assertEqual(ci.scope(["dashboard/src/styles.css", "dashboard/src/archive/styles.css"]), "styles")
-        for paths in [[], ["README.md"], ["styles.css"], ["dashboard/src/main.tsx"],
+    def test_dashboard_scope_is_conservative(self):
+        for paths in [["dashboard/src/styles.css", "dashboard/src/archive/styles.css"],
+                      ["dashboard/src/main.tsx"],
+                      ["dashboard/src/meal-breaks.tsx", "shared/meal-breaks.ts", "tests/meal-breaks.test.ts"],
+                      ["tests/browser/meal-breaks.spec.ts"]]:
+            with self.subTest(paths=paths):
+                self.assertEqual(ci.scope(paths), "dashboard")
+        for paths in [[], ["README.md"], ["styles.css"], ["dashboard/vite.config.ts"],
+                      ["shared/contracts/index.ts"], ["shared/paycom.ts"], ["shared/new-helper.ts"],
+                      ["tests/rust-support.ts"], ["tests/rust-core.test.ts"], ["backend/src/main.rs"],
                       ["dashboard/src/styles.css", "package-lock.json"],
                       ["dashboard/src/styles.css", ".github/workflows/checks.yml"]]:
             with self.subTest(paths=paths):
                 self.assertEqual(ci.scope(paths), "full")
+
+    def test_shared_helper_runtime_consumer_forces_full_checks(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch-ci-consumer-") as temp:
+            root = Path(temp)
+            (root / "tooling").mkdir()
+            (root / "tooling/new-runtime.ts").write_text("import { mealPairs } from '../shared/meal-breaks.js';")
+            old = Path.cwd()
+            try:
+                ci.os.chdir(root)
+                self.assertEqual(ci.scope(["shared/meal-breaks.ts"]), "full")
+            finally:
+                ci.os.chdir(old)
 
     def test_move_from_backend_to_css_cannot_hide_a_backend_change(self):
         with tempfile.TemporaryDirectory(prefix="dispatch-ci-plan-") as temp:
@@ -68,11 +87,11 @@ class CiPlanTests(unittest.TestCase):
         self.assertTrue(ci.matches(self.receipt, self.run, self.context, "full"))
         for field, value in {"base": "e" * 40, "head": "e" * 40, "tree": "e" * 40,
                              "baseRef": "main", "repository": "other/repo", "workflow": "other.yml",
-                             "runId": 16, "attempt": 1, "scope": "styles", "format": 2}.items():
+                             "runId": 16, "attempt": 1, "scope": "dashboard", "format": 2}.items():
             with self.subTest(field=field):
                 changed = {**self.receipt, field: value}
                 self.assertFalse(ci.matches(changed, self.run, self.context, "full"))
-        self.assertTrue(ci.matches({**self.receipt, "scope": "styles"}, self.run, self.context, "styles"))
+        self.assertTrue(ci.matches({**self.receipt, "scope": "dashboard"}, self.run, self.context, "dashboard"))
 
     def test_wrong_failed_pending_or_fork_runs_are_not_trusted(self):
         for field, value in {"head_sha": "f" * 40, "event": "push", "status": "in_progress",
@@ -129,6 +148,16 @@ class CiPlanTests(unittest.TestCase):
             self.assertEqual(ci.plan("schedule", "refs/heads/dev", {})[0], "full")
             reuse.assert_not_called()
 
+    def test_draft_checks_defer_until_ready_and_cannot_publish_validation(self):
+        event = copy.deepcopy(self.event)
+        event["pull_request"]["draft"] = True
+        self.assertEqual(ci.plan("pull_request", "refs/pull/1/merge", event)[0], "draft")
+        with patch.object(ci, "merge_context", return_value=self.context), self.assertRaises(ValueError):
+            ci.receipt(event, "full")
+        event["pull_request"]["draft"] = False
+        with patch.object(ci, "changes", return_value=["dashboard/src/main.tsx"]):
+            self.assertEqual(ci.plan("pull_request", "refs/pull/1/merge", event)[0], "dashboard")
+
     def test_receipt_cannot_claim_a_different_checked_out_merge(self):
         environment = {"GITHUB_SHA": self.context["commit"], "GITHUB_RUN_ID": "17", "GITHUB_RUN_ATTEMPT": "2"}
         with patch.dict(ci.os.environ, environment), patch.object(ci, "merge_context", return_value=self.context):
@@ -139,7 +168,7 @@ class CiPlanTests(unittest.TestCase):
                 ci.receipt(changed, "full")
             with patch.object(ci, "changes", return_value=["api/main.ts"]):
                 with self.assertRaises(ValueError):
-                    ci.receipt(self.event, "styles")
+                    ci.receipt(self.event, "dashboard")
 
 
 if __name__ == "__main__":

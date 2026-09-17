@@ -20,17 +20,52 @@ for the current merged `dev` head, after verifying the GitHub download digest,
 runtime inventory and source commit. PR build artifacts and failed/pending checks cannot
 update the environment. Unfinished edits in the running checkout block updates.
 
-PR checks run independent suites concurrently on one runner. A change consisting
-only of dashboard stylesheets runs TypeScript, formatting, a complete build and
-all dashboard browser tests. Other changes run the full suite, including unit,
-dependency, artifact/rollback and Python checks. Unknown changes use the full path.
+Ready PRs run independent jobs on separate GitHub runners:
+
+- **build** builds the release artifact, checks types/formatting, runs dashboard
+  logic and all dashboard browser tests, and verifies the artifact.
+- **core** compiles debug Rust once, then runs Rust/API/Python checks and the
+  dependency audit.
+- **collectors** runs Paycom, Cortex and capacity shards on separate runners.
+  Capacity/tenant-fairness measurements never compete with the other suites.
+- **platform** is the stable final required check. It fails if any required job
+  fails, is cancelled or is unexpectedly skipped. Only this gate can publish a
+  validation receipt or a deployable Dev artifact.
+
+Dashboard source/assets, browser specs and the explicitly reviewed meal-break and
+history helper tests use the dashboard path. The shared meal-break helper qualifies
+only while it has no non-dashboard runtime consumers. New shared helpers, contracts,
+backend code, dependencies, build settings, test infrastructure and CI changes use
+full validation. Renames consider both paths. Unknown changes fail closed to full.
+
+GitHub caches compiled Rust dependencies separately for release/debug profiles,
+keyed by the pinned toolchain, manifests, lockfiles and compiler environment.
+Only trusted dev/main runs maintain caches; PRs and collector shards restore them.
+The core job refreshes the debug cache during full runs, including nightly/manual
+validation. The release job refreshes its cache on merged Dev builds. Missing or
+expired caches cause normal compilation, never skipped validation. CI debug symbols
+and incremental compilation are disabled to keep these disposable caches smaller.
+
+Draft PRs defer validation. Use drafts for unfinished work; marking a PR ready runs
+checks, and later source pushes invalidate the old run. Before the final push or
+marking ready, commit/review the change and run:
+
+```bash
+npm run pr:prepare
+```
+
+This fetches Dev and checks the worktree, base ancestry and other ready Dev PRs.
+Finish earlier ready PRs before refreshing the base and starting the next final run.
+It never merges, pushes or restarts checks. When overlapping final runs are
+intentional, use `npm run pr:prepare -- --allow-concurrent`; combined source changes
+still require validation. Avoid updating a branch repeatedly while its checks run.
 
 A successful same-repository PR publishes a small validation receipt containing
 its base/head commits, complete Git tree and check scope. A merge to `dev` reuses
 those results only when all three revisions match, the latest PR workflow passed,
 and the receipt's GitHub archive digest and run attempt match. Missing, expired,
 failed or mismatched evidence falls back to normal checks. This never installs a
-PR build: the merged commit gets a fresh verified build and a smoke check covering
+PR build: the merged commit gets a fresh verified build using cached dependencies and a smoke check covering
 standalone startup, health/digest, dashboard assets, login, DSP access and Paycom
 settings. The existing updater still requires a successful merged-dev workflow.
 
@@ -67,9 +102,21 @@ root; never point the fixture runner at the persistent Dev state. Frontend edits
 hot reload; restart this local API runner after backend changes. Feature work does
 not change the shared Dev environment before merge.
 
-`npm run build` writes the deployable artifact to `.build/`. It compiles the Rust platform API, CLI and BrowserOS worker (using Cargo's ignored `target/` cache),
-installs locked runtime dependencies, records the source commit, and produces the
-SHA-256 `release.json` inventory. Building alone does not activate it.
+`npm run build` writes the deployable artifact to `.build/`, bundles the dashboard,
+records the source commit and produces the SHA-256 `release.json` inventory.
+Building alone does not activate it.
+
+Locally, `npm run build`, `npm test` and `npm run dev` reuse completed backend
+binaries across worktrees when all Rust inputs, compiler versions, profile and
+build environment match. The cache lives in the repository's common Git directory
+under `dispatch-rust-builds/`, outside live runtime/state and outside feature
+worktrees. Each checkout receives its own copy, verified against a stored digest;
+concurrent builds use a lock. Embedded provider JavaScript and SQL count as Rust
+inputs. Source changes during compilation prevent cache publication. Custom Cargo
+configuration/output roots, build scripts and external path dependencies use normal
+Cargo compilation. Set `DISPATCH_DISABLE_RUST_CACHE=1` for a fresh Cargo invocation.
+Direct Cargo commands remain available; CI always uses Cargo with its dependency
+cache. Preserve the local cache when deleting a completed feature worktree.
 
 Stop temporary servers before cleanup. Verification scripts remove their own
 temporary state; `node tooling/clean-test-output.mjs` removes known reports and
@@ -93,8 +140,10 @@ npm run build
 npm run test:ui -- tests/browser/dashboard.spec.ts --grep 'archived Paycom settings'
 ```
 
-For pipeline/backend changes, `npm run check:ci -- full` runs independent checks
-concurrently. `npm run test:smoke` exercises a fresh standalone fixture without
+For pipeline/backend changes, `npm run check:ci -- full` runs the complete checks locally, keeping native
+capacity tests after compilation. CI runs `build-full`, `core` and the collector
+shards on separate machines. `npm run check:ci -- dashboard` exercises the shorter
+dashboard path, including its built API fixtures and browser coverage. `npm run test:smoke` exercises a fresh standalone fixture without
 starting a browser. The individual verification commands remain available:
 
 ```bash
