@@ -44,6 +44,42 @@ test(
       20000,
     );
     assert.equal(publication(), previous, 'Progress must stay unpublished');
+    const firstDate = f.collector(
+      dsp.id,
+      (db) =>
+        JSON.parse(
+          String(
+            db.prepare('SELECT metadata FROM collection_live_runs WHERE job_id=?').get(id)!
+              .metadata,
+          ),
+        ).from,
+    );
+    const live = (await owner.get(`/api/dsp/timecards?date=${firstDate}`)).value;
+    assert.equal(live.available, true);
+    assert.deepEqual(
+      live.rows
+        .filter((r: any) => ['BB02', 'CC03', 'DD04', 'EE05'].includes(r.employeeCode))
+        .map((r: any) => r.employeeCode)
+        .sort(),
+      ['BB02', 'CC03', 'DD04', 'EE05'],
+    );
+    assert(
+      !live.rows.some((r: any) => r.employeeCode === 'AA01'),
+      'A stalled employee must not appear before its page is complete',
+    );
+    const meals = (await owner.get(`/api/dsp/paycom/meal-breaks?date=${firstDate}`)).value;
+    assert.equal(
+      meals.rows.filter((r: any) =>
+        ['BB02', 'CC03', 'DD04', 'EE05'].includes(r.paycom?.employeeCode),
+      ).length,
+      4,
+      'Paycom punches also appear in Meal Breaks before publication',
+    );
+    assert.equal(
+      (await owner.get('/api/dsp/jobs')).value.find((j: any) => j.id === id).status,
+      'running',
+    );
+
     assert.equal(
       f.state.readsByCode.get('EE05'),
       1,

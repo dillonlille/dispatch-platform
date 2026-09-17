@@ -129,6 +129,7 @@ impl Driver {
         &mut self,
         scope: &Scope,
         metrics: &Recorder,
+        live: &crate::core::live_collection::Writer,
         progress: F,
     ) -> Result<Value>
     where
@@ -138,6 +139,16 @@ impl Driver {
         scope.validate()?;
         let started_at = now();
         let mut candidates = self.candidates(scope).await?;
+        live.start_cortex(
+            scope,
+            json!(
+                candidates
+                    .iter()
+                    .map(|c| json!({"id":c.transporter_id,"name":c.driver}))
+                    .collect::<Vec<_>>()
+            ),
+        )
+        .await?;
         let mut records: BTreeMap<String, (String, Itinerary)> = BTreeMap::new();
         let mut known = HashSet::new();
         let mut reads = 0;
@@ -175,6 +186,13 @@ impl Driver {
                             "cortex_invalid_identity",
                             502,
                         )?;
+                        live.cortex(&Capture {
+                            scope: scope.clone(),
+                            started_at,
+                            finished_at: now(),
+                            itineraries: vec![route.clone()],
+                        })
+                        .await?;
                         records.insert(candidate.id.clone(), (candidate.revision.clone(), route));
                     }
                     Err(error) if error.code == "cortex_source_changed" => {
@@ -208,6 +226,12 @@ impl Driver {
                 progress(95, "Validating meal publication".into()).await?;
                 return Ok(serde_json::to_value(capture)?);
             }
+            live.cortex_drivers(json!(
+                next.iter()
+                    .map(|c| json!({"id":c.transporter_id,"name":c.driver}))
+                    .collect::<Vec<_>>()
+            ))
+            .await?;
             candidates = next;
         }
         Err(Error::new("cortex_source_changed", 502))

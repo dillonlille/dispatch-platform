@@ -75,22 +75,33 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null) {
     const controller = new AbortController();
     let active = true;
     setError('');
-    const read = () =>
-      api<T>(url, undefined, controller.signal)
-        .then((value) => {
-          if (active) {
-            setData(value);
-            setError('');
-          }
-        })
-        .catch((error: Error) => {
-          if (active && error.name !== 'AbortError') setError(error.message);
-        });
+    let reading = false;
+    const read = async () => {
+      if (reading || document.hidden) return;
+      reading = true;
+      try {
+        const value = await api<T>(url, undefined, controller.signal);
+        if (active) {
+          setData(value);
+          setError('');
+        }
+      } catch (error) {
+        if (active && error instanceof Error && error.name !== 'AbortError')
+          setError(error.message);
+      } finally {
+        reading = false;
+      }
+    };
+    const visible = () => {
+      if (!document.hidden) void read();
+    };
+    document.addEventListener('visibilitychange', visible);
     void read();
     const timer = poll ? setInterval(() => void read(), poll) : undefined;
     return () => {
       active = false;
       controller.abort();
+      document.removeEventListener('visibilitychange', visible);
       if (timer) clearInterval(timer);
     };
   }, [url, revision, poll, refreshKey]);

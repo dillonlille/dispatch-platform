@@ -234,6 +234,33 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         query: Value::Object(query),
         ip,
     };
+    if input.method == "GET" && input.path == "/api/dsp/collection-updates" {
+        // Long polling carries the same signed-view header as every other read.
+        // No DB slot or transaction stays open while a client waits.
+        v::fields(&input.query, &["after"])?;
+        let after = v::text(&input.query, "after", 0, 100)?.to_owned();
+        let auth = input.clone();
+        let dsp = state
+            .read(move |db| Ok(s(&auth.context(db, "read")?.dsp, "id").to_owned()))
+            .await?;
+        let _slot = state
+            .updates
+            .slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Error::new("platform_busy", 503))?;
+        let mut updates = state.updates.subscribe(&dsp);
+        if state.updates.token(&updates) == after {
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(20), updates.changed()).await;
+        }
+        let revision = state.updates.token(&updates);
+        // Permission changes and expired sessions take effect during an open wait.
+        state
+            .read(move |db| input.context(db, "read").map(|_| ()))
+            .await?;
+        return Ok(Json(json!({"revision":revision})).into_response());
+    }
     if input.method == "POST" && input.path == "/api/auth/login" {
         v::fields(&input.body, &["email", "password"])?;
         let email = v::email(&input.body, "email")?;
