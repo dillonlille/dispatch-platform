@@ -73,7 +73,7 @@ test('driver results update open timecards and meal breaks without resetting the
   await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.getByRole('heading', { name: 'Currently under development' }).waitFor();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByLabel('Paycom date').fill(date);
   await page.getByRole('button', { name: 'View punches for Live Driver' }).click();
   await expect(page.getByRole('dialog')).toContainText('17:00');

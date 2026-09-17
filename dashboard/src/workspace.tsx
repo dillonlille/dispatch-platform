@@ -104,7 +104,7 @@ export function PaycomPage({
   const owner = ['owner', 'platform_owner'].includes(view.role);
   return (
     <div className="paycom-page">
-      <Header title="Paycom">
+      <Header title="Timecard">
         {owner && (
           <button
             onClick={() => {
@@ -125,7 +125,7 @@ export function PaycomPage({
           ['meal-breaks', 'Meal Breaks'],
           ['employees', 'Employees'],
         ]}
-        label="Paycom"
+        label="Timecard"
       />
       <section className="paycom-workspace-controls" aria-label="Date and sync">
         <div className="paycom-controls-row">

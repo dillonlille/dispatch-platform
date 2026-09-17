@@ -30,7 +30,7 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await expect(
     page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Avery Morgan' })).toBeVisible();
   await page.getByLabel('Search employees').fill('Avery');
@@ -62,7 +62,7 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByLabel('Verification code').fill('123456');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('button', { name: 'Sync now', exact: true }).click();
   await expect(page.getByText('Sync complete', { exact: true })).toBeVisible({
     timeout: 15000,
@@ -104,7 +104,7 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await expect(page.getByRole('link', { name: 'Connections', exact: true })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Paycom', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByLabel('Search employees')).toBeVisible();
   await page.screenshot({
@@ -204,7 +204,7 @@ test('archived Paycom settings persist and affect the workspace', async ({ page 
     await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
     await requested;
     const dspId = new URL(page.url()).hash.split('/')[1]!;
-    const paycom = page.getByRole('link', { name: 'Paycom', exact: true });
+    const paycom = page.getByRole('link', { name: 'Timecard', exact: true });
     await expect(paycom).toHaveAttribute('href', `#dsp/${dspId}/paycom`);
     await expect(page.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute(
       'href',
