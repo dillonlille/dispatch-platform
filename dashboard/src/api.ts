@@ -1,3 +1,4 @@
+import { beginBrowserWrite } from './browser-update.js';
 import { scheduleIssues } from '../../shared/schedules.js';
 import { useEffect, useState, useCallback } from 'react';
 import { parseApiResponse } from '../../shared/contracts/runtime.js';
@@ -62,36 +63,41 @@ export function errorLabel(code: string): string | undefined {
   return labels[code];
 }
 export async function api<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, {
-    method: body === undefined ? 'GET' : 'POST',
-    credentials: 'same-origin',
-    headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}),
-      ...(view ? { 'X-Dispatch-View': view } : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    signal,
-  });
-  const value = await response.json();
-  if (!response.ok) {
-    if (response.status === 401 && url !== '/api/auth/login')
-      window.dispatchEvent(new Event('dispatch-signed-out'));
-    throw new ApiError(
-      value.error,
-      errorLabel(value.error) ?? value.message ?? 'The request could not be completed.',
-      response.status,
-      response.headers.get('x-request-id') ?? undefined,
-    );
-  }
+  const finish = body === undefined ? undefined : beginBrowserWrite();
   try {
-    return parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
-  } catch {
-    throw new ApiError(
-      'invalid_api_response',
-      'The server returned an unexpected response. Refresh and try again.',
-      502,
-      response.headers.get('x-request-id') ?? undefined,
-    );
+    const response = await fetch(url, {
+      method: body === undefined ? 'GET' : 'POST',
+      credentials: 'same-origin',
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}),
+        ...(view ? { 'X-Dispatch-View': view } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal,
+    });
+    const value = await response.json();
+    if (!response.ok) {
+      if (response.status === 401 && url !== '/api/auth/login')
+        window.dispatchEvent(new Event('dispatch-signed-out'));
+      throw new ApiError(
+        value.error,
+        errorLabel(value.error) ?? value.message ?? 'The request could not be completed.',
+        response.status,
+        response.headers.get('x-request-id') ?? undefined,
+      );
+    }
+    try {
+      return parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
+    } catch {
+      throw new ApiError(
+        'invalid_api_response',
+        'The server returned an unexpected response. Refresh and try again.',
+        502,
+        response.headers.get('x-request-id') ?? undefined,
+      );
+    }
+  } finally {
+    finish?.();
   }
 }
 export function useData<T>(url: string, poll = 0, refreshKey?: string | null, dataScope?: string) {

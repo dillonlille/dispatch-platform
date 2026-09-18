@@ -1,3 +1,4 @@
+import { useUpdateState } from './browser-update.js';
 import { useState } from 'react';
 import {
   Wrench,
@@ -136,7 +137,7 @@ export function PaycomPage({
   perform: Perform;
   canCollect: boolean;
 }) {
-  const [selectedTab, setTab] = useState<string>();
+  const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const [syncing, setSyncing] = useState(false);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');

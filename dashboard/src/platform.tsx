@@ -1,3 +1,4 @@
+import { useUpdateState } from './browser-update.js';
 import { useState, type FormEvent } from 'react';
 import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type { DspSummary, AuditEvent, Job, PlatformHealth } from '../../shared/contracts/index.js';
@@ -22,8 +23,8 @@ import {
 export type Perform = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; perform: Perform }) {
   const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000);
-  const [query, setQuery] = useState(''),
-    [filter, setFilter] = useState('all'),
+  const [query, setQuery] = useUpdateState('dsp-query', ''),
+    [filter, setFilter] = useUpdateState('dsp-filter', 'all'),
     [creating, setCreating] = useState(false),
     [suspending, setSuspending] = useState<DspSummary>(),
     [removing, setRemoving] = useState<DspSummary>(),
