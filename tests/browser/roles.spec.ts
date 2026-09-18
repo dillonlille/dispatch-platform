@@ -49,8 +49,8 @@ test('owner creates a role and the member’s interface follows its permissions'
   const context = await browser.newContext();
   const member = await context.newPage();
   await login(member, 'member@dispatch.test');
-  await expect(member.getByRole('link', { name: 'Collections', exact: true })).toBeVisible();
   await member.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await expect(member.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
   await expect(member.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   await member.getByRole('link', { name: 'Team & Roles', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Invite member', exact: true })).toBeVisible();
