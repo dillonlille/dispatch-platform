@@ -7,6 +7,16 @@ inputs:
   save:
     description: Allow this job to maintain the cache on dev/main.
     default: 'true'
+  skip-rust:
+    description: The verified PR artifact already contains the compiled backend.
+    default: 'false'
+outputs:
+  binary-key:
+    description: Exact Rust input key for the release binary.
+    value: ${{ steps.binary-key.outputs.key }}
+  binary-hit:
+    description: Whether the exact release binary cache was restored.
+    value: ${{ steps.binary-cache.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -17,8 +27,30 @@ runs:
     - run: npm ci --ignore-scripts
       shell: bash
     - run: rustup show active-toolchain
+      if: inputs.skip-rust != 'true'
       shell: bash
+    - name: Identify reusable release binary
+      id: binary-key
+      if: inputs.profile == 'release'
+      shell: bash
+      run: |
+        python3 tooling/cargo-build.py --release --cache-key >> "$GITHUB_OUTPUT"
+        echo "DISPATCH_CI_RUST_CACHE=$GITHUB_WORKSPACE/.ci-rust-cache" >> "$GITHUB_ENV"
+    - name: Bind the selected Rust inputs
+      if: steps.binary-key.outputs.key != ''
+      shell: bash
+      env:
+        BINARY_KEY: ${{ steps.binary-key.outputs.key }}
+      run: echo "DISPATCH_CI_RUST_KEY=$BINARY_KEY" >> "$GITHUB_ENV"
+    - name: Restore exact release binary
+      id: binary-cache
+      if: steps.binary-key.outputs.key != '' && inputs.skip-rust != 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .ci-rust-cache/
+        key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.key }}
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      if: inputs.skip-rust != 'true' && steps.binary-cache.outputs.cache-hit != 'true'
       with:
         shared-key: dispatch-${{ inputs.profile }}
         cache-bin: 'false'

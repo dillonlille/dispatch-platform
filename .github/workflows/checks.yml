@@ -33,6 +33,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 tooling/ci-plan.py plan
   build:
+    outputs:
+      rust-key: ${{ steps.tools.outputs.binary-key }}
     needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -40,11 +42,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Reuse the verified PR build
+        id: reuse
+        if: needs.plan.outputs.mode == 'reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tooling/ci-artifact.py
       - uses: ./.github/actions/setup-build
+        id: tools
         with:
           profile: release
+          skip-rust: ${{ steps.reuse.outputs.reused == 'true' }}
       - name: Build, dashboard tests and artifact checks
+        if: steps.reuse.outputs.reused != 'true'
         run: npm run check:ci -- build-${{ needs.plan.outputs.mode }}
+      - name: Smoke test the promoted build
+        if: steps.reuse.outputs.reused == 'true'
+        run: npm run test:smoke
+      - name: Save trusted release binary
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ci-rust-cache/
+          key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
       - name: Preserve workload measurements
         if: always() && needs.plan.outputs.mode == 'full'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -54,10 +75,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - name: Package Dev candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         run: tar -czf dispatch-dev.tar.gz -C .build .
       - name: Pass candidate to final gate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -126,6 +147,8 @@ jobs:
         run: python3 tooling/ci-gate.py
       - name: Record PR validation
         if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          CI_RUST_KEY: ${{ needs.build.outputs.rust-key }}
         run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
       - name: Upload PR validation
         if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
@@ -136,13 +159,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Retrieve this run's Dev candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify candidate source and inventory
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
         run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
+      - name: Preserve the gated PR build
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dispatch-dev.tar.gz
+          if-no-files-found: error
+          retention-days: 7
       - name: Publish verified Dev build
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

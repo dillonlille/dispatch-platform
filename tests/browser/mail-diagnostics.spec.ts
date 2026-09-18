@@ -57,13 +57,19 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
     );
     await expect(field('Failed')).toHaveText('1', { timeout: 20000 });
     await expect(field('Pending')).toHaveText('0');
-    await page.screenshot({ path: '/tmp/dispatch-mail-diagnostics-desktop.png', fullPage: true });
+    await page.screenshot({
+      path: test.info().outputPath('dispatch-mail-diagnostics-desktop.png'),
+      fullPage: true,
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(mail).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    await page.screenshot({ path: '/tmp/dispatch-mail-diagnostics-mobile.png', fullPage: true });
+    await page.screenshot({
+      path: test.info().outputPath('dispatch-mail-diagnostics-mobile.png'),
+      fullPage: true,
+    });
     rejectMail = false;
     await owner.post('/api/platform/dsps', { ownerEmail: 'recovered@example.test' });
     await expect(field('Last delivered')).not.toHaveText('—', { timeout: 20000 });

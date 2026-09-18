@@ -42,6 +42,8 @@ def main():
     if problems:
         print("PR preparation needs attention:\n" + "\n".join("- " + item for item in problems))
         return 1
+    print("Run focused local checks for the changed behavior. GitHub runs the full required validation; "
+          "review the PR while it runs. Repeat checks only for new changes or failures.")
     print("Ready for final validation against " + run("git", "rev-parse", "--short", "origin/dev") + ".")
     own = next((pr for pr in pulls if pr["headRefName"] == branch), None)
     if own and any(check.get("status") in {"QUEUED", "IN_PROGRESS", "PENDING"}

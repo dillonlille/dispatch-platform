@@ -27,3 +27,5 @@ target/
 /data/
 /dsps/
 /.platform.lock
+
+.ci-rust-cache/
