@@ -216,6 +216,7 @@ class DevUpdater:
 
     def status(self, state, commit=None):
         write_json(self.status_file, {"status": state, "commit": commit,
+                                    "digest": json.loads((self.live / ".build/release.json").read_text())["digest"],
                                     "updatedAt": datetime.now(timezone.utc).isoformat()})
 
     def service(self, action):

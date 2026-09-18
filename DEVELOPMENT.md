@@ -49,3 +49,23 @@ The Dev timer still checks every ten seconds, waits for successful checks of the
 current branch head, and verifies the installed runtime. Failed activation restores
 the previous version. Measure PR checks, merge checks and actual deployment
 separately; GitHub runner queue/startup time is outside the updater's control.
+
+## Open browser updates
+
+The served document includes its runtime identity. Signed-in pages check
+`/api/browser-update` every five seconds and when returning to a visible tab.
+The endpoint advertises readiness only after the updater records the matching
+healthy runtime and removes its activation receipt. Production uses its existing
+`production-update.json`; Dev records the installed digest in `dev-update.json`.
+Local development/fixture servers do not require an updater receipt.
+
+Once a different runtime is ready, the page reloads after two seconds without
+pointer, keyboard, touch, input, or scroll activity. Hidden tabs wait until visible.
+Open forms and dialogs conservatively defer refresh until closed or left, including
+saved forms that remain on screen. In-flight API writes also defer refresh.
+DSP/route, Timecard tab/date, supported table filters/sorting/pagination and window
+scroll position survive the refresh. Only explicit navigation state is retained;
+passwords, verification input and form drafts are never serialized. Failed checks
+clear the pending update; a per-build five-minute guard prevents reload loops.
+Storage-blocked browsers skip automatic refresh to preserve state and loop safety.
+Existing tabs need one initial manual refresh to load this feature.

@@ -55,7 +55,7 @@ impl State {
         }
         Ok(Arc::new(Self {
             key: store.key.clone(),
-            assets: http::assets(&config.dashboard)?,
+            assets: http::assets(&config.dashboard, &config.release)?,
             config,
             db_slots: Arc::new(Semaphore::new(4)),
             db_queue: Arc::new(Semaphore::new(64)),

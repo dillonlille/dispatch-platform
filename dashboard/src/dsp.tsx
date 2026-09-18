@@ -1,3 +1,4 @@
+import { useUpdateState } from './browser-update.js';
 import { useCollectionUpdates } from './live-collection.js';
 import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
@@ -27,9 +28,9 @@ export function EmployeesPage({
   preferences?: PaycomPreferences;
 }) {
   const limit = preferences.rows_per_page;
-  const [direction, setDirection] = useState('asc');
-  const [query, setQuery] = useState(''),
-    [offset, setOffset] = useState(0),
+  const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
+  const [query, setQuery] = useUpdateState('employee-query', ''),
+    [offset, setOffset] = useUpdateState('employee-offset', 0),
     [employee, setEmployee] = useState<string>();
   const { data, error } = useData<Employees>(
     `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&direction=${direction}`,
@@ -248,14 +249,15 @@ export function TimecardsPage({
   timezone: string;
   preferences?: PaycomPreferences;
 }) {
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useUpdateState('timecard-offset', 0);
   const calendarToday = localDate(calendarTimezone());
   const [localDay, setLocalDay] = useState(calendarToday);
   const date = sharedDate ?? (localDay > calendarToday ? calendarToday : localDay);
-  const [sort, setSort] = useState(
+  const [sort, setSort] = useUpdateState(
+      'timecard-sort',
       preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
     ),
-    [direction, setDirection] = useState('asc'),
+    [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
     [selectedCode, setSelectedCode] = useState<string>();
   const liveRevision = useCollectionUpdates(date);
   const { data, error } = useData<Daily>(
