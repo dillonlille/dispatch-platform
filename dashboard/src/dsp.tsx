@@ -259,12 +259,18 @@ export function TimecardsPage({
     [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
     [selectedCode, setSelectedCode] = useState<string>();
   const liveRevision = useCollectionUpdates(date);
-  const { data, error } = useData<Daily>(
+  const {
+    data: current,
+    stale,
+    error,
+  } = useData<Daily>(
     `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
     0,
     `${refreshKey}:${liveRevision}`,
     date,
   );
+  // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
+  const data = current ?? stale;
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
@@ -304,7 +310,7 @@ export function TimecardsPage({
             Choose another date or collect the current pay period.
           </Empty>
         ) : (
-          <>
+          <div className="paycom-day-results" aria-busy={!current} inert={!current}>
             <div className="table-wrap">
               <table className="paycom-day-table" aria-label="Daily employee timecards">
                 <thead>
@@ -387,7 +393,7 @@ export function TimecardsPage({
                 Your DSP owner can choose which departments appear in Timecard Settings.
               </Empty>
             )}
-          </>
+          </div>
         )}
         <footer className="paycom-timecard-footer" aria-label="Timecard timezones">
           <span>

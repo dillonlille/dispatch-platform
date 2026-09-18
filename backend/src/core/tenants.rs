@@ -39,6 +39,7 @@ impl Store {
         )?;
         let id = crypto::id("dsp")?;
         self.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,permanent,created_at) VALUES (?,?,?,'provisioning',?,?,?)",params![id,name,self.config.environment,timezone,permanent,iso()])?;
+        super::roles::seed(&self.platform, &id)?;
         self.provision(&id)?;
         self.audit(Some(actor), Some(&id), "dsp.created", "")?;
         self.get_dsp(&id)
@@ -74,7 +75,7 @@ impl Store {
         result
     }
     pub fn dsps(&self, a: &Auth) -> Result<Value> {
-        let rows = self.platform.all("SELECT d.*,m.role member_role,(SELECT MIN(u.email) FROM memberships o JOIN users u ON u.id=o.user_id WHERE o.dsp_id=d.id AND o.role='owner' AND u.status='active') owner_email,CASE WHEN d.permanent=1 THEN (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,(SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name",params![now(),s(&a.user,"id"),flag(&a.user,"platformOwner")])?;
+        let rows = self.platform.all("SELECT d.*,COALESCE((SELECT r.name FROM roles r WHERE r.id=m.role_id),m.role) member_role,(SELECT MIN(u.email) FROM memberships o JOIN users u ON u.id=o.user_id WHERE o.dsp_id=d.id AND o.role='owner' AND u.status='active') owner_email,CASE WHEN d.permanent=1 THEN (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,(SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name",params![now(),s(&a.user,"id"),flag(&a.user,"platformOwner")])?;
         let mut result = Vec::new();
         for row in rows {
             let owner = row["owner_email"]
@@ -191,15 +192,53 @@ impl Store {
         self.get_dsp(id)
     }
     pub fn members(&self, id: &str) -> Result<Value> {
-        Ok(json!(self.platform.all("SELECT m.id,m.user_id userId,m.dsp_id dspId,u.email,u.first_name||' '||u.last_name name,m.role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.dsp_id=? ORDER BY u.first_name,u.last_name",[id])?))
+        let mut rows = self.platform.all("SELECT m.id,m.user_id userId,m.dsp_id dspId,u.email,u.first_name||' '||u.last_name name,COALESCE(r.name,m.role) role,r.id roleId,COALESCE(r.system,m.role='owner') owner FROM memberships m JOIN users u ON u.id=m.user_id LEFT JOIN roles r ON r.id=m.role_id WHERE m.dsp_id=? ORDER BY u.first_name,u.last_name",[id])?;
+        for row in &mut rows {
+            boolean(row, &["owner"]);
+        }
+        Ok(json!(rows))
     }
+    // The owner role is mirrored into the legacy column on every write, so it
+    // stays the single count that protects a DSP from losing its last owner.
     pub fn set_role(&self, c: &Context, member: &str, role: Option<&str>) -> Result<()> {
+        let dsp = s(&c.dsp, "id");
         self.platform.transaction(|| {
-            let row=self.platform.one("SELECT * FROM memberships WHERE id=? AND dsp_id=?",[member,s(&c.dsp,"id")])?.ok_or_else(||Error::new("member_not_found",404))?;
-            if s(&row,"role")=="owner" && role!=Some("owner") { ensure(n(&self.platform.one("SELECT count(*) count FROM memberships WHERE dsp_id=? AND role='owner'",[s(&c.dsp,"id")])?.unwrap(),"count")>1,"last_owner_required",409)?; }
-            if let Some(role)=role {self.platform.exec("UPDATE memberships SET role=? WHERE id=?",[role,member])?;} else {self.platform.exec("DELETE FROM memberships WHERE id=?",[member])?;}
-            self.platform.exec("UPDATE dsps SET revision=revision+1 WHERE id=?",[s(&c.dsp,"id")])?;
-            self.audit(Some(s(&c.auth.user,"id")),Some(s(&c.dsp,"id")),if role.is_some(){"member.role_changed"}else{"member.removed"},role.unwrap_or(""))
+            let row = self
+                .platform
+                .one("SELECT * FROM memberships WHERE id=? AND dsp_id=?", [member, dsp])?
+                .ok_or_else(|| Error::new("member_not_found", 404))?;
+            let current = self
+                .grant(s(&row, "user_id"), dsp)?
+                .ok_or_else(|| Error::new("member_not_found", 404))?;
+            self.ensure_assignable(c, &self.role(dsp, &current.id)?)?;
+            let next = role.map(|id| self.role(dsp, id)).transpose()?;
+            if let Some(next) = &next {
+                self.ensure_assignable(c, next)?;
+            }
+            if current.owner && !next.as_ref().is_some_and(|next| flag(next, "system")) {
+                ensure(n(&self.platform.one("SELECT count(*) count FROM memberships WHERE dsp_id=? AND role='owner'",[dsp])?.unwrap(),"count")>1,"last_owner_required",409)?;
+            }
+            if let Some(next) = &next {
+                self.platform.exec(
+                    "UPDATE memberships SET role=?,role_id=? WHERE id=?",
+                    [Store::legacy_role(next), s(next, "id"), member],
+                )?;
+            } else {
+                self.platform
+                    .exec("DELETE FROM memberships WHERE id=?", [member])?;
+            }
+            self.platform
+                .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
+            self.audit(
+                Some(s(&c.auth.user, "id")),
+                Some(dsp),
+                if next.is_some() {
+                    "member.role_changed"
+                } else {
+                    "member.removed"
+                },
+                next.as_ref().map_or("", |next| s(next, "name")),
+            )
         })
     }
 }

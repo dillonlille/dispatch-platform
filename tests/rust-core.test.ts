@@ -150,8 +150,10 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
     202,
   );
   const mail = path.join(f.root, 'data/platform/development-mail');
-  await until(async () => fs.existsSync(mail) && fs.readdirSync(mail).length > 0);
-  const filename = path.join(mail, fs.readdirSync(mail)[0]!);
+  const completed = () =>
+    fs.existsSync(mail) ? fs.readdirSync(mail).filter((name) => name.endsWith('.json')) : [];
+  await until(async () => completed().length > 0);
+  const filename = path.join(mail, completed()[0]!);
   assert.equal(fs.statSync(filename).mode & 0o077, 0);
   const message = JSON.parse(fs.readFileSync(filename, 'utf8'));
   assert.match(message.html, />Reset password<\/a>/);
@@ -457,9 +459,11 @@ test('existing-account invitations require the account password and revocation r
   const member = await f.client('member@dispatch.test');
   const dev = owner.session.dsps.find((d: { permanent: boolean }) => d.permanent);
   await owner.select(dev.id);
+  const roles: { id: string; name: string }[] = (await owner.get('/api/dsp/roles')).value;
+  const roleId = (name: string) => roles.find((role) => role.name === name)!.id;
   const invited = await owner.post('/api/dsp/members/invite', {
     email: 'member@dispatch.test',
-    role: 'manager',
+    role: roleId('Manager'),
   });
   assert.equal(invited.status, 200);
   assert.equal(invited.value.invitationUrl, undefined);
@@ -495,7 +499,7 @@ test('existing-account invitations require the account password and revocation r
   );
   const pending = await owner.post('/api/dsp/members/invite', {
     email: 'new@dispatch.test',
-    role: 'member',
+    role: roleId('Member'),
   });
   assert.equal(pending.value.invitationUrl, undefined);
   const raw = /token=([A-Za-z0-9_-]{43})/.exec(

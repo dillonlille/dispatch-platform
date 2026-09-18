@@ -293,7 +293,10 @@ async fn persistent_profiles_isolation_egress_and_lifecycle() -> Result<()> {
     let root = tempfile::tempdir()?;
     fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700))?;
     let binary = root.path().join("dispatch-backend");
-    fs::copy(env!("CARGO_BIN_EXE_dispatch-backend"), &binary)?;
+    let source = std::env::var_os("DISPATCH_TEST_BINARY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_dispatch-backend").into());
+    fs::copy(source, &binary)?;
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))?;
     let forbidden = root.path().join("must-not-initialize-platform-state");
     let unconfined = std::process::Command::new(&binary)

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { displayTimezone, saveTimezone } from './preferences.js';
 import type { DspView, SessionView, AuditEvent } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, time } from './ui.js';
+import { Header, Tabs, ErrorBox, time, can } from './ui.js';
 import { ConnectionsPage } from './dsp.js';
 import { type Perform } from './platform.js';
 import { ThemeSection } from './theme.js';
@@ -23,13 +23,13 @@ export function SettingsPage({
   const timezones = ['UTC', ...Intl.supportedValuesOf('timeZone')];
   const [passwordError, setPasswordError] = useState('');
   const [busy, setBusy] = useState(false);
-  const owner = view?.role === 'owner' || view?.role === 'platform_owner';
+  const connections = can(view, 'connections.manage');
   const tabs = [
     ['general', 'General'],
     ['security', 'Security'],
-    ...(owner ? [['connections', 'Connections']] : []),
+    ...(connections ? [['connections', 'Connections']] : []),
     ['theme', 'Theme'],
-    ...(owner ? [['audit', 'Audit log']] : []),
+    ...(can(view, 'audit.view') ? [['audit', 'Audit log']] : []),
   ];
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
   return (
@@ -70,7 +70,9 @@ export function SettingsPage({
               <div>
                 <dt>Role</dt>
                 <dd>
-                  {session.user.platformOwner ? 'Platform owner' : (view?.role ?? 'Team member')}
+                  {session.user.platformOwner
+                    ? 'Platform owner'
+                    : (view?.role.name ?? 'Team member')}
                 </dd>
               </div>
             </dl>
@@ -202,7 +204,7 @@ export function SettingsPage({
           </form>
         </section>
       )}
-      {tab === 'connections' && owner && (
+      {tab === 'connections' && connections && (
         <div className="settings-connections">
           <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
         </div>

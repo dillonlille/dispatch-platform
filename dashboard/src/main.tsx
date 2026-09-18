@@ -16,7 +16,7 @@ import { api, credentials, ApiError } from './api.js';
 import { AuthScreen } from './auth.js';
 import { DspList, AuditPage, ReleasesPage, DiagnosticsPage, type Perform } from './platform.js';
 import { EmployeesPage, TimecardsPage, ConnectionsPage } from './dsp.js';
-import { Badge, Header, Loading, ErrorBox } from './ui.js';
+import { Badge, Header, Loading, ErrorBox, can } from './ui.js';
 import './styles.css';
 import { DspOnboarding } from './onboarding.js';
 import { PaycomSettingsPage } from './paycom-settings.js';
@@ -92,6 +92,13 @@ function App() {
     setView(next);
   }, [session, dspId]);
   useEffect(() => {
+    // Role and membership edits expire every open view of the DSP; reopening
+    // picks up the member's new permissions without a manual reload.
+    const expired = () => void reopen().catch(() => undefined);
+    window.addEventListener('dispatch-view-expired', expired);
+    return () => window.removeEventListener('dispatch-view-expired', expired);
+  }, [reopen]);
+  useEffect(() => {
     const signedOut = () => {
       credentials('');
       setSession(null);
@@ -160,14 +167,18 @@ function App() {
     route.startsWith('reset?')
   )
     return <AuthScreen onLogin={() => load(true)} />;
-  const owner = view?.role === 'owner' || view?.role === 'platform_owner',
-    canCollect = owner || view?.role === 'manager';
-  if (view?.profile?.setupRequired && owner) return <DspOnboarding complete={reopen} />;
+  const canCollect = can(view, 'collections.run'),
+    // The link stays put while a view loads; the page itself waits for the view.
+    canViewTimecard = !view || can(view, 'timecard.view'),
+    canTeam =
+      can(view, 'members.invite') || can(view, 'members.manage') || can(view, 'roles.manage');
+  if (view?.profile?.setupRequired && can(view, 'settings.manage'))
+    return <DspOnboarding complete={reopen} />;
   const nav = dspId
     ? [
         { id: 'overview', label: 'Home Page', icon: House },
-        { id: 'paycom', label: 'Timecard', icon: CalendarDays },
-        ...(owner ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
+        ...(canViewTimecard ? [{ id: 'paycom', label: 'Timecard', icon: CalendarDays }] : []),
+        ...(canTeam ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
         { id: 'settings', label: 'Settings', icon: Settings },
       ]
     : [
@@ -213,17 +224,17 @@ function App() {
           <div key={`${view.dsp.id}:${view.dsp.revision}`}>
             {page === 'overview' ? (
               <HomePage />
-            ) : page === 'paycom' ? (
+            ) : page === 'paycom' && canViewTimecard ? (
               <PaycomPage view={view} perform={perform} canCollect={canCollect} />
-            ) : page === 'paycom-settings' && owner ? (
+            ) : page === 'paycom-settings' && can(view, 'timecard.manage') ? (
               <PaycomSettingsPage dspId={view.dsp.id} />
-            ) : page === 'team' && owner ? (
+            ) : page === 'team' && canTeam ? (
               <TeamPage view={view} perform={perform} reopen={reopen} />
-            ) : page === 'employees' ? (
+            ) : page === 'employees' && canViewTimecard ? (
               <EmployeesPage />
-            ) : page === 'timecards' ? (
+            ) : page === 'timecards' && canViewTimecard ? (
               <TimecardsPage timezone={view.dsp.timezone} />
-            ) : page === 'connections' && owner ? (
+            ) : page === 'connections' && can(view, 'connections.manage') ? (
               <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
             ) : page === 'settings' ? (
               <SettingsPage session={session} view={view} perform={perform} />

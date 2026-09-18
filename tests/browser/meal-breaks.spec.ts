@@ -339,6 +339,67 @@ test('members can open real collected punch data without management controls', a
   ).toBeVisible();
 });
 
+test('switching dates holds the layout until the new day arrives', async ({ page }) => {
+  let hold: Promise<void> | undefined;
+  await page.route('**/api/dsp/paycom/settings', (route) =>
+    route.fulfill({
+      json: {
+        revision: 0,
+        values: paycomDefaults,
+        history: [],
+        options: { departments: [], stations: [] },
+      },
+    }),
+  );
+  await page.route('**/api/dsp/paycom/meal-breaks?*', async (route) => {
+    await hold;
+    await route.fulfill({
+      json: { ...sample(), date: new URL(route.request().url()).searchParams.get('date') },
+    });
+  });
+  await page.route('**/api/dsp/jobs/meal-breaks?*', async (route) => {
+    await hold;
+    const source = {
+      enabled: true,
+      active: false,
+      job: { status: 'succeeded' },
+      collectedAt: null,
+    };
+    await route.fulfill({
+      json: {
+        date: new URL(route.request().url()).searchParams.get('date'),
+        scopeAvailable: true,
+        paycom: source,
+        flex: source,
+      },
+    });
+  });
+  await open(page);
+  const results = page.locator('.paycom-day-results');
+  const sync = page.getByRole('button', { name: 'Sync now', exact: true });
+  await expect(results).toHaveAttribute('aria-busy', 'false');
+  await expect(sync).toBeEnabled();
+  const layout = () =>
+    page.evaluate(() =>
+      ['.meal-page', '.meal-table', '.paycom-timecard-footer'].map(
+        (selector) => document.querySelector(selector)!.getBoundingClientRect().top,
+      ),
+    );
+  const before = await layout();
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  await page.getByRole('button', { name: 'Previous day', exact: true }).click();
+  await expect(results).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
+  await expect(page.getByText('Checking connections…')).toHaveCount(0);
+  await expect(sync).toBeDisabled();
+  expect(await layout()).toEqual(before);
+  release();
+  await expect(results).toHaveAttribute('aria-busy', 'false');
+  await expect(sync).toBeEnabled();
+  // The new day's rows may differ in height; everything above them stays put.
+  expect((await layout()).slice(0, 2)).toEqual(before.slice(0, 2));
+});
 test('shared date and sync controls survive tabs, navigation, reload and collection', async ({
   page,
 }) => {

@@ -94,7 +94,11 @@ pub fn bootstrap(
         409,
     )?;
     let owner = db.create_user(email, first, last, password, true)?;
-    let dsp = db.create_dsp("Dev DSP", "UTC", s(&owner, "id"), true)?;
+    let dsp = if db.config.environment == "preview" {
+        Some(db.create_dsp("Dev DSP", "UTC", s(&owner, "id"), true)?)
+    } else {
+        None
+    };
     Ok(json!({"owner":owner,"dsp":dsp}))
 }
 pub fn seed(db: &Store) -> Result<()> {
@@ -136,8 +140,13 @@ pub fn seed(db: &Store) -> Result<()> {
         false,
     )?;
     db.platform.exec(
-        "INSERT INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,'member')",
-        params![crypto::id("mem")?, s(&member, "id"), s(&north, "id")],
+        "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,'member',?)",
+        params![
+            crypto::id("mem")?,
+            s(&member, "id"),
+            s(&north, "id"),
+            super::roles::default_role(&db.platform, s(&north, "id"), "member")?
+        ],
     )?;
     for dsp in [&dev, &north] {
         let id = s(dsp, "id");

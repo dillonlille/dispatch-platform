@@ -8,7 +8,7 @@ use super::{
     },
     crypto,
     db::{Store, flag, iso, s},
-    ensure, validate as v, workforce,
+    ensure, roles, validate as v, workforce,
 };
 use axum::{
     Json, Router,
@@ -384,7 +384,7 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         let after = v::text(&input.query, "after", 0, 100)?.to_owned();
         let auth = input.clone();
         let dsp = state
-            .read(move |db| Ok(s(&auth.context(db, "read")?.dsp, "id").to_owned()))
+            .read(move |db| Ok(s(&auth.context(db, LIVE_UPDATES)?.dsp, "id").to_owned()))
             .await?;
         let _slot = state
             .updates
@@ -400,7 +400,7 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         let revision = state.updates.token(&updates);
         // Permission changes and expired sessions take effect during an open wait.
         state
-            .read(move |db| input.context(db, "read").map(|_| ()))
+            .read(move |db| input.context(db, LIVE_UPDATES).map(|_| ()))
             .await?;
         return Ok(Json(json!({"revision":revision})).into_response());
     }
@@ -528,7 +528,7 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
         ("POST", "/api/session/dsp") => {
             let a = i.auth(db)?;
             v::fields(b, &["dspId"])?;
-            let c = db.context(&a, v::text(b, "dspId", 1, 100)?, "read")?;
+            let c = db.context(&a, v::text(b, "dspId", 1, 100)?, roles::ACCESS)?;
             db.audit(
                 Some(s(&a.user, "id")),
                 Some(s(&c.dsp, "id")),
@@ -540,7 +540,7 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
                 "",
             )?;
             return Ok(Reply::json(
-                json!({"dsp":c.dsp,"role":c.role,"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?}),
+                json!({"dsp":c.dsp,"role":{"id":c.role,"name":c.role_name,"owner":c.owner},"permissions":if c.owner{roles::all()}else{c.permissions.clone()},"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?}),
             ));
         }
         _ => {}
@@ -601,8 +601,8 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             let mut out = json!({"dsp":dsp});
             if let Some(email) = email {
                 db.platform.transaction(|| {
-                    let raw = db.invite(&a, id, &email, "owner")?;
-                    db.invitation_mail(&a, &email, &name, "owner", &raw, b.get("name").is_none())
+                    let raw = db.invite(&a, id, &email, &db.owner_role(id)?)?;
+                    db.invitation_mail(&a, &email, &name, "Owner", &raw, b.get("name").is_none())
                 })?;
                 out["invitation"] = json!({"email":email,"status":"queued"});
             }
@@ -641,7 +641,14 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             Ok(Reply::json(diagnostics(db, state)?))
         }
         ("GET", "/api/platform/releases") => {
-            let file = db.config.platform().join("dev-update.json");
+            let file = db
+                .config
+                .platform()
+                .join(if db.config.environment == "production" {
+                    "production-update.json"
+                } else {
+                    "dev-update.json"
+                });
             let update=std::fs::read(file).ok().and_then(|s|serde_json::from_slice::<Value>(&s).ok()).map(|v|json!({"status":v["status"],"commit":v["commit"],"updatedAt":v["updatedAt"]}));
             Ok(Reply::json(
                 json!({"version":db.config.version,"environment":db.config.environment,"release":db.config.release,"update":update}),
@@ -666,19 +673,33 @@ fn diagnostics(db: &Store, state: &State) -> Result<Value> {
         json!({"enabled":db.config.development||db.config.environment=="preview","storageAvailableBytes":super::operations::available_space(&db.config.root)?,"runtime":{"name":"Shared platform (Rust)","status":"Running","memoryBytes":memory.0+memory.1,"coreMemoryBytes":memory.0,"workerMemoryBytes":memory.1,"browsers":state.browsers.active()},"dsps":db.platform.all("SELECT d.id,d.name,d.status FROM dsps d WHERE EXISTS (SELECT 1 FROM audit a WHERE a.dsp_id=d.id AND a.action='diagnostics.fixtures_loaded') ORDER BY d.created_at DESC",[])?}),
     )
 }
+// Collection progress refreshes both the timecard pages and the collections page.
+const LIVE_UPDATES: &str = "timecard.view|collections.run";
+// Anyone who works with the team needs the member and role lists to do so.
+const TEAM: &str = "members.invite|members.manage|roles.manage";
+fn tenant_permission(endpoint: &str, detail: Option<&str>, write: bool) -> &'static str {
+    match (endpoint, detail, write) {
+        ("connections", ..) => "connections.manage",
+        ("members", Some("invite"), true) | ("invitations", ..) => "members.invite",
+        ("members", _, true) => "members.manage",
+        ("roles", _, true) => "roles.manage",
+        ("members" | "roles", _, false) => TEAM,
+        ("audit", ..) => "audit.view",
+        ("settings", ..) | ("profile", _, true) => "settings.manage",
+        ("paycom" | "schedule", _, true) | ("schedules", ..) => "timecard.manage",
+        ("jobs", Some("meal-breaks"), false) => "timecard.view",
+        ("jobs", ..) | ("cortex", _, true) => "collections.run",
+        ("overview", ..) => roles::ACCESS,
+        _ => "timecard.view",
+    }
+}
 fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply> {
     let write = i.method == "POST";
     let endpoint = *parts.get(2).unwrap_or(&"");
-    let permission = match endpoint {
-        "connections" => "connections",
-        "members" | "invitations" => "members",
-        "audit" | "settings" => "settings",
-        "profile" if write => "settings",
-        "paycom" | "schedule" | "schedules" if write => "settings",
-        "jobs" | "cortex" if write => "collect",
-        _ => "read",
-    };
-    let c = i.context(db, permission)?;
+    let c = i.context(
+        db,
+        tenant_permission(endpoint, parts.get(3).copied(), write),
+    )?;
     let id = s(&c.dsp, "id");
     let actor = s(&c.auth.user, "id");
     let b = &i.body;
@@ -696,7 +717,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
             let publication = db.collector(id,super::collectors::Provider::Paycom)?.one("SELECT collected_at FROM publications WHERE active=1",[])?;
             Ok(Reply::json(json!({"connection":connection()?,"schedule":db.schedule(id)?,"workforce":{"collectedAt":publication.map(|p|p["collected_at"].clone())}})))
         },
-        ("GET","/api/dsp/overview")=>{let jobs=db.recent_jobs(Some(id),8)?;Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":db.employees(id,"",0,5,false)?,"audit":db.audits(Some(id),10)?})))},
+        ("GET","/api/dsp/overview")=>{let jobs=if c.can("collections.run"){db.recent_jobs(Some(id),8)?}else{json!([])};let workforce=if c.can("timecard.view"){db.employees(id,"",0,5,false)?}else{Value::Null};let audit=if c.can("audit.view"){db.audits(Some(id),10)?}else{json!([])};Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":workforce,"audit":audit})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
         ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,&date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},
@@ -713,7 +734,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
             db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit(Some(actor),Some(id),"dsp.profile_completed","")?;Ok(Reply::ok())
         },
-        ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !["owner","platform_owner"].contains(&c.role.as_str()){value["history"]=json!([]);}Ok(Reply::json(value))},
+        ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !c.can("timecard.manage"){value["history"]=json!([]);}Ok(Reply::json(value))},
         ("GET","/api/dsp/paycom/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_comparison(id,v::text(&i.query,"date",10,10)?,s(&c.dsp,"timezone"))?))},
         ("POST","/api/dsp/paycom/employee-links")=>Ok(Reply::json(db.save_employee_links(id,actor,b)?)),
         ("POST","/api/dsp/paycom/settings")=>{v::fields(b,&["revision","values"])?;Ok(Reply::json(db.save_preferences(id,actor,v::integer(b,"revision",0,i64::MAX)?,&b["values"])?))},
@@ -723,9 +744,11 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         },
         ("GET","/api/dsp/timecards")=>{let q=&i.query;v::fields(q,&["date","sort","direction"])?;let sort=q.get("sort").map(|_|v::choice(q,"sort",&["name","hours","inDay","outLunch","inLunch","outDay","totalHours","condition"])).transpose()?.unwrap_or("name");Ok(Reply::json(db.daily(id,v::text(q,"date",10,10)?,sort,direction(q)?)?))},
         ("GET","/api/dsp/members")=>Ok(Reply::json(db.members(id)?)),
-        ("GET","/api/dsp/invitations")=>Ok(Reply::json(json!(db.platform.all("SELECT email,role,expires_at expiresAt,used_at IS NOT NULL accepted FROM invitations WHERE dsp_id=? ORDER BY expires_at DESC LIMIT 100",[id])?))),
+        ("GET","/api/dsp/invitations")=>Ok(Reply::json(json!(db.platform.all("SELECT i.email,COALESCE(r.name,i.role) role,i.expires_at expiresAt,i.used_at IS NOT NULL accepted FROM invitations i LEFT JOIN roles r ON r.id=i.role_id WHERE i.dsp_id=? ORDER BY i.expires_at DESC LIMIT 100",[id])?))),
+        ("GET","/api/dsp/roles")=>Ok(Reply::json(db.roles(id)?)),
+        ("POST","/api/dsp/roles")=>{let (name,permissions)=role_input(b)?;Ok(Reply::status(db.create_role(&c,&name,&permissions)?,201))},
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
-        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=v::choice(b,"role",&["owner","manager","member"])?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,role)?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),role,&raw,role=="owner" && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
+        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audits(Some(id),200)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
@@ -736,10 +759,25 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
                 if parts.len()==5 && parts[4]=="remove" { db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",key)?;return Ok(Reply::ok()); }
             }
             if !write&&endpoint=="employees"&&parts.len()==4{return Ok(Reply::json(db.employee(id,parts[3])?));}
-            if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::choice(b,"role",&["owner","manager","member"])?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
+            if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::text(b,"role",1,100)?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
+            if write&&endpoint=="roles"&&parts.len()==4{let (name,permissions)=role_input(b)?;return Ok(Reply::json(db.update_role(&c,parts[3],&name,&permissions)?));}
+            if write&&endpoint=="roles"&&parts.len()==5&&parts[4]=="remove"{v::fields(b,&[])?;db.delete_role(&c,parts[3])?;return Ok(Reply::ok());}
             Err(Error::new("not_found",404))
         }
     }
+}
+fn role_input(b: &Value) -> Result<(String, Vec<String>)> {
+    v::fields(b, &["name", "permissions"])?;
+    let permissions = b["permissions"]
+        .as_array()
+        .filter(|list| list.len() <= roles::PERMISSIONS.len())
+        .and_then(|list| {
+            list.iter()
+                .map(|p| p.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| Error::new("invalid_input", 400))?;
+    Ok((v::text(b, "name", 1, 60)?.to_owned(), permissions))
 }
 fn direction(q: &Value) -> Result<bool> {
     Ok(q.get("direction")
@@ -822,7 +860,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
         let job = parts[3].to_owned();
         let (context, result, active_revision) = state
             .run(move |db| {
-                let c = input.context(db, "collect")?;
+                let c = input.context(db, "collections.run")?;
                 v::fields(&input.body, &[])?;
                 let row = db.job(&job, Some(s(&c.dsp, "id")))?;
                 let active_revision =
@@ -852,7 +890,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
         }
         state
             .run(move |db| {
-                db.revalidate(&context, "collect")?;
+                db.revalidate(&context, "collections.run")?;
                 Ok(())
             })
             .await?;
@@ -869,7 +907,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
     if parts.len() == 4 && !write {
         let input = i.clone();
         let c = state
-            .run(move |db| input.context(db, "connections"))
+            .run(move |db| input.context(db, "connections.manage"))
             .await?;
         return Ok(Some(Reply::json(
             state.connection(s(&c.dsp, "id"), provider).await?,
@@ -894,7 +932,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
     }
     let input = i.clone();
     let c = state
-        .run(move |db| input.context(db, "connections"))
+        .run(move |db| input.context(db, "connections.manage"))
         .await?;
     let id = s(&c.dsp, "id").to_owned();
     let b = &i.body;
@@ -909,7 +947,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             let context = c.clone();
             state
                 .run(move |db| {
-                    db.revalidate(&context, "connections")?;
+                    db.revalidate(&context, "connections.manage")?;
                     db.cancel_provider(s(&context.dsp, "id"), provider)
                 })
                 .await?;
@@ -935,7 +973,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
             let context = c.clone();
             state
                 .run(move |db| {
-                    db.revalidate(&context, "connections")?;
+                    db.revalidate(&context, "connections.manage")?;
                     db.cancel_provider(s(&context.dsp, "id"), provider)
                 })
                 .await?;
@@ -992,7 +1030,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                     if session.ready() {
                         let context = c.clone();
                         state
-                            .run(move |db| db.revalidate(&context, "connections"))
+                            .run(move |db| db.revalidate(&context, "connections.manage"))
                             .await?;
                         return Ok(Some(Reply::json(state.connection(&id, provider).await?)));
                     }
@@ -1013,7 +1051,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                 Ok(value) => {
                     let context = c.clone();
                     state
-                        .run(move |db| db.revalidate(&context, "connections"))
+                        .run(move |db| db.revalidate(&context, "connections.manage"))
                         .await?;
                     if action == "screenshot" {
                         return Ok(Some(Reply::json(
@@ -1056,7 +1094,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
         }
     }
     state
-        .run(move |db| db.revalidate(&c, "connections"))
+        .run(move |db| db.revalidate(&c, "connections.manage"))
         .await?;
     Ok(Some(Reply::json(state.connection(&id, provider).await?)))
 }
