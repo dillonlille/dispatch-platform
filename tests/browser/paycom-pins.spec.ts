@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import fs from 'node:fs';
 const auth = fs
   .readFileSync('backend/src/core/browsers/paycom/auth.js', 'utf8')

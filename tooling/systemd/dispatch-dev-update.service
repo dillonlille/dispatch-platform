@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/dispatch-platform/dev/live
+WorkingDirectory=%h/dispatch-platform/dev
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 %h/dispatch-platform/dev/live/tooling/update-dev.py --root %h/dispatch-platform/dev
+ExecStart=/usr/bin/python3 %h/dispatch-platform/dev/.runtime/management/update-dev.py --root %h/dispatch-platform/dev
 TimeoutStartSec=10min
 UMask=0077

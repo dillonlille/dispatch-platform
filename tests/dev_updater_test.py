@@ -39,13 +39,16 @@ def artifact(root, commit, marker="candidate"):
 
 
 class DevUpdaterTests(unittest.TestCase):
+    flat = False
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="dispatch-dev-updater-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "dev"
         self.root.mkdir(mode=0o700)
-        self.live = self.root / "live"
-        self.live.mkdir(mode=0o700)
+        self.live = self.root if self.flat else self.root / "live"
+        if not self.flat:
+            self.live.mkdir(mode=0o700)
         for name in ["config", "data", "data/platform"]:
             (self.root / name).mkdir(mode=0o700)
         self.git("init", "-b", "dev")
@@ -188,6 +191,45 @@ class DevUpdaterTests(unittest.TestCase):
             (self.candidate / "release.json").write_text(json.dumps(manifest))
             with self.assertRaisesRegex(RuntimeError, "Unsupported artifact format/schema"):
                 updater.verify_artifact(self.candidate, self.new)
+
+
+class FlatDevUpdaterTests(DevUpdaterTests):
+    flat = True
+
+    def test_private_state_is_ignored_even_with_an_old_gitignore(self):
+        self.assertEqual(self.instance.live, self.root)
+        self.instance.clean_checkout()
+        (self.root / "dsps").mkdir()
+        (self.root / "dsps/private.json").write_text("private")
+        (self.root / ".platform.lock").touch()
+        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
+        self.assertEqual(self.git("ls-files", "--others", "--exclude-standard"), "")
+
+    def test_update_cannot_overwrite_private_state_with_tracked_files(self):
+        settings = (self.root / "config/updater.json").read_bytes()
+        self.git("add", "-f", "config/updater.json")
+        self.git("commit", "-m", "invalid tracked state")
+        bad = self.git("rev-parse", "HEAD")
+        self.git("reset", "--hard", self.old)
+        (self.root / "config").mkdir(mode=0o700, exist_ok=True)
+        (self.root / "config/updater.json").write_bytes(settings)
+        candidate = self.instance.runtime / "bad"
+        artifact(candidate, bad)
+        with patch.object(self.instance, "service") as service:
+            with self.assertRaisesRegex(RuntimeError, "private environment paths"):
+                self.instance.activate(candidate, bad)
+            service.assert_not_called()
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.old)
+        self.assertEqual((self.root / "data/private-sentinel").read_text(), "retained")
+        self.assertEqual((self.root / "config/updater.json").read_bytes(), settings)
+
+    def test_installed_host_updater_survives_source_rollback(self):
+        updater.install_management(self.live)
+        script = self.live / ".runtime/management/update-dev.py"
+        self.assertEqual(script.stat().st_mode & 0o777, 0o600)
+        self.git("reset", "--hard", self.old)
+        subprocess.run(["python3", str(script), "--root", str(self.root), "--verify"],
+                       check=True, capture_output=True)
 
 
 if __name__ == "__main__":

@@ -21,3 +21,11 @@ dispatch-dev.tar.gz
 target/
 
 .build-staging-*/
+
+# Private state beside the live Dev checkout. Never commit these directories.
+/config/
+/data/
+/dsps/
+/.platform.lock
+
+.ci-rust-cache/

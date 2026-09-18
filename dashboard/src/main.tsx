@@ -1,3 +1,4 @@
+import { useBrowserUpdate } from './browser-update.js';
 import { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -89,6 +90,7 @@ function App() {
   }, [load]);
   const dspId = route.startsWith('dsp/') ? route.split('/')[1] : undefined,
     page = (dspId ? route.split('/')[2] || 'overview' : route).split('?')[0]!;
+  useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
   const reopen = useCallback(async () => {
     if (!session || !dspId) return;
     const next = await api<DspView>('/api/session/dsp', { dspId });

@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1]
 
@@ -39,6 +40,46 @@ class PipelineTests(unittest.TestCase):
             (root / "backend/build.rs").unlink()
             (root / "backend/Cargo.toml").write_text('[dependencies]\nexternal = { path = "../../outside" }\n')
             self.assertFalse(cache.cache_eligible(root, env))
+
+    def test_ci_binary_reuse_requires_explicit_environment_and_exact_validated_inputs(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch-ci-binary-") as temp:
+            root = Path(temp)
+            (root / "backend/src").mkdir(parents=True)
+            (root / "tooling").mkdir()
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["backend"]\n')
+            (root / "backend/Cargo.toml").write_text('[package]\nname = "fixture"\n')
+            source = root / "backend/src/main.rs"
+            source.write_text("fn main() {}")
+            env = {"CI": "true", "CARGO_HOME": str(root / "cargo-home"),
+                   "DISPATCH_CI_RUST_CACHE": str(root / ".ci-rust-cache")}
+            self.assertFalse(cache.cache_eligible(root, env))
+            self.assertTrue(cache.cache_eligible(root, env, allow_ci=True))
+            self.assertFalse(cache.ci_cache_enabled(root, {**env, "DISPATCH_CI_RUST_CACHE": "/other"}))
+            builds = []
+            def compile(args, **_kwargs):
+                builds.append(args)
+                binary = root / "target/release/dispatch-backend"
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_text(source.read_text())
+            with patch.dict(cache.os.environ, env, clear=True), \
+                    patch.object(cache, "__file__", str(root / "tooling/cargo-build.py")), \
+                    patch.object(cache, "output", side_effect=lambda *args, **_kw: str(root / ".git") if args[0] == "git" else "pinned compiler"), \
+                    patch.object(cache.subprocess, "run", side_effect=compile):
+                cache.build(release=True)
+                (root / "target/release/dispatch-backend").unlink()
+                cache.build(release=True)
+                self.assertEqual(len(builds), 1)
+                source.write_text("fn main() { changed(); }")
+                cache.build(release=True)
+                self.assertEqual(len(builds), 2)
+                # An intact cache hit is required even if GitHub restored the key.
+                for binary in (root / ".ci-rust-cache").glob("*/dispatch-backend"):
+                    binary.write_text("corruption")
+                cache.build(release=True)
+                self.assertEqual(len(builds), 3)
+                with patch.dict(cache.os.environ, {"DISPATCH_CI_RUST_KEY": "wrong key"}), self.assertRaises(RuntimeError):
+                    cache.build(release=True)
+                self.assertEqual(len(builds), 3)
 
     def test_gate_requires_every_job_and_rejects_failure_cancellation_and_wrong_skips(self):
         jobs = {name: {"result": "success"} for name in ["plan", "build", "core", "collectors", "rust-advisories"]}
@@ -86,6 +127,7 @@ class PipelineTests(unittest.TestCase):
             self.assertNotEqual(first, key(roots[1], profile="debug"))
             self.assertNotEqual(first, key(roots[1], compiler="new compiler"))
             self.assertNotEqual(first, key(roots[1], env={"RUSTFLAGS": "custom"}))
+            self.assertNotEqual(first, key(roots[1], env={"ImageVersion": "new runner"}))
             (roots[1] / "backend/src/new.rs").write_text("untracked source")
             self.assertNotEqual(first, key(roots[1]))
             (roots[1] / "backend/src/new.rs").unlink()

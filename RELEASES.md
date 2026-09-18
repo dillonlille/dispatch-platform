@@ -1,6 +1,6 @@
 # Dispatch releases
 
-Development lives on `dispatch-dev`. Its `dev/live` checkout tracks `dev`; passing
+Development lives on `dispatch-dev`. Its `/home/thepickle/dispatch-platform/dev` checkout tracks `dev`; passing
 checks for the current merged revision install the verified Dev artifact. Keep
 unfinished work in separate worktrees. Production contains an installed runtime,
 private state and management scripts; it needs neither a Git checkout nor build tools.

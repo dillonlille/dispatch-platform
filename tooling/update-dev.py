@@ -22,9 +22,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runtime_artifact import (MAX_BYTES, REPOSITORY, command, private_directory, require,
                               safe_path, unpack, verify_artifact, write_json)
 
+PRIVATE_PATHS = ("config", "data", "dsps", ".platform.lock")
+
 
 def github(endpoint):
     return json.loads(command("gh", "api", f"repos/{REPOSITORY}/{endpoint}"))
+
+
+def install_management(live):
+    """Keep the reviewed host updater independent of checkout changes/rollback."""
+    target = private_directory(Path(live) / ".runtime/management")
+    for name in ("update-dev.py", "runtime_artifact.py"):
+        source = Path(__file__).with_name(name)
+        if not source.is_file():
+            continue
+        fd, temporary = tempfile.mkstemp(prefix=".install-", dir=target)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                out.write(source.read_bytes())
+                out.flush()
+                os.fsync(out.fileno())
+            os.replace(temporary, target / name)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 class DevUpdater:
@@ -33,9 +54,18 @@ class DevUpdater:
         require(self.root.name == "dev" and self.root.resolve() == self.root,
                 "Updater requires a real dev environment directory")
         private_directory(self.root)
-        self.live = self.root / "live"
+        # Accept the old layout during migration; new installations use dev/.
+        self.live = self.root if (self.root / ".git").is_dir() else self.root / "live"
         require(self.live.resolve() == self.live and (self.live / ".git").is_dir(),
                 "Dev requires its persistent repository checkout")
+        if self.live == self.root:
+            # These exclusions survive rollback to commits predating this layout.
+            exclude = self.live / ".git/info/exclude"
+            existing = exclude.read_text().splitlines() if exclude.exists() else []
+            missing = [f"/{name}" for name in PRIVATE_PATHS if f"/{name}" not in existing]
+            if missing:
+                with exclude.open("a") as out:
+                    out.write("\n# Private Dev environment; preserve across updates.\n" + "\n".join(missing) + "\n")
         self.platform = private_directory(self.root / "data/platform")
         self.runtime = private_directory(self.live / ".runtime")
         self.receipt = self.platform / "dev-activation.json"
@@ -55,9 +85,15 @@ class DevUpdater:
         require(self.git("remote", "get-url", "origin") in (
             f"https://github.com/{REPOSITORY}.git", f"git@github.com:{REPOSITORY}.git"),
             "Unexpected repository origin")
+        self.check_source("HEAD")
+
+    def check_source(self, commit):
+        require(not self.git("ls-tree", "-r", "--name-only", commit, "--", *PRIVATE_PATHS),
+                "Dev source must not contain private environment paths")
 
     def status(self, state, commit=None):
         write_json(self.status_file, {"status": state, "commit": commit,
+                                    "digest": json.loads((self.live / ".build/release.json").read_text())["digest"],
                                     "updatedAt": datetime.now(timezone.utc).isoformat()})
 
     def service(self, action):
@@ -106,6 +142,7 @@ class DevUpdater:
         manifest = verify_artifact(candidate, commit)
         (candidate / "services/rust/dispatch-backend").chmod(0o700)
         self.clean_checkout()
+        self.check_source(commit)
         current = self.git("rev-parse", "HEAD")
         old = verify_artifact(self.live / ".build", current)
         require(old["schema"] == manifest["schema"], "Schema change requires an explicit migration plan")
@@ -185,9 +222,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--install-management", action="store_true",
+                        help="Install reviewed host updater outside tracked source")
     args = parser.parse_args()
     os.umask(0o077)
     updater = DevUpdater(args.root)
+    if args.install_management:
+        updater.clean_checkout()
+        install_management(updater.live)
+        return
     if args.verify:
         updater.clean_checkout()
         manifest = verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))

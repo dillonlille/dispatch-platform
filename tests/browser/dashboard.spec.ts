@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
 async function login(page: Page, email = 'owner@dispatch.test') {
   await page.goto('/');
@@ -8,7 +9,23 @@ async function login(page: Page, email = 'owner@dispatch.test') {
 }
 test('owner dashboard, search, workforce, timecards, connection verification and collection', async ({
   page,
+  dispatch,
 }) => {
+  const owner = await dispatch.client();
+  const dsp = owner.session.dsps.find((d: any) => d.name === 'Northline Logistics');
+  await owner.select(dsp.id);
+  await owner.post('/api/dsp/profile', {
+    name: dsp.name,
+    abbreviation: 'NL',
+    stationCode: 'DEMO1',
+    timezone: 'America/Chicago',
+  });
+  await owner.select(dsp.id);
+  const cortex = await owner.post('/api/dsp/connections/cortex', {
+    username: 'fixture@example.test',
+    password: 'fixture-password',
+  });
+  expect(cortex.status).toBe(200);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await login(page);
@@ -48,7 +65,11 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByLabel('Close dialog').click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Connections', exact: true }).click();
-  await page.getByRole('button', { name: 'Update credentials' }).click();
+  await page
+    .getByRole('article')
+    .filter({ has: page.getByRole('heading', { name: 'Paycom', exact: true }) })
+    .getByRole('button', { name: 'Update credentials' })
+    .click();
   await page.getByLabel('Client code').fill('DEMO1');
   await page.getByLabel('Username', { exact: true }).fill('test-user');
   await page.getByLabel('Password', { exact: true }).fill('require-verification');
@@ -63,6 +84,8 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  // Fixture meal timestamps describe a complete business day.
+  await page.getByLabel('Paycom date').fill('2026-01-11');
   await page.getByRole('button', { name: 'Sync now', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
     'Paycom synced',
@@ -70,13 +93,25 @@ test('owner dashboard, search, workforce, timecards, connection verification and
       timeout: 15000,
     },
   );
+  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toContainText(
+    'Flex synced',
+    { timeout: 15000 },
+  );
+  await page.screenshot({
+    path: test.info().outputPath('sync-both-providers.png'),
+    fullPage: true,
+  });
   await page.getByRole('link', { name: 'Collections', exact: true }).click();
   const history = page.getByRole('region', { name: 'Collection performance history' });
   await expect(history).toContainText('Last successful collection');
   await expect(history).toContainText('Median collection time');
   await expect(history.getByLabel('Collection source')).toBeVisible();
   await expect(history).toContainText('Needs 5 full runs');
-  const collection = page.getByRole('row').filter({ hasText: 'Collection completed' }).first();
+  const collection = page
+    .getByRole('row')
+    .filter({ hasText: 'Collection completed' })
+    .filter({ hasText: 'Paycom' })
+    .first();
   await collection.getByText('Attempt details', { exact: true }).click();
   await expect(collection.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
     '12 employees · 84 daily records',
@@ -121,6 +156,7 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
 
 test('create a DSP and accept its owner invitation while another account is signed in', async ({
   page,
+  dispatch,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -132,10 +168,7 @@ test('create a DSP and accept its owner invitation while another account is sign
     page.getByText('Invitation email queued for invited-owner@dispatch.test', { exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel('Invitation link')).toHaveCount(0);
-  const message = await capturedMail(
-    process.env.DISPATCH_TEST_STATE_ROOT!,
-    'invited-owner@dispatch.test',
-  );
+  const message = await capturedMail(dispatch.root, 'invited-owner@dispatch.test');
   await page.goto('about:blank');
   await page.setContent(message.html);
   await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();

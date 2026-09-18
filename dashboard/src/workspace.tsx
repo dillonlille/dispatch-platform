@@ -1,3 +1,4 @@
+import { useUpdateState } from './browser-update.js';
 import { useState } from 'react';
 import {
   Wrench,
@@ -136,7 +137,7 @@ export function PaycomPage({
   perform: Perform;
   canCollect: boolean;
 }) {
-  const [selectedTab, setTab] = useState<string>();
+  const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const [syncing, setSyncing] = useState(false);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
@@ -157,10 +158,10 @@ export function PaycomPage({
   const meals = tab === 'meal-breaks';
   const timecards = tab === 'timecards';
   const daily = timecards || meals;
-  const activeSync = sourceState?.paycom.active || (meals && sourceState?.flex.active);
+  const activeSync = sourceState?.paycom.active || (daily && sourceState?.flex.active);
   const collectedAt = overview.data?.workforce.collectedAt;
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
-  const syncUnavailable = meals
+  const syncUnavailable = daily
     ? !sourceState
       ? 'Checking connections…'
       : !sourceState.paycom.enabled
@@ -168,7 +169,7 @@ export function PaycomPage({
         : !sourceState.flex.enabled
           ? 'Connect Cortex in Settings → Connections to sync Flex.'
           : !sourceState.scopeAvailable
-            ? 'Flex needs an initial station collection before Sync now is available.'
+            ? 'Complete your DSP profile with a station code to sync Flex.'
             : ''
     : !data?.enabled
       ? 'Connect Paycom to sync.'
@@ -179,25 +180,21 @@ export function PaycomPage({
       disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
       title={
         syncUnavailable ||
-        (meals
-          ? `Sync Flex and Paycom for ${date}`
-          : tab === 'employees'
-            ? 'Sync Paycom’s current pay period'
-            : `Sync Paycom for ${date}`)
+        (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
       }
       onClick={async () => {
         setSyncing(true);
         try {
           await perform(
             async () => {
-              await api(meals ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
+              await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
                 requestId: crypto.randomUUID(),
                 ...(tab !== 'employees' ? { date } : {}),
               });
               refresh();
               syncState.refresh();
             },
-            meals ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
+            daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
           );
         } finally {
           setSyncing(false);
@@ -214,7 +211,7 @@ export function PaycomPage({
         {daily && canCollect && (
           <>
             <SourceSyncStatus name="Paycom" source={sourceState?.paycom} compact />
-            {meals && <SourceSyncStatus name="Flex" source={sourceState?.flex} compact />}
+            <SourceSyncStatus name="Flex" source={sourceState?.flex} compact />
           </>
         )}
         {daily && syncButton}

@@ -97,7 +97,7 @@ def matches(receipt, run, context, expected_scope):
             and receipt.get("scope") in {"full", expected_scope})
 
 
-def validated_run(context):
+def validated_receipt(context):
     runs = github(f"actions/workflows/checks.yml/runs?event=pull_request&head_sha={context['head']}&per_page=5")["workflow_runs"]
     # Never revive an older green run after a newer failed/pending rerun.
     if not runs:
@@ -114,8 +114,13 @@ def validated_run(context):
     archive = github(f"actions/artifacts/{artifact['id']}/zip", binary=True)
     receipt = read_receipt(archive, artifact.get("digest"))
     if matches(receipt, run, context, scope(changes(context["base"]))):
-        return run["id"]
+        return run, receipt
     return None
+
+
+def validated_run(context):
+    verified = validated_receipt(context)
+    return verified[0]["id"] if verified else None
 
 
 def plan(event_name, ref, event):
@@ -153,9 +158,13 @@ def receipt(event, selected):
         raise ValueError("Validation receipt requires the actual same-repository PR merge")
     if selected != "full" and selected != scope(changes(context["base"])):
         raise ValueError("Insufficient validation scope")
-    return {"format": 1, "repository": REPOSITORY, "workflow": WORKFLOW, "baseRef": "dev",
-            "runId": int(os.environ["GITHUB_RUN_ID"]), "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-            "scope": selected, **context}
+    value = {"format": 1, "repository": REPOSITORY, "workflow": WORKFLOW, "baseRef": "dev",
+             "runId": int(os.environ["GITHUB_RUN_ID"]), "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+             "scope": selected, **context}
+    rust_key = os.environ.get("CI_RUST_KEY", "")
+    if re.fullmatch(r"[a-f0-9]{64}", rust_key):
+        value["rustKey"] = rust_key
+    return value
 
 
 def main():

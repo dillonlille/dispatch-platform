@@ -109,6 +109,21 @@ impl IntoResponse for Reply {
         response
     }
 }
+pub fn browser_update_ready(config: &super::config::Config) -> bool {
+    let channel = if config.environment == "production" {
+        "production"
+    } else {
+        "dev"
+    };
+    let platform = config.platform();
+    let status = std::fs::read(platform.join(format!("{channel}-update.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    !platform.join(format!("{channel}-activation.json")).exists()
+        && (config.development
+            || status.is_some_and(|s| s["status"] == "ready" && s["digest"] == config.release))
+}
+
 pub struct Asset {
     bytes: axum::body::Bytes,
     etag: String,
@@ -117,7 +132,7 @@ pub struct Asset {
 }
 // Artifacts are immutable for the process lifetime. Deployment restarts the core.
 // Load once so both GET and HEAD need no filesystem work on the request path.
-pub fn assets(root: &std::path::Path) -> Result<HashMap<String, Asset>> {
+pub fn assets(root: &std::path::Path, release: &str) -> Result<HashMap<String, Asset>> {
     let mut files = vec![("/".to_owned(), root.join("index.html"))];
     let directory = root.join("assets");
     if directory.is_dir() {
@@ -137,7 +152,20 @@ pub fn assets(root: &std::path::Path) -> Result<HashMap<String, Asset>> {
         if !file.is_file() {
             continue;
         }
-        let bytes = std::fs::read(&file)?;
+        let mut bytes = std::fs::read(&file)?;
+        if route == "/" {
+            let html = String::from_utf8_lossy(&bytes);
+            bytes = html
+                .replacen(
+                    "</head>",
+                    &format!(
+                        "<meta name=\"dispatch-build\" content=\"{}\"></head>",
+                        crypto::sha(release.as_bytes())
+                    ),
+                    1,
+                )
+                .into_bytes();
+        }
         size += bytes.len();
         ensure(size <= 64 * 1024 * 1024, "dashboard_too_large", 503)?;
         let extension = file.extension().and_then(|s| s.to_str()).unwrap_or("");
@@ -267,6 +295,16 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
     }
     if method == "GET" && path == "/api/health" {
         return Ok(Json(json!({"status":"ready","environment":state.config.environment,"release":state.config.release,"runtime":"rust"})).into_response());
+    }
+    if method == "GET" && path == "/api/browser-update" {
+        let ready = browser_update_ready(&state.config);
+        let mut response =
+            Json(json!({"build":crypto::sha(state.config.release.as_bytes()),"ready":ready}))
+                .into_response();
+        response
+            .headers_mut()
+            .insert("cache-control", "no-store".parse().unwrap());
+        return Ok(response);
     }
     if (method == "GET" || method == "HEAD") && (path == "/" || path.starts_with("/assets/")) {
         ensure(

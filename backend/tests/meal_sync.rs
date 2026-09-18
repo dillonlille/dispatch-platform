@@ -62,6 +62,44 @@ fn jobs(db: &Store, id: &str) -> Vec<Value> {
     db.list_jobs(Some(id)).unwrap().as_array().unwrap().clone()
 }
 #[test]
+fn first_sync_discovers_from_tenant_profile_and_replays_after_publication() {
+    let (_root, db, id, actor) = fixture();
+    enable(&db, &id, Provider::Paycom);
+    enable(&db, &id, Provider::Cortex);
+    db.set_profile(&id, json!({"stationCode":"DOT4", "abbreviation":"FSCL"}))
+        .unwrap();
+    assert_eq!(
+        db.meal_sync_status(&id, "2026-01-11").unwrap()["scopeAvailable"],
+        true
+    );
+    let queued = db
+        .enqueue_meal_sync(&id, &actor, "first:ñ", "2026-01-11")
+        .unwrap();
+    assert_eq!(queued["jobs"].as_array().unwrap().len(), 2);
+    let row = db.job(s(&queued["jobs"][1], "id"), Some(&id)).unwrap();
+    let request: Value = serde_json::from_str(s(&row, "request")).unwrap();
+    assert_eq!(request["station"], "DOT4");
+    assert_eq!(request["dspAbbreviation"], "FSCL");
+    assert_eq!(request["dspName"], db.get_dsp(&id).unwrap()["name"]);
+    assert!(request.get("serviceAreaId").is_none());
+    db.cancel_dsp(&id).unwrap();
+    seed(&db, &id, "2026-01-11", 1);
+    seed(&db, &id, "2026-01-11", 2);
+    let replay = db
+        .enqueue_meal_sync(&id, &actor, "first:ñ", "2026-01-11")
+        .unwrap();
+    for index in 0..2 {
+        assert_eq!(queued["jobs"][index]["id"], replay["jobs"][index]["id"]);
+    }
+    assert_eq!(jobs(&db, &id).len(), 2);
+    assert_eq!(
+        db.enqueue_meal_sync(&id, &actor, "first:ñ", "2026-01-12")
+            .unwrap_err()
+            .code,
+        "idempotency_conflict"
+    );
+}
+#[test]
 fn combined_sync_reuses_tenant_scope_records_date_and_is_idempotent() {
     let (_root, db, id, actor) = fixture();
     enable(&db, &id, Provider::Paycom);

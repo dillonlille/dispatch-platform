@@ -24,20 +24,20 @@ test('Meal Breaks sync authorizes both collectors and publishes their selected d
     (await owner.post('/api/dsp/jobs/meal-breaks', request)).value.error,
     'meal_sync_scope_required',
   );
-  const seed = await owner.post('/api/dsp/cortex/meal-breaks/collect', {
-    requestId: 'initial-scope',
-    date: '2026-01-10',
-    station: 'DEMO1',
-    serviceAreaId: 'area-demo',
-    provider: 'provider-demo',
+  const profile = await owner.post('/api/dsp/profile', {
+    name: dsp.name,
+    abbreviation: 'NL',
+    stationCode: 'DEMO1',
     timezone: 'America/Los_Angeles',
   });
-  assert.equal(seed.status, 202, seed.body);
-  await until(
-    async () =>
-      (await owner.get('/api/dsp/jobs')).value.find((j: any) => j.id === seed.value.id)?.status ===
-      'succeeded',
+  assert.equal(profile.status, 200, profile.body);
+  await owner.select(dsp.id);
+  await member.select(dsp.id);
+  assert.equal(
+    (await owner.get('/api/dsp/jobs/meal-breaks?date=2026-01-11')).value.scopeAvailable,
+    true,
   );
+  assert.deepEqual((await owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-11')).value, []);
   const queued = await owner.post('/api/dsp/jobs/meal-breaks', request);
   assert.equal(queued.status, 202, queued.body);
   assert.equal(queued.value.jobs.length, 2);
@@ -63,6 +63,11 @@ test('Meal Breaks sync authorizes both collectors and publishes their selected d
   const comparison = (await owner.get('/api/dsp/paycom/meal-breaks?date=2026-01-11')).value;
   assert(comparison.paycomCollectedAt);
   assert.equal(comparison.cortexPublications.length, 1);
+  // Publication must not change the meaning of a retried first-use request.
+  assert.deepEqual(
+    (await owner.post('/api/dsp/jobs/meal-breaks', request)).value.jobs.map((j: any) => j.id),
+    queued.value.jobs.map((j: any) => j.id),
+  );
   assert.equal((await member.get('/api/dsp/jobs/meal-breaks?date=2026-01-11')).status, 200);
   const other = owner.session.dsps.find((d: any) => d.permanent);
   await owner.select(other.id);

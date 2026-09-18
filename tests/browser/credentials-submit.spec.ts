@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('credentials close before login finishes, errors stay on the card, and CAPTCHA opens after retry', async ({
   page,

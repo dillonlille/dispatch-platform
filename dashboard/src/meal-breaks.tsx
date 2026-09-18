@@ -1,3 +1,4 @@
+import { useUpdateState } from './browser-update.js';
 import { useCollectionUpdates } from './live-collection.js';
 import { Fragment, useMemo, useState } from 'react';
 import {
@@ -420,10 +421,10 @@ export function MealBreaksPage({
   owner: boolean;
   preferences: PaycomPreferences;
 }) {
-  const [query, setQuery] = useState(''),
-    [filter, setFilter] = useState('all'),
-    [page, setPage] = useState(0),
-    [descending, setDescending] = useState(false);
+  const [query, setQuery] = useUpdateState('meal-query', ''),
+    [filter, setFilter] = useUpdateState('meal-filter', 'all'),
+    [page, setPage] = useUpdateState('meal-page', 0),
+    [descending, setDescending] = useUpdateState('meal-descending', false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()),
     [linking, setLinking] = useState(false);
   const liveRevision = useCollectionUpdates(date);

@@ -20,6 +20,49 @@ pub struct Scope {
     pub provider: String,
     pub timezone: String,
 }
+// The server pins the DSP's profile when queuing first-use discovery. Keep this
+// request unchanged after resolving it, so retries remain idempotent.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CollectionRequest {
+    Scoped(Scope),
+    Discover(Discovery),
+}
+impl CollectionRequest {
+    pub fn validate_scope(&self, scope: &Scope) -> Result<()> {
+        scope.validate()?;
+        let matches = match self {
+            Self::Scoped(expected) => scope == expected,
+            Self::Discover(discovery) => {
+                scope == &discovery.scope(&scope.service_area_id, &scope.provider)?
+                    && !["ALL_DSPS", "ALL_DRIVERS"].contains(&scope.provider.as_str())
+            }
+        };
+        ensure(matches, "cortex_scope_mismatch", 502)
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Discovery {
+    pub date: String,
+    pub station: String,
+    pub timezone: String,
+    pub dsp_name: String,
+    pub dsp_abbreviation: String,
+}
+impl Discovery {
+    pub fn scope(&self, service_area_id: &str, provider: &str) -> Result<Scope> {
+        let scope = Scope {
+            date: self.date.clone(),
+            station: self.station.clone(),
+            timezone: self.timezone.clone(),
+            service_area_id: service_area_id.into(),
+            provider: provider.into(),
+        };
+        scope.validate()?;
+        Ok(scope)
+    }
+}
 fn token(v: &str) -> bool {
     !v.is_empty()
         && v.len() <= 256
