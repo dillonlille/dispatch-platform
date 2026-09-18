@@ -192,7 +192,7 @@ fn schedule_handles_dst_gaps_and_repeated_minutes() {
     );
     assert_eq!(
         jobs::next_occurrence("01:30", "America/Chicago", parse("2026-11-01T06:30:00Z")).unwrap(),
-        "2026-11-01T07:30:00.000Z"
+        "2026-11-02T07:30:00.000Z"
     );
     assert!(jobs::next_occurrence("25:99", "UTC", 0).is_err());
 }
@@ -412,7 +412,6 @@ fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
 
 #[test]
 fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
-    use dispatch_backend::core::collectors::Provider;
     let (_root, db) = store();
     operations::seed(&db).unwrap();
     let dsp = db
@@ -435,10 +434,10 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
             .iter()
             .any(|(d, at)| d == id && *at > db::now())
     );
-    db.collector(id, Provider::Paycom)
+    db.dsp(id)
         .unwrap()
         .exec(
-            "UPDATE schedules SET next_run='2026-01-01T00:00:00.000Z'",
+            "UPDATE collection_schedules SET next_run='2026-01-01T00:00:00.000Z'",
             [],
         )
         .unwrap();

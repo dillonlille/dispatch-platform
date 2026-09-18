@@ -406,6 +406,8 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
     let invalidate_schedule = input.method == "POST"
         && (input.path.contains("/dsps")
             || input.path.ends_with("/schedule")
+            || (input.path.contains("/schedules") && !input.path.ends_with("/preview"))
+            || input.path.ends_with("/profile")
             || input.path.ends_with("/settings"));
     let pool = state.clone();
     let reply = if input.method == "GET" && !input.path.starts_with("/api/invitations/") {
@@ -597,7 +599,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         "members" | "invitations" => "members",
         "audit" | "settings" => "settings",
         "profile" if write => "settings",
-        "paycom" | "schedule" if write => "settings",
+        "paycom" | "schedule" | "schedules" if write => "settings",
         "jobs" | "cortex" if write => "collect",
         _ => "read",
     };
@@ -627,6 +629,9 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/jobs/meal-breaks")=>{v::fields(b,&["requestId","date"])?;let result=db.enqueue_meal_sync(id,actor,v::text(b,"requestId",1,128)?,v::text(b,"date",10,10)?)?;db.audit(Some(actor),Some(id),"meal_breaks.sync_requested","")?;Ok(Reply::status(result,202))},
         ("POST","/api/dsp/cortex/meal-breaks/collect")=>{let scope=super::meals::Scope::request(b,s(&c.dsp,"timezone"))?;let job=db.enqueue_meals(id,Some(actor),v::text(b,"requestId",1,128)?,&scope)?;db.audit(Some(actor),Some(id),"cortex.collection.requested","")?;Ok(Reply::status(job,202))},
         ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
+        ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
+        ("POST","/api/dsp/schedules/preview")=>Ok(Reply::json(db.preview_schedule(id,b)?)),
+        ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit(Some(actor),Some(id),"schedule.created",s(&result,"name"))?;Ok(Reply::status(result,201))},
         ("GET","/api/dsp/schedule")=>Ok(Reply::json(db.schedule(id)?)),
         ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
@@ -649,6 +654,12 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audits(Some(id),200)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
+            if write && endpoint=="schedules" {
+                let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;
+                if parts.len()==4 { let result=db.save_collection_schedule(id,Some(key),b)?;db.audit(Some(actor),Some(id),"schedule.updated",s(&result,"name"))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="enabled" { let result=db.enable_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.toggled",key)?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="remove" { db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",key)?;return Ok(Reply::ok()); }
+            }
             if !write&&endpoint=="employees"&&parts.len()==4{return Ok(Reply::json(db.employee(id,parts[3])?));}
             if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::choice(b,"role",&["owner","manager","member"])?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
             Err(Error::new("not_found",404))
