@@ -117,7 +117,9 @@ function timecard(url: URL, mismatch: boolean, dailyHours = 8) {
   }).join('');
   return `<title>Timecard Editor</title><input type="password" hidden aria-label="Hidden account settings"><input name="firstrefno" type="hidden" value="${url.searchParams.get('firstrefno')}"><table id="tbltimesheet"><thead><tr>${headers.map((h) => `<th data-column="${h}">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div id="periodtotals">${dailyHours * 2}</div>`;
 }
-export async function paycomFixture() {
+export async function paycomFixture(
+  extraRoute?: (req: http.IncomingMessage, res: http.ServerResponse) => boolean,
+) {
   const events: string[] = [];
   const state = {
     rejection: false,
@@ -147,6 +149,7 @@ export async function paycomFixture() {
     requests: [] as Record<string, unknown>[],
   };
   const server = http.createServer(async (req, res) => {
+    if (extraRoute?.(req, res)) return;
     const url = new URL(req.url!, 'http://fixture.invalid');
     const account = decodeURIComponent(
       req.headers.cookie?.match(/(?:^|; )fixture_account=([^;]+)/)?.[1] ?? credentials.username,

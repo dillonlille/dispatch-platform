@@ -4,13 +4,24 @@ use super::{
     collectors::Provider,
     db::{Store, flag, s},
     ensure,
-    meals::Scope,
+    meals::{Discovery, Scope},
     workforce,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
 
 impl Store {
+    fn meal_sync_discovery(&self, id: &str, date: &str) -> Result<Discovery> {
+        let profile = self.profile(id)?;
+        let dsp = self.get_dsp(id)?;
+        Ok(Discovery {
+            date: date.into(),
+            station: s(&profile, "stationCode").into(),
+            timezone: s(&dsp, "timezone").into(),
+            dsp_name: s(&dsp, "name").into(),
+            dsp_abbreviation: s(&profile, "abbreviation").into(),
+        })
+    }
     pub(crate) fn meal_sync_scopes(&self, id: &str, date: &str) -> Result<Vec<Scope>> {
         let db = self.collector(id, Provider::Cortex)?;
         // Reuse the selected day's proven scopes. For an uncollected day, use the
@@ -55,8 +66,14 @@ impl Store {
         // Reading a calendar date is valid even when the viewer is a day ahead
         // of the DSP. Collection still validates each provider's business date.
         super::validate::date(date)?;
+        let discovery = self.meal_sync_discovery(id, date)?;
+        let station_available = (3..=8).contains(&discovery.station.len())
+            && discovery
+                .station
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
         Ok(
-            json!({"date":date,"scopeAvailable":!self.meal_sync_scopes(id,date)?.is_empty(),
+            json!({"date":date,"scopeAvailable":station_available || !self.meal_sync_scopes(id,date)?.is_empty(),
             "paycom":self.sync_source(id,date,Provider::Paycom)?,
             "flex":self.sync_source(id,date,Provider::Cortex)?}),
         )
@@ -73,13 +90,51 @@ impl Store {
             "meal_sync_flex_required",
             409,
         )?;
+        // Replay the original batch even after discovery publishes its first
+        // scope, or subsequent collections change the available stations.
+        let prefix = format!("meal:{key}:");
+        let existing = self.jobs.all("SELECT * FROM jobs WHERE dsp_id=? AND substr(idempotency_key,1,?)=? ORDER BY CASE kind WHEN 'paycom.collect' THEN 0 ELSE 1 END,idempotency_key", params![id,prefix.chars().count() as i64,prefix])?;
+        let existing: Vec<_> = existing
+            .into_iter()
+            .filter(|row| {
+                let suffix = s(row, "idempotency_key")
+                    .strip_prefix(&prefix)
+                    .unwrap_or("");
+                suffix == "paycom"
+                    || suffix.strip_prefix("flex:").is_some_and(|index| {
+                        !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit())
+                    })
+            })
+            .collect();
+        if !existing.is_empty() {
+            let mut jobs = Vec::new();
+            for row in existing {
+                let request: Value = serde_json::from_str(s(&row, "request"))?;
+                ensure(s(&request, "date") == date, "idempotency_conflict", 409)?;
+                jobs.push(self.public_job(&row)?);
+            }
+            return Ok(json!({"date":date,"jobs":jobs}));
+        }
         let scopes = self.meal_sync_scopes(id, date)?;
-        ensure(!scopes.is_empty(), "meal_sync_scope_required", 409)?;
         let mut requests = vec![(
             format!("meal:{key}:paycom"),
             Provider::Paycom,
             json!({"date":date}),
         )];
+        if scopes.is_empty() {
+            let discovery = self.meal_sync_discovery(id, date)?;
+            ensure(
+                !discovery.station.is_empty(),
+                "meal_sync_scope_required",
+                409,
+            )?;
+            discovery.scope("discovery", "discovery")?;
+            requests.push((
+                format!("meal:{key}:flex:0"),
+                Provider::Cortex,
+                serde_json::to_value(discovery)?,
+            ));
+        }
         for (index, scope) in scopes.iter().enumerate() {
             scope.validate()?;
             requests.push((
@@ -88,18 +143,7 @@ impl Store {
                 serde_json::to_value(scope)?,
             ));
         }
-        // Existing request keys are replayed idempotently. Other active work is
-        // allowed to finish before starting another two-source collection.
-        if self
-            .jobs
-            .one(
-                "SELECT id FROM jobs WHERE dsp_id=? AND idempotency_key=?",
-                [id, &requests[0].0],
-            )?
-            .is_none()
-        {
-            ensure(self.jobs.one("SELECT id FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification') LIMIT 1",[id])?.is_none(),"sync_in_progress",409)?;
-        }
+        ensure(self.jobs.one("SELECT id FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification') LIMIT 1",[id])?.is_none(),"sync_in_progress",409)?;
         let jobs = self.enqueue_batch(id, Some(actor), &requests)?;
         Ok(json!({"date":date,"jobs":jobs}))
     }

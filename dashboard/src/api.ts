@@ -26,7 +26,11 @@ const labels: Record<string, string> = {
   invalid_schedule_interval: 'Choose an interval from 0.5 to 24 hours in half-hour increments.',
   meal_sync_paycom_required: 'Connect Paycom before syncing meal breaks.',
   meal_sync_flex_required: 'Connect Cortex in Settings → Connections before syncing Flex.',
-  meal_sync_scope_required: 'Flex needs an initial station collection before syncing this date.',
+  meal_sync_scope_required: 'Complete your DSP profile with a station code to sync Flex.',
+  cortex_station_unavailable:
+    'Your saved station was not found in Cortex. Check your DSP profile and Cortex access.',
+  cortex_provider_ambiguous:
+    'Cortex could not identify your DSP. Check your DSP name and abbreviation.',
   sync_in_progress: 'A collection is already in progress. Wait for it to finish, then sync again.',
   queue_full: 'The collection queue is full. Try again after the current collections finish.',
   invalid_date: 'Choose a valid date that is not in the future.',
@@ -54,6 +58,9 @@ const labels: Record<string, string> = {
   rate_limited: 'Too many attempts. Wait a few minutes and try again.',
   invalid_credentials: 'The provider could not verify those credentials.',
 };
+export function errorLabel(code: string): string | undefined {
+  return labels[code];
+}
 export async function api<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
@@ -71,7 +78,7 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
       window.dispatchEvent(new Event('dispatch-signed-out'));
     throw new ApiError(
       value.error,
-      labels[value.error] ?? value.message ?? 'The request could not be completed.',
+      errorLabel(value.error) ?? value.message ?? 'The request could not be completed.',
       response.status,
       response.headers.get('x-request-id') ?? undefined,
     );

@@ -1,11 +1,11 @@
 //! Validated, temporary driver results. Complete publications remain authoritative
 //! for history; failed/cancelled/replaced attempts never overwrite them.
 use super::{
-    Result, State,
+    Error, Result, State,
     collectors::Provider,
     db::{self, Db, Store, s},
     ensure,
-    meals::{Capture, Scope},
+    meals::{Capture, CollectionRequest, Scope},
 };
 use rusqlite::params;
 use serde_json::{Value, json};
@@ -140,11 +140,17 @@ impl Writer {
         }
     }
     pub async fn start_cortex(&self, scope: &Scope, drivers: Value) -> Result<()> {
+        let scope = scope.clone();
         let metadata = json!({"from":scope.date,"to":scope.date,"scope":scope,"drivers":drivers});
         let job = self.job.clone();
         let owner = self.owner.clone();
         self.state
-            .run(move |db| db.start_live(&job, &owner, &metadata))
+            .run(move |db| {
+                let row = db.job(&job, None)?;
+                let request: CollectionRequest = serde_json::from_str(s(&row, "request"))?;
+                request.validate_scope(&scope)?;
+                db.start_live(&job, &owner, &metadata)
+            })
             .await
     }
     pub async fn cortex_drivers(&self, drivers: Value) -> Result<()> {
@@ -171,9 +177,11 @@ impl Writer {
             let dsp=db.guard_job(&job,&owner)?;
             let row=db.job(&job,None)?;
             ensure(s(&row,"kind")=="cortex.meal_breaks.collect","unsupported_collector",409)?;
-            let expected: Scope=serde_json::from_str(s(&row,"request"))?;
-            capture.validate(&expected)?;
             let storage=db.collector(s(&dsp,"id"),Provider::Cortex)?;
+            let run=storage.one("SELECT metadata FROM collection_live_runs WHERE job_id=? AND owner=?",[&job,&owner])?.ok_or_else(|| Error::new("invalid_live_capture",502))?;
+            let metadata: Value=serde_json::from_str(s(&run,"metadata"))?;
+            let expected: Scope=serde_json::from_value(metadata["scope"].clone())?;
+            capture.validate(&expected)?;
             storage.exec("INSERT OR REPLACE INTO collection_live_items SELECT job_id,?1,?2,?3 FROM collection_live_runs WHERE job_id=?4 AND owner=?5",params![capture.itineraries[0].id,capture.scope.date,data,job,owner])?;
             Ok(s(&dsp,"id").to_owned())
         }).await?;
@@ -364,6 +372,12 @@ mod tests {
             .await?;
         // Invalid data leaves the previous validated driver result intact.
         let mut invalid = capture.clone();
+        invalid.scope.provider = "other-provider".into();
+        assert_eq!(
+            writer.cortex(&invalid).await.unwrap_err().code,
+            "cortex_scope_mismatch"
+        );
+        invalid = capture.clone();
         invalid.itineraries[0].meals[0].end = Some(0);
         assert!(writer.cortex(&invalid).await.is_err());
         capture.itineraries[0].meals.clear();
