@@ -17,7 +17,6 @@ import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } fro
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './paycom-day-controls.js';
-import { calendarTimezone, displayTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { type Perform } from './platform.js';
 
@@ -45,10 +44,12 @@ type SyncSource = {
 function SourceSyncStatus({
   name,
   source,
+  timezone,
   compact = false,
 }: {
   name: string;
   source?: SyncSource;
+  timezone: string;
   compact?: boolean;
 }) {
   const status = source?.job?.status;
@@ -68,23 +69,22 @@ function SourceSyncStatus({
   if (compact) {
     const collectedAt = source?.collectedAt;
     const collectedToday =
-      collectedAt &&
-      localDate(calendarTimezone(), new Date(collectedAt)) === localDate(calendarTimezone());
+      collectedAt && localDate(timezone, new Date(collectedAt)) === localDate(timezone);
     const timestamp = collectedAt
       ? collectedToday
         ? new Intl.DateTimeFormat('en-US', {
             hour: 'numeric',
             minute: '2-digit',
-            timeZone: displayTimezone(),
+            timeZone: timezone,
           }).format(new Date(collectedAt))
-        : time(collectedAt)
+        : time(collectedAt, timezone)
       : null;
     return (
       <div
         className="paycom-header-sync"
         role="status"
         aria-label={`${name} sync`}
-        title={collectedAt ? `Last successful sync ${time(collectedAt)}` : undefined}
+        title={collectedAt ? `Last successful sync ${time(collectedAt, timezone)}` : undefined}
       >
         {status === 'failed' && !source?.active ? (
           <span className="paycom-sync-failed">
@@ -107,7 +107,10 @@ function SourceSyncStatus({
         {collectedAt && message === 'Sync complete' && (
           <span className="paycom-sync-timestamp">
             ·{' '}
-            <time dateTime={collectedAt} title={`Last successful sync ${time(collectedAt)}`}>
+            <time
+              dateTime={collectedAt}
+              title={`Last successful sync ${time(collectedAt, timezone)}`}
+            >
               {timestamp}
             </time>
           </span>
@@ -122,7 +125,7 @@ function SourceSyncStatus({
         {message}
       </span>
       {source?.collectedAt && (
-        <span className="muted">Last successful sync {time(source.collectedAt)}</span>
+        <span className="muted">Last successful sync {time(source.collectedAt, timezone)}</span>
       )}
     </div>
   );
@@ -139,7 +142,7 @@ export function PaycomPage({
 }) {
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const [syncing, setSyncing] = useState(false);
-  const { date, today, selectDate } = usePaycomDate(view.dsp.id);
+  const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
   const tab = selectedTab ?? preferences.data?.values.opening_page ?? 'timecards';
   const overview = useData<{
@@ -210,8 +213,18 @@ export function PaycomPage({
       <Header title="Timecard">
         {daily && canCollect && (
           <>
-            <SourceSyncStatus name="Paycom" source={sourceState?.paycom} compact />
-            <SourceSyncStatus name="Flex" source={sourceState?.flex} compact />
+            <SourceSyncStatus
+              name="Paycom"
+              source={sourceState?.paycom}
+              timezone={view.dsp.timezone}
+              compact
+            />
+            <SourceSyncStatus
+              name="Flex"
+              source={sourceState?.flex}
+              timezone={view.dsp.timezone}
+              compact
+            />
           </>
         )}
         {daily && syncButton}
@@ -243,7 +256,11 @@ export function PaycomPage({
           <div className="paycom-controls-row">{syncButton}</div>
           {canCollect && (
             <div className="paycom-sync-status">
-              <SourceSyncStatus name="Paycom" source={sourceState?.paycom} />
+              <SourceSyncStatus
+                name="Paycom"
+                source={sourceState?.paycom}
+                timezone={view.dsp.timezone}
+              />
               {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
             </div>
           )}
