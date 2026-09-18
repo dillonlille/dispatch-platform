@@ -26,8 +26,10 @@ pub struct Context {
     pub dsp: Value,
     pub role: String,
 }
-pub fn user(row: &Value) -> Value {
-    json!({"id":row["id"],"email":row["email"],"firstName":row["first_name"],"lastName":row["last_name"],"platformOwner":flag(row,"platform_owner")})
+pub fn user(row: &Value) -> Result<Value> {
+    Ok(serde_json::to_value(
+        super::contracts::PublicUser::from_row(row)?,
+    )?)
 }
 impl Store {
     pub fn create_user(
@@ -76,7 +78,7 @@ impl Store {
         let hash = crypto::sha(raw);
         let row=self.platform.one("SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=? AND s.expires_at>? AND s.user_version=u.version AND u.status='active'",params![hash,now()])?.ok_or_else(||Error::new("sign_in_required",401))?;
         Ok(Auth {
-            user: user(&row),
+            user: user(&row)?,
             hash,
             csrf: crypto::sign(&self.key, &format!("csrf:{raw}")),
             raw: raw.into(),
@@ -243,7 +245,7 @@ impl Store {
             &json!({"to":to,"subject":subject,"text":text,"html":html,"environment":self.config.environment,"origin":self.config.origin}),
         )?;
         self.platform.exec(
-            "INSERT INTO outbox(id,encrypted_message,available_at) VALUES (?,?,?)",
+            "INSERT INTO outbox(id,encrypted_message,available_at,created_at) VALUES (?,?,?3,?3)",
             params![id, encrypted, now()],
         )?;
         Ok(())

@@ -175,18 +175,36 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
         }
         if transport.is_none() {
             let config = state.config.clone();
-            transport = tokio::task::spawn_blocking(move || MailTransport::new(&config))
+            let result = tokio::task::spawn_blocking(move || MailTransport::new(&config))
                 .await
-                .ok()
-                .and_then(Result::ok)
-                .map(Arc::new);
-            if transport.is_none() {
-                continue;
+                .unwrap_or_else(|_| Err(Error::new("email_transport_task_failed", 500)));
+            match result {
+                Ok(client) => {
+                    super::mail::transport_status(&state, None);
+                    transport = Some(Arc::new(client));
+                }
+                Err(error) => {
+                    super::mail::transport_status(&state, Some(&error.code));
+                    super::observability::event(
+                        "error",
+                        "mail.transport_failed",
+                        json!({"error":error.code,"mode":state.config.mail_mode}),
+                    );
+                    continue;
+                }
             }
         }
         let pending=state.read(|db|db.platform.all("SELECT id,encrypted_message,attempts FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",[db::now()])).await;
-        let Ok(rows) = pending else {
-            continue;
+        let rows = match pending {
+            Ok(rows) => rows,
+            Err(error) => {
+                super::observability::event(
+                    "error",
+                    "mail.queue_failed",
+                    json!({"error":error.code}),
+                );
+                continue;
+            }
         };
         for row in rows {
             if *stop.borrow() {
@@ -199,10 +217,26 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
             let result =
                 tokio::task::spawn_blocking(move || deliver(&config, &key, &message, &client))
                     .await;
-            let sent = matches!(result, Ok(Ok(())));
+            let result =
+                result.unwrap_or_else(|_| Err(Error::new("email_delivery_task_failed", 500)));
+            let error = result.err().map(|e| e.code);
             let id = s(&row, "id").to_owned();
             let attempts = n(&row, "attempts");
-            let _=state.run(move|db|{if sent {db.platform.exec("UPDATE outbox SET status='sent',encrypted_message='',sent_at=? WHERE id=?",[&iso(),&id])?;}else{db.platform.exec("UPDATE outbox SET attempts=attempts+1,status=?,available_at=? WHERE id=?",params![if attempts>=4{"failed"}else{"pending"},db::now()+60000*2_i64.pow(attempts.clamp(0,8) as u32),id])?;}Ok(())}).await;
+            super::observability::event(
+                if error.is_some() { "warn" } else { "info" },
+                "mail.delivery",
+                json!({"mailId":id,"attempt":attempts+1,"error":error}),
+            );
+            if let Err(error) = state
+                .run(move |db| super::mail::record_delivery(db, &id, attempts, error.as_deref()))
+                .await
+            {
+                super::observability::event(
+                    "error",
+                    "mail.record_failed",
+                    json!({"error":error.code}),
+                );
+            }
         }
     }
 }
@@ -213,7 +247,7 @@ enum MailTransport {
 }
 impl MailTransport {
     fn new(config: &Config) -> Result<Self> {
-        let error = || Error::new("email_delivery_failed", 503);
+        let error = || Error::new("email_transport_configuration_failed", 503);
         Ok(match config.mail_mode.as_str() {
             "capture" => Self::Capture,
             "cloudflare" => Self::Cloudflare(
@@ -253,8 +287,23 @@ fn deliver(config: &Config, key: &[u8], row: &Value, transport: &MailTransport) 
             .bearer_auth(config.mail_worker_token.as_deref().ok_or_else(error)?)
             .json(&value)
             .send()
-            .map_err(|_| error())?;
-        ensure(response.status().is_success(), "email_delivery_failed", 503)?;
+            .map_err(|e| {
+                Error::new(
+                    if e.is_timeout() {
+                        "email_timeout"
+                    } else if e.is_connect() {
+                        "email_connection_failed"
+                    } else {
+                        "email_request_failed"
+                    },
+                    503,
+                )
+            })?;
+        ensure(
+            response.status().is_success(),
+            &format!("email_http_{}", response.status().as_u16()),
+            503,
+        )?;
     } else {
         use lettre::{
             Transport,
@@ -285,7 +334,18 @@ fn deliver(config: &Config, key: &[u8], row: &Value, transport: &MailTransport) 
         let MailTransport::Smtp(transport) = transport else {
             unreachable!()
         };
-        transport.send(&message).map_err(|_| error())?;
+        transport.send(&message).map_err(|e| {
+            Error::new(
+                if e.is_timeout() {
+                    "email_timeout"
+                } else if e.is_response() {
+                    "email_smtp_rejected"
+                } else {
+                    "email_smtp_delivery_failed"
+                },
+                503,
+            )
+        })?;
     }
     Ok(())
 }

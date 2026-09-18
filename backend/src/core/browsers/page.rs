@@ -55,7 +55,11 @@ impl Page {
             .err()
             .is_some_and(|error| error.code == "browser_command_timeout")
         {
-            eprintln!("provider_browser_command_timeout: {method}");
+            super::super::observability::event(
+                "warn",
+                "browser.command_timeout",
+                serde_json::json!({"method":method}),
+            );
         }
         result
     }

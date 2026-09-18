@@ -3,6 +3,7 @@ pub mod browsers;
 pub mod collection_checkpoint;
 pub mod collectors;
 pub mod config;
+pub mod contracts;
 pub mod crypto;
 pub mod db;
 pub mod error;
@@ -10,10 +11,13 @@ pub mod http;
 pub mod job_metrics;
 pub mod jobs;
 pub mod live_collection;
+pub mod mail;
 pub mod meal_comparison;
 pub mod meal_sync;
 pub mod meals;
+pub mod observability;
 pub mod operations;
+pub mod proxy;
 pub mod schedules;
 pub mod tenants;
 pub mod validate;
@@ -34,6 +38,7 @@ pub struct State {
     pub pool: Mutex<Vec<db::Store>>,
     pub schedule_revision: std::sync::atomic::AtomicU64,
     pub password_slots: Arc<Semaphore>,
+    pub mail_transport: Mutex<mail::TransportHealth>,
     pub browsers: browsers::Manager,
     pub updates: live_collection::Updates,
 }
@@ -58,6 +63,7 @@ impl State {
             pool: Mutex::new(vec![store]),
             schedule_revision: std::sync::atomic::AtomicU64::new(0),
             password_slots: Arc::new(Semaphore::new(2)),
+            mail_transport: Mutex::new(mail::TransportHealth::default()),
             browsers: browsers::Manager::default(),
             updates: live_collection::Updates::new()?,
         }))

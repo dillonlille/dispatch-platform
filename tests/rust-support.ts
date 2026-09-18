@@ -82,7 +82,7 @@ export async function fixture(
     }
     const response = await fetch(origin + url, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { origin, 'content-type': 'application/json', ...headers },
+      headers: { origin: env.DISPATCH_ORIGIN, 'content-type': 'application/json', ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(overrides.DISPATCH_FIXTURE_PROVIDER_URL ? 180000 : 15000),
     });

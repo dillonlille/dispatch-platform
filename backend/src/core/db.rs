@@ -287,6 +287,7 @@ impl Store {
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
+        super::mail::migrate(&store.platform)?;
         store
             .platform
             .0

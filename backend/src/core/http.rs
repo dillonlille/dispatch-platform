@@ -1,7 +1,12 @@
 use super::{
     Error, Result, State,
     accounts::{Auth, Context},
-    browsers, crypto,
+    browsers,
+    contracts::{
+        self, CollectionRequest, InvitationRequest, LoginRequest, PasswordRequest, ProviderMode,
+        ResetRequest, SessionResponse,
+    },
+    crypto,
     db::{Store, flag, iso, s},
     ensure, validate as v, workforce,
 };
@@ -179,12 +184,33 @@ pub fn router(state: Arc<State>) -> Router {
 }
 async fn dispatch(AxumState(state): AxumState<Arc<State>>, request: Request) -> Response {
     let development = state.config.development;
+    let started = std::time::Instant::now();
+    let route = super::observability::route(request.uri().path());
+    let method = request.method().to_string();
+    let request_id = match crypto::id("req") {
+        Ok(id) => id,
+        Err(error) => return error.into_response(),
+    };
     let result = process(state, request).await;
+    let error_code = result.as_ref().err().map(|e| e.code.clone());
     let mut response = match result {
         Ok(response) => response,
         Err(error) => error.into_response(),
     };
+    let status = response.status().as_u16();
+    super::observability::event(
+        if status >= 500 {
+            "error"
+        } else if status >= 400 {
+            "warn"
+        } else {
+            "info"
+        },
+        "http.request",
+        json!({"requestId":request_id,"method":method,"route":route,"status":status,"elapsedMs":started.elapsed().as_millis(),"error":error_code}),
+    );
     let headers = response.headers_mut();
+    headers.insert("x-request-id", request_id.parse().unwrap());
     for (name, value) in [
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "same-origin"),
@@ -287,11 +313,12 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         ensure(!query.contains_key(k.as_ref()), "invalid_input", 400)?;
         query.insert(k.into_owned(), json!(value));
     }
-    let ip = request
+    let peer = request
         .extensions()
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|v| v.0.ip().to_string())
-        .unwrap_or_else(|| "127.0.0.1".into());
+        .map(|v| v.0.ip())
+        .ok_or_else(|| Error::new("client_address_unavailable", 500))?;
+    let ip = state.config.trusted_proxy.client_ip(peer, &headers)?;
     let body = tokio::time::timeout(
         std::time::Duration::from_secs(15),
         to_bytes(request.into_body(), 64 * 1024),
@@ -340,10 +367,10 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         return Ok(Json(json!({"revision":revision})).into_response());
     }
     if input.method == "POST" && input.path == "/api/auth/login" {
-        v::fields(&input.body, &["email", "password"])?;
-        let email = v::email(&input.body, "email")?;
-        let password = v::text(&input.body, "password", 0, 128)?.to_owned();
-        let raw = state.login(email, password, input.ip.clone()).await?;
+        let login = LoginRequest::parse(&input.body)?;
+        let raw = state
+            .login(login.email, login.password, input.ip.clone())
+            .await?;
         return Ok(Reply::cookie(
             json!({"ok":true}),
             format!(
@@ -361,11 +388,11 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
         let b = &input.body;
         let auth_input = input.clone();
         if input.path == "/api/auth/password" {
-            v::fields(b, &["currentPassword", "password"])?;
-            let current = v::text(b, "currentPassword", 0, 128)?.to_owned();
-            let password = v::text(b, "password", 12, 128)?.to_owned();
+            let input = PasswordRequest::parse(b)?;
             let auth = state.read(move |db| auth_input.auth(db)).await?;
-            state.change_password(auth, current, password).await?;
+            state
+                .change_password(auth, input.current_password, input.password)
+                .await?;
             return Ok(Reply::cookie(
                 json!({"ok":true}),
                 "dispatch_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into(),
@@ -373,28 +400,28 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
             .into_response());
         }
         if input.path == "/api/auth/reset-password" {
-            v::fields(b, &["token", "password"])?;
-            let token = v::text(b, "token", 43, 43)?.to_owned();
-            let password = v::text(b, "password", 12, 128)?.to_owned();
+            let input = ResetRequest::parse(b)?;
             state
                 .run(move |db| db.throttle(&format!("reset:{}", auth_input.ip), 30, 3600000))
                 .await?;
-            state.reset_password(token, password).await?;
+            state.reset_password(input.token, input.password).await?;
             return Ok(Reply::ok().into_response());
         }
         let parts: Vec<_> = input.path.trim_start_matches('/').split('/').collect();
         if parts.len() == 4 && parts[..2] == ["api", "invitations"] && parts[3] == "accept" {
-            v::fields(b, &["firstName", "lastName", "password"])?;
+            let invitation = InvitationRequest::parse(b)?;
             let token = parts[2].to_owned();
-            let first = v::name(b, "firstName", 100)?;
-            let last = v::name(b, "lastName", 100)?;
-            let password = v::text(b, "password", 12, 128)?.to_owned();
             state
                 .run(move |db| db.throttle(&format!("invite:{}", auth_input.ip), 20, 3600000))
                 .await?;
             return Ok(Json(
                 state
-                    .accept_invitation(token, first, last, password)
+                    .accept_invitation(
+                        token,
+                        invitation.first_name,
+                        invitation.last_name,
+                        invitation.password,
+                    )
                     .await?,
             )
             .into_response());
@@ -446,9 +473,19 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
         }
         ("GET", "/api/session") => {
             let a = i.auth(db)?;
-            return Ok(Reply::json(
-                json!({"user":a.user,"csrf":a.csrf,"dsps":db.dsps(&a)?,"development":db.config.development,"environment":db.config.environment,"release":db.config.release,"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
-            ));
+            return Ok(Reply::json(serde_json::to_value(SessionResponse {
+                user: contracts::request(&a.user)?,
+                csrf: a.csrf.clone(),
+                dsps: db.dsps(&a)?,
+                development: db.config.development,
+                environment: SessionResponse::environment(&db.config.environment)?,
+                release: db.config.release.clone(),
+                provider_mode: if db.config.fixture {
+                    ProviderMode::Fixture
+                } else {
+                    ProviderMode::Native
+                },
+            })?));
         }
         ("POST", "/api/session/dsp") => {
             let a = i.auth(db)?;
@@ -543,7 +580,7 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
                 .map(|r| (s(&r, "status").into(), r["n"].clone()))
                 .collect();
             Ok(Reply::json(
-                json!({"environment":db.config.environment,"release":db.config.release,"jobs":counts,"browsers":{"active":state.browsers.active(),"capacity":db.config.browser_capacity,"memory":state.browsers.admission()},"dsps":db.platform.one("SELECT count(*) n FROM dsps",[])?.unwrap()["n"],"email":db.config.mail_available(),"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
+                json!({"environment":db.config.environment,"release":db.config.release,"jobs":counts,"browsers":{"active":state.browsers.active(),"capacity":db.config.browser_capacity,"memory":state.browsers.admission()},"dsps":db.platform.one("SELECT count(*) n FROM dsps",[])?.unwrap()["n"],"email":db.config.mail_available(),"mail":super::mail::health(db,state)?,"providerMode":if db.config.fixture{"fixture"}else{"native"}}),
             ))
         }
         ("GET", "/api/platform/diagnostics") => Ok(Reply::json(diagnostics(db, state)?)),
@@ -624,9 +661,9 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/overview")=>{let jobs=db.recent_jobs(Some(id),8)?;Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":db.employees(id,"",0,5,false)?,"audit":db.audits(Some(id),10)?})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
-        ("POST","/api/dsp/jobs")=>{v::fields(b,&["requestId","date"])?;let key=v::text(b,"requestId",1,128)?;let job=if b.get("date").is_some(){db.enqueue_paycom_date(id,Some(actor),key,v::text(b,"date",10,10)?)?}else{db.enqueue(id,Some(actor),key)?};db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},
+        ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,&date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},
         ("GET","/api/dsp/jobs/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_sync_status(id,v::text(&i.query,"date",10,10)?)?))},
-        ("POST","/api/dsp/jobs/meal-breaks")=>{v::fields(b,&["requestId","date"])?;let result=db.enqueue_meal_sync(id,actor,v::text(b,"requestId",1,128)?,v::text(b,"date",10,10)?)?;db.audit(Some(actor),Some(id),"meal_breaks.sync_requested","")?;Ok(Reply::status(result,202))},
+        ("POST","/api/dsp/jobs/meal-breaks")=>{let request=CollectionRequest::parse(b,true)?;let result=db.enqueue_meal_sync(id,actor,&request.request_id,request.date.as_deref().ok_or_else(||Error::new("invalid_input",400))?)?;db.audit(Some(actor),Some(id),"meal_breaks.sync_requested","")?;Ok(Reply::status(result,202))},
         ("POST","/api/dsp/cortex/meal-breaks/collect")=>{let scope=super::meals::Scope::request(b,s(&c.dsp,"timezone"))?;let job=db.enqueue_meals(id,Some(actor),v::text(b,"requestId",1,128)?,&scope)?;db.audit(Some(actor),Some(id),"cortex.collection.requested","")?;Ok(Reply::status(job,202))},
         ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
         ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
