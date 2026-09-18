@@ -3,7 +3,7 @@ use super::{
     Error, Result, State,
     contracts::{ActiveJobStatus, PublicJob},
     crypto,
-    db::{Store, at, flag, iso, n, now, s},
+    db::{Store, flag, iso, n, now, s},
     ensure,
     job_metrics::{self, Metrics, Phase, Recorder},
 };
@@ -319,85 +319,12 @@ impl Store {
         let next = next_occurrence(time, tz, now())?;
         let db = self.collector(id, Provider::Paycom)?;
         db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
+        self.import_legacy_schedule(id, true)?;
         self.schedule(id)
-    }
-    pub fn schedule_deadlines(&self) -> Result<Vec<(String, i64)>> {
-        let mut deadlines = Vec::new();
-        for dsp in self.platform.all(
-            "SELECT id FROM dsps WHERE status='active' AND environment=?",
-            [&self.config.environment],
-        )? {
-            let id = s(&dsp, "id");
-            let schedule = self.schedule(id)?;
-            if flag(&schedule, "enabled") {
-                let deadline = schedule["nextRun"]
-                    .as_str()
-                    .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-                    .map_or(0, |date| date.timestamp_millis());
-                deadlines.push((id.to_owned(), deadline));
-            }
-        }
-        Ok(deadlines)
-    }
-    pub fn schedule_due(&self, id: &str) -> Result<Option<i64>> {
-        let dsp = self.get_dsp(id)?;
-        if s(&dsp, "status") != "active" || s(&dsp, "environment") != self.config.environment {
-            return Ok(None);
-        }
-        let schedule = self.schedule(id)?;
-        if !flag(&schedule, "enabled") {
-            return Ok(None);
-        }
-        let next = if let Some(next) = schedule["nextRun"].as_str() {
-            next.to_owned()
-        } else {
-            next_scheduled(&schedule, now())?
-        };
-        let next = if next <= iso() {
-            if self.enqueue(id, None, &format!("schedule:{next}")).is_err() {
-                return Ok(Some(now() + 5000));
-            }
-            next_scheduled(&schedule, now())?
-        } else {
-            next
-        };
-        self.collector(id, Provider::Paycom)?.exec(
-            "UPDATE schedules SET next_run=? WHERE provider='paycom'",
-            [&next],
-        )?;
-        Ok(Some(
-            chrono::DateTime::parse_from_rfc3339(&next)
-                .map_err(|_| Error::new("invalid_schedule", 500))?
-                .timestamp_millis(),
-        ))
     }
 }
 pub fn next_occurrence(time: &str, tz: &str, after: i64) -> Result<String> {
-    ensure(
-        time.len() == 5 && chrono::NaiveTime::parse_from_str(time, "%H:%M").is_ok(),
-        "invalid_schedule_time",
-        400,
-    )?;
-    let tz: chrono_tz::Tz = tz
-        .parse()
-        .map_err(|_| Error::new("invalid_timezone", 400))?;
-    let start = after / 60000 * 60000 + 60000;
-    for minute in 0..3 * 24 * 60 {
-        let ms = start + minute * 60000;
-        let instant = chrono::DateTime::from_timestamp_millis(ms)
-            .ok_or_else(|| Error::new("invalid_schedule", 400))?;
-        if instant.with_timezone(&tz).format("%H:%M").to_string() == time {
-            return Ok(at(ms));
-        }
-    }
-    Err(Error::new("schedule_unresolvable", 400))
-}
-fn next_scheduled(schedule: &Value, after: i64) -> Result<String> {
-    if n(schedule, "intervalSeconds") > 0 {
-        Ok(at(after + n(schedule, "intervalSeconds") * 1000))
-    } else {
-        next_occurrence(s(schedule, "localTime"), s(schedule, "timezone"), after)
-    }
+    super::schedules::next_daily(time, tz, after)
 }
 // Stable per-job jitter survives restarts and disperses DSP retries. No secret
 // material or provider identity participates in the delay.

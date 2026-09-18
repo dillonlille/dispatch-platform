@@ -222,7 +222,7 @@ function App() {
             ) : page === 'paycom' ? (
               <PaycomPage view={view} perform={perform} canCollect={canCollect} />
             ) : page === 'paycom-settings' && owner ? (
-              <PaycomSettingsPage dspId={view.dsp.id} perform={perform} />
+              <PaycomSettingsPage dspId={view.dsp.id} />
             ) : page === 'team' && owner ? (
               <TeamPage view={view} perform={perform} reopen={reopen} />
             ) : page === 'employees' ? (

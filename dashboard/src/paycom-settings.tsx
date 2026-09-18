@@ -1,457 +1,517 @@
 import { useEffect, useState } from 'react';
-import { ArrowUp, ArrowDown } from 'lucide-react';
-import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, Loading, Modal, time } from './ui.js';
+import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
+import { api, ApiError, useData } from './api.js';
+import { Header, ErrorBox, Loading, Modal } from './ui.js';
+import { dateFormatter } from '../../shared/date-format.js';
 import {
-  paycomDefaults,
-  paycomColumns,
-  type PaycomPreferences,
-  type PaycomSettings as Snapshot,
-} from '../../shared/paycom.js';
-import type { Schedule } from '../../shared/contracts/index.js';
-import type { Perform } from './platform.js';
-const sections = [
-  ['sync', 'Sync schedule'],
-  ['view', 'Workspace view'],
-  ['drivers', 'Driver departments'],
-];
-export function PaycomSettingsPage({ dspId, perform }: { dspId: string; perform: Perform }) {
-  const query = useData<Snapshot>('/api/dsp/paycom/settings', 5000);
-  const overview = useData<{ schedule: Schedule; workforce: { collectedAt: string | null } }>(
-    '/api/dsp/paycom/status',
-    5000,
+  scheduleIssues,
+  type CollectionSchedule,
+  type CollectionSchedules,
+  type ScheduleInput,
+} from '../../shared/schedules.js';
+import './timecard-schedules.css';
+
+const newSchedule = (): ScheduleInput => ({
+  name: '',
+  collection: 'paycom',
+  cadence: 'interval',
+  intervalMinutes: 120,
+  localTime: '00:00',
+  enabled: true,
+});
+function clock(value: string) {
+  const [hour, minute] = value.split(':').map(Number);
+  return `${hour! % 12 || 12}:${String(minute).padStart(2, '0')} ${hour! < 12 ? 'AM' : 'PM'}`;
+}
+function repeat(schedule: ScheduleInput) {
+  if (schedule.cadence === 'daily') return `Daily at ${clock(schedule.localTime)}`;
+  const minutes = schedule.intervalMinutes ?? 120;
+  return minutes % 60 === 0
+    ? `Every ${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`
+    : `Every ${minutes} minutes`;
+}
+function nextCollection(value: string | null, timezone: string) {
+  return value
+    ? dateFormatter('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: timezone,
+      }).format(new Date(value))
+    : 'Not scheduled';
+}
+function CollectionLabels({ collection }: Pick<ScheduleInput, 'collection'>) {
+  return (
+    <div className="schedule-collections">
+      {collection !== 'meal_break' && <span className="schedule-tag">Paycom</span>}
+      {collection !== 'paycom' && (
+        <span className="schedule-tag schedule-tag-meal">Meal Break</span>
+      )}
+    </div>
   );
-  const [base, setBase] = useState<Snapshot>();
-  const [draft, setDraft] = useState<PaycomPreferences>();
-  const [tab, setTab] = useState('sync'),
-    [busy, setBusy] = useState(false),
-    [reset, setReset] = useState(false),
-    [history, setHistory] = useState(false),
-    [saved, setSaved] = useState(false);
+}
+function ScheduleEditor({
+  schedule,
+  timezone,
+  onClose,
+  onSaved,
+  onReload,
+}: {
+  schedule: CollectionSchedule | null;
+  timezone: string;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<ScheduleInput>(() =>
+    schedule
+      ? {
+          name: schedule.name,
+          collection: schedule.collection,
+          cadence: schedule.cadence,
+          intervalMinutes: schedule.intervalMinutes,
+          localTime: schedule.localTime,
+          enabled: schedule.enabled,
+        }
+      : newSchedule(),
+  );
+  const [paycom, setPaycom] = useState(draft.collection !== 'meal_break');
+  const [meal, setMeal] = useState(draft.collection !== 'paycom');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [stale, setStale] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const { cadence, intervalMinutes, localTime, enabled } = draft;
+  const sameTiming =
+    !!schedule &&
+    schedule.cadence === cadence &&
+    schedule.intervalMinutes === intervalMinutes &&
+    schedule.localTime === localTime;
   useEffect(() => {
-    if (!base && query.data) {
-      setBase(query.data);
-      setDraft(structuredClone(query.data.values));
+    const controller = new AbortController();
+    setPreview(null);
+    setPreviewError('');
+    if (
+      !enabled ||
+      !localTime ||
+      (cadence === 'interval' &&
+        (!intervalMinutes ||
+          intervalMinutes < 30 ||
+          intervalMinutes > 1440 ||
+          intervalMinutes % 30))
+    )
+      return;
+    if (sameTiming && schedule.enabled && schedule.nextRun) {
+      setPreview(schedule.nextRun);
+      return;
     }
-  }, [query.data, base]);
-  if (!base || !draft)
-    return (
-      <>
-        <ErrorBox message={query.error} />
-        <Loading />
-      </>
-    );
-  const dirty = JSON.stringify(base.values) !== JSON.stringify(draft);
-  const newer = query.data && query.data.revision !== base.revision;
-  const edit = <K extends keyof PaycomPreferences>(key: K, value: PaycomPreferences[K]) =>
-    setDraft({ ...draft, [key]: value });
-  function restoreSection() {
-    const keys: (keyof PaycomPreferences)[] =
-      tab === 'sync'
-        ? ['automatic_sync', 'sync_interval_seconds']
-        : tab === 'drivers'
-          ? ['driver_departments']
-          : [
-              'opening_page',
-              'rows_per_page',
-              'name_order',
-              'default_sort',
-              'department',
-              'station',
-              'columns',
-            ];
-    setDraft((current) => ({
-      ...current!,
-      ...Object.fromEntries(keys.map((key) => [key, structuredClone(paycomDefaults[key])])),
-    }));
-  }
-  function select(
-    key: keyof PaycomPreferences,
-    label: string,
-    options: (readonly [string | number, string])[],
-    description?: string,
-  ) {
-    return (
-      <div>
-        <label htmlFor={`paycom-${key}`}>{label}</label>
-        <select
-          id={`paycom-${key}`}
-          value={String(draft![key] ?? '')}
-          disabled={busy || (key === 'sync_interval_seconds' && !draft!.automatic_sync)}
-          onChange={(event) => {
-            const raw = event.target.value;
-            edit(
-              key,
-              (['rows_per_page', 'sync_interval_seconds'].includes(key)
-                ? Number(raw)
-                : raw || null) as never,
+    const timer = setTimeout(() => {
+      void api<{ nextRun: string }>(
+        '/api/dsp/schedules/preview',
+        {
+          cadence,
+          intervalMinutes,
+          localTime,
+          ...(schedule ? { scheduleId: schedule.id } : {}),
+        },
+        controller.signal,
+      )
+        .then((result) => setPreview(result.nextRun))
+        .catch((cause: unknown) => {
+          if (!controller.signal.aborted)
+            setPreviewError(
+              cause instanceof Error ? cause.message : 'Could not preview this schedule.',
             );
-          }}
-        >
-          {options.map(([value, text]) => (
-            <option key={value} value={value}>
-              {text}
-            </option>
-          ))}
-        </select>
-        {description && <small className="muted">{description}</small>}
-      </div>
-    );
+        });
+    }, 200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [cadence, intervalMinutes, localTime, enabled, timezone, sameTiming, schedule]);
+  const edit = <K extends keyof ScheduleInput>(key: K, value: ScheduleInput[K]) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+  async function submit(remove = false) {
+    if (!remove && !paycom && !meal) {
+      setError('Select Paycom, Meal Break, or both.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (remove && schedule)
+        await api(`/api/dsp/schedules/${schedule.id}/remove`, { revision: schedule.revision });
+      else
+        await api(schedule ? `/api/dsp/schedules/${schedule.id}` : '/api/dsp/schedules', {
+          ...draft,
+          name: draft.name.trim(),
+          collection: paycom && meal ? 'both' : paycom ? 'paycom' : 'meal_break',
+          ...(schedule ? { revision: schedule.revision } : {}),
+        });
+      onSaved(remove ? 'Schedule deleted' : schedule ? 'Schedule saved' : 'Schedule created');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The schedule could not be saved.');
+      setStale(cause instanceof ApiError && cause.code === 'schedule_changed');
+    } finally {
+      setBusy(false);
+    }
   }
   return (
-    <div className="plugin-settings-page">
-      <a className="plugin-settings-back" href={`#dsp/${dspId}/paycom`}>
-        ← Back
-      </a>
-      <Header title="Timecard Settings" />
-      <ErrorBox message={query.error || overview.error} />
-      {newer && (
-        <div className="notice">
-          These settings changed in another session. Discard your draft to load the latest settings
-          before saving.
-        </div>
-      )}
-      {draft.department &&
-        draft.driver_departments !== null &&
-        !draft.driver_departments.includes(draft.department) && (
-          <p role="status" className="plugin-settings-rule">
-            Your default department is excluded from Timecards. Choose an included department or
-            update Driver departments.
-          </p>
-        )}
-      <Tabs value={tab} onChange={setTab} items={sections} label="Timecard Settings sections" />
-      <div className="plugin-settings-fields">
-        {tab === 'sync' && (
-          <>
-            <div className="plugin-setting-wide">
-              <div className="plugin-setting-toggle">
-                <div>
-                  <label htmlFor="automatic-sync">Automatic sync</label>
-                  <p>
-                    Keep employees and timecards up to date. Pausing lets the current collection
-                    finish.
-                  </p>
-                </div>
+    <Modal
+      title={schedule ? 'Edit schedule' : 'New schedule'}
+      variant="sheet"
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <form
+        className="schedule-editor"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <fieldset disabled={busy} className="schedule-editor-fields">
+          <label>
+            Schedule name
+            <input
+              autoComplete="off"
+              value={draft.name}
+              placeholder="e.g. Morning collection"
+              required
+              maxLength={60}
+              onChange={(event) => edit('name', event.target.value)}
+            />
+          </label>
+          <fieldset className="schedule-choice-group">
+            <legend>Collect</legend>
+            <div className="schedule-checks">
+              <label>
                 <input
-                  id="automatic-sync"
                   type="checkbox"
-                  role="switch"
-                  checked={draft.automatic_sync}
-                  disabled={busy}
-                  onChange={(event) => edit('automatic_sync', event.target.checked)}
+                  checked={paycom}
+                  onChange={(event) => setPaycom(event.target.checked)}
                 />
-              </div>
+                Paycom
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={meal}
+                  onChange={(event) => setMeal(event.target.checked)}
+                />
+                Meal Break
+              </label>
             </div>
-            {select(
-              'sync_interval_seconds',
-              'Sync every',
-              [
-                [1800, '30 minutes'],
-                [3600, '1 hour'],
-                [7200, '2 hours'],
-                [14400, '4 hours'],
-              ],
-              draft.automatic_sync
-                ? undefined
-                : 'Turn on Automatic sync to change its interval. Your saved interval is remembered.',
-            )}
-          </>
-        )}
-        {tab === 'view' && (
-          <>
-            {select('opening_page', 'Opening page', [
-              ['timecards', 'Timecards'],
-              ['meal-breaks', 'Meal Breaks'],
-              ['employees', 'Employees'],
-            ])}
-            {select('rows_per_page', 'Rows per page', [
-              [25, '25'],
-              [50, '50'],
-              [100, '100'],
-            ])}
-            {select(
-              'name_order',
-              'Name order',
-              [
-                ['first_last', 'First Last'],
-                ['last_first', 'Last, First'],
-              ],
-              'Choose how employee names appear and sort in Paycom.',
-            )}
-            {select('default_sort', 'Default sort', [
-              ['employeeName', 'Employee name, A–Z'],
-              ['condition', 'Punch status'],
-              ['inDay', 'Clock-in time, earliest first'],
-            ])}
-            {select('department', 'Default department', [
-              ['', 'All departments'],
-              ...base.options.departments.map((d) => [d.value, d.value] as const),
-            ])}
-            {select('station', 'Default delivery station', [
-              ['', 'All stations'],
-              ...base.options.stations.map((value) => [value, value] as const),
-            ])}
-            <fieldset className="plugin-setting-multiple plugin-setting-wide" disabled={busy}>
-              <legend>Timecard columns</legend>
-              <p>
-                Employee names always appear. Select other columns and use the arrows to order them.
-              </p>
-              <div className="plugin-setting-choices">
-                {[
-                  ...draft.columns,
-                  ...paycomColumns
-                    .map(([key]) => key)
-                    .filter((key) => !draft.columns.includes(key)),
-                ].map((key) => {
-                  const index = draft.columns.indexOf(key);
-                  const label = paycomColumns.find(([value]) => value === key)![1];
-                  return (
-                    <div className="plugin-setting-option" key={key}>
-                      <label className="plugin-setting-choice">
-                        <input
-                          type="checkbox"
-                          checked={index >= 0}
-                          onChange={(event) =>
-                            edit(
-                              'columns',
-                              event.target.checked
-                                ? [...draft.columns, key]
-                                : draft.columns.filter((value) => value !== key),
-                            )
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                      {index >= 0 && (
-                        <div className="row-actions">
-                          {[-1, 1].map((offset) => (
-                            <button
-                              key={offset}
-                              className="icon-button"
-                              aria-label={`Move ${label} ${offset < 0 ? 'up' : 'down'}`}
-                              disabled={
-                                index + offset < 0 || index + offset >= draft.columns.length
-                              }
-                              onClick={() => {
-                                const values = [...draft.columns];
-                                [values[index], values[index + offset]] = [
-                                  values[index + offset]!,
-                                  values[index]!,
-                                ];
-                                edit('columns', values);
-                              }}
-                            >
-                              {offset < 0 ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </fieldset>
-          </>
-        )}
-        {tab === 'drivers' && (
-          <fieldset className="plugin-setting-multiple plugin-setting-wide" disabled={busy}>
-            <legend>Departments shown on Timecards</legend>
-            <p>
-              Only employees from the selected departments appear on your DSP’s Timecard page.
-              Selecting none shows no employees.
-            </p>
-            <label className="plugin-setting-choice">
-              <input
-                type="checkbox"
-                checked={draft.driver_departments === null}
-                onChange={(event) =>
-                  edit(
-                    'driver_departments',
-                    event.target.checked ? null : base.options.departments.map((d) => d.value),
-                  )
-                }
-              />
-              Include all current and future options
-            </label>
-            <div className="plugin-setting-choices">
-              {base.options.departments.map((department) => (
-                <label key={department.value} className="plugin-setting-choice">
-                  <input
-                    type="checkbox"
-                    disabled={draft.driver_departments === null}
-                    checked={
-                      draft.driver_departments === null ||
-                      draft.driver_departments.includes(department.value)
-                    }
-                    onChange={(event) =>
-                      edit(
-                        'driver_departments',
-                        event.target.checked
-                          ? [...draft.driver_departments!, department.value]
-                          : draft.driver_departments!.filter((value) => value !== department.value),
-                      )
-                    }
-                  />
-                  {department.value || 'No department'}{' '}
-                  <span className="muted">{department.count} employees</span>
-                </label>
-              ))}
-            </div>
-            {!base.options.departments.length && (
-              <p>Departments will appear after the first collection.</p>
-            )}
           </fieldset>
+          <fieldset className="schedule-choice-group">
+            <legend>Repeat</legend>
+            <div className="schedule-repeat">
+              <label>
+                <input
+                  type="radio"
+                  name="schedule-repeat"
+                  value="interval"
+                  checked={cadence === 'interval'}
+                  onChange={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      cadence: 'interval',
+                      intervalMinutes: 120,
+                    }))
+                  }
+                />
+                Every interval
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="schedule-repeat"
+                  value="daily"
+                  checked={cadence === 'daily'}
+                  onChange={() =>
+                    setDraft((current) => ({ ...current, cadence: 'daily', intervalMinutes: null }))
+                  }
+                />
+                Daily
+              </label>
+            </div>
+          </fieldset>
+          <div className={cadence === 'interval' ? 'schedule-time-fields' : undefined}>
+            {cadence === 'interval' && (
+              <label>
+                Every
+                <div className="schedule-interval">
+                  <input
+                    type="number"
+                    aria-label="Every"
+                    aria-describedby="schedule-hours"
+                    min="0.5"
+                    max="24"
+                    step="0.5"
+                    required
+                    value={intervalMinutes ? intervalMinutes / 60 : ''}
+                    onChange={(event) => edit('intervalMinutes', Number(event.target.value) * 60)}
+                  />
+                  <span id="schedule-hours">hours</span>
+                </div>
+              </label>
+            )}
+            <label>
+              {cadence === 'interval' ? 'Starting at' : 'Time'}
+              <input
+                type="time"
+                value={localTime}
+                required
+                onChange={(event) => edit('localTime', event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="schedule-timezone">
+            <Globe2 size={14} aria-hidden="true" />
+            {timezone} · DSP time zone
+          </div>
+          <div className="schedule-next-preview">
+            <span>Next collection</span>
+            <output aria-live="polite">
+              {enabled ? (preview ? nextCollection(preview, timezone) : '—') : 'Paused'}
+            </output>
+          </div>
+          <ErrorBox message={previewError} />
+        </fieldset>
+        <ErrorBox message={error} />
+        {stale && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              void onReload().catch((cause) => setError(cause.message));
+            }}
+          >
+            Reload schedule
+          </button>
         )}
-      </div>
-      {tab === 'view' && (
-        <>
-          <p className="plugin-settings-preview">
-            Name preview: {draft.name_order === 'first_last' ? 'JANE DOE' : 'DOE, JANE'}
-          </p>
-          <p className="plugin-settings-preview">
-            Timecard column preview: Employee ·{' '}
-            {draft.columns
-              .map((key) => paycomColumns.find(([value]) => value === key)![1])
-              .join(' · ')}
-          </p>
-        </>
-      )}
-      {tab === 'sync' && (
-        <div className="paycom-settings-status">
-          <p>
-            Last successful sync
-            <strong>
-              {overview.data?.workforce.collectedAt
-                ? time(overview.data.workforce.collectedAt)
-                : 'Not yet synced'}
-            </strong>
-          </p>
-          <p>
-            Next scheduled sync
-            <strong>
-              {overview.data?.schedule.nextRun
-                ? time(overview.data.schedule.nextRun)
-                : 'Not scheduled'}
-            </strong>
-          </p>
+        <div className="schedule-editor-actions">
+          <label className="schedule-toggle">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={enabled}
+              disabled={busy}
+              onChange={(event) => edit('enabled', event.target.checked)}
+            />
+            Enabled
+          </label>
           <div>
-            <button
-              onClick={() =>
-                void perform(
-                  () => api('/api/dsp/jobs', { requestId: crypto.randomUUID() }),
-                  'Sync queued',
-                )
-              }
-            >
-              Sync now
+            <button type="button" disabled={busy} onClick={onClose}>
+              Cancel
             </button>
-            <button
-              onClick={() => {
-                location.hash = `dsp/${dspId}/settings?tab=connections`;
-              }}
-            >
-              Manage connection ↗
+            <button className="primary" disabled={busy || stale} type="submit">
+              {busy ? 'Saving…' : schedule ? 'Save changes' : 'Create schedule'}
             </button>
           </div>
         </div>
-      )}
-      {tab !== 'drivers' && (
-        <>
-          <button disabled={busy} onClick={restoreSection}>
-            Restore {sections.find(([key]) => key === tab)![1]} defaults
-          </button>
-          <div className="plugin-settings-defaults">
-            <button className="text-button" disabled={busy} onClick={() => setReset(true)}>
-              Restore defaults
-            </button>
-            <button
-              className="text-button"
-              aria-expanded={history}
-              onClick={() => setHistory(!history)}
+        {schedule &&
+          (deleting ? (
+            <div
+              className="schedule-delete-confirm"
+              role="group"
+              aria-label="Delete schedule confirmation"
             >
-              Change history
+              <span>Delete this schedule?</span>
+              <div>
+                <button type="button" disabled={busy} onClick={() => setDeleting(false)}>
+                  Keep schedule
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy || stale}
+                  onClick={() => void submit(true)}
+                >
+                  Delete schedule
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="text-button danger schedule-delete"
+              disabled={busy}
+              onClick={() => setDeleting(true)}
+            >
+              Delete schedule
             </button>
-            <span>Settings apply to this DSP.</span>
+          ))}
+      </form>
+    </Modal>
+  );
+}
+export function PaycomSettingsPage({ dspId }: { dspId: string }) {
+  const query = useData<CollectionSchedules>('/api/dsp/schedules', 10000, dspId, dspId);
+  const [editing, setEditing] = useState<CollectionSchedule | null | undefined>();
+  const [busyId, setBusyId] = useState<string>();
+  const [updated, setUpdated] = useState<CollectionSchedule>();
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const schedules = (query.data?.schedules ?? []).map((schedule) =>
+    updated?.id === schedule.id && updated.revision > schedule.revision ? updated : schedule,
+  );
+  const active = schedules.filter((schedule) => schedule.enabled).length;
+  async function toggle(schedule: CollectionSchedule) {
+    setBusyId(schedule.id);
+    setError('');
+    setUpdated({
+      ...schedule,
+      enabled: !schedule.enabled,
+      nextRun: null,
+      revision: schedule.revision + 1,
+    });
+    try {
+      const result = await api<CollectionSchedule>(`/api/dsp/schedules/${schedule.id}/enabled`, {
+        enabled: !schedule.enabled,
+        revision: schedule.revision,
+      });
+      setUpdated(result);
+      setMessage(schedule.enabled ? 'Schedule paused' : 'Schedule enabled');
+    } catch (cause) {
+      setUpdated(undefined);
+      setError(cause instanceof Error ? cause.message : 'Could not update the schedule.');
+    } finally {
+      query.refresh();
+      setBusyId(undefined);
+    }
+  }
+  return (
+    <div className="timecard-schedules">
+      <a className="schedule-back" href={`#dsp/${dspId}/paycom`}>
+        <ArrowLeft size={14} aria-hidden="true" />
+        Back
+      </a>
+      <Header title="Timecard Settings">
+        <button className="primary" disabled={!query.data} onClick={() => setEditing(null)}>
+          <Plus size={16} aria-hidden="true" />
+          New schedule
+        </button>
+      </Header>
+      <ErrorBox message={error || query.error} />
+      {!query.data ? (
+        !query.error && <Loading />
+      ) : (
+        <>
+          <div className="schedule-section-heading">
+            <div>
+              <h2>Sync schedules</h2>
+              <span className="schedule-count">{schedules.length}</span>
+            </div>
+            <span className="schedule-timezone">
+              <Globe2 size={14} aria-hidden="true" />
+              DSP time zone · {query.data.timezone}
+            </span>
           </div>
-          {history && (
-            <section aria-label="Settings change history">
-              {base.history.length ? (
-                base.history.map((entry) => (
-                  <div className="runtime-row" key={entry.revision}>
-                    <span>
-                      Revision {entry.revision} · {time(entry.at)}
-                    </span>
-                    <button
-                      disabled={busy || newer}
-                      onClick={() => setDraft(structuredClone(entry.values))}
-                    >
-                      Restore
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <p className="muted">No previous settings yet.</p>
-              )}
-            </section>
+          {schedules.length ? (
+            <div className="schedule-table-wrap">
+              <table className="schedule-table">
+                <caption className="sr-only">Sync schedules</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Schedule</th>
+                    <th scope="col">Collection</th>
+                    <th scope="col">Repeat</th>
+                    <th scope="col">Next collection</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedules.map((schedule) => (
+                    <tr key={schedule.id}>
+                      <th scope="row">{schedule.name}</th>
+                      <td data-label="Collection">
+                        <CollectionLabels collection={schedule.collection} />
+                      </td>
+                      <td data-label="Repeat">{repeat(schedule)}</td>
+                      <td data-label="Next collection" className="schedule-next">
+                        {schedule.enabled
+                          ? nextCollection(schedule.nextRun, query.data!.timezone)
+                          : 'Paused'}
+                        {schedule.lastError && (
+                          <small>
+                            {scheduleIssues[schedule.lastError] ??
+                              'Collection delayed. Check connections.'}
+                          </small>
+                        )}
+                      </td>
+                      <td data-label="Status">
+                        <label className="schedule-toggle">
+                          <input
+                            type="checkbox"
+                            role="switch"
+                            aria-label={`Enable ${schedule.name}`}
+                            checked={schedule.enabled}
+                            disabled={busyId !== undefined}
+                            onChange={() => void toggle(schedule)}
+                          />
+                          <span>{schedule.enabled ? 'On' : 'Paused'}</span>
+                        </label>
+                      </td>
+                      <td className="schedule-row-actions">
+                        <button
+                          className="icon-button"
+                          aria-label={`Edit ${schedule.name}`}
+                          onClick={() => setEditing(schedule)}
+                        >
+                          <Pencil size={16} aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="schedule-empty">
+              <h3>No schedules</h3>
+              <button onClick={() => setEditing(null)}>
+                <Plus size={16} aria-hidden="true" />
+                New schedule
+              </button>
+            </div>
+          )}
+          <footer className="schedule-footer">
+            <span>
+              <Building2 size={14} aria-hidden="true" />
+              Applies to {query.data.dspName}
+            </span>
+            <span role="status">
+              {message || `${active} ${active === 1 ? 'schedule' : 'schedules'} active`}
+            </span>
+          </footer>
+          {editing !== undefined && (
+            <ScheduleEditor
+              key={`${editing?.id ?? 'new'}-${editing?.revision ?? 0}`}
+              schedule={editing}
+              timezone={query.data.timezone}
+              onClose={() => setEditing(undefined)}
+              onSaved={(text) => {
+                setEditing(undefined);
+                setMessage(text);
+                query.refresh();
+              }}
+              onReload={async () => {
+                const fresh = await api<CollectionSchedules>('/api/dsp/schedules');
+                const schedule = fresh.schedules.find((value) => value.id === editing?.id);
+                setEditing(schedule);
+                query.refresh();
+              }}
+            />
           )}
         </>
-      )}
-      <footer className="plugin-settings-footer">
-        <span role="status">
-          {dirty ? 'You have unsaved changes' : saved ? 'Settings saved' : 'All changes saved'}
-        </span>
-        <div>
-          <button
-            disabled={(!dirty && !newer) || busy}
-            onClick={() => {
-              const next = query.data ?? base;
-              setBase(next);
-              setDraft(structuredClone(next.values));
-            }}
-          >
-            Discard
-          </button>
-          <button
-            className="primary"
-            disabled={!dirty || busy || newer}
-            onClick={() => {
-              setBusy(true);
-              void perform(async () => {
-                const next = await api<Snapshot>('/api/dsp/paycom/settings', {
-                  revision: base.revision,
-                  values: draft,
-                });
-                setBase(next);
-                setDraft(structuredClone(next.values));
-                setSaved(true);
-                query.refresh();
-                overview.refresh();
-              }).finally(() => setBusy(false));
-            }}
-          >
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </footer>
-      {reset && (
-        <Modal title="Restore Paycom defaults?" onClose={() => setReset(false)}>
-          <p>
-            This replaces your draft with the default settings. Save changes to apply them to this
-            DSP.
-          </p>
-          <div className="form-actions">
-            <button onClick={() => setReset(false)}>Cancel</button>
-            <button
-              className="primary"
-              onClick={() => {
-                setDraft(structuredClone(paycomDefaults));
-                setReset(false);
-              }}
-            >
-              Restore defaults
-            </button>
-          </div>
-        </Modal>
       )}
     </div>
   );

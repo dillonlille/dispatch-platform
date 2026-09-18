@@ -302,6 +302,7 @@ impl Store {
         )? {
             let id = s(&row, "id");
             store.migrate_collector_storage(id)?;
+            store.initialize_schedules(id)?;
         }
         Ok(store)
     }

@@ -11,7 +11,7 @@ use rusqlite::params;
 use serde_json::{Value, json};
 
 impl Store {
-    fn meal_sync_scopes(&self, id: &str, date: &str) -> Result<Vec<Scope>> {
+    pub(crate) fn meal_sync_scopes(&self, id: &str, date: &str) -> Result<Vec<Scope>> {
         let db = self.collector(id, Provider::Cortex)?;
         // Reuse the selected day's proven scopes. For an uncollected day, use the
         // most recently collected day's scopes, never another DSP or ALL_DSPS.

@@ -62,6 +62,7 @@ impl Store {
                 "INSERT OR IGNORE INTO schedules(provider,timezone) VALUES ('paycom',?)",
                 [s(&dsp, "timezone")],
             )?;
+            self.initialize_schedules(id)?;
             self.platform
                 .exec("UPDATE dsps SET status='active' WHERE id=?", [id])?;
             Ok(())
@@ -176,8 +177,11 @@ impl Store {
             "UPDATE dsps SET name=?,timezone=?,revision=revision+1 WHERE id=?",
             [name, timezone, id],
         )?;
-        self.collector(id, Provider::Paycom)?
-            .exec("UPDATE schedules SET timezone=?,next_run=NULL", [timezone])?;
+        if s(&c.dsp, "timezone") != timezone {
+            self.collector(id, Provider::Paycom)?
+                .exec("UPDATE schedules SET timezone=?,next_run=NULL", [timezone])?;
+            self.retime_schedules(id, timezone)?;
+        }
         self.audit(
             Some(s(&c.auth.user, "id")),
             Some(id),

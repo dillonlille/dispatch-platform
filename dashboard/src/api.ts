@@ -1,3 +1,4 @@
+import { scheduleIssues } from '../../shared/schedules.js';
 import { useEffect, useState, useCallback } from 'react';
 import { parseApiResponse } from '../../shared/contracts/runtime.js';
 export let csrf = '',
@@ -17,6 +18,12 @@ export class ApiError extends Error {
   }
 }
 const labels: Record<string, string> = {
+  ...scheduleIssues,
+  schedule_changed: 'This schedule changed in another session. Reload it before saving.',
+  schedule_not_found: 'This schedule was deleted. Close the editor and refresh.',
+  schedule_limit: 'You can create up to 50 schedules for this DSP.',
+  invalid_schedule_time: 'Choose a valid collection time.',
+  invalid_schedule_interval: 'Choose an interval from 0.5 to 24 hours in half-hour increments.',
   meal_sync_paycom_required: 'Connect Paycom before syncing meal breaks.',
   meal_sync_flex_required: 'Connect Cortex in Settings → Connections before syncing Flex.',
   meal_sync_scope_required: 'Flex needs an initial station collection before syncing this date.',
