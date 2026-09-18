@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type { DspSummary, AuditEvent, Job, PlatformHealth } from '../../shared/contracts/index.js';
-import { api, useData } from './api.js';
+import { api, errorLabel, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
 import { JobPerformance } from './job-performance.js';
@@ -443,7 +443,7 @@ export function JobTable({
               </td>
               <td>
                 <Badge value={job.status} />
-                {job.error && <small>{title(job.error)}</small>}
+                {job.error && <small>{errorLabel(job.error) ?? title(job.error)}</small>}
               </td>
               <td>
                 <div className="progress">

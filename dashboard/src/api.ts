@@ -58,6 +58,9 @@ const labels: Record<string, string> = {
   rate_limited: 'Too many attempts. Wait a few minutes and try again.',
   invalid_credentials: 'The provider could not verify those credentials.',
 };
+export function errorLabel(code: string): string | undefined {
+  return labels[code];
+}
 export async function api<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
@@ -75,7 +78,7 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
       window.dispatchEvent(new Event('dispatch-signed-out'));
     throw new ApiError(
       value.error,
-      labels[value.error] ?? value.message ?? 'The request could not be completed.',
+      errorLabel(value.error) ?? value.message ?? 'The request could not be completed.',
       response.status,
       response.headers.get('x-request-id') ?? undefined,
     );
