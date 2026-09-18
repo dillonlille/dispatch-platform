@@ -1,0 +1,14 @@
+[Unit]
+Description=Dispatch Production Cloudflare Tunnel
+After=network-online.target dispatch-production.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cloudflared --config %h/dispatch-platform/public/config/cloudflared.yml tunnel run
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

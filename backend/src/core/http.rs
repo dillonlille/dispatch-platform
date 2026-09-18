@@ -641,7 +641,14 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             Ok(Reply::json(diagnostics(db, state)?))
         }
         ("GET", "/api/platform/releases") => {
-            let file = db.config.platform().join("dev-update.json");
+            let file = db
+                .config
+                .platform()
+                .join(if db.config.environment == "production" {
+                    "production-update.json"
+                } else {
+                    "dev-update.json"
+                });
             let update=std::fs::read(file).ok().and_then(|s|serde_json::from_slice::<Value>(&s).ok()).map(|v|json!({"status":v["status"],"commit":v["commit"],"updatedAt":v["updatedAt"]}));
             Ok(Reply::json(
                 json!({"version":db.config.version,"environment":db.config.environment,"release":db.config.release,"update":update}),
