@@ -82,10 +82,20 @@ class ProductionUpdaterTests(unittest.TestCase):
         for tag in ("v0.0.2", "v0.0.3"):
             with patch.object(production, "github", return_value=self.release | {"tag_name": tag}), \
                     patch.object(production, "download_asset") as download, \
+                    patch.object(self.instance, "healthy", return_value=True), \
                     patch.object(self.instance, "service") as service:
                 self.instance.update()
                 download.assert_not_called()
                 service.assert_not_called()
+
+    def test_first_published_install_records_health_and_source_for_dashboard(self):
+        with patch.object(production, "github", return_value=self.release | {"tag_name": "v0.0.3"}), \
+                patch.object(self.instance, "healthy", return_value=True):
+            self.instance.update()
+        status = json.loads(self.instance.status_file.read_text())
+        self.assertEqual(status["status"], "ready")
+        self.assertEqual(status["commit"], "a" * 40)
+        self.assertEqual(status["digest"], self.old["digest"])
 
     def test_same_version_cannot_replace_installed_runtime(self):
         self.new = self.old

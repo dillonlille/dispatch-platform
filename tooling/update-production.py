@@ -174,6 +174,11 @@ class ProductionUpdater:
         if version(selected) < version(current["version"]):
             return
         if selected == current["version"]:
+            require(self.healthy(current["digest"], timeout=5), "Installed Production runtime is not healthy")
+            previous_status = json.loads(self.status_file.read_text()) if self.status_file.exists() else {}
+            if previous_status.get("status") != "ready" or previous_status.get("digest") != current["digest"]:
+                commit = json.loads((self.live / "tooling/build-info.json").read_text())["commit"]
+                self.status("ready", current, commit=commit)
             return
         if self.status_file.exists():
             status = json.loads(self.status_file.read_text())
