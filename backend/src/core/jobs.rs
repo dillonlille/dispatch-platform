@@ -211,11 +211,19 @@ impl Store {
             409,
         )?;
         if let Some(actor) = row["actor_id"].as_str() {
-            let user=self.platform.one("SELECT u.status,u.platform_owner,m.role FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.dsp_id=? WHERE u.id=?",[s(&row,"dsp_id"),actor])?.ok_or_else(||Error::new("permission_denied",403))?;
+            let user = self
+                .platform
+                .one(
+                    "SELECT status,platform_owner FROM users WHERE id=?",
+                    [actor],
+                )?
+                .ok_or_else(|| Error::new("permission_denied", 403))?;
             ensure(
                 s(&user, "status") == "active"
                     && (flag(&user, "platform_owner")
-                        || ["owner", "manager"].contains(&s(&user, "role"))),
+                        || self.grant(actor, s(&row, "dsp_id"))?.is_some_and(|grant| {
+                            grant.owner || grant.permissions.iter().any(|p| p == "collections.run")
+                        })),
                 "permission_denied",
                 403,
             )?;
@@ -567,6 +575,12 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     let error = result.err().map(|e| e.code);
     let actor = job["actor_id"].as_str().map(str::to_owned);
     let snapshot = metrics.snapshot();
+    // Request logs cannot explain a failed sync; record each attempt's outcome.
+    super::observability::event(
+        if error.is_some() { "warn" } else { "info" },
+        "job.finished",
+        json!({"jobId":id,"dspId":dsp,"kind":s(&job,"kind"),"attempt":n(&job,"attempt"),"error":error,"metrics":job_metrics::summary(&snapshot)}),
+    );
     let changed_dsp = dsp.clone();
     let _ = state
         .run(move |db| {

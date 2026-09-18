@@ -29,6 +29,7 @@ function discover(
   root: object,
   href = `${origin}/operations/execution/itineraries?selectedDay=${request.date}&serviceAreaId=area-1`,
   extra = {},
+  memoizedState: unknown = null,
 ) {
   const result = vm.runInNewContext(`(${script.trim().replace(/;$/, '')})(input)`, {
     URL,
@@ -37,12 +38,23 @@ function discover(
     location: { href },
     document: {
       querySelectorAll: () => [
-        { __reactFiber$fixture: { memoizedProps: root, return: { memoizedProps: extra } } },
+        {
+          __reactFiber$fixture: {
+            memoizedProps: root,
+            memoizedState,
+            return: { memoizedProps: extra },
+          },
+        },
       ],
     },
   });
   return JSON.parse(JSON.stringify(result));
 }
+// Cortex's execution home keeps its service areas in a hook ref, after hooks
+// that reference DOM nodes and other React internals.
+const home = `${origin}/operations/execution/`;
+const hooks = (...values: unknown[]) =>
+  values.reduceRight<unknown>((next, memoizedState) => ({ memoizedState, next }), null);
 test('first-use discovery matches the DSP in a station with multiple providers', () => {
   assert.deepEqual(discover(props()), {
     scope: {
@@ -115,5 +127,68 @@ test('discovery rejects ambiguous DSPs, all-provider filters, wrong origins and 
     discover(props(), undefined, { stations: [{ ...station, serviceAreaID: 'conflicting' }] })
       .error,
     'cortex_station_unavailable',
+  );
+});
+test('first-use discovery finds the station on the execution home Cortex redirects to', () => {
+  class Internal {
+    get stations(): never {
+      throw new Error('React internals must not be read');
+    }
+  }
+  const other = { ...station, serviceAreaID: 'area-2', defaultStationCode: 'ABC1' };
+  const state = hooks(new Internal(), 'text', {
+    current: { 'area-2': other, 'area-1': { ...station, nested: new Internal() } },
+  });
+  assert.deepEqual(discover({}, home, {}, state), { serviceAreaId: 'area-1' });
+  assert.deepEqual(discover({}, `${origin}/operations/execution`, {}, state), {
+    serviceAreaId: 'area-1',
+  });
+  assert.deepEqual(discover({}, home, {}, hooks({ current: {} })), {
+    error: 'cortex_content_incomplete',
+    reason: 'station_loading',
+  });
+  assert.deepEqual(discover({}, home, {}, hooks({ current: { 'area-2': other } })), {
+    error: 'cortex_station_unavailable',
+    reason: 'station_missing',
+  });
+  assert.deepEqual(
+    discover(
+      {},
+      home,
+      {},
+      hooks({ current: { a: station, b: { ...station, serviceAreaID: 'b' } } }),
+    ),
+    { error: 'cortex_station_unavailable', reason: 'station_ambiguous' },
+  );
+  assert.equal(
+    discover({}, home, {}, hooks({ current: { a: { ...station, timeZone: 'America/New_York' } } }))
+      .error,
+    'cortex_timezone_mismatch',
+  );
+  // Hook state is only read on the execution home, and no other page is trusted.
+  assert.equal(discover({}, undefined, {}, state).reason, 'page_loading');
+  for (const path of ['/dspconsolev2', '/operations/execution/other', '/operations/planning/'])
+    assert.deepEqual(discover(props(), `${origin}${path}`, {}, state), {
+      error: 'cortex_content_incomplete',
+      reason: 'path',
+    });
+});
+test('discovery only resolves a scope for the requested day', () => {
+  const scoped = (day: string) =>
+    `${origin}/operations/execution/itineraries?selectedDay=${day}&serviceAreaId=area-1`;
+  // A page showing another day is sent back to the requested day, never published.
+  assert.deepEqual(discover(props(), scoped('2026-01-09')), { serviceAreaId: 'area-1' });
+  assert.deepEqual(discover({ ...props(), selectedDay: '2026-01-09' }), {
+    serviceAreaId: 'area-1',
+  });
+  assert.equal(discover(props(), scoped(request.date)).scope.date, request.date);
+});
+test('discovery reports why a page is not ready', () => {
+  assert.equal(discover({ ...props(), isLoadingSummaries: true }).reason, 'summaries_loading');
+  assert.equal(discover({}).reason, 'page_loading');
+  assert.equal(discover({ ...props(), providerFilterOptions: [] }).reason, 'provider_none');
+  assert.equal(
+    discover({ ...props(), providerFilterOptions: [{ value: 'a' }, { value: 'b' }] }).reason,
+    'provider_many',
   );
 });

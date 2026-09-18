@@ -101,7 +101,8 @@ test('owner dashboard, search, workforce, timecards, connection verification and
     path: test.info().outputPath('sync-both-providers.png'),
     fullPage: true,
   });
-  await page.getByRole('link', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   const history = page.getByRole('region', { name: 'Collection performance history' });
   await expect(history).toContainText('Last successful collection');
   await expect(history).toContainText('Median collection time');
@@ -122,8 +123,6 @@ test('owner dashboard, search, workforce, timecards, connection verification and
     path: test.info().outputPath('dispatch-job-metrics.png'),
     fullPage: true,
   });
-  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
-  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Platform collections' })).toContainText(
     'Attempt details',
   );
@@ -176,7 +175,11 @@ test('create a DSP and accept its owner invitation while another account is sign
   await expect(page.getByLabel('Email address')).toHaveValue('invited-owner@dispatch.test');
   await page.getByLabel('First name', { exact: true }).fill('Invited');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
-  await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
+  await page.getByLabel('Password', { exact: true }).fill('Invited1');
+  await page.getByLabel('Confirm password', { exact: true }).fill('Invited2');
+  await page.getByRole('button', { name: 'Accept invitation' }).click();
+  await expect(page.getByText('The passwords must match.', { exact: true })).toBeVisible();
+  await page.getByLabel('Confirm password', { exact: true }).fill('Invited1');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
   await page.screenshot({

@@ -95,8 +95,11 @@ test('disabled Dev mail does not fall back to production mail or create a DSP/in
   );
   assert.equal((await owner.get('/api/platform/dsps')).value.length, 1);
   await owner.select(owner.session.dsps[0].id);
+  const role = (await owner.get('/api/dsp/roles')).value.find(
+    (item: { name: string }) => item.name === 'Member',
+  );
   assert.equal(
-    (await owner.post('/api/dsp/members/invite', { email: 'never@dispatch.test', role: 'member' }))
+    (await owner.post('/api/dsp/members/invite', { email: 'never@dispatch.test', role: role.id }))
       .status,
     503,
   );

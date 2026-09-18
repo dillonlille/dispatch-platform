@@ -10,6 +10,14 @@ export interface Measurement {
   p95Ms: number;
   responseBytes: number;
 }
+export interface Failure {
+  scenario: Measurement['scenario'];
+  concurrency: number;
+  route: string;
+  tenant: number;
+  status: number;
+  body: string;
+}
 export interface BenchmarkReport {
   startupMs: number;
   idleRssBytes: number;
@@ -18,6 +26,7 @@ export interface BenchmarkReport {
   completedCollections: number;
   observedRunning: number;
   measurements: Measurement[];
+  failures?: Failure[];
 }
 // Deliberately broad across host/CI hardware. Keep tighter comparisons in the
 // recorded baseline; never auto-adjust these budgets to accept a failed run.
@@ -38,7 +47,14 @@ export function checkBenchmark(report: BenchmarkReport, performance = false) {
       assert.equal(rows.length, 1, `Missing/duplicate workload: ${scenario}/${concurrency}`);
       const row = rows[0]!;
       assert.equal(row.requests, 240, 'Incomplete request workload');
-      assert.equal(row.errors, 0, `${scenario}/${concurrency}: HTTP errors`);
+      const failed = (report.failures ?? [])
+        .filter((f) => f.scenario === scenario && f.concurrency === concurrency)
+        .map((f) => `${f.route} returned ${f.status}: ${f.body}`);
+      assert.equal(
+        row.errors,
+        0,
+        [`${scenario}/${concurrency}: HTTP errors`, ...failed].join('\n'),
+      );
       for (const value of [row.requestsPerSecond, row.p95Ms, row.medianMs, row.responseBytes])
         assert(Number.isFinite(value) && value > 0, 'Invalid workload measurement');
       if (performance) {

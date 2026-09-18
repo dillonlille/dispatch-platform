@@ -93,6 +93,7 @@ test('Rust provisioning, invitation acceptance, profile setup, removal and resto
   const message = await capturedMail(f.root, 'new@dispatch.test');
   assert.match(message.subject, /^\[Dispatch Dev\]/);
   assert.match(message.html, />Start DSP onboarding<\/a>/);
+  assert.match(message.text, / invited you to set up a new DSP on Dispatch as its owner\./);
   assert.equal(message.origin, f.env.DISPATCH_ORIGIN);
   const raw = /token=([A-Za-z0-9_-]{43})/.exec(message.text)![1];
   const invite = `/api/invitations/${raw}`;
@@ -155,6 +156,7 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
   const filename = path.join(mail, completed()[0]!);
   assert.equal(fs.statSync(filename).mode & 0o077, 0);
   const message = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  assert.match(message.html, />Reset password<\/a>/);
   const raw = /token=([A-Za-z0-9_-]{43})/.exec(message.text)![1];
   assert.equal(
     (await f.request('/api/auth/reset-password', { token: raw, password: 'Replacement-password!' }))
@@ -457,9 +459,11 @@ test('existing-account invitations require the account password and revocation r
   const member = await f.client('member@dispatch.test');
   const dev = owner.session.dsps.find((d: { permanent: boolean }) => d.permanent);
   await owner.select(dev.id);
+  const roles: { id: string; name: string }[] = (await owner.get('/api/dsp/roles')).value;
+  const roleId = (name: string) => roles.find((role) => role.name === name)!.id;
   const invited = await owner.post('/api/dsp/members/invite', {
     email: 'member@dispatch.test',
-    role: 'manager',
+    role: roleId('Manager'),
   });
   assert.equal(invited.status, 200);
   assert.equal(invited.value.invitationUrl, undefined);
@@ -495,7 +499,7 @@ test('existing-account invitations require the account password and revocation r
   );
   const pending = await owner.post('/api/dsp/members/invite', {
     email: 'new@dispatch.test',
-    role: 'member',
+    role: roleId('Member'),
   });
   assert.equal(pending.value.invitationUrl, undefined);
   const raw = /token=([A-Za-z0-9_-]{43})/.exec(

@@ -2,7 +2,6 @@ import { useUpdateState } from './browser-update.js';
 import { useCollectionUpdates } from './live-collection.js';
 import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
-import { calendarTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
@@ -250,7 +249,7 @@ export function TimecardsPage({
   preferences?: PaycomPreferences;
 }) {
   const [offset, setOffset] = useUpdateState('timecard-offset', 0);
-  const calendarToday = localDate(calendarTimezone());
+  const calendarToday = localDate(timezone);
   const [localDay, setLocalDay] = useState(calendarToday);
   const date = sharedDate ?? (localDay > calendarToday ? calendarToday : localDay);
   const [sort, setSort] = useUpdateState(
@@ -260,12 +259,18 @@ export function TimecardsPage({
     [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
     [selectedCode, setSelectedCode] = useState<string>();
   const liveRevision = useCollectionUpdates(date);
-  const { data, error } = useData<Daily>(
+  const {
+    data: current,
+    stale,
+    error,
+  } = useData<Daily>(
     `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
     0,
     `${refreshKey}:${liveRevision}`,
     date,
   );
+  // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
+  const data = current ?? stale;
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
@@ -305,7 +310,7 @@ export function TimecardsPage({
             Choose another date or collect the current pay period.
           </Empty>
         ) : (
-          <>
+          <div className="paycom-day-results" aria-busy={!current} inert={!current}>
             <div className="table-wrap">
               <table className="paycom-day-table" aria-label="Daily employee timecards">
                 <thead>
@@ -388,22 +393,21 @@ export function TimecardsPage({
                 Your DSP owner can choose which departments appear in Timecard Settings.
               </Empty>
             )}
-          </>
+          </div>
         )}
         <footer className="paycom-timecard-footer" aria-label="Timecard timezones">
           <span>
             <Globe size={16} aria-hidden="true" />
-            Calendar: {calendarTimezone().replaceAll('_', ' ')}
+            {timezone.replaceAll('_', ' ')}
           </span>
           <div className="paycom-timecard-business-time">
-            <span>Paycom: {timezone.replaceAll('_', ' ')}</span>
             <details className="paycom-timecard-info">
               <summary aria-label="About timecard data">
                 <Info size={16} aria-hidden="true" />
               </summary>
               <p>
-                Last completed collection {time(data?.collectedAt)}. Times update during collection,
-                and hours may change after corrections.
+                Last completed collection {time(data?.collectedAt, timezone)}. Times update during
+                collection, and hours may change after corrections.
               </p>
             </details>
           </div>

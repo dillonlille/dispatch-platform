@@ -1,4 +1,5 @@
-//! Per-attempt diagnostics. Only timings, counts and memory totals are persisted.
+//! Per-attempt diagnostics. Only timings, counts, memory totals and fixed failure
+//! labels are persisted.
 use super::{
     Result,
     db::{self, Store, n, s},
@@ -31,6 +32,7 @@ pub struct Metrics {
     outcome: String,
     error: Option<String>,
     phase: Option<Phase>,
+    detail: Option<String>,
     queue_ms: u64,
     elapsed_ms: u64,
     authentication_ms: Option<u64>,
@@ -48,6 +50,10 @@ pub struct Metrics {
     incomplete_memory_samples: u64,
     page_reads: PageReads,
 }
+/// The journal line for one attempt: outcome and timings, without page reads.
+pub fn summary(metrics: &Metrics) -> Value {
+    serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,"elapsedMs":metrics.elapsed_ms,"authenticationMs":metrics.authentication_ms,"collectionMs":metrics.collection_ms})
+}
 impl Metrics {
     pub fn new(job: &Value) -> Self {
         Self {
@@ -57,6 +63,7 @@ impl Metrics {
             outcome: "running".into(),
             error: None,
             phase: Some(Phase::Starting),
+            detail: None,
             queue_ms: db::now().saturating_sub(n(job, "available_at")).max(0) as u64,
             elapsed_ms: 0,
             authentication_ms: None,
@@ -241,6 +248,13 @@ impl Recorder {
         clock.value.phase = Some(phase);
         clock.changed = Instant::now();
     }
+    /// The most recent reason a provider page was not ready. Labels come from
+    /// collector code, so anything that is not a short identifier is dropped.
+    pub fn detail(&self, label: &str) {
+        let valid = (1..=48).contains(&label.len())
+            && label.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
+        self.0.lock().expect("job metrics").value.detail = valid.then(|| label.to_owned());
+    }
     pub fn counts(&self, data: &Value) {
         let mut clock = self.0.lock().expect("job metrics");
         clock.value.employees = data["employees"].as_array().map(Vec::len);
@@ -291,6 +305,9 @@ impl Recorder {
             clock.value.finished_at = Some(db::iso());
             clock.value.outcome = outcome.into();
             clock.value.error = error.map(str::to_owned);
+            if error.is_none() {
+                clock.value.detail = None;
+            }
         }
     }
     pub fn observe(&self, sample: Memory) {
@@ -425,6 +442,27 @@ mod tests {
         assert_eq!(reads["failures"].as_array().unwrap().len(), 8);
         assert_eq!(reads["slowest"].as_array().unwrap().len(), 5);
         assert_eq!(reads["active"][0]["ordinal"], 21);
+    }
+    #[test]
+    fn failure_detail_keeps_only_fixed_labels_and_clears_on_success() {
+        let detail = |recorder: &Recorder| {
+            serde_json::to_value(recorder.snapshot()).unwrap()["detail"].clone()
+        };
+        let recorder = Recorder::new(&json!({"attempt":1}));
+        recorder.detail("summaries_loading");
+        assert_eq!(detail(&recorder), "summaries_loading");
+        for label in ["", "Station DOT4", "https://example.test", &"a".repeat(49)] {
+            recorder.detail(label);
+            assert_eq!(detail(&recorder), Value::Null, "{label}");
+        }
+        recorder.detail("path");
+        assert_eq!(summary(&recorder.snapshot())["detail"], "path");
+        let failed = Recorder::new(&json!({"attempt":1}));
+        failed.detail("path");
+        failed.finish("failed", Some("cortex_content_incomplete"));
+        assert_eq!(detail(&failed), "path");
+        recorder.finish("succeeded", None);
+        assert_eq!(detail(&recorder), Value::Null);
     }
     #[test]
     fn partial_samples_do_not_claim_a_complete_shared_memory_peak() {

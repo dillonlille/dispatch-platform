@@ -232,7 +232,7 @@ impl Session {
         if let Some((state, context)) = guard {
             let context = context.clone();
             state
-                .read(move |db| db.revalidate(&context, "connections"))
+                .read(move |db| db.revalidate(&context, "connections.manage"))
                 .await?;
         }
         if ["screenshot", "assist", "complete_assistance"].contains(&s(&command, "action")) {
@@ -365,7 +365,7 @@ impl Session {
                     .map(|data| (data, None)),
                 Worker::Cortex(worker) => {
                     let scope = worker
-                        .resolve_scope(&serde_json::from_value(request.clone())?)
+                        .resolve_scope(&serde_json::from_value(request.clone())?, metrics)
                         .await?;
                     let data = worker
                         .collect(
@@ -440,7 +440,7 @@ impl Store {
         Ok(())
     }
     pub fn save_credentials(&self, c: &Context, value: &Value, provider: Provider) -> Result<()> {
-        self.revalidate(c, "connections")?;
+        self.revalidate(c, "connections.manage")?;
         validate_credentials(value, provider)?;
         let id = s(&c.dsp, "id");
         let area = self.area(id, "secrets")?;
@@ -470,7 +470,7 @@ impl Store {
         )
     }
     pub fn disable(&self, c: &Context, remove: bool, provider: Provider) -> Result<()> {
-        self.revalidate(c, "connections")?;
+        self.revalidate(c, "connections.manage")?;
         let id = s(&c.dsp, "id");
         let db = self.collector(id, provider)?;
         db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;if provider == Provider::Paycom { db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?",[provider.id()])?; }Ok(())})?;

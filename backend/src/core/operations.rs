@@ -140,8 +140,13 @@ pub fn seed(db: &Store) -> Result<()> {
         false,
     )?;
     db.platform.exec(
-        "INSERT INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,'member')",
-        params![crypto::id("mem")?, s(&member, "id"), s(&north, "id")],
+        "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,'member',?)",
+        params![
+            crypto::id("mem")?,
+            s(&member, "id"),
+            s(&north, "id"),
+            super::roles::default_role(&db.platform, s(&north, "id"), "member")?
+        ],
     )?;
     for dsp in [&dev, &north] {
         let id = s(dsp, "id");

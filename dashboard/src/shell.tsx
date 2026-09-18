@@ -151,7 +151,7 @@ export function Shell({
                   {session.user.platformOwner
                     ? `Platform owner${view ? ' · Viewing DSP' : ''}`
                     : view
-                      ? title(view.role)
+                      ? view.role.name
                       : 'Team member'}
                 </span>
               </span>

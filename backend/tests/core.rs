@@ -524,3 +524,47 @@ async fn concurrent_password_resets_cannot_reuse_a_consumed_token() {
         "reset_expired"
     );
 }
+#[test]
+fn dsp_audit_log_hides_platform_owner_actions() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let tenant = db
+        .platform
+        .one("SELECT id FROM dsps WHERE name='Northline Logistics'", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&tenant, "id");
+    let user = |owner: i64| {
+        db.platform
+            .one(
+                "SELECT id FROM users WHERE platform_owner=? LIMIT 1",
+                [owner],
+            )
+            .unwrap()
+            .unwrap()
+    };
+    let (owner, member) = (user(1), user(0));
+    db.audit(Some(s(&owner, "id")), Some(id), "collection.requested", "")
+        .unwrap();
+    db.audit(Some(s(&member, "id")), Some(id), "schedule.updated", "")
+        .unwrap();
+    db.audit(None, Some(id), "collection.completed", "")
+        .unwrap();
+    let actions = |dsp| -> Vec<String> {
+        db.audits(dsp, 200)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| s(row, "dspId") == id)
+            .map(|row| s(row, "action").to_owned())
+            .collect()
+    };
+    assert_eq!(
+        actions(Some(id)),
+        ["collection.completed", "schedule.updated"]
+    );
+    let platform = actions(None);
+    assert!(platform.contains(&"collection.requested".to_owned()));
+    assert!(platform.contains(&"development.fixtures_loaded".to_owned()));
+}

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Job, JobMetrics, SessionView, User } from './index.js';
+import { permissions, type Job, type JobMetrics, type SessionView, type User } from './index.js';
 
 const text = z.string();
 const count = z.number().int().nonnegative();
@@ -35,7 +35,7 @@ const profile = z.object({
   setupRequired: z.boolean(),
   removed: z.boolean(),
 });
-const role = z.enum(['owner', 'manager', 'member', 'platform_owner']);
+const permission = z.enum(permissions);
 export const sessionSchema = z.object({
   user: userSchema,
   csrf: text.min(1),
@@ -46,7 +46,7 @@ export const sessionSchema = z.object({
       ownerStatus: z.enum(['active', 'invited', 'missing']),
       paycom: connectionStatus,
       lastCollection: text.nullable(),
-      role,
+      role: text.nullable(),
     }),
   ),
   development: z.boolean(),
@@ -54,7 +54,13 @@ export const sessionSchema = z.object({
   release: text,
   providerMode: z.enum(['fixture', 'native']),
 }) satisfies z.ZodType<SessionView>;
-const viewSchema = z.object({ dsp, token: text.min(1), role, profile });
+const viewSchema = z.object({
+  dsp,
+  token: text.min(1),
+  role: z.object({ id: text, name: text, owner: z.boolean() }),
+  permissions: z.array(permission),
+  profile,
+});
 const pageRead = z.object({
   ordinal: count,
   attempt: count,
@@ -76,6 +82,7 @@ export const metricsSchema = z.object({
   phase: z
     .enum(['starting', 'authentication', 'verification', 'collection', 'publication'])
     .nullable(),
+  detail: text.nullable().optional(),
   queueMs: milliseconds,
   elapsedMs: milliseconds,
   authenticationMs: milliseconds.nullable(),

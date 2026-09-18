@@ -1,5 +1,24 @@
 export type Environment = 'production' | 'preview';
-export type Role = 'owner' | 'manager' | 'member';
+export const permissions = [
+  'timecard.view',
+  'timecard.manage',
+  'collections.run',
+  'connections.manage',
+  'members.invite',
+  'members.manage',
+  'roles.manage',
+  'settings.manage',
+  'audit.view',
+] as const;
+export type Permission = (typeof permissions)[number];
+export interface Role {
+  id: string;
+  name: string;
+  owner: boolean;
+  permissions: Permission[];
+  members: number;
+  invitations: number;
+}
 export type DspStatus = 'provisioning' | 'active' | 'suspended' | 'failed';
 export type ConnectionStatus =
   | 'not_connected'
@@ -43,7 +62,7 @@ export interface DspSummary extends Dsp {
   ownerStatus: 'active' | 'invited' | 'missing';
   paycom: ConnectionStatus;
   lastCollection: string | null;
-  role: Role | 'platform_owner';
+  role: string | null;
 }
 export interface Membership {
   id: string;
@@ -51,7 +70,9 @@ export interface Membership {
   dspId: string;
   email: string;
   name: string;
-  role: Role;
+  role: string;
+  roleId: string | null;
+  owner: boolean;
 }
 export interface SessionView {
   user: User;
@@ -66,7 +87,8 @@ export interface DspView {
   profile?: DspProfile;
   dsp: Dsp;
   token: string;
-  role: Role | 'platform_owner';
+  role: Pick<Role, 'id' | 'name' | 'owner'>;
+  permissions: Permission[];
 }
 export interface Connection {
   verificationSessionId?: string;
@@ -97,6 +119,7 @@ export interface JobMetrics {
   outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
   error: string | null;
   phase: 'starting' | 'authentication' | 'verification' | 'collection' | 'publication' | null;
+  detail?: string | null;
   queueMs: number;
   elapsedMs: number;
   authenticationMs: number | null;

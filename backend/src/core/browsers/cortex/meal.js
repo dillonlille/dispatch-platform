@@ -2,23 +2,24 @@
 // references, stop/task IDs, addresses, cookies or tokens leave the page. Runs in the application's world
 // because React's props are not visible from an isolated JavaScript world.
 (input) => {
-  const fail = (error) => ({ error });
+  // `reason` is a fixed diagnostic label for job metrics, never page content.
+  const fail = (error, reason) => ({ error, reason });
   const scope = input.scope;
   const url = new URL(location.href);
   if (url.origin !== input.origin || url.username || url.password)
-    return fail('cortex_scope_mismatch');
+    return fail('cortex_scope_mismatch', 'origin');
   if (!url.pathname.startsWith('/operations/execution/itineraries'))
-    return fail('cortex_content_incomplete');
+    return fail('cortex_content_incomplete', 'path');
   if (
     url.searchParams.get('selectedDay') !== scope.date ||
     url.searchParams.get('serviceAreaId') !== scope.serviceAreaId ||
     url.searchParams.get('provider') !== scope.provider
   )
-    return fail('cortex_scope_mismatch');
+    return fail('cortex_scope_mismatch', 'url_scope');
   let root;
   const seen = new Set();
   const elements = document.querySelectorAll('*');
-  if (elements.length > 60000) return fail('cortex_source_too_large');
+  if (elements.length > 60000) return fail('cortex_source_too_large', 'elements');
   for (const element of elements) {
     const key = Object.keys(element).find((k) => k.startsWith('__reactFiber'));
     for (let fiber = element[key], depth = 0; fiber && depth < 80; fiber = fiber.return, depth++) {
@@ -39,7 +40,7 @@
     root.isLoadingSummaries !== false ||
     (input.kind === 'detail' && root.isLoadingItineraryDetails !== false)
   )
-    return fail('cortex_content_incomplete');
+    return fail('cortex_content_incomplete', 'summaries_loading');
   const station = root.selectedStation;
   if (
     !station ||
@@ -51,14 +52,14 @@
     !Array.isArray(root.providerFilterOptions) ||
     !root.providerFilterOptions.some((p) => p.value === scope.provider)
   )
-    return fail('cortex_scope_mismatch');
+    return fail('cortex_scope_mismatch', 'page_scope');
   try {
     const zone = (value) =>
       new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
     if (typeof station.timeZone !== 'string' || zone(station.timeZone) !== zone(scope.timezone))
-      return fail('cortex_timezone_mismatch');
+      return fail('cortex_timezone_mismatch', 'timezone');
   } catch {
-    return fail('cortex_timezone_mismatch');
+    return fail('cortex_timezone_mismatch', 'timezone');
   }
   const token = (value) => typeof value === 'string' && /^[A-Za-z0-9_.:#-]{1,256}$/.test(value);
   const stamp = (value) =>
@@ -107,11 +108,11 @@
   };
   try {
     const all = root.allItinerarySummaries;
-    if (all.length > 1000) return fail('cortex_source_too_large');
+    if (all.length > 1000) return fail('cortex_source_too_large', 'summaries');
     // Use the full loaded list, independent of visual text/progress filters.
     const selected =
       scope.provider === 'ALL_DRIVERS' ? all : all.filter((s) => s.companyId === scope.provider);
-    if (scope.provider === 'ALL_DSPS') return fail('invalid_cortex_scope');
+    if (scope.provider === 'ALL_DSPS') return fail('invalid_cortex_scope', 'provider');
     const candidates = selected
       .map((s) => {
         const driver = root.transporterSummary[s.transporterId]?.transporterName;
@@ -130,41 +131,36 @@
           routeComplete: s.executionStatus === 'COMPLETE',
           meals: meals(s.breaks),
         };
-        return {
-          ...item,
-          revision: JSON.stringify([
-            item,
-            s.stopProgress,
-            s.latestTaskExecutionTime,
-            s.lastStopExecutionTime,
-          ]),
-        };
+        // Only published facts version a route. Delivery progress changes with
+        // every package, so including it would fail every sync of a working day;
+        // each detail read validates its own stops and deliveries instead.
+        return { ...item, revision: JSON.stringify(item) };
       })
       .sort((a, b) => a.id.localeCompare(b.id));
     if (new Set(candidates.map((c) => c.id)).size !== candidates.length)
-      return fail('cortex_invalid_identity');
+      return fail('cortex_invalid_identity', 'identity');
     if (input.kind === 'list') return { candidates };
     const c = input.candidate;
     const current = candidates.find((v) => v.id === c.id);
-    if (!current || current.revision !== c.revision) return fail('cortex_source_changed');
+    if (!current || current.revision !== c.revision)
+      return fail('cortex_source_changed', 'route_changed');
     const d = root.itineraryDetails;
     const localDate = Array.isArray(d.localDate)
       ? d.localDate.map((v, i) => String(v).padStart(i ? 2 : 4, '0')).join('-')
       : d.localDate;
-    if (
-      d.itineraryId !== c.id ||
-      d.transporterId !== c.transporterId ||
-      d.serviceAreaId !== scope.serviceAreaId ||
-      localDate !== scope.date
-    )
-      return fail('cortex_scope_mismatch');
+    if (d.itineraryId !== c.id) return fail('cortex_scope_mismatch', 'detail_itinerary');
+    if (d.transporterId !== c.transporterId)
+      return fail('cortex_scope_mismatch', 'detail_transporter');
+    if (d.serviceAreaId !== scope.serviceAreaId)
+      return fail('cortex_scope_mismatch', 'detail_area');
+    if (localDate !== scope.date) return fail('cortex_scope_mismatch', 'detail_date');
     const breaks = meals(d.breaks);
     if (
       JSON.stringify(breaks.map((m) => [m.id, m.start, m.end])) !==
         JSON.stringify(c.meals.map((m) => [m.id, m.start, m.end])) ||
       (d.executionStatus === 'COMPLETE') !== c.routeComplete
     )
-      return fail('cortex_source_changed');
+      return fail('cortex_source_changed', 'meal_changed');
     if (
       !Array.isArray(d.stops) ||
       !Array.isArray(d.unknownStops) ||
@@ -172,7 +168,7 @@
       d.stops.length > 2000 ||
       d.inactiveTasks.length > 10000
     )
-      return fail('cortex_content_incomplete');
+      return fail('cortex_content_incomplete', 'stops');
     // unknownStops records unplanned dwell locations (enter/exit coordinates
     // and times), not missing delivery tasks. It does not invalidate the
     // independently counted stops[].tasks delivery evidence.
@@ -184,11 +180,11 @@
     let taskCount = 0;
     for (const stop of d.stops) {
       if (!token(stop.stopId) || stopIds.has(stop.stopId) || !Array.isArray(stop.tasks))
-        return fail('cortex_content_incomplete');
+        return fail('cortex_content_incomplete', 'stops');
       stopIds.add(stop.stopId);
       for (const task of stop.tasks) {
-        if (++taskCount > 10000) return fail('cortex_source_too_large');
-        if (!token(task.taskId)) return fail('cortex_content_incomplete');
+        if (++taskCount > 10000) return fail('cortex_source_too_large', 'tasks');
+        if (!token(task.taskId)) return fail('cortex_content_incomplete', 'tasks');
         const time = stamp(task.actualExecutionTime ?? task.taskExecutionTime);
         const evidence = JSON.stringify([
           task.taskType,
@@ -283,6 +279,8 @@
       'cortex_invalid_meal_evidence',
       'cortex_invalid_identity',
     ];
-    return fail(allowed.includes(error.message) ? error.message : 'cortex_content_incomplete');
+    return allowed.includes(error.message)
+      ? fail(error.message, 'evidence')
+      : fail('cortex_content_incomplete', 'script_error');
   }
 };
