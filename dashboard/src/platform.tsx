@@ -485,39 +485,6 @@ export function JobTable({
     <Empty title="No collections yet">Start a collection from a DSP workspace.</Empty>
   );
 }
-export function JobsPage({
-  platform,
-  perform,
-  canCollect,
-}: {
-  platform: boolean;
-  perform: Perform;
-  canCollect: boolean;
-}) {
-  const { data, error, refresh } = useData<Job[]>(
-    platform ? '/api/platform/jobs' : '/api/dsp/jobs',
-    3000,
-  );
-  return (
-    <>
-      <Header title="Collections" />
-      <ErrorBox message={error} />
-      {data ? (
-        <>
-          <CollectionHistory jobs={data} />
-          <JobTable
-            jobs={data}
-            perform={perform}
-            refresh={refresh}
-            cancel={!platform && canCollect}
-          />
-        </>
-      ) : (
-        <Loading />
-      )}
-    </>
-  );
-}
 export function DiagnosticsPage({ perform }: { perform: Perform }) {
   const health = useData<PlatformHealth>('/api/platform/health', 10000);
   const { data, error, refresh } = useData<{

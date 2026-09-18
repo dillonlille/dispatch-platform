@@ -101,7 +101,8 @@ test('owner dashboard, search, workforce, timecards, connection verification and
     path: test.info().outputPath('sync-both-providers.png'),
     fullPage: true,
   });
-  await page.getByRole('link', { name: 'Collections', exact: true }).click();
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   const history = page.getByRole('region', { name: 'Collection performance history' });
   await expect(history).toContainText('Last successful collection');
   await expect(history).toContainText('Median collection time');
@@ -122,8 +123,6 @@ test('owner dashboard, search, workforce, timecards, connection verification and
     path: test.info().outputPath('dispatch-job-metrics.png'),
     fullPage: true,
   });
-  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
-  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Platform collections' })).toContainText(
     'Attempt details',
   );
