@@ -94,7 +94,11 @@ pub fn bootstrap(
         409,
     )?;
     let owner = db.create_user(email, first, last, password, true)?;
-    let dsp = db.create_dsp("Dev DSP", "UTC", s(&owner, "id"), true)?;
+    let dsp = if db.config.environment == "preview" {
+        Some(db.create_dsp("Dev DSP", "UTC", s(&owner, "id"), true)?)
+    } else {
+        None
+    };
     Ok(json!({"owner":owner,"dsp":dsp}))
 }
 pub fn seed(db: &Store) -> Result<()> {
