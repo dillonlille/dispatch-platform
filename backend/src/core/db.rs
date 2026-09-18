@@ -272,6 +272,15 @@ pub struct Store {
     pub key: Vec<u8>,
     dsp_cache: std::cell::RefCell<Vec<(String, Db)>>,
 }
+// A nullable, additive column keeps the version 3 platform schema readable by
+// the previous Rust release. It names the actor once their account is deleted.
+fn migrate_audit(db: &Db) -> Result<()> {
+    let columns = db.all("PRAGMA table_info(audit)", [])?;
+    if !columns.iter().any(|c| s(c, "name") == "actor_name") {
+        db.0.execute_batch("ALTER TABLE audit ADD COLUMN actor_name TEXT")?;
+    }
+    Ok(())
+}
 impl Store {
     pub fn initialize(config: Config) -> Result<Self> {
         private_dir(&config.root)?;
@@ -304,6 +313,7 @@ impl Store {
         };
         super::mail::migrate(&store.platform)?;
         super::roles::migrate(&store.platform)?;
+        migrate_audit(&store.platform)?;
         store
             .platform
             .0
@@ -394,7 +404,7 @@ impl Store {
     }
     // A DSP's log lists its members' and the system's actions, never a platform owner's.
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR (a.dsp_id=? AND COALESCE(u.platform_owner,0)=0)) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
+        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR (a.dsp_id=? AND COALESCE(u.platform_owner,0)=0)) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
     }
 }
 
