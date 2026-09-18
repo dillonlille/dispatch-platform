@@ -14,6 +14,7 @@ pub mod meal_comparison;
 pub mod meal_sync;
 pub mod meals;
 pub mod operations;
+pub mod schedules;
 pub mod tenants;
 pub mod validate;
 pub mod workforce;

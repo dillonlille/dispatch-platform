@@ -191,7 +191,7 @@ test('archived account tabs preserve names, appearance and display timezone pref
   await expect(page.getByRole('alert')).toHaveText('The new passwords must match.');
 });
 
-test('Timecard Settings persist and affect the workspace', async ({ page }) => {
+test('Timecard schedules can be created, edited, paused and deleted', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: /Northline Logistics/ }).click();
   let releaseView!: () => void;
@@ -224,27 +224,50 @@ test('Timecard Settings persist and affect the workspace', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Collections', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Timecard Settings', exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Workspace view', exact: true }).click();
-  await page.getByLabel('Opening page', { exact: true }).selectOption('employees');
-  await page.getByLabel('Name order', { exact: true }).selectOption('last_first');
-  await page.getByRole('checkbox', { name: 'Hours', exact: true }).uncheck();
-  await page.getByRole('tab', { name: 'Driver departments', exact: true }).click();
-  await page.getByRole('checkbox', { name: 'Include all current and future options' }).uncheck();
-  await page.getByRole('checkbox', { name: /Operations/ }).uncheck();
-  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(page.getByText('Settings saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Workspace view', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Driver departments', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
+  let dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
+  await dialog.getByLabel('Schedule name').fill('Paycom refresh');
+  await dialog.getByLabel('Every', { exact: true }).fill('2');
+  await dialog.getByRole('button', { name: 'Create schedule', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  let row = page.getByRole('row').filter({ hasText: 'Paycom refresh' });
+  await expect(row).toContainText('Every 2 hours');
   await page.reload();
-  await page.getByRole('tab', { name: 'Workspace view', exact: true }).click();
-  await expect(page.getByLabel('Name order', { exact: true })).toHaveValue('last_first');
-  await page.getByRole('link', { name: '← Back', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'Employees', exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-  await expect(page.getByRole('button', { name: 'Morgan, Avery', exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
-  await expect(page.getByRole('button', { name: /View punches for/ })).toHaveCount(11);
-  await expect(page.getByRole('columnheader', { name: 'Hours', exact: true })).toHaveCount(0);
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Edit Paycom refresh' }).click();
+  dialog = page.getByRole('dialog', { name: 'Edit schedule', exact: true });
+  await dialog.getByRole('radio', { name: 'Daily', exact: true }).check();
+  await dialog.getByLabel('Time', { exact: true }).fill('21:00');
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(row).toContainText('Daily at 9:00 PM');
+  await row.getByRole('switch', { name: 'Enable Paycom refresh' }).uncheck();
+  await expect(row.getByRole('switch')).not.toBeChecked();
+  await page.reload();
+  await expect(row.getByRole('switch')).not.toBeChecked();
+  await row.getByRole('button', { name: 'Edit Paycom refresh' }).click();
+  await dialog.getByRole('button', { name: 'Delete schedule', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Delete schedule', exact: true }).click();
+  await expect(row).toHaveCount(0);
+  // Both collectors can be selected and saved while paused before connecting Cortex.
+  await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
+  dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
+  await dialog.getByLabel('Schedule name').fill('Morning collection');
+  await dialog.getByRole('checkbox', { name: 'Meal Break', exact: true }).check();
+  await dialog.getByRole('switch', { name: 'Enabled', exact: true }).uncheck();
+  await dialog.getByRole('button', { name: 'Create schedule', exact: true }).click();
+  row = page.getByRole('row').filter({ hasText: 'Morning collection' });
+  await expect(row).toContainText('Paycom');
+  await expect(row).toContainText('Meal Break');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(row).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await row.getByRole('button', { name: 'Edit Morning collection' }).click();
+  dialog = page.getByRole('dialog', { name: 'Edit schedule', exact: true });
+  await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
 });
 
 test('archived Diagnostics creates a synthetic DSP and excludes Plugins and Backups navigation', async ({

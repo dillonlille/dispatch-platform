@@ -165,6 +165,9 @@ impl Store {
         values: &Value,
     ) -> Result<Value> {
         validate_preferences(values)?;
+        let previous = self.preferences(id)?;
+        let sync_changed = previous["values"]["automatic_sync"] != values["automatic_sync"]
+            || previous["values"]["sync_interval_seconds"] != values["sync_interval_seconds"];
         let db = self.collector(id, Provider::Paycom)?;
         db.transaction(|| {
             let before = preferences(&db)?;
@@ -216,6 +219,9 @@ impl Store {
             }
             Ok(())
         })?;
+        if sync_changed {
+            self.import_legacy_schedule(id, true)?;
+        }
         self.audit(
             Some(actor),
             Some(id),
