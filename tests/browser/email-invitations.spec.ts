@@ -45,6 +45,7 @@ test('an existing account opens its newly invited DSP instead of another members
     await page.getByLabel('First name', { exact: true }).fill('Existing');
     await page.getByLabel('Last name', { exact: true }).fill('Member');
     await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
+    await page.getByLabel('Confirm password', { exact: true }).fill('Dispatch-demo-2026!');
     await page.getByRole('button', { name: 'Accept invitation', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
     await expect(page.getByLabel('DSP name', { exact: true })).toHaveValue('');

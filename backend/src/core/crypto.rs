@@ -38,7 +38,7 @@ pub fn equal(a: &str, b: &str) -> bool {
 }
 pub fn hash_password(value: &str) -> Result<String> {
     ensure(
-        (12..=128).contains(&value.chars().count()),
+        (8..=128).contains(&value.chars().count()),
         "invalid_password",
         400,
     )?;
