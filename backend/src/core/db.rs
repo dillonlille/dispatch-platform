@@ -376,7 +376,8 @@ impl Store {
         )?;
         Ok(())
     }
+    // A DSP's log lists its members' and the system's actions, never a platform owner's.
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR a.dsp_id=?) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
+        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR (a.dsp_id=? AND COALESCE(u.platform_owner,0)=0)) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
     }
 }
