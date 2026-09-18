@@ -53,11 +53,11 @@ jobs:
           path: /tmp/dispatch-rust-benchmark.json
           if-no-files-found: ignore
           retention-days: 30
-      - name: Package Dev candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      - name: Package runtime candidate
+        if: github.event_name == 'push'
         run: tar -czf dispatch-dev.tar.gz -C .build .
       - name: Pass candidate to final gate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -135,19 +135,19 @@ jobs:
           path: ${{ runner.temp }}/validation.json
           if-no-files-found: error
           retention-days: 7
-      - name: Retrieve this run's Dev candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      - name: Retrieve this run's runtime candidate
+        if: github.event_name == 'push'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify candidate source and inventory
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: github.event_name == 'push'
         run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
-      - name: Publish verified Dev build
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      - name: Publish verified branch build
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: dispatch-dev-${{ github.sha }}
+          name: dispatch-${{ github.ref_name }}-${{ github.sha }}
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 14
