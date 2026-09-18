@@ -263,7 +263,9 @@ test(
       if (detail) {
         const id = decodeURIComponent(url.pathname.split('/')[4]!);
         visits[id] = (visits[id] || 0) + 1;
-        const c = summaries.find((s) => s.itineraryId === id)!;
+        // Cortex can settle on another route's details until the page is reloaded.
+        const stale = mode === 'growing' && id === 'itinerary-2' && visits[id] === 1;
+        const c = summaries.find((s) => s.itineraryId === (stale ? 'itinerary-1' : id))!;
         p.isLoadingItineraryDetails = false;
         p.itineraryDetails = {
           ...c,
@@ -355,7 +357,7 @@ test(
     await until(async () => {
       const comparison = (await owner.get('/api/dsp/paycom/meal-breaks?date=2026-01-10')).value;
       return comparison.rows.some((row: any) => row.cortex.length === 2);
-    }, 25000);
+    }, 40000);
     assert.equal(
       (await owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10')).value.length,
       0,
@@ -369,6 +371,7 @@ test(
     release();
     assert.equal((await first).status, 'succeeded');
     assert(visits['itinerary-1']! >= 2, 'Changed existing meals must be re-read');
+    assert(visits['itinerary-2']! >= 2, 'A route showing another route is reloaded');
     const publications = () => owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10');
     const initial = (await publications()).value;
     assert.equal(initial[0].itineraryCount, 2);

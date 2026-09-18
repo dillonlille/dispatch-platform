@@ -85,10 +85,12 @@ impl Driver {
         let path = candidate
             .map(|c| scope.detail_path(&c.id))
             .unwrap_or_else(|| scope.list_path());
-        self.page
-            .start_navigation(&format!("{}{path}", self.origin))
-            .await?;
+        let url = format!("{}{path}", self.origin);
+        self.page.start_navigation(&url).await?;
         let deadline = Instant::now() + Duration::from_secs(30);
+        // Cortex occasionally settles on another route's details and never
+        // corrects itself. One reload recovers it without hiding a real mismatch.
+        let mut reload = Some(Instant::now() + Duration::from_secs(10));
         let mut last = None;
         let mut stable = 0;
         let mut last_error = "cortex_content_incomplete".to_owned();
@@ -121,6 +123,12 @@ impl Driver {
                 {
                     last = None;
                     stable = 0;
+                    if error.code == "cortex_scope_mismatch"
+                        && reload.is_some_and(|at| Instant::now() >= at)
+                    {
+                        reload = None;
+                        self.page.start_navigation(&url).await?;
+                    }
                     last_error = error.code;
                 }
                 Err(error) => return Err(error),
