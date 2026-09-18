@@ -64,3 +64,18 @@ test('benchmark failures cannot pass as successful measurements', () => {
     assert.throws(() => checkBenchmark(report, true));
   }
 });
+test('an HTTP error names the failed route, status and response', () => {
+  const report = sample();
+  report.measurements[0]!.errors = 1;
+  report.failures = [
+    {
+      scenario: report.measurements[0]!.scenario,
+      concurrency: report.measurements[0]!.concurrency,
+      route: '/api/session',
+      tenant: 0,
+      status: 503,
+      body: '{"error":"busy"}',
+    },
+  ];
+  assert.throws(() => checkBenchmark(report), /\/api\/session returned 503: \{"error":"busy"\}/);
+});
