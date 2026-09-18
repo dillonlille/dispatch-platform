@@ -429,7 +429,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     await expect(
       page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
     ).toBeVisible();
-    await expect(page.locator('.paycom-timecard-footer')).toContainText('Calendar:');
+    await expect(page.locator('.paycom-timecard-footer')).toContainText('America/Chicago');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );

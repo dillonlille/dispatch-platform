@@ -148,13 +148,12 @@
     const localDate = Array.isArray(d.localDate)
       ? d.localDate.map((v, i) => String(v).padStart(i ? 2 : 4, '0')).join('-')
       : d.localDate;
-    if (
-      d.itineraryId !== c.id ||
-      d.transporterId !== c.transporterId ||
-      d.serviceAreaId !== scope.serviceAreaId ||
-      localDate !== scope.date
-    )
-      return fail('cortex_scope_mismatch', 'detail_scope');
+    if (d.itineraryId !== c.id) return fail('cortex_scope_mismatch', 'detail_itinerary');
+    if (d.transporterId !== c.transporterId)
+      return fail('cortex_scope_mismatch', 'detail_transporter');
+    if (d.serviceAreaId !== scope.serviceAreaId)
+      return fail('cortex_scope_mismatch', 'detail_area');
+    if (localDate !== scope.date) return fail('cortex_scope_mismatch', 'detail_date');
     const breaks = meals(d.breaks);
     if (
       JSON.stringify(breaks.map((m) => [m.id, m.start, m.end])) !==

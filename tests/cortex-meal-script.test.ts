@@ -83,7 +83,7 @@ test('meal collection only reads the requested day', () => {
   });
   assert.deepEqual(read(detail([2026, 9, 18]), href(scope.date, true), candidate), {
     error: 'cortex_scope_mismatch',
-    reason: 'detail_scope',
+    reason: 'detail_date',
   });
   const itinerary = read(detail([2026, 9, 15]), href(scope.date, true), candidate).itinerary;
   assert.deepEqual(itinerary.meals, [
