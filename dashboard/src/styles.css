@@ -1513,6 +1513,12 @@ td small {
   margin-top: 16px;
   font-size: 12px;
 }
+.paycom-day-results {
+  transition: opacity 120ms ease;
+}
+.paycom-day-results[aria-busy='true'] {
+  opacity: 0.45;
+}
 .paycom-timecard-heading {
   flex-wrap: wrap;
 }

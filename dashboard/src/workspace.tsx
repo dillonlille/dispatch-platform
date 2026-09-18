@@ -152,7 +152,9 @@ export function PaycomPage({
     paycom: SyncSource;
     flex: SyncSource;
   }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000);
-  const sourceState = syncState.data?.date === date ? syncState.data : undefined;
+  // The last known state stays up while another date loads so the page does not shift.
+  const sourceState = syncState.data;
+  const sourceCurrent = sourceState?.date === date;
   const { error, refresh } = overview;
   const data = overview.data?.connection;
   const meals = tab === 'meal-breaks';
@@ -177,7 +179,13 @@ export function PaycomPage({
   const owner = ['owner', 'platform_owner'].includes(view.role);
   const syncButton = canCollect && (
     <button
-      disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
+      disabled={
+        !!syncUnavailable ||
+        !!syncState.error ||
+        syncing ||
+        !!activeSync ||
+        (daily && !sourceCurrent)
+      }
       title={
         syncUnavailable ||
         (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
