@@ -108,7 +108,15 @@ fn shell(origin: &str, dev: bool, preheader: &str, body: &str, footer: &str) -> 
 }
 
 pub fn invitation(i: &Invitation) -> Message {
-    let article = if i.role == "owner" { "an" } else { "a" };
+    // Roles are named by each DSP, so the article follows the name's first letter.
+    let article = if i
+        .role
+        .starts_with(['A', 'E', 'I', 'O', 'U', 'a', 'e', 'i', 'o', 'u'])
+    {
+        "an"
+    } else {
+        "a"
+    };
     let expires = chrono::DateTime::from_timestamp_millis(i.expires_at)
         .map(|at| at.format("%B %-d, %Y").to_string())
         .unwrap_or_default();

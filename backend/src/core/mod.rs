@@ -19,6 +19,7 @@ pub mod meals;
 pub mod observability;
 pub mod operations;
 pub mod proxy;
+pub mod roles;
 pub mod schedules;
 pub mod tenants;
 pub mod validate;

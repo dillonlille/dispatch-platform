@@ -292,6 +292,7 @@ impl Store {
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
         super::mail::migrate(&store.platform)?;
+        super::roles::migrate(&store.platform)?;
         store
             .platform
             .0

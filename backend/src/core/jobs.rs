@@ -211,11 +211,19 @@ impl Store {
             409,
         )?;
         if let Some(actor) = row["actor_id"].as_str() {
-            let user=self.platform.one("SELECT u.status,u.platform_owner,m.role FROM users u LEFT JOIN memberships m ON m.user_id=u.id AND m.dsp_id=? WHERE u.id=?",[s(&row,"dsp_id"),actor])?.ok_or_else(||Error::new("permission_denied",403))?;
+            let user = self
+                .platform
+                .one(
+                    "SELECT status,platform_owner FROM users WHERE id=?",
+                    [actor],
+                )?
+                .ok_or_else(|| Error::new("permission_denied", 403))?;
             ensure(
                 s(&user, "status") == "active"
                     && (flag(&user, "platform_owner")
-                        || ["owner", "manager"].contains(&s(&user, "role"))),
+                        || self.grant(actor, s(&row, "dsp_id"))?.is_some_and(|grant| {
+                            grant.owner || grant.permissions.iter().any(|p| p == "collections.run")
+                        })),
                 "permission_denied",
                 403,
             )?;
