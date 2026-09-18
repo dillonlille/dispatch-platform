@@ -602,7 +602,7 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             if let Some(email) = email {
                 db.platform.transaction(|| {
                     let raw = db.invite(&a, id, &email, &db.owner_role(id)?)?;
-                    db.invitation_mail(&email, &name, &raw, b.get("name").is_none())
+                    db.invitation_mail(&a, &email, &name, "Owner", &raw, b.get("name").is_none())
                 })?;
                 out["invitation"] = json!({"email":email,"status":"queued"});
             }
@@ -741,7 +741,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/roles")=>Ok(Reply::json(db.roles(id)?)),
         ("POST","/api/dsp/roles")=>{let (name,permissions)=role_input(b)?;Ok(Reply::status(db.create_role(&c,&name,&permissions)?,201))},
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
-        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&email,s(&c.dsp,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
+        ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audits(Some(id),200)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{

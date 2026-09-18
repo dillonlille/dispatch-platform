@@ -1,18 +1,11 @@
 use super::{
     Error, Result, crypto,
     db::{Store, flag, iso, n, now, s},
-    ensure, validate as v,
+    email, ensure, validate as v,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
+const INVITATION_TTL: i64 = 7 * 86400000;
 #[derive(Clone)]
 pub struct Auth {
     pub user: Value,
@@ -193,7 +186,7 @@ impl Store {
         self.ensure_assignable(&c, &role)?;
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
         let raw = crypto::token()?;
-        self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) VALUES (?,?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),Self::legacy_role(&role),s(&role,"id"),now()+7*86400000,s(&a.user,"id")])?;
+        self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) VALUES (?,?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),Self::legacy_role(&role),s(&role,"id"),now()+INVITATION_TTL,s(&a.user,"id")])?;
         self.audit(
             Some(s(&a.user, "id")),
             Some(dsp),
@@ -219,9 +212,31 @@ impl Store {
         )? {
             let raw = crypto::token()?;
             self.platform.transaction(|| {
-                self.platform.exec("DELETE FROM resets WHERE user_id=? OR expires_at<?",params![s(&user,"id"),now()])?;
-                self.platform.exec("INSERT INTO resets(hash,user_id,user_version,expires_at) VALUES (?,?,?,?)",params![crypto::sha(&raw),s(&user,"id"),n(&user,"version"),now()+1800000])?;
-                self.mail(email,"Reset your Dispatch password",&format!("Open {}/#reset?token={raw} to reset your password. This link expires in 30 minutes.",self.config.origin))
+                self.platform.exec(
+                    "DELETE FROM resets WHERE user_id=? OR expires_at<?",
+                    params![s(&user, "id"), now()],
+                )?;
+                self.platform.exec(
+                    "INSERT INTO resets(hash,user_id,user_version,expires_at) VALUES (?,?,?,?)",
+                    params![
+                        crypto::sha(&raw),
+                        s(&user, "id"),
+                        n(&user, "version"),
+                        now() + 1800000
+                    ],
+                )?;
+                let mail = email::reset(
+                    &self.config.origin,
+                    self.config.environment == "preview",
+                    s(&user, "email"),
+                    &format!("{}/#reset?token={raw}", self.config.origin),
+                );
+                self.queue_mail(
+                    s(&user, "email"),
+                    &mail.subject,
+                    &mail.text,
+                    Some(&mail.html),
+                )
             })?;
         }
         Ok(())
@@ -229,32 +244,28 @@ impl Store {
     fn reset_user(&self, raw: &str) -> Result<Value> {
         self.platform.one("SELECT u.* FROM resets r JOIN users u ON u.id=r.user_id WHERE r.hash=? AND r.used_at IS NULL AND r.expires_at>? AND r.user_version=u.version AND u.status='active'",params![crypto::sha(raw),now()])?.ok_or_else(||Error::new("reset_expired",400))
     }
-    pub fn mail(&self, to: &str, subject: &str, text: &str) -> Result<()> {
-        self.queue_mail(to, subject, text, None)
-    }
-    pub fn invitation_mail(&self, to: &str, dsp: &str, raw: &str, onboarding: bool) -> Result<()> {
-        let url = format!("{}/#invite?token={raw}", self.config.origin);
-        let action = if onboarding {
-            "Start DSP onboarding"
-        } else {
-            "Accept invitation"
-        };
-        let subject = if onboarding {
-            "Set up your DSP on Dispatch".to_owned()
-        } else {
-            format!("Join {dsp} on Dispatch")
-        };
-        let label = if self.config.environment == "preview" {
-            "Dispatch Dev"
-        } else {
-            "Dispatch"
-        };
-        let text = format!("{label}\n\n{action}: {url}\n\nThis invitation expires in seven days.");
-        let html = format!(
-            r#"<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182033;padding:32px"><h1>{label}</h1><p><a href="{}" style="display:inline-block;background:#4968ce;color:#fff;padding:14px 22px;border-radius:8px;text-decoration:none">{action}</a></p><p>This invitation expires in seven days.</p></body></html>"#,
-            escape_html(&url)
-        );
-        self.queue_mail(to, &subject, &text, Some(&html))
+    pub fn invitation_mail(
+        &self,
+        a: &Auth,
+        to: &str,
+        dsp: &str,
+        role: &str,
+        raw: &str,
+        onboarding: bool,
+    ) -> Result<()> {
+        let inviter = format!("{} {}", s(&a.user, "firstName"), s(&a.user, "lastName"));
+        let mail = email::invitation(&email::Invitation {
+            origin: &self.config.origin,
+            dev: self.config.environment == "preview",
+            to,
+            inviter: inviter.trim(),
+            dsp,
+            role,
+            url: &format!("{}/#invite?token={raw}", self.config.origin),
+            expires_at: now() + INVITATION_TTL,
+            onboarding,
+        });
+        self.queue_mail(to, &mail.subject, &mail.text, Some(&mail.html))
     }
     fn queue_mail(&self, to: &str, subject: &str, text: &str, html: Option<&str>) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
