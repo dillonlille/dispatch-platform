@@ -490,7 +490,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     await expect(
       page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
     ).toBeVisible();
-    await expect(page.locator('.paycom-timecard-footer')).toContainText('Calendar:');
+    await expect(page.locator('.paycom-timecard-footer')).toContainText('America/Chicago');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -579,9 +579,10 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   expect(errors).toEqual([]);
 });
 
-test.describe('local calendar dates', () => {
-  // Personal calendar preferences work for members as well as owners.
-  test.use({ timezoneId: 'America/Los_Angeles' });
+test.describe('DSP calendar dates', () => {
+  // A manager in another state works on the DSP's business day (America/Chicago
+  // for the seeded DSP), not their device's or their personal display timezone.
+  test.use({ timezoneId: 'America/New_York' });
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/dsp/paycom/settings', (route) =>
       route.fulfill({
@@ -595,21 +596,39 @@ test.describe('local calendar dates', () => {
     );
   });
 
-  test('UTC midnight keeps the local day across tabs and rejects a saved tomorrow', async ({
-    page,
-  }) => {
-    await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
-    await open(page, true, null);
+  test('a viewer already in tomorrow sees, keeps and syncs the DSP day', async ({ page }) => {
+    // 12:30 AM on 9/17 in New York is still 11:30 PM on 9/16 for the DSP.
+    await page.clock.setFixedTime(new Date('2026-09-17T04:30:00Z'));
+    const collectedAt = '2026-09-17T04:10:00Z';
+    const synced: string[] = [];
+    await page.route('**/api/dsp/jobs/meal-breaks?*', (route) =>
+      route.fulfill({
+        json: {
+          date: new URL(route.request().url()).searchParams.get('date'),
+          scopeAvailable: true,
+          paycom: { enabled: true, active: false, job: { status: 'succeeded' }, collectedAt },
+          flex: { enabled: true, active: false, job: { status: 'succeeded' }, collectedAt },
+        },
+      }),
+    );
+    await page.route('**/api/dsp/jobs/meal-breaks', (route) => {
+      synced.push(route.request().postDataJSON().date);
+      return route.fulfill({ status: 202, json: { date: synced.at(-1), jobs: [] } });
+    });
+    await open(page, false, null);
     const input = page.getByLabel('Paycom date');
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
-    await expect(page.getByText('Calendar: America/Los Angeles', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Next day', exact: true })).toBeDisabled();
+    // The sync happened "today" for the DSP, shown on the DSP's clock.
+    await expect(page.getByRole('status', { name: 'Paycom sync' })).toContainText('11:10 PM');
+    await page.getByRole('button', { name: 'Sync now', exact: true }).click();
+    await expect.poll(() => synced).toEqual(['2026-09-16']);
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
     await expect(
-      page.getByRole('heading', { name: 'Employee timecards', exact: true }),
+      page.getByLabel('Timecard timezones').getByText('America/Chicago', { exact: true }),
     ).toBeVisible();
     const dspId = new URL(page.url()).hash.split('/')[1]!;
     await page.evaluate(
@@ -624,7 +643,8 @@ test.describe('local calendar dates', () => {
     await expect(input).toHaveValue('2026-09-15');
     await page.getByRole('button', { name: 'Today', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
-    await page.clock.setFixedTime(new Date('2026-09-17T07:01:00Z'));
+    // The DSP's midnight, not the viewer's, opens the next day.
+    await page.clock.setFixedTime(new Date('2026-09-17T05:01:00Z'));
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
     await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
     await expect(input).toHaveAttribute('max', '2026-09-17');
@@ -633,26 +653,18 @@ test.describe('local calendar dates', () => {
     await expect(input).toHaveValue('2026-09-17');
   });
 
-  test('calendar follows the saved display timezone and returning to Automatic uses the device', async ({
-    page,
-  }) => {
+  test('a personal display timezone does not move the Timecard calendar', async ({ page }) => {
     await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
     await open(page, true, null);
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByLabel('Display timezone').selectOption('UTC');
     await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     const input = page.getByLabel('Paycom date');
-    await expect(input).toHaveValue('2026-09-17');
-    await expect(page.getByText('Calendar: UTC', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Previous day', exact: true }).click();
-    await page.getByRole('button', { name: 'Today', exact: true }).click();
-    await page.reload();
-    await expect(input).toHaveValue('2026-09-17');
-    await page.getByRole('link', { name: 'Settings', exact: true }).click();
-    await page.getByLabel('Display timezone').selectOption('');
-    await page.getByRole('link', { name: 'Timecard', exact: true }).click();
     await expect(input).toHaveValue('2026-09-16');
     await expect(input).toHaveAttribute('max', '2026-09-16');
-    await expect(page.getByText('Calendar: America/Los Angeles', { exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+    await expect(
+      page.getByLabel('Timecard timezones').getByText('America/Chicago', { exact: true }),
+    ).toBeVisible();
   });
 });

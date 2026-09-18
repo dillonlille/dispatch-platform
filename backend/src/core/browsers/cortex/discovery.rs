@@ -1,10 +1,17 @@
 use super::*;
-use crate::core::meals::{CollectionRequest, Scope};
+use crate::core::{
+    job_metrics::Recorder,
+    meals::{CollectionRequest, Scope},
+};
 
 const DISCOVER: &str = include_str!("discovery.js");
 
 impl Driver {
-    pub async fn resolve_scope(&mut self, request: &CollectionRequest) -> Result<Scope> {
+    pub async fn resolve_scope(
+        &mut self,
+        request: &CollectionRequest,
+        metrics: &Recorder,
+    ) -> Result<Scope> {
         let discovery = match request {
             CollectionRequest::Scoped(scope) => {
                 scope.validate()?;
@@ -62,10 +69,14 @@ impl Driver {
                     if area.as_deref() != Some(found) {
                         self.page.start_navigation(&path(Some(found))).await?;
                         area = Some(found.to_owned());
+                        metrics.detail("scope_navigation");
+                    } else {
+                        metrics.detail("scope_settling");
                     }
                 }
                 Ok(value) => {
                     let error = s(&value, "error");
+                    metrics.detail(s(&value, "reason"));
                     if ["cortex_timezone_mismatch", "cortex_source_too_large"].contains(&error) {
                         return Err(Error::new(error, 502));
                     }
@@ -90,6 +101,7 @@ impl Driver {
                     ]
                     .contains(&error.code.as_str()) =>
                 {
+                    metrics.detail(&error.code);
                     last_error = error.code
                 }
                 Err(error) => return Err(error),

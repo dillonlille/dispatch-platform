@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { calendarTimezone } from './preferences.js';
 import { localDate, shiftDate } from '../../shared/meal-breaks.js';
 
 function validDay(value: string, today: string) {
@@ -12,8 +11,9 @@ function validDay(value: string, today: string) {
   }
 }
 
-export function usePaycomDate(dspId: string) {
-  const timezone = calendarTimezone();
+// Collection accepts dates up to the DSP's business date, so a viewer in another
+// timezone must see and select the DSP's day rather than their own.
+export function usePaycomDate(dspId: string, timezone: string) {
   const today = localDate(timezone);
   const key = `dispatch:paycom-date:${dspId}`;
   const [selectedDate, setDate] = useState(() => {
@@ -35,7 +35,7 @@ export function usePaycomDate(dspId: string) {
       // The shared in-memory selection remains available across tabs.
     }
   };
-  return { date, today, timezone, selectDate };
+  return { date, today, selectDate };
 }
 
 export function PaycomDateControls({

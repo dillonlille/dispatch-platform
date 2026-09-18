@@ -82,6 +82,7 @@ export const metricsSchema = z.object({
   phase: z
     .enum(['starting', 'authentication', 'verification', 'collection', 'publication'])
     .nullable(),
+  detail: text.nullable().optional(),
   queueMs: milliseconds,
   elapsedMs: milliseconds,
   authenticationMs: milliseconds.nullable(),

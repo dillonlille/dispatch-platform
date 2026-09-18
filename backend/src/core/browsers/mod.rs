@@ -365,7 +365,7 @@ impl Session {
                     .map(|data| (data, None)),
                 Worker::Cortex(worker) => {
                     let scope = worker
-                        .resolve_scope(&serde_json::from_value(request.clone())?)
+                        .resolve_scope(&serde_json::from_value(request.clone())?, metrics)
                         .await?;
                     let data = worker
                         .collect(

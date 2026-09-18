@@ -119,6 +119,7 @@ export interface JobMetrics {
   outcome: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
   error: string | null;
   phase: 'starting' | 'authentication' | 'verification' | 'collection' | 'publication' | null;
+  detail?: string | null;
   queueMs: number;
   elapsedMs: number;
   authenticationMs: number | null;

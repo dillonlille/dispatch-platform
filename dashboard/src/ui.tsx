@@ -5,14 +5,15 @@ import { displayTimezone } from './preferences.js';
 import type { DspView, Permission } from '../../shared/contracts/index.js';
 export const can = (view: DspView | undefined, permission: Permission) =>
   Boolean(view && (view.role.owner || view.permissions.includes(permission)));
-export const time = (value: string | null | undefined) =>
+// Timecard pages pass the DSP's timezone; elsewhere the viewer's preference applies.
+export const time = (value: string | null | undefined, timeZone = displayTimezone()) =>
   value
     ? dateFormatter('en-US', {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
-        timeZone: displayTimezone(),
+        timeZone,
       }).format(new Date(value))
     : 'Never';
 export const title = (value: string) =>

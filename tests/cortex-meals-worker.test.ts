@@ -20,8 +20,26 @@ test(
         );
         return true;
       }
+      // Like Cortex, send an itineraries request without a service area to the
+      // execution home, whose station list lives in hook state rather than props.
+      if (url.pathname === '/operations/execution/') {
+        const areas = {
+          'area-2': { serviceAreaID: 'area-2', defaultStationCode: 'ABC1', timeZone: 'US/Pacific' },
+          'area-1': { serviceAreaID: 'area-1', defaultStationCode: 'DOT4', timeZone: 'US/Pacific' },
+        };
+        res.setHeader('Content-Type', 'text/html');
+        res.end(
+          `<title>Delivery Execution</title><main></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:{},memoizedState:{memoizedState:document.body,next:{memoizedState:{current:${JSON.stringify(areas)}},next:null}}};</script>`,
+        );
+        return true;
+      }
       if (!url.pathname.startsWith('/operations/execution/itineraries')) return false;
       paths.push(url.pathname + url.search);
+      if (!url.searchParams.get('serviceAreaId')) {
+        res.writeHead(302, { Location: '/operations/execution/' });
+        res.end();
+        return true;
+      }
       const candidate = {
         itineraryId: 'itinerary-1',
         transporterId: 'driver-1',
@@ -204,8 +222,11 @@ test(
           routeCode: 'CX1',
           companyId: 'provider-1',
           executionStatus: 'COMPLETE',
-          stopProgress: { total: 2, completed: 2 },
-          latestTaskExecutionTime: start + 2400000,
+          // Deliveries keep advancing during a working day; only meal and
+          // route facts may restart a read.
+          stopProgress: { total: 2, completed: lists },
+          latestTaskExecutionTime: start + 2400000 + lists,
+          lastStopExecutionTime: start + 2400000 + lists,
           breaks: grown
             ? [
                 br('meal#1', start, start + 900000),
@@ -242,7 +263,9 @@ test(
       if (detail) {
         const id = decodeURIComponent(url.pathname.split('/')[4]!);
         visits[id] = (visits[id] || 0) + 1;
-        const c = summaries.find((s) => s.itineraryId === id)!;
+        // Cortex can settle on another route's details until the page is reloaded.
+        const stale = mode === 'growing' && id === 'itinerary-2' && visits[id] === 1;
+        const c = summaries.find((s) => s.itineraryId === (stale ? 'itinerary-1' : id))!;
         p.isLoadingItineraryDetails = false;
         p.itineraryDetails = {
           ...c,
@@ -334,7 +357,7 @@ test(
     await until(async () => {
       const comparison = (await owner.get('/api/dsp/paycom/meal-breaks?date=2026-01-10')).value;
       return comparison.rows.some((row: any) => row.cortex.length === 2);
-    }, 25000);
+    }, 40000);
     assert.equal(
       (await owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10')).value.length,
       0,
@@ -348,6 +371,7 @@ test(
     release();
     assert.equal((await first).status, 'succeeded');
     assert(visits['itinerary-1']! >= 2, 'Changed existing meals must be re-read');
+    assert(visits['itinerary-2']! >= 2, 'A route showing another route is reloaded');
     const publications = () => owner.get('/api/dsp/cortex/meal-breaks?date=2026-01-10');
     const initial = (await publications()).value;
     assert.equal(initial[0].itineraryCount, 2);

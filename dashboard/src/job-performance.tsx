@@ -32,7 +32,12 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
                 <strong>
                   Attempt {attempt.attempt} · {title(attempt.outcome)}
                 </strong>
-                {attempt.error && <small>{title(attempt.error)}</small>}
+                {attempt.error && (
+                  <small>
+                    {title(attempt.error)}
+                    {attempt.detail && ` · ${title(attempt.detail)}`}
+                  </small>
+                )}
                 <dl>
                   <dt>Queue wait</dt>
                   <dd>{duration(attempt.queueMs)}</dd>

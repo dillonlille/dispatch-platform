@@ -24,7 +24,6 @@ import {
 } from '../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../shared/paycom.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
-import { calendarTimezone } from './preferences.js';
 import './meal-breaks.css';
 
 function Source({ name }: { name: 'Paycom' | 'Flex' }) {
@@ -689,13 +688,9 @@ export function MealBreaksPage({
       <footer className="paycom-timecard-footer" aria-label="Meal break timezones">
         <span>
           <Globe size={16} aria-hidden="true" />
-          Calendar: {calendarTimezone().replaceAll('_', ' ')}
+          {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
         </span>
         <div className="paycom-timecard-business-time">
-          <span>
-            Comparison:{' '}
-            {zones.size > 1 ? 'Local time for each Flex station' : zone.replaceAll('_', ' ')}
-          </span>
           <details className="paycom-timecard-info">
             <summary aria-label="About meal break data">
               <Info size={16} aria-hidden="true" />
@@ -704,10 +699,11 @@ export function MealBreaksPage({
               {data ? (
                 <>
                   Paycom collected:{' '}
-                  {data.paycomCollectedAt ? time(data.paycomCollectedAt) : 'No collection'}.<br />
+                  {data.paycomCollectedAt ? time(data.paycomCollectedAt, zone) : 'No collection'}.
+                  <br />
                   Flex collected:{' '}
                   {data.cortexPublications[0]
-                    ? time(data.cortexPublications[0].collectedAt)
+                    ? time(data.cortexPublications[0].collectedAt, zone)
                     : 'No collection'}
                   .<br />
                   <br />

@@ -2,7 +2,6 @@ import { useUpdateState } from './browser-update.js';
 import { useCollectionUpdates } from './live-collection.js';
 import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
-import { calendarTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
@@ -250,7 +249,7 @@ export function TimecardsPage({
   preferences?: PaycomPreferences;
 }) {
   const [offset, setOffset] = useUpdateState('timecard-offset', 0);
-  const calendarToday = localDate(calendarTimezone());
+  const calendarToday = localDate(timezone);
   const [localDay, setLocalDay] = useState(calendarToday);
   const date = sharedDate ?? (localDay > calendarToday ? calendarToday : localDay);
   const [sort, setSort] = useUpdateState(
@@ -399,17 +398,16 @@ export function TimecardsPage({
         <footer className="paycom-timecard-footer" aria-label="Timecard timezones">
           <span>
             <Globe size={16} aria-hidden="true" />
-            Calendar: {calendarTimezone().replaceAll('_', ' ')}
+            {timezone.replaceAll('_', ' ')}
           </span>
           <div className="paycom-timecard-business-time">
-            <span>Paycom: {timezone.replaceAll('_', ' ')}</span>
             <details className="paycom-timecard-info">
               <summary aria-label="About timecard data">
                 <Info size={16} aria-hidden="true" />
               </summary>
               <p>
-                Last completed collection {time(data?.collectedAt)}. Times update during collection,
-                and hours may change after corrections.
+                Last completed collection {time(data?.collectedAt, timezone)}. Times update during
+                collection, and hours may change after corrections.
               </p>
             </details>
           </div>
