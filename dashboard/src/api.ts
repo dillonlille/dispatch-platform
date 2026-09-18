@@ -165,5 +165,7 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null, da
   }, [url, revision, poll, refreshKey, dataScope]);
   // A date-scoped view can keep its controls mounted without showing the previous day's rows.
   const data = result?.scope === dataScope ? result?.data : undefined;
-  return { data, error, refresh };
+  // The previous scope's value lets a view hold its layout, marked busy, until the new one lands.
+  const stale = data || error ? undefined : result?.data;
+  return { data, stale, error, refresh };
 }
