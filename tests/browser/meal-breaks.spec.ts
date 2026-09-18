@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 

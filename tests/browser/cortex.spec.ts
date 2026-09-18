@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 
 test('Cortex credentials, verification, retest and disconnect stay scoped to its card', async ({
   page,

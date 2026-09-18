@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
 async function login(page: Page, email = 'owner@dispatch.test') {
   await page.goto('/');
@@ -121,6 +122,7 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
 
 test('create a DSP and accept its owner invitation while another account is signed in', async ({
   page,
+  dispatch,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -132,10 +134,7 @@ test('create a DSP and accept its owner invitation while another account is sign
     page.getByText('Invitation email queued for invited-owner@dispatch.test', { exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel('Invitation link')).toHaveCount(0);
-  const message = await capturedMail(
-    process.env.DISPATCH_TEST_STATE_ROOT!,
-    'invited-owner@dispatch.test',
-  );
+  const message = await capturedMail(dispatch.root, 'invited-owner@dispatch.test');
   await page.goto('about:blank');
   await page.setContent(message.html);
   await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();

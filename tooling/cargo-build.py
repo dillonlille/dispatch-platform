@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reuse verified local backend binaries across worktrees with identical Rust inputs.
 
-CI uses Cargo's normal dependency cache. Local entries live beside Git metadata,
+CI release builds can restore an exact-input binary from a trusted branch cache.
+Local entries live beside Git metadata,
 never in a runtime/data directory, and are copied into each checkout's own target.
 """
 import argparse
@@ -25,7 +26,7 @@ def fingerprint(root, profile, compiler, environment):
     digest = hashlib.sha256()
     flags = {key: value for key, value in environment.items()
              if key.startswith(("CARGO_", "RUST", "CC_", "CXX_", "PKG_CONFIG"))
-             or key in {"CC", "CXX", "CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "RANLIB"}}
+             or key in {"CC", "CXX", "CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "RANLIB", "ImageOS", "ImageVersion", "RUNNER_OS", "RUNNER_ARCH"}}
     digest.update(json.dumps([2, profile, compiler, platform.system(), platform.machine(), flags], sort_keys=True).encode())
     files = [root / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain",
                                       "tooling/cargo-build.py")]
@@ -64,8 +65,8 @@ def cached_binary(entry):
         return None
 
 
-def cache_eligible(root, environment):
-    if (environment.get("CI") or environment.get("DISPATCH_DISABLE_RUST_CACHE")
+def cache_eligible(root, environment, allow_ci=False):
+    if ((environment.get("CI") and not allow_ci) or environment.get("DISPATCH_DISABLE_RUST_CACHE")
             or environment.get("CARGO_TARGET_DIR")):
         return False
     # Unbounded external build inputs belong to Cargo, not this small cache.
@@ -100,19 +101,32 @@ def cache_eligible(root, environment):
     return True
 
 
+def cache_key(root, profile, environment):
+    compiler = output("rustc", "-vV", cwd=root) + "\n" + output("cc", "--version", cwd=root)
+    return fingerprint(root, profile, compiler, environment)
+
+
+def ci_cache_enabled(root, environment):
+    return (environment.get("CI") == "true"
+            and environment.get("DISPATCH_CI_RUST_CACHE") == str(root / ".ci-rust-cache"))
+
+
 def build(release=False):
     root = Path(__file__).resolve().parent.parent
     profile = "release" if release else "debug"
     args = ["cargo", "build", "--locked", *(["--release"] if release else [])]
     # Custom output roots and build scripts can have extra inputs. Let Cargo
-    # handle them, and never use a local binary cache in CI or on request.
-    if not cache_eligible(root, os.environ):
+    # handle them. CI reuse requires the explicit release-cache directory.
+    ci_cache = release and ci_cache_enabled(root, os.environ)
+    if not cache_eligible(root, os.environ, allow_ci=ci_cache):
         subprocess.run(args, cwd=root, check=True)
         return
     compiler = output("rustc", "-vV", cwd=root) + "\n" + output("cc", "--version", cwd=root)
     key = fingerprint(root, profile, compiler, os.environ)
+    if ci_cache and os.environ.get("DISPATCH_CI_RUST_KEY", key) != key:
+        raise RuntimeError("CI Rust inputs changed after cache selection")
     common = Path(output("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root))
-    cache = common / "dispatch-rust-builds"
+    cache = root / ".ci-rust-cache" if ci_cache else common / "dispatch-rust-builds"
     cache.mkdir(mode=0o700, exist_ok=True)
     entry = cache / key
     target = root / "target" / profile / "dispatch-backend"
@@ -121,7 +135,7 @@ def build(release=False):
         binary = cached_binary(entry)
         if binary:
             copy_binary(binary, target)
-            print(f"Reused local {profile} backend for identical Rust inputs.", flush=True)
+            print(f"Reused {profile} backend for identical Rust inputs.", flush=True)
             return
         subprocess.run(args, cwd=root, check=True)
         if fingerprint(root, profile, compiler, os.environ) != key:
@@ -129,10 +143,17 @@ def build(release=False):
         entry.mkdir(mode=0o700, exist_ok=True)
         copy_binary(target, entry / "dispatch-backend")
         (entry / "sha256").write_text(hashlib.sha256(target.read_bytes()).hexdigest() + "\n")
-        print(f"Cached local {profile} backend for other worktrees.", flush=True)
+        print(f"Cached {profile} backend for identical inputs.", flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release", action="store_true")
-    build(parser.parse_args().release)
+    parser.add_argument("--cache-key", action="store_true")
+    args = parser.parse_args()
+    if args.cache_key:
+        root = Path(__file__).resolve().parent.parent
+        key = cache_key(root, "release", os.environ) if args.release and cache_eligible(root, os.environ, allow_ci=True) else ""
+        print("key=" + key)
+    else:
+        build(args.release)
