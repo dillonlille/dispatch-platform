@@ -111,7 +111,12 @@ function ScheduleEditor({
     const timer = setTimeout(() => {
       void api<{ nextRun: string }>(
         '/api/dsp/schedules/preview',
-        { cadence, intervalMinutes, localTime },
+        {
+          cadence,
+          intervalMinutes,
+          localTime,
+          ...(schedule ? { scheduleId: schedule.id } : {}),
+        },
         controller.signal,
       )
         .then((result) => setPreview(result.nextRun))

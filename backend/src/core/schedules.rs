@@ -94,6 +94,11 @@ fn timing(value: &Value) -> Result<()> {
     }
     Ok(())
 }
+fn same_timing(row: &Value, value: &Value) -> bool {
+    row["cadence"] == value["cadence"]
+        && row["interval_minutes"] == value["intervalMinutes"]
+        && row["local_time"] == value["localTime"]
+}
 fn public(row: &Value) -> Value {
     json!({"id":row["id"],"name":row["name"],"collection":row["collection"],
         "cadence":row["cadence"],"intervalMinutes":row["interval_minutes"],
@@ -195,11 +200,23 @@ impl Store {
         Ok(())
     }
     pub fn preview_schedule(&self, id: &str, value: &Value) -> Result<Value> {
-        v::fields(value, &["cadence", "intervalMinutes", "localTime"])?;
+        v::fields(
+            value,
+            &["scheduleId", "cadence", "intervalMinutes", "localTime"],
+        )?;
         timing(value)?;
         let dsp = self.get_dsp(id)?;
         let tz = s(&dsp, "timezone");
-        let row = json!({"cadence":value["cadence"],"interval_minutes":value["intervalMinutes"],"local_time":value["localTime"],"anchor":anchor(s(value,"localTime"),tz,now())?});
+        let before = if value.get("scheduleId").is_some() {
+            Some(self.schedule_row(id, v::text(value, "scheduleId", 1, 128)?)?)
+        } else {
+            None
+        };
+        let start = match before.as_ref().filter(|row| same_timing(row, value)) {
+            Some(row) => n(row, "anchor"),
+            None => anchor(s(value, "localTime"), tz, now())?,
+        };
+        let row = json!({"cadence":value["cadence"],"interval_minutes":value["intervalMinutes"],"local_time":value["localTime"],"anchor":start});
         Ok(json!({"nextRun":next(&row,tz,now())?}))
     }
     pub fn save_collection_schedule(
@@ -252,11 +269,7 @@ impl Store {
         let key = schedule
             .map(str::to_owned)
             .unwrap_or(crypto::id("schedule")?);
-        let same_timing = before.as_ref().is_some_and(|r| {
-            r["cadence"] == value["cadence"]
-                && r["interval_minutes"] == value["intervalMinutes"]
-                && r["local_time"] == value["localTime"]
-        });
+        let same_timing = before.as_ref().is_some_and(|r| same_timing(r, value));
         let start = if same_timing {
             n(before.as_ref().unwrap(), "anchor")
         } else {
@@ -527,6 +540,36 @@ mod tests {
         assert_eq!(
             next(&row, "UTC", ms("2026-01-10T07:00:00Z")).unwrap(),
             "2026-01-10T08:00:00.000Z"
+        );
+    }
+    #[test]
+    fn resuming_preview_preserves_the_saved_interval_anchor() {
+        let (_root, db, id) = setup();
+        let mut value = input("paycom");
+        value["intervalMinutes"] = json!(300);
+        value["enabled"] = json!(false);
+        let saved = db.save_collection_schedule(&id, None, &value).unwrap();
+        let key = s(&saved, "id");
+        // Simulate an interval created on a prior day. Five hours does not
+        // divide into a day, so anchoring anew would change its future runs.
+        let old_anchor = anchor("00:00", "America/Chicago", now()).unwrap() - 86400000;
+        db.dsp(&id)
+            .unwrap()
+            .exec(
+                "UPDATE collection_schedules SET anchor=? WHERE id=?",
+                params![old_anchor, key],
+            )
+            .unwrap();
+        let preview = db.preview_schedule(&id, &json!({"scheduleId":key,"cadence":"interval","intervalMinutes":300,"localTime":"00:00"})).unwrap();
+        let resumed = db
+            .enable_collection_schedule(&id, key, &json!({"revision":1,"enabled":true}))
+            .unwrap();
+        assert_eq!(preview["nextRun"], resumed["nextRun"]);
+        assert_eq!((ms(s(&preview, "nextRun")) - old_anchor) % (300 * 60000), 0);
+        let changed = db.preview_schedule(&id, &json!({"scheduleId":key,"cadence":"daily","intervalMinutes":null,"localTime":"06:00"})).unwrap();
+        assert_eq!(
+            changed["nextRun"],
+            next_daily("06:00", "America/Chicago", now()).unwrap()
         );
     }
     #[test]
