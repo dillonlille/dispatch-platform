@@ -176,20 +176,20 @@ export function SettingsPage({
                 name="password"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={8}
                 maxLength={128}
                 required
                 disabled={busy}
               />
             </label>
-            <p className="muted">Use at least 12 characters.</p>
+            <p className="muted">Use at least 8 characters.</p>
             <label>
               Confirm new password
               <input
                 name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={8}
                 maxLength={128}
                 required
                 disabled={busy}

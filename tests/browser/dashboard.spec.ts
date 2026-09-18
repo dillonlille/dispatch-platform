@@ -176,7 +176,11 @@ test('create a DSP and accept its owner invitation while another account is sign
   await expect(page.getByLabel('Email address')).toHaveValue('invited-owner@dispatch.test');
   await page.getByLabel('First name', { exact: true }).fill('Invited');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
-  await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
+  await page.getByLabel('Password', { exact: true }).fill('Invited1');
+  await page.getByLabel('Confirm password', { exact: true }).fill('Invited2');
+  await page.getByRole('button', { name: 'Accept invitation' }).click();
+  await expect(page.getByText('The passwords must match.', { exact: true })).toBeVisible();
+  await page.getByLabel('Confirm password', { exact: true }).fill('Invited1');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
   await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
   await page.screenshot({
