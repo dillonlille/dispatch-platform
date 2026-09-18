@@ -38,7 +38,7 @@ def main():
                     and 0 < len(args.last_name.strip()) <= 100, "Owner first and last names required")
     for directory in [root, root / "config", root / "data", root / "data/platform", root / "dsps"]:
         updates.private_directory(directory)
-    live = root / "live"
+    live = root
     updates.require(live.resolve() == live and (live / ".git").is_dir(), "Persistent Dev checkout required")
     updates.require(updates.command("git", "branch", "--show-current", cwd=live) == "dev",
                     "Setup requires the dev branch")
@@ -86,6 +86,7 @@ def main():
     updates.write_json(root / "config/updater.json",
                        {"service": "dispatch-dev.service", "healthUrl": "http://127.0.0.1:5180/api/health"})
     updates.DevUpdater(root).status("ready", commit)
+    updates.install_management(live)
     print(f"Dev initialized. Initial login is private in {root / 'config/initial-owner.json'}")
     print("Install the reviewed tooling/systemd units separately to start Dev and its updater.")
 
