@@ -2,6 +2,7 @@ import { test, expect } from './fixtures.js';
 import type { Page } from '@playwright/test';
 
 async function login(page: Page) {
+  await page.clock.install();
   await page.goto('/');
   await page.getByLabel('Email address').fill('owner@dispatch.test');
   await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
@@ -24,7 +25,6 @@ test('completed update waits for two idle seconds, restores filters, and reloads
     return route.fulfill({ json: { build: 'a'.repeat(64), ready } });
   });
   await login(page);
-  await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.getByLabel('Search DSPs').fill('Summit');
   const initialLoads = loads;
@@ -72,7 +72,6 @@ test('open editing dialog protects input until it closes', async ({ page }) => {
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.locator('input[type="email"]').fill('unsaved@example.test');
-  await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   const before = loads;
   ready = true;
@@ -98,9 +97,9 @@ test('unavailable update check does not refresh or interrupt sign in', async ({ 
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ status: 503, body: 'Restarting' }),
   );
+  await page.clock.install();
   await page.goto('/');
   await page.getByLabel('Email address').fill('owner@dispatch.test');
-  await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.clock.runFor(10000);
   expect(loads).toBe(1);
@@ -136,7 +135,6 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
   await page.evaluate(() => window.scrollTo(0, 200));
   const scroll = await page.evaluate(() => window.scrollY);
   expect(scroll).toBeGreaterThan(0);
-  await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   const before = loads;
   ready = true;
