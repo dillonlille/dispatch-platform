@@ -1,5 +1,5 @@
 import { collectorDatabase } from './collector-storage.js';
-import { checkBenchmark, type Measurement } from './benchmark-budget.js';
+import { checkBenchmark, type Failure, type Measurement } from './benchmark-budget.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -200,6 +200,8 @@ async function run() {
     for (let i = 0; i < 30; i++)
       await json(routes[i % routes.length]!, undefined, clients[i % clients.length]);
     const measurements: Measurement[] = [];
+    // A failed response is reported in full: the count alone cannot explain a CI failure.
+    const failures: Failure[] = [];
     let completedCollections = 0,
       observedRunning = 0;
     for (const scenario of ['single-dsp', 'multi-dsp-collection'] as const) {
@@ -259,7 +261,17 @@ async function run() {
                     expected[tenant]![index % routes.length],
                     `${scenario}: response changed for ${route}`,
                   );
-                else errors++;
+                else {
+                  errors++;
+                  failures.push({
+                    scenario,
+                    concurrency,
+                    route,
+                    tenant,
+                    status: response.status,
+                    body: payload.slice(0, 300),
+                  });
+                }
                 timings.push(performance.now() - start);
               }
             }),
@@ -298,6 +310,7 @@ async function run() {
       idleRssBytes,
       peakRssBytes: peak,
       afterLoadRssBytes: rss(server.pid!),
+      failures,
       completedCollections,
       observedRunning,
       measurements,
