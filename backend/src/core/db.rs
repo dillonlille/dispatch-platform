@@ -54,6 +54,10 @@ pub fn private_file(path: &Path, create: bool) -> Result<()> {
         }
     }
     match fs::symlink_metadata(path) {
+        // SQLite removes its -wal, -shm and -journal files when a connection closes.
+        // An lstat racing that unlink can still succeed and report no links; the
+        // file is already gone, which is the same as not found.
+        Ok(s) if s.nlink() == 0 => Ok(()),
         Ok(s) => ensure(
             s.is_file()
                 && !s.file_type().is_symlink()
@@ -377,7 +381,50 @@ impl Store {
         )?;
         Ok(())
     }
+    // A DSP's log lists its members' and the system's actions, never a platform owner's.
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR a.dsp_id=?) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
+        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR (a.dsp_id=? AND COALESCE(u.platform_owner,0)=0)) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    #[test]
+    fn a_file_deleted_during_the_check_is_absent_but_hard_links_stay_unsafe() {
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.path().join("dispatch.sqlite-wal");
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(Ordering::Relaxed) {
+                    drop(
+                        OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .mode(0o600)
+                            .open(&path),
+                    );
+                    let _ = fs::remove_file(&path);
+                }
+            });
+            // Stop the writer before asserting so a failure cannot leave it running.
+            let began = std::time::Instant::now();
+            let mut failed = None;
+            while failed.is_none() && began.elapsed() < Duration::from_secs(2) {
+                failed = private_file(&path, false).err();
+            }
+            stop.store(true, Ordering::Relaxed);
+            assert!(failed.is_none(), "a deleted file was reported unsafe");
+        });
+        fs::write(&path, "").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        private_file(&path, false).unwrap();
+        fs::hard_link(&path, root.path().join("link")).unwrap();
+        assert!(private_file(&path, false).is_err());
     }
 }
