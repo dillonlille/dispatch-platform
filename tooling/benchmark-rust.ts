@@ -259,7 +259,23 @@ async function run() {
                     expected[tenant]![index % routes.length],
                     `${scenario}: response changed for ${route}`,
                   );
-                else errors++;
+                else {
+                  errors++;
+                  process.stderr.write(
+                    JSON.stringify({
+                      event: 'benchmark.request_failed',
+                      scenario,
+                      concurrency,
+                      route,
+                      status: response.status,
+                      error: JSON.parse(payload).error,
+                      backendErrors: logs
+                        .split('\n')
+                        .filter((line) => line.includes('"level":"error"'))
+                        .slice(-5),
+                    }) + '\n',
+                  );
+                }
                 timings.push(performance.now() - start);
               }
             }),

@@ -54,15 +54,29 @@ pub fn private_file(path: &Path, create: bool) -> Result<()> {
         }
     }
     match fs::symlink_metadata(path) {
-        Ok(s) => ensure(
-            s.is_file()
+        Ok(s) => {
+            let safe = s.is_file()
                 && !s.file_type().is_symlink()
-                && s.nlink() == 1
+                // SQLite can unlink a sidecar after lookup but before stat reads
+                // its link count. Zero links is the already-allowed missing-file
+                // case; two or more still means an unsafe hard-linked file.
+                && s.nlink() <= 1
                 && s.uid() == unsafe { libc::geteuid() }
-                && s.mode() & 0o077 == 0,
-            "unsafe_storage_file",
-            500,
-        ),
+                && s.mode() & 0o077 == 0;
+            if !safe {
+                super::observability::event(
+                    "error",
+                    "storage.file_rejected",
+                    json!({
+                        "links":s.nlink(), "mode":s.mode() & 0o777,
+                        "ownerMatches":s.uid() == unsafe { libc::geteuid() },
+                        "regular":s.is_file(), "symlink":s.file_type().is_symlink(),
+                        "sqliteSidecar":path.to_string_lossy().ends_with("-wal") || path.to_string_lossy().ends_with("-shm") || path.to_string_lossy().ends_with("-journal")
+                    }),
+                );
+            }
+            ensure(safe, "unsafe_storage_file", 500)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
     }
