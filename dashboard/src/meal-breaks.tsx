@@ -434,7 +434,10 @@ export function MealBreaksPage({
     `${refreshKey}:${liveRevision}`,
     date,
   );
-  const data = request.data?.date === date ? request.data : undefined;
+  const current = request.data?.date === date ? request.data : undefined;
+  // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
+  const data = current ?? request.stale;
+  const shownDate = data?.date ?? date;
   const zone = data?.timezone ?? timezone;
   const name = (row: MealEmployee) => {
     const value = fullName(row.name);
@@ -446,8 +449,8 @@ export function MealBreaksPage({
       : value;
   };
   const rows = useMemo(
-    () => (data?.rows ?? []).map((row) => ({ row, summary: mealPairs(row, date) })),
-    [data, date],
+    () => (data?.rows ?? []).map((row) => ({ row, summary: mealPairs(row, shownDate) })),
+    [data, shownDate],
   );
   const counts = {
     all: rows.length,
@@ -553,7 +556,7 @@ export function MealBreaksPage({
         </p>
       )}
       {data && (unlinked > 0 || (owner && data.drivers.length > 0)) && (
-        <div className="meal-link-notice">
+        <div className="meal-link-notice" inert={!current}>
           <span>
             {[
               automatic ? `${automatic} matched automatically.` : '',
@@ -585,7 +588,7 @@ export function MealBreaksPage({
             : 'Choose another date to compare collected records.'}
         </Empty>
       ) : (
-        <>
+        <div className="paycom-day-results" aria-busy={!current} inert={!current}>
           {(!data.paycomCollectedAt || !data.cortexPublications.length) && (
             <p className="meal-source-notice" role="status">
               <AlertTriangle size={16} aria-hidden="true" />
@@ -604,7 +607,7 @@ export function MealBreaksPage({
           >
             <table className="meal-table">
               <caption className="sr-only">
-                Meal breaks for {date}. Paycom local clock times and Flex station-local times,
+                Meal breaks for {shownDate}. Paycom local clock times and Flex station-local times,
                 compared to the minute.
               </caption>
               <thead>
@@ -645,7 +648,7 @@ export function MealBreaksPage({
                     <EmployeeRows
                       row={row}
                       summary={summary}
-                      date={date}
+                      date={shownDate}
                       name={name(row)}
                       expanded={expanded.has(row.id)}
                       toggle={() =>
@@ -681,7 +684,7 @@ export function MealBreaksPage({
               </button>
             </div>
           )}
-        </>
+        </div>
       )}
       <footer className="paycom-timecard-footer" aria-label="Meal break timezones">
         <span>
