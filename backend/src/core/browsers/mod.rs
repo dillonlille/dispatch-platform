@@ -296,7 +296,7 @@ impl Session {
         owner: &str,
         metrics: &super::job_metrics::Recorder,
         request: &Value,
-    ) -> Result<Value> {
+    ) -> Result<(Value, Option<super::meals::Scope>)> {
         ensure(self.ready(), "verification_required", 409)?;
         ensure(
             !self.collecting.swap(true, Ordering::SeqCst),
@@ -306,14 +306,22 @@ impl Session {
         if self.fixture {
             tokio::time::sleep(Duration::from_millis(100)).await;
             return if self.provider == Provider::Cortex {
-                Ok(serde_json::to_value(super::meals::fixture(
-                    &serde_json::from_value(request.clone())?,
-                ))?)
+                let scope = match serde_json::from_value(request.clone())? {
+                    super::meals::CollectionRequest::Scoped(scope) => scope,
+                    super::meals::CollectionRequest::Discover(discovery) => {
+                        discovery.scope("area-demo", "provider-demo")?
+                    }
+                };
+                Ok((
+                    serde_json::to_value(super::meals::fixture(&scope))?,
+                    Some(scope),
+                ))
             } else {
                 workforce::fixture_date(
                     &self.timezone,
                     workforce::collection_date(request, &self.timezone)?,
                 )
+                .map(|data| (data, None))
             };
         }
         let mut worker = self.worker.lock().await;
@@ -341,30 +349,33 @@ impl Session {
         };
         let response = async {
             match worker {
-                Worker::Paycom(worker) => {
-                    worker
-                        .collect(
-                            &self.timezone,
-                            workforce::collection_date(request, &self.timezone)?,
-                            metrics,
-                            Some(&super::collection_checkpoint::Checkpoint::new(
-                                state.clone(),
-                                job,
-                                owner,
-                            )),
-                            progress,
-                        )
-                        .await
-                }
+                Worker::Paycom(worker) => worker
+                    .collect(
+                        &self.timezone,
+                        workforce::collection_date(request, &self.timezone)?,
+                        metrics,
+                        Some(&super::collection_checkpoint::Checkpoint::new(
+                            state.clone(),
+                            job,
+                            owner,
+                        )),
+                        progress,
+                    )
+                    .await
+                    .map(|data| (data, None)),
                 Worker::Cortex(worker) => {
-                    worker
+                    let scope = worker
+                        .resolve_scope(&serde_json::from_value(request.clone())?)
+                        .await?;
+                    let data = worker
                         .collect(
-                            &serde_json::from_value(request.clone())?,
+                            &scope,
                             metrics,
                             &super::live_collection::Writer::new(state.clone(), job, owner),
                             progress,
                         )
-                        .await
+                        .await?;
+                    Ok((data, Some(scope)))
                 }
             }
         };

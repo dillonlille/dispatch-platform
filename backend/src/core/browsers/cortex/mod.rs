@@ -1,5 +1,6 @@
 //! Cortex authentication and structured meal evidence from Amazon Logistics.
 mod collection;
+mod discovery;
 use super::{attempt::Attempts, browseros, page::Page};
 use crate::core::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};

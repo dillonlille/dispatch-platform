@@ -477,11 +477,22 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     { timeout: 10000 },
   );
   await expect(sync).toBeDisabled();
+  await timecards.click();
+  await expect(sync).toBeDisabled();
+  await expect(page.getByRole('status', { name: 'Flex sync', exact: true })).toContainText(
+    'queued',
+  );
   flexStatus = 'failed';
+  await meals.click();
   await expect.poll(() => mealReads, { timeout: 10000 }).toBeGreaterThan(before);
   await expect(sync).toBeEnabled({ timeout: 10000 });
   await expect(dateInput).toHaveValue(date);
   expect(syncRequests).toBe(1);
+  await timecards.click();
+  await sync.click();
+  await expect(sync).toBeDisabled();
+  expect(syncRequests).toBe(2);
+  syncStatus = flexStatus = 'succeeded';
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await meals.click();
   await expect(dateInput).toHaveValue(date);

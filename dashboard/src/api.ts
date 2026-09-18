@@ -26,7 +26,11 @@ const labels: Record<string, string> = {
   invalid_schedule_interval: 'Choose an interval from 0.5 to 24 hours in half-hour increments.',
   meal_sync_paycom_required: 'Connect Paycom before syncing meal breaks.',
   meal_sync_flex_required: 'Connect Cortex in Settings → Connections before syncing Flex.',
-  meal_sync_scope_required: 'Flex needs an initial station collection before syncing this date.',
+  meal_sync_scope_required: 'Complete your DSP profile with a station code to sync Flex.',
+  cortex_station_unavailable:
+    'Your saved station was not found in Cortex. Check your DSP profile and Cortex access.',
+  cortex_provider_ambiguous:
+    'Cortex could not identify your DSP. Check your DSP name and abbreviation.',
   sync_in_progress: 'A collection is already in progress. Wait for it to finish, then sync again.',
   queue_full: 'The collection queue is full. Try again after the current collections finish.',
   invalid_date: 'Choose a valid date that is not in the future.',

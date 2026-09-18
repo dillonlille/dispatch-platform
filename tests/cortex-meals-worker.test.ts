@@ -3,6 +3,150 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fixture, until } from './rust-support.js';
+import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
+
+test(
+  'first Sync Now discovers Cortex scope and publishes both sources through BrowserOS',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
+  async (t) => {
+    const date = '2026-09-06';
+    const start = Date.parse(`${date}T20:00:00Z`);
+    const paths: string[] = [];
+    const f = await paycomFixture((req, res) => {
+      const url = new URL(req.url!, 'http://fixture.test');
+      if (url.pathname === '/dspconsolev2') {
+        res.end(
+          '<title>DSP Console</title><nav><a href="/scheduling/calendar-view/week">Weekly schedule</a></nav><a href="/ap/signin">Sign out</a>',
+        );
+        return true;
+      }
+      if (!url.pathname.startsWith('/operations/execution/itineraries')) return false;
+      paths.push(url.pathname + url.search);
+      const candidate = {
+        itineraryId: 'itinerary-1',
+        transporterId: 'driver-1',
+        routeCode: 'CX1',
+        companyId: 'provider-1',
+        executionStatus: 'COMPLETE',
+        stopProgress: { total: 2, completed: 2 },
+        latestTaskExecutionTime: start + 2400000,
+        breaks: [
+          {
+            punchId: 'punch-1',
+            breakId: 'meal-1',
+            type: 'MEAL',
+            state: 'OFF',
+            timeStampOn: start,
+            timeStampOff: start + 1800000,
+            sequenceNumber: 1,
+          },
+        ],
+      };
+      const p: any = {
+        selectedDay: date,
+        serviceAreaId: 'area-1',
+        selectedStation: {
+          serviceAreaID: 'area-1',
+          defaultStationCode: 'DOT4',
+          timeZone: 'US/Pacific',
+        },
+        providerFilterValue: url.searchParams.get('provider') ?? 'ALL_DSPS',
+        providerFilterOptions: [
+          { value: 'ALL_DRIVERS', label: 'All Drivers' },
+          { value: 'ALL_DSPS' },
+          { value: 'provider-1', label: 'FSCL' },
+          { value: 'other-provider', label: 'Other' },
+        ],
+        isLoadingSummaries: false,
+        allItinerarySummaries: [candidate],
+        transporterSummary: { 'driver-1': { transporterName: 'Fixture Driver' } },
+      };
+      if (url.pathname.includes('/documentType/')) {
+        p.isLoadingItineraryDetails = false;
+        p.itineraryDetails = {
+          ...candidate,
+          localDate: [2026, 9, 6],
+          serviceAreaId: 'area-1',
+          unknownStops: [],
+          inactiveTasks: [],
+          stops: [start - 60000, start + 1860000].map((time, i) => ({
+            stopId: `stop-${i}`,
+            tasks: [
+              {
+                taskId: `task-${i}`,
+                taskType: 'DROP_OFF',
+                taskState: 'DELIVERED',
+                executionStatus: 'COMPLETE',
+                actualExecutionTime: time / 1000,
+                transporterId: null,
+              },
+            ],
+          })),
+        };
+      }
+      res.setHeader('Content-Type', 'text/html');
+      res.end(
+        `<title>Delivery Execution</title><main></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:${JSON.stringify(p)}};</script>`,
+      );
+      return true;
+    });
+    t.after(f.close);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: any) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (
+        await owner.post('/api/dsp/profile', {
+          name: 'Full Scale Logistics',
+          abbreviation: 'FSCL',
+          stationCode: 'DOT4',
+          timezone: 'America/Los_Angeles',
+        })
+      ).status,
+      200,
+    );
+    await owner.select(dsp.id);
+    for (const [provider, login] of [
+      ['paycom', credentials],
+      ['cortex', { username: 'fixture@example.test', password: 'fixture-password' }],
+    ] as const) {
+      const saved = await owner.post(`/api/dsp/connections/${provider}`, login);
+      assert.equal(saved.value.status, 'ready', saved.body);
+    }
+    assert.deepEqual((await owner.get(`/api/dsp/cortex/meal-breaks?date=${date}`)).value, []);
+    const request = { requestId: 'first-sync', date };
+    const queued = await owner.post('/api/dsp/jobs/meal-breaks', request);
+    assert.equal(queued.status, 202, queued.body);
+    assert.equal(queued.value.jobs.length, 2);
+    await until(async () => {
+      const jobs = (await owner.get('/api/dsp/jobs')).value.filter((j: any) =>
+        queued.value.jobs.some((q: any) => q.id === j.id),
+      );
+      assert(!jobs.some((j: any) => j.status === 'failed'), JSON.stringify(jobs));
+      return jobs.every((j: any) => j.status === 'succeeded');
+    }, 90000);
+    const status = (await owner.get(`/api/dsp/jobs/meal-breaks?date=${date}`)).value;
+    assert(status.paycom.collectedAt);
+    assert(status.flex.collectedAt);
+    const publications = (await owner.get(`/api/dsp/cortex/meal-breaks?date=${date}`)).value;
+    assert.equal(publications[0].mealCount, 1);
+    assert.equal(publications[0].verifiedGapPairs, 1);
+    assert(
+      paths.some((path) => !path.includes('serviceAreaId=')),
+      'Starts without a known station ID',
+    );
+    assert(
+      paths.some(
+        (path) => path.includes('serviceAreaId=area-1') && path.includes('provider=provider-1'),
+      ),
+      'Collects the resolved DSP scope',
+    );
+    assert.deepEqual(
+      (await owner.post('/api/dsp/jobs/meal-breaks', request)).value.jobs.map((j: any) => j.id),
+      queued.value.jobs.map((j: any) => j.id),
+    );
+  },
+);
 test(
   'Cortex BrowserOS captures changed meals, multiple itineraries, and four meal timestamps before atomic publication',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 180000 },

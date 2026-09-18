@@ -463,7 +463,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
             .await?;
         metrics.phase(Phase::Collection);
         let request: Value = serde_json::from_str(s(&job, "request"))?;
-        let data = session
+        let (data, scope) = session
             .collect(&state, &id, &owner, &metrics, &request)
             .await?;
         metrics.counts(&data);
@@ -481,7 +481,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                         &tenant,
                         &jid,
                         &serde_json::from_value(data)?,
-                        &serde_json::from_value(request)?,
+                        &scope.ok_or_else(|| Error::new("invalid_cortex_scope", 502))?,
                     )?,
                 };
                 completed_metrics.finish("succeeded", None);
