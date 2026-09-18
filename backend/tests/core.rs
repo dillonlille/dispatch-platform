@@ -213,6 +213,35 @@ fn private_storage_rejects_links_and_world_readable_files() {
     assert!(db.area("../escape", "data").is_err());
 }
 #[test]
+fn private_storage_tolerates_concurrent_sidecar_removal() {
+    use std::{
+        fs::OpenOptions,
+        os::unix::fs::OpenOptionsExt,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let sidecar = root.path().join("database.sqlite-wal");
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let stop = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                let file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&sidecar)
+                    .unwrap();
+                std::fs::remove_file(&sidecar).unwrap();
+                drop(file);
+            }
+        });
+        let result = (0..100_000).try_for_each(|_| db::private_file(&sidecar, false));
+        stop.store(true, Ordering::Relaxed);
+        result.unwrap();
+    });
+}
+#[test]
 fn egress_rejects_private_and_lookalike_destinations() {
     for address in [
         "127.0.0.1",

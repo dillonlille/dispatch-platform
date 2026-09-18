@@ -1,0 +1,21 @@
+[Unit]
+Description=Dispatch Production platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dispatch-platform/public/live
+EnvironmentFile=%h/dispatch-platform/public/config/platform.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/usr/bin/python3 %h/dispatch-platform/public/management/update-production.py --root %h/dispatch-platform/public --verify
+ExecStart=%h/dispatch-platform/public/live/services/rust/dispatch-backend serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=mixed
+UMask=0077
+
+[Install]
+WantedBy=default.target
