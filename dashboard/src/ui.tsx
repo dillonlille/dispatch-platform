@@ -2,6 +2,9 @@ import { dateFormatter } from '../../shared/date-format.js';
 import { useEffect, useRef, useId, type ReactNode } from 'react';
 import { X, LoaderCircle, Inbox } from 'lucide-react';
 import { displayTimezone } from './preferences.js';
+import type { DspView, Permission } from '../../shared/contracts/index.js';
+export const can = (view: DspView | undefined, permission: Permission) =>
+  Boolean(view && (view.role.owner || view.permissions.includes(permission)));
 export const time = (value: string | null | undefined) =>
   value
     ? dateFormatter('en-US', {

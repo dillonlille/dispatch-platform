@@ -51,6 +51,14 @@ const labels: Record<string, string> = {
   stale_view: 'Your DSP access changed. Reopen the DSP to continue.',
   connection_required: 'Connect Paycom before starting a collection.',
   last_owner_required: 'Keep at least one DSP owner.',
+  dsp_view_expired: 'Your DSP access changed. Refreshing your view…',
+  role_exceeds_permissions: 'You can only manage roles and members within your own permissions.',
+  role_in_use: 'Move this role’s members and pending invitations to another role first.',
+  role_name_taken: 'Another role already uses this name.',
+  invalid_role_name: 'Choose a role name up to 40 characters. “Owner” is reserved.',
+  role_not_found: 'This role no longer exists. Refresh and try again.',
+  role_limit: 'You can create up to 50 roles for this DSP.',
+  owner_role_locked: 'The Owner role cannot be changed.',
   verification_incomplete:
     'Paycom still needs verification. Complete the CAPTCHA, then press Submit again.',
   connection_busy: 'The browser is busy. Please try again in a moment.',
@@ -79,6 +87,8 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
     if (!response.ok) {
       if (response.status === 401 && url !== '/api/auth/login')
         window.dispatchEvent(new Event('dispatch-signed-out'));
+      if (value.error === 'dsp_view_expired' && url !== '/api/session/dsp')
+        window.dispatchEvent(new Event('dispatch-view-expired'));
       throw new ApiError(
         value.error,
         errorLabel(value.error) ?? value.message ?? 'The request could not be completed.',

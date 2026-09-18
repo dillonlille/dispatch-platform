@@ -25,6 +25,20 @@ pub struct Context {
     pub auth: Auth,
     pub dsp: Value,
     pub role: String,
+    pub role_name: String,
+    pub owner: bool,
+    pub permissions: Vec<String>,
+}
+impl Context {
+    pub fn can(&self, permission: &str) -> bool {
+        self.owner || self.permissions.iter().any(|p| p == permission)
+    }
+    // Alternatives are separated by `|`; any one of them grants the request.
+    pub fn allows(&self, permission: &str) -> bool {
+        permission
+            .split('|')
+            .any(|wanted| wanted == super::roles::ACCESS || self.can(wanted))
+    }
 }
 pub fn user(row: &Value) -> Result<Value> {
     Ok(serde_json::to_value(
@@ -86,35 +100,33 @@ impl Store {
     }
     pub fn context(&self, a: &Auth, id: &str, permission: &str) -> Result<Context> {
         let dsp = self.get_dsp(id)?;
-        let role = if flag(&a.user, "platformOwner") {
-            "platform_owner".to_owned()
+        let grant = if flag(&a.user, "platformOwner") {
+            Some(super::roles::Grant {
+                id: "platform_owner".to_owned(),
+                name: "Platform owner".to_owned(),
+                owner: true,
+                permissions: super::roles::all(),
+            })
         } else {
-            self.platform
-                .one(
-                    "SELECT role FROM memberships WHERE user_id=? AND dsp_id=?",
-                    [s(&a.user, "id"), id],
-                )?
-                .map(|r| s(&r, "role").to_owned())
-                .unwrap_or_default()
+            self.grant(s(&a.user, "id"), id)?
         };
-        let allowed = match role.as_str() {
-            "platform_owner" | "owner" => true,
-            "manager" => ["read", "collect"].contains(&permission),
-            "member" => permission == "read",
-            _ => false,
+        let grant = grant.ok_or_else(|| Error::new("permission_denied", 403))?;
+        let c = Context {
+            auth: a.clone(),
+            dsp,
+            role: grant.id,
+            role_name: grant.name,
+            owner: grant.owner,
+            permissions: grant.permissions,
         };
-        ensure(allowed, "permission_denied", 403)?;
-        ensure(s(&dsp, "status") == "active", "dsp_unavailable", 409)?;
+        ensure(c.allows(permission), "permission_denied", 403)?;
+        ensure(s(&c.dsp, "status") == "active", "dsp_unavailable", 409)?;
         ensure(
-            s(&dsp, "environment") == self.config.environment,
+            s(&c.dsp, "environment") == self.config.environment,
             "environment_mismatch",
             403,
         )?;
-        Ok(Context {
-            auth: a.clone(),
-            dsp,
-            role,
-        })
+        Ok(c)
     }
     pub fn view_token(&self, c: &Context) -> String {
         format!(
@@ -138,19 +150,25 @@ impl Store {
             "dsp_view_required",
             403,
         )?;
-        let c = self.context(a, token.split('.').next().unwrap_or(""), permission)?;
+        // A stale view is reported before a missing permission so a member whose
+        // role just changed reopens the DSP instead of seeing a denial.
+        let id = token.split('.').next().unwrap_or("");
+        let c = self.context(a, id, super::roles::ACCESS)?;
         ensure(
             crypto::equal(&self.view_token(&c), token),
             "dsp_view_expired",
             409,
         )?;
+        ensure(c.allows(permission), "permission_denied", 403)?;
         Ok(c)
     }
     pub fn revalidate(&self, c: &Context, permission: &str) -> Result<Context> {
         let a = self.authenticate(&c.auth.raw)?;
         let fresh = self.context(&a, s(&c.dsp, "id"), permission)?;
         ensure(
-            fresh.dsp["revision"] == c.dsp["revision"] && fresh.role == c.role,
+            fresh.dsp["revision"] == c.dsp["revision"]
+                && fresh.role == c.role
+                && fresh.permissions == c.permissions,
             "dsp_view_expired",
             409,
         )?;
@@ -170,20 +188,27 @@ impl Store {
         })
     }
     pub fn invite(&self, a: &Auth, dsp: &str, email: &str, role: &str) -> Result<String> {
-        self.context(a, dsp, "members")?;
+        let c = self.context(a, dsp, "members.invite")?;
+        let role = self.role(dsp, role)?;
+        self.ensure_assignable(&c, &role)?;
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
         let raw = crypto::token()?;
-        self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,expires_at,created_by) VALUES (?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),role,now()+7*86400000,s(&a.user,"id")])?;
-        self.audit(Some(s(&a.user, "id")), Some(dsp), "member.invited", role)?;
+        self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) VALUES (?,?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),Self::legacy_role(&role),s(&role,"id"),now()+7*86400000,s(&a.user,"id")])?;
+        self.audit(
+            Some(s(&a.user, "id")),
+            Some(dsp),
+            "member.invited",
+            s(&role, "name"),
+        )?;
         Ok(raw)
     }
     pub fn invitation(&self, raw: &str) -> Result<Value> {
         ensure(raw.len() == 43, "invitation_expired", 404)?;
-        let mut invitation = self.platform.one("SELECT i.email,i.dsp_id dspId,d.name dspName,i.role FROM invitations i JOIN dsps d ON d.id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL AND i.expires_at>? AND d.status='active' AND d.environment=?",params![crypto::sha(raw),now(),self.config.environment])?.ok_or_else(||Error::new("invitation_expired",404))?;
-        invitation["onboarding"] = json!(
-            s(&invitation, "role") == "owner"
-                && flag(&self.profile(s(&invitation, "dspId"))?, "setupRequired")
-        );
+        let mut invitation = self.platform.one("SELECT i.email,i.dsp_id dspId,d.name dspName,r.name role,r.id roleId,r.system owner FROM invitations i JOIN dsps d ON d.id=i.dsp_id JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL AND i.expires_at>? AND d.status='active' AND d.environment=?",params![crypto::sha(raw),now(),self.config.environment])?.ok_or_else(||Error::new("invitation_expired",404))?;
+        let owner = flag(&invitation, "owner");
+        invitation.as_object_mut().unwrap().remove("owner");
+        invitation["onboarding"] =
+            json!(owner && flag(&self.profile(s(&invitation, "dspId"))?, "setupRequired"));
         Ok(invitation)
     }
     pub fn recovery(&self, email: &str) -> Result<()> {
@@ -373,7 +398,8 @@ impl super::State {
                 },
                 _ => return Err(Error::new("sign_in_with_existing_password",403)),
             };
-            db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role) VALUES (?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),s(&invite,"role")])?;
+            let role = db.role(s(&invite,"dspId"),s(&invite,"roleId"))?;
+            db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),Store::legacy_role(&role),s(&role,"id")])?;
             db.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(&raw)])?;
             db.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined","")?;
             Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))

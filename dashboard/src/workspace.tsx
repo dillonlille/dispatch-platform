@@ -10,16 +10,17 @@ import {
   Settings,
   AlertTriangle,
 } from 'lucide-react';
-import type { Connection, DspView, Membership, Job } from '../../shared/contracts/index.js';
+import type { Connection, DspView, Membership, Job, Role } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
-import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time } from './ui.js';
+import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time, can } from './ui.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './paycom-day-controls.js';
 import { calendarTimezone, displayTimezone } from './preferences.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { type Perform } from './platform.js';
+import { RoleSheet, RolesTab, assignable } from './roles.js';
 
 export function HomePage() {
   return (
@@ -174,7 +175,7 @@ export function PaycomPage({
     : !data?.enabled
       ? 'Connect Paycom to sync.'
       : '';
-  const owner = ['owner', 'platform_owner'].includes(view.role);
+  const canConnect = can(view, 'connections.manage');
   const syncButton = canCollect && (
     <button
       disabled={!!syncUnavailable || !!syncState.error || syncing || !!activeSync}
@@ -215,7 +216,7 @@ export function PaycomPage({
           </>
         )}
         {daily && syncButton}
-        {owner && (
+        {can(view, 'timecard.manage') && (
           <button
             onClick={() => {
               location.hash = `dsp/${view.dsp.id}/paycom-settings`;
@@ -226,7 +227,7 @@ export function PaycomPage({
           </button>
         )}
       </Header>
-      {owner && <ErrorBox message={error} />}
+      {canConnect && <ErrorBox message={error} />}
       {canCollect && <ErrorBox message={syncState.error} />}
       <Tabs
         value={tab}
@@ -259,12 +260,12 @@ export function PaycomPage({
           onDateChange={selectDate}
           refreshKey={refreshKey}
           timezone={view.dsp.timezone}
-          owner={owner}
+          owner={can(view, 'timecard.manage')}
           preferences={preferences.data?.values ?? paycomDefaults}
         />
-      ) : owner && !data && !error ? (
+      ) : canConnect && !data && !error ? (
         <Loading />
-      ) : owner && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
+      ) : canConnect && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
         <button
           className="primary paycom-connect"
           onClick={() => {
@@ -305,7 +306,13 @@ export function TeamPage({
   reopen: () => Promise<void>;
 }) {
   const { data, error, refresh } = useData<Membership[]>('/api/dsp/members', 10000);
-  const invitations = useData<Invitation[]>('/api/dsp/invitations', 10000);
+  const canInvite = can(view, 'members.invite'),
+    canManage = can(view, 'members.manage'),
+    canRoles = can(view, 'roles.manage');
+  const invitations = useData<Invitation[]>(canInvite ? '/api/dsp/invitations' : '', 10000);
+  const roles = useData<Role[]>('/api/dsp/roles', 10000);
+  const [roleEditor, setRoleEditor] = useState<Role | 'new'>();
+  const grantable = roles.data?.filter((role) => assignable(view, role)) ?? [];
   const [tab, setTab] = useState('members');
   const [search, setSearch] = useState('');
   const [inviting, setInviting] = useState(false);
@@ -318,10 +325,19 @@ export function TeamPage({
   return (
     <>
       <Header title="Team & Roles">
-        <button className="primary" onClick={() => setInviting(true)}>
-          <Plus size={16} />
-          Invite member
-        </button>
+        {tab === 'roles' && canRoles ? (
+          <button className="primary" onClick={() => setRoleEditor('new')}>
+            <Plus size={16} />
+            Create role
+          </button>
+        ) : (
+          canInvite && (
+            <button className="primary" onClick={() => setInviting(true)}>
+              <Plus size={16} />
+              Invite member
+            </button>
+          )
+        )}
       </Header>
       <Tabs
         value={tab}
@@ -329,11 +345,11 @@ export function TeamPage({
         items={[
           ['members', 'Members'],
           ['roles', 'Roles'],
-          ['invitations', 'Invitations'],
+          ...(canInvite ? [['invitations', 'Invitations']] : []),
         ]}
         label="Team"
       />
-      <ErrorBox message={error || invitations.error} />
+      <ErrorBox message={error || roles.error || invitations.error} />
       {tab === 'members' && (
         <>
           <div className="table-toolbar">
@@ -383,18 +399,20 @@ export function TeamPage({
                           </div>
                         </div>
                       </td>
-                      <td>{title(member.role)}</td>
+                      <td>{member.role}</td>
                       <td>
                         <Badge value="active">Active</Badge>
                       </td>
                       <td>
-                        <button
-                          className="icon-button"
-                          aria-label={`Edit ${member.name}`}
-                          onClick={() => setEditing(member)}
-                        >
-                          <Ellipsis size={18} />
-                        </button>
+                        {canManage && grantable.some((role) => role.id === member.roleId) && (
+                          <button
+                            className="icon-button"
+                            aria-label={`Edit ${member.name}`}
+                            onClick={() => setEditing(member)}
+                          >
+                            <Ellipsis size={18} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -409,31 +427,21 @@ export function TeamPage({
           )}
         </>
       )}
-      {tab === 'roles' && (
-        <>
-          <div className="table-toolbar">
-            <p className="muted">Standard roles for your DSP.</p>
-          </div>
-          <div className="role-list">
-            {[
-              ['owner', 'Manage members, settings, connections and collections'],
-              ['manager', 'View workforce and manage collections'],
-              ['member', 'View workforce and timecards'],
-            ].map(([role, description]) => (
-              <section className="role-row" key={role}>
-                <div>
-                  <div className="role-heading">
-                    <h2>{title(role!)}</h2>
-                    <span className="muted">Standard role</span>
-                  </div>
-                  <p>{description}</p>
-                </div>
-              </section>
-            ))}
-          </div>
-        </>
+      {tab === 'roles' && <RolesTab view={view} roles={roles.data} edit={setRoleEditor} />}
+      {roleEditor && (
+        <RoleSheet
+          view={view}
+          role={roleEditor === 'new' ? undefined : roleEditor}
+          perform={perform}
+          close={() => setRoleEditor(undefined)}
+          saved={async (permissionsChanged) => {
+            if (permissionsChanged) await reopen();
+            roles.refresh();
+            refresh();
+          }}
+        />
       )}
-      {tab === 'invitations' && (
+      {tab === 'invitations' && canInvite && (
         <>
           <div className="table-toolbar">
             <p className="muted">Pending invitations to your DSP.</p>
@@ -465,7 +473,7 @@ export function TeamPage({
                   .map((invitation, index) => (
                     <tr key={`${invitation.email}:${index}`}>
                       <td>{invitation.email}</td>
-                      <td>{title(invitation.role)}</td>
+                      <td>{invitation.role}</td>
                       <td>{time(new Date(invitation.expiresAt).toISOString())}</td>
                       <td>
                         <button
@@ -527,6 +535,7 @@ export function TeamPage({
                   });
                   setInviting(false);
                   invitations.refresh();
+                  roles.refresh();
                 },
                 `Invitation email queued for ${form.get('email')}`,
               );
@@ -538,10 +547,18 @@ export function TeamPage({
             </label>
             <label>
               Role
-              <select name="role" defaultValue="member">
-                <option value="owner">Owner</option>
-                <option value="manager">Manager</option>
-                <option value="member">Member</option>
+              <select
+                name="role"
+                required
+                defaultValue={
+                  (grantable.find((role) => role.name === 'Member') ?? grantable.at(-1))?.id
+                }
+              >
+                {grantable.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
               </select>
             </label>
             <div className="form-actions">
@@ -569,10 +586,12 @@ export function TeamPage({
           >
             <label>
               Role
-              <select name="role" defaultValue={editing.role}>
-                <option value="owner">Owner</option>
-                <option value="manager">Manager</option>
-                <option value="member">Member</option>
+              <select name="role" defaultValue={editing.roleId ?? undefined}>
+                {grantable.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
               </select>
             </label>
             <div className="form-actions">
