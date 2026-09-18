@@ -68,6 +68,7 @@ export async function capturedMail(
   const deadline = Date.now() + 12000;
   while (Date.now() < deadline) {
     for (const name of fs.existsSync(directory) ? fs.readdirSync(directory) : []) {
+      if (!name.endsWith('.json')) continue;
       const file = path.join(directory, name);
       const message = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (message.to === to && message.text !== previousText) {

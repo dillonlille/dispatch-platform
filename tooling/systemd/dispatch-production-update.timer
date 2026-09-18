@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for stable Dispatch releases
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

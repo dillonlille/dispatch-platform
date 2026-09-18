@@ -150,8 +150,10 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
     202,
   );
   const mail = path.join(f.root, 'data/platform/development-mail');
-  await until(async () => fs.existsSync(mail) && fs.readdirSync(mail).length > 0);
-  const filename = path.join(mail, fs.readdirSync(mail)[0]!);
+  const completed = () =>
+    fs.existsSync(mail) ? fs.readdirSync(mail).filter((name) => name.endsWith('.json')) : [];
+  await until(async () => completed().length > 0);
+  const filename = path.join(mail, completed()[0]!);
   assert.equal(fs.statSync(filename).mode & 0o077, 0);
   const message = JSON.parse(fs.readFileSync(filename, 'utf8'));
   assert.match(message.html, />Reset password<\/a>/);

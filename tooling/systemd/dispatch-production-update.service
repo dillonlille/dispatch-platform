@@ -1,0 +1,11 @@
+[Unit]
+Description=Install verified stable Dispatch releases
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 %h/dispatch-platform/public/management/update-production.py --root %h/dispatch-platform/public
+TimeoutStartSec=10min
+UMask=0077

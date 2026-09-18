@@ -29,6 +29,13 @@ test('Dev and production invitations use isolated configuration, mailboxes and a
     },
   });
   t.after(production.close);
+  const devOwner = await dev.client();
+  const productionOwner = await production.client();
+  assert.equal(devOwner.session.dsps.length, 1);
+  assert.equal(devOwner.session.dsps[0].name, 'Dev DSP');
+  assert.deepEqual(productionOwner.session.dsps, []);
+  assert.deepEqual((await productionOwner.get('/api/platform/dsps')).value, []);
+  assert.equal(productionOwner.session.user.platformOwner, true);
   for (const [f, prefix] of [
     [dev, '[Dispatch Dev] '],
     [production, ''],
