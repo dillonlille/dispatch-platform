@@ -551,6 +551,52 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
               <p className="muted">{browserMemoryStatus(health.data.browsers.memory)}</p>
             )}
           </section>
+          {health.data?.mail && (
+            <section aria-label="Email delivery" className="archived-card diagnostics-health">
+              <h2>Email delivery</h2>
+              <dl className="details">
+                <div>
+                  <dt>Sending</dt>
+                  <dd>{health.data.mail.enabled ? 'Enabled' : 'Disabled'}</dd>
+                </div>
+                <div>
+                  <dt>Pending</dt>
+                  <dd>{health.data.mail.pending}</dd>
+                </div>
+                <div>
+                  <dt>Failed</dt>
+                  <dd>{health.data.mail.failed}</dd>
+                </div>
+                <div>
+                  <dt>Oldest pending</dt>
+                  <dd>
+                    {health.data.mail.pending === 0
+                      ? '—'
+                      : health.data.mail.oldestPendingAgeMs === null
+                        ? 'Unknown'
+                        : `${Math.floor(health.data.mail.oldestPendingAgeMs / 60000)} min`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Last delivered</dt>
+                  <dd>
+                    {health.data.mail.lastSuccessAt ? time(health.data.mail.lastSuccessAt) : '—'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Last attempt</dt>
+                  <dd>
+                    {health.data.mail.lastAttemptAt ? time(health.data.mail.lastAttemptAt) : '—'}
+                  </dd>
+                </div>
+              </dl>
+              <ErrorBox
+                message={mailFailure(
+                  health.data.mail.transport.error ?? health.data.mail.lastError,
+                )}
+              />
+            </section>
+          )}
           <section className="archived-card" aria-labelledby="test-dsp-title">
             <h2 id="test-dsp-title">Test DSP</h2>
             <p className="muted">
@@ -606,6 +652,17 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
       </section>
     </>
   );
+}
+function mailFailure(code: string | null): string {
+  if (!code) return '';
+  if (/^email_http_\d{3}$/.test(code)) return `The mail service returned HTTP ${code.slice(-3)}.`;
+  const labels: Record<string, string> = {
+    email_timeout: 'The mail service timed out.',
+    email_connection_failed: 'The mail service could not be reached.',
+    email_transport_configuration_failed: 'The mail transport configuration could not be loaded.',
+    email_smtp_rejected: 'The SMTP server rejected delivery.',
+  };
+  return labels[code] ?? 'Email delivery failed. Check the service logs for details.';
 }
 export function AuditPage() {
   const { data, error } = useData<AuditEvent[]>('/api/platform/audit', 10000);

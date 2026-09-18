@@ -56,6 +56,7 @@ def main():
         "NODE_ENV": "production",
         "DISPATCH_STANDALONE": "1",
         "DISPATCH_ENVIRONMENT": "preview",
+        "DISPATCH_TRUSTED_PROXY": "cloudflare",
         "DISPATCH_STATE_ROOT": str(root),
         "DISPATCH_ORIGIN": args.origin,
         "DISPATCH_PROVIDER_MODE": args.provider,

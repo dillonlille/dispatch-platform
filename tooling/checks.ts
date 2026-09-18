@@ -62,6 +62,18 @@ async function build(scope: string) {
     }),
     Promise.all([built, browsers]).then(([ok, installed]) => ok && installed && npm('test:ui')),
   ]);
+  // Measure after the other build checks finish so this process does not compete
+  // with browser tests or compilers on the same runner.
+  if (scope === 'full' && !failures.length)
+    await run('Rust workload regression', process.execPath, [
+      'node_modules/tsx/dist/cli.mjs',
+      'tooling/benchmark-rust.ts',
+      '--binary',
+      '.build/services/rust/dispatch-backend',
+      '--check',
+      '--output',
+      '/tmp/dispatch-rust-benchmark.json',
+    ]);
 }
 async function core() {
   const python = run('Python tests', 'python3', [

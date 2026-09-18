@@ -5,6 +5,7 @@ pub struct Config {
     pub root: PathBuf,
     pub environment: String,
     pub development: bool,
+    pub trusted_proxy: super::proxy::TrustedProxy,
     pub standalone: bool,
     pub origin: String,
     pub port: u16,
@@ -30,8 +31,41 @@ impl Config {
         let bundle = env::var_os("DISPATCH_ARTIFACT_ROOT")
             .map(PathBuf::from)
             .unwrap_or(env::current_dir()?);
-        let development = variable("NODE_ENV", "development") != "production";
         let environment = variable("DISPATCH_ENVIRONMENT", "preview");
+        let mode = variable(
+            "NODE_ENV",
+            if environment == "production" {
+                "production"
+            } else {
+                "development"
+            },
+        );
+        ensure(
+            ["development", "test", "production"].contains(&mode.as_str()),
+            "invalid_runtime_mode",
+            400,
+        )?;
+        let development = mode != "production";
+        ensure(
+            environment != "production" || !development,
+            "production_configuration_required",
+            400,
+        )?;
+        if environment == "production" {
+            ensure(
+                ["DISPATCH_STATE_ROOT", "DISPATCH_ORIGIN"]
+                    .iter()
+                    .all(|key| env::var(key).is_ok_and(|v| !v.trim().is_empty())),
+                "production_configuration_required",
+                400,
+            )?;
+        }
+        let provider = variable("DISPATCH_PROVIDER_MODE", "fixture");
+        ensure(
+            ["native", "fixture"].contains(&provider.as_str()),
+            "invalid_provider_mode",
+            400,
+        )?;
         let mail_prefix = if environment == "preview" {
             "DISPATCH_DEV"
         } else {
@@ -49,6 +83,10 @@ impl Config {
             )),
             environment,
             development,
+            trusted_proxy: super::proxy::TrustedProxy::parse(&variable(
+                "DISPATCH_TRUSTED_PROXY",
+                "none",
+            ))?,
             standalone: variable("DISPATCH_STANDALONE", "1") == "1",
             origin: variable("DISPATCH_ORIGIN", "http://127.0.0.1:5173"),
             port: variable("PORT", "5180")
@@ -56,7 +94,7 @@ impl Config {
                 .map_err(|_| super::Error::new("invalid_port", 400))?,
             release: variable("DISPATCH_RELEASE", "development"),
             version: None,
-            fixture: variable("DISPATCH_PROVIDER_MODE", "fixture") == "fixture",
+            fixture: provider == "fixture",
             fixture_url: env::var("DISPATCH_FIXTURE_PROVIDER_URL").ok(),
             browser_capacity: 2,
             dashboard: bundle.join("dashboard"),

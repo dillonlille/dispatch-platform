@@ -201,5 +201,15 @@ export interface PlatformHealth {
   };
   dsps: number;
   email: boolean;
+  mail: {
+    enabled: boolean;
+    pending: number;
+    failed: number;
+    oldestPendingAgeMs: number | null;
+    lastSuccessAt: string | null;
+    lastAttemptAt: string | null;
+    lastError: string | null;
+    transport: { error: string | null; checkedAt: string | null };
+  };
   providerMode: 'fixture' | 'native';
 }

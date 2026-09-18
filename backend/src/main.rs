@@ -13,7 +13,11 @@ async fn main() {
         libc::umask(0o077);
     }
     if let Err(error) = run().await {
-        eprintln!("dispatch: {}", error.code);
+        core::observability::event(
+            "error",
+            "core.failed",
+            serde_json::json!({"error":error.code}),
+        );
         std::process::exit(1);
     }
 }
@@ -68,9 +72,10 @@ async fn run() -> Result<()> {
                 },
                 stop.clone(),
             ));
-            println!(
-                "Dispatch Rust {} listening at http://127.0.0.1:{}",
-                config.environment, config.port
+            core::observability::event(
+                "info",
+                "core.started",
+                serde_json::json!({"environment":config.environment,"port":config.port,"release":config.release}),
             );
             let sender = stop.clone();
             let mut shutdown_receiver = stop.subscribe();

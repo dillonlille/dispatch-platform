@@ -328,7 +328,13 @@ impl Session {
                 state
                     .run(move |db| {
                         db.guard_job(&job, &owner)?;
-                        db.progress(&job, &owner, progress, &message, "running")
+                        db.progress(
+                            &job,
+                            &owner,
+                            progress,
+                            &message,
+                            super::contracts::ActiveJobStatus::Running,
+                        )
                     })
                     .await
             }

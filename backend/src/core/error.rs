@@ -33,13 +33,21 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        eprintln!("storage_io_failed: {:?}", e.kind());
+        super::observability::event(
+            "error",
+            "storage.io_failed",
+            json!({"kind":format!("{:?}",e.kind())}),
+        );
         Self::new("operation_failed", 500)
     }
 }
 impl From<rusqlite::Error> for Error {
     fn from(e: rusqlite::Error) -> Self {
-        eprintln!("database_failed: {e}");
+        super::observability::event(
+            "error",
+            "database.failed",
+            json!({"code":e.sqlite_error().map(|e| e.extended_code)}),
+        );
         Self::new("operation_failed", 500)
     }
 }

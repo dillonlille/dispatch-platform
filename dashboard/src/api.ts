@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { parseApiResponse } from '../../shared/contracts/runtime.js';
 export let csrf = '',
   view = '';
 export function credentials(nextCsrf: string, nextView = '') {
@@ -10,6 +11,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    readonly requestId?: string,
   ) {
     super(message);
   }
@@ -64,9 +66,19 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
       value.error,
       labels[value.error] ?? value.message ?? 'The request could not be completed.',
       response.status,
+      response.headers.get('x-request-id') ?? undefined,
     );
   }
-  return value as T;
+  try {
+    return parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
+  } catch {
+    throw new ApiError(
+      'invalid_api_response',
+      'The server returned an unexpected response. Refresh and try again.',
+      502,
+      response.headers.get('x-request-id') ?? undefined,
+    );
+  }
 }
 export function useData<T>(url: string, poll = 0, refreshKey?: string | null, dataScope?: string) {
   const [result, setResult] = useState<{ data: T; scope: string | undefined }>(),

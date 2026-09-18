@@ -45,6 +45,14 @@ jobs:
           profile: release
       - name: Build, dashboard tests and artifact checks
         run: npm run check:ci -- build-${{ needs.plan.outputs.mode }}
+      - name: Preserve workload measurements
+        if: always() && needs.plan.outputs.mode == 'full'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dispatch-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/dispatch-rust-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Package Dev candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: tar -czf dispatch-dev.tar.gz -C .build .

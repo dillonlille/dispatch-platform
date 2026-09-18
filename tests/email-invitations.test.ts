@@ -4,7 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fixture, until } from './rust-support.js';
-import { capturedMail } from './mail-support.js';
+import { capturedMail, smtpCapture } from './mail-support.js';
 import worker from '../services/cloudflare-mail/worker.js';
 import type { Env } from '../services/cloudflare-mail/worker-configuration.js';
 
@@ -13,12 +13,19 @@ const token = 'synthetic-worker-secret-for-invite-tests';
 test('Dev and production invitations use isolated configuration, mailboxes and accounts', async (t) => {
   const dev = await fixture(false);
   t.after(dev.close);
+  const smtp = await smtpCapture();
+  t.after(smtp.close);
   const production = await fixture({
     seed: false,
     env: {
       DISPATCH_ENVIRONMENT: 'production',
+      NODE_ENV: 'production',
+      DISPATCH_PROVIDER_MODE: 'native',
+      DISPATCH_ORIGIN: 'https://production.dispatch.test',
       DISPATCH_DEV_MAIL_MODE: 'disabled',
-      DISPATCH_PRODUCTION_MAIL_MODE: 'capture',
+      DISPATCH_PRODUCTION_MAIL_MODE: 'smtp',
+      DISPATCH_PRODUCTION_SMTP_URL: smtp.url,
+      DISPATCH_PRODUCTION_MAIL_FROM: 'dispatch@example.test',
     },
   });
   t.after(production.close);
@@ -32,9 +39,15 @@ test('Dev and production invitations use isolated configuration, mailboxes and a
     });
     assert.equal(result.status, 201);
     assert.equal(result.value.invitationUrl, undefined);
-    const message = await capturedMail(f.root, 'new-owner@dispatch.test');
-    assert.equal(message.environment, f.env.DISPATCH_ENVIRONMENT);
-    assert.equal(message.origin, f.env.DISPATCH_ORIGIN);
+    const message =
+      f === dev
+        ? await capturedMail(f.root, 'new-owner@dispatch.test')
+        : await (async () => {
+            await until(async () => smtp.messages.length === 1);
+            const raw = smtp.messages[0]!;
+            return { subject: /^Subject: (.*)$/m.exec(raw)![1]!.trim(), text: raw, html: raw };
+          })();
+    assert(message.text.includes(f.env.DISPATCH_ORIGIN));
     assert.equal(message.subject, `${prefix}Set up your DSP on Dispatch`);
     assert.match(message.html, />Start DSP onboarding<\/a>/);
     const raw = /token=([A-Za-z0-9_-]{43})/.exec(message.text)![1];
@@ -114,6 +127,13 @@ test('Cloudflare outbox sends HTML, retries failure and clears encrypted mail af
     f.database('data/platform/accounts.sqlite', (db) => db.prepare('SELECT * FROM outbox').get())!;
   await until(async () => row().attempts === 1);
   assert.equal(row().status, 'pending');
+  const waiting = (await owner.get('/api/platform/health')).value.mail;
+  assert.equal(waiting.pending, 1);
+  assert.equal(waiting.failed, 0);
+  assert.equal(waiting.lastError, 'email_http_502');
+  assert(waiting.oldestPendingAgeMs >= 0);
+  assert(waiting.lastAttemptAt);
+  assert.equal(waiting.lastSuccessAt, null);
   assert(row().encrypted_message);
   assert.equal(received[0]!.headers.authorization, `Bearer ${token}`);
   assert.equal(received[0]!.message.origin, f.env.DISPATCH_ORIGIN);
@@ -125,7 +145,48 @@ test('Cloudflare outbox sends HTML, retries failure and clears encrypted mail af
   );
   await until(async () => row().status === 'sent');
   assert.equal(row().encrypted_message, '');
+  const delivered = (await owner.get('/api/platform/health')).value.mail;
+  assert.equal(delivered.pending, 0);
+  assert.equal(delivered.lastError, null);
+  assert(delivered.lastSuccessAt);
+  assert.equal(delivered.oldestPendingAgeMs, null);
+  assert.equal((await f.request('/api/platform/health')).status, 401);
   assert.equal(f.logs().includes(token), false);
+  assert.equal(f.logs().includes('delivery@dispatch.test'), false);
+  // A terminal failure stays visible after restarting the core.
+  rejectMail = true;
+  await owner.post('/api/platform/dsps', { ownerEmail: 'failed@dispatch.test' });
+  f.database('data/platform/accounts.sqlite', (db) =>
+    db.prepare("UPDATE outbox SET attempts=4,available_at=0 WHERE status='pending'").run(),
+  );
+  await until(async () => (await owner.get('/api/platform/health')).value.mail.failed === 1);
+  await f.stop();
+  await f.start();
+  const failure = (await owner.get('/api/platform/health')).value.mail;
+  assert.equal(failure.failed, 1);
+  assert.equal(failure.lastError, 'email_http_502');
+  assert(failure.lastSuccessAt);
+});
+
+test('mail transport initialization failure is visible without disclosing configuration', async (t) => {
+  const privateValue = 'invalid-smtp-url-with-private-password';
+  const f = await fixture({
+    seed: false,
+    env: {
+      DISPATCH_DEV_MAIL_MODE: 'smtp',
+      DISPATCH_DEV_SMTP_URL: privateValue,
+      DISPATCH_DEV_MAIL_FROM: 'sender@example.test',
+    },
+  });
+  t.after(f.close);
+  const owner = await f.client();
+  await until(
+    async () =>
+      (await owner.get('/api/platform/health')).value.mail.transport.error ===
+      'email_transport_configuration_failed',
+  );
+  assert(!f.logs().includes(privateValue));
+  assert(f.logs().includes('mail.transport_failed'));
 });
 
 test('Cloudflare Worker requires the private secret and matching environment before sending', async () => {

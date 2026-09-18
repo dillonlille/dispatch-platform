@@ -28,6 +28,7 @@
     "pretest": "python3 tooling/cargo-build.py",
     "test:rust": "cargo test --locked",
     "benchmark:rust": "python3 tooling/cargo-build.py --release && tsx tooling/benchmark-rust.ts",
+    "benchmark:check": "tsx tooling/benchmark-rust.ts --binary .build/services/rust/dispatch-backend --check",
     "check:rust": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked",
     "pr:prepare": "python3 tooling/pr-prepare.py"
   },

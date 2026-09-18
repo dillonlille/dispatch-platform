@@ -1,6 +1,8 @@
 use super::collectors::Provider;
 use super::{
-    Error, Result, State, crypto,
+    Error, Result, State,
+    contracts::{ActiveJobStatus, PublicJob},
+    crypto,
     db::{Store, at, flag, iso, n, now, s},
     ensure,
     job_metrics::{self, Metrics, Phase, Recorder},
@@ -27,16 +29,18 @@ pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
     db.0.execute_batch("PRAGMA foreign_keys=ON")?;
     result
 }
-fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Value {
-    json!({"id":row["id"],"dspId":row["dsp_id"],"dspName":name,"environment":row["environment"],"kind":row["kind"],"status":row["status"],"progress":row["progress"],"message":row["message"],"attempt":row["attempt"],"maxAttempts":row["max_attempts"],"availableAt":at(n(row,"available_at")),"createdAt":row["created_at"],"startedAt":row["started_at"],"completedAt":row["completed_at"],"error":row["error"],"release":row["release"],"actorId":row["actor_id"],"metrics":metrics})
+fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Result<Value> {
+    Ok(serde_json::to_value(PublicJob::from_row(
+        row, name, metrics,
+    )?)?)
 }
 impl Store {
     pub fn public_job(&self, row: &Value) -> Result<Value> {
-        Ok(public_job(
+        public_job(
             row,
             &self.get_dsp(s(row, "dsp_id"))?["name"],
             self.metrics(s(row, "id"))?,
-        ))
+        )
     }
     pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
         self.recent_jobs(id, 200)
@@ -77,11 +81,7 @@ impl Store {
                     let name = names
                         .get(s(row, "dsp_id"))
                         .ok_or_else(|| Error::new("dsp_not_found", 404))?;
-                    Ok(public_job(
-                        row,
-                        name,
-                        metrics.remove(s(row, "id")).unwrap_or_default(),
-                    ))
+                    public_job(row, name, metrics.remove(s(row, "id")).unwrap_or_default())
                 })
                 .collect::<Result<Vec<_>>>()?
         ))
@@ -266,9 +266,9 @@ impl Store {
         owner: &str,
         progress: i64,
         message: &str,
-        status: &str,
+        status: ActiveJobStatus,
     ) -> Result<()> {
-        let count=self.jobs.exec("UPDATE jobs SET progress=?,message=?,status=? WHERE id=? AND lease_owner=? AND status IN ('running','waiting_verification')",params![progress.clamp(0,99),message,status,id,owner])?;
+        let count=self.jobs.exec("UPDATE jobs SET progress=?,message=?,status=? WHERE id=? AND lease_owner=? AND status IN ('running','waiting_verification')",params![progress.clamp(0,99),message,status.as_str(),id,owner])?;
         ensure(count == 1, "job_cancelled", 409)
     }
     pub fn finish(&self, id: &str, owner: &str, error: Option<&str>) -> Result<()> {
@@ -438,7 +438,7 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                     }
                     Ok(())
                 }).await;
-                if let Err(error)=result { eprintln!("checkpoint_cleanup_failed: {}",error.code); }
+                if let Err(error)=result { super::observability::event("error", "checkpoint_cleanup_failed", json!({"error":error.code})); }
             },
             _=timer.tick()=>{
                 state.expire_browsers().await;
@@ -446,7 +446,7 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                 if revision != schedule_revision || now()-refreshed >= 60000 {
                     match state.read(|db| db.schedule_deadlines()).await {
                         Ok(values) => { deadlines = values.into_iter().collect(); schedule_revision = revision; refreshed = now(); },
-                        Err(error) => eprintln!("scheduler_refresh_failed: {}",error.code),
+                        Err(error) => super::observability::event("error", "scheduler_refresh_failed", json!({"error":error.code})),
                     }
                 }
                 let due: Vec<_> = deadlines.iter().filter(|(_,at)| **at <= now()).map(|(id,_)| id.clone()).collect();
@@ -455,7 +455,7 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                     match state.run(move |db| db.schedule_due(&dsp)).await {
                         Ok(Some(next)) => { deadlines.insert(id,next); },
                         Ok(None) => { deadlines.remove(&id); },
-                        Err(error) => { deadlines.insert(id,now()+5000); eprintln!("scheduler_tick_failed: {}",error.code); },
+                        Err(error) => { deadlines.insert(id,now()+5000); super::observability::event("error", "scheduler_tick_failed", json!({"error":error.code})); },
                     }
                 }
                 // Poll indexed queue/lease state without a write lock. Recovery
@@ -463,9 +463,9 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                 let ready = match state.read(|db| db.jobs.one("SELECT EXISTS(SELECT 1 FROM jobs WHERE status='queued' AND available_at<=?1) queued,EXISTS(SELECT 1 FROM jobs WHERE status IN ('running','waiting_verification') AND lease_until<?1) expired",[now()])).await {
                     Ok(Some(value)) => value,
                     Ok(None) => continue,
-                    Err(error) => { eprintln!("job_poll_failed: {}",error.code); continue; },
+                    Err(error) => { super::observability::event("error", "job_poll_failed", json!({"error":error.code})); continue; },
                 };
-                if flag(&ready,"expired") && let Err(error) = state.run(|db| db.recover_jobs(false)).await { eprintln!("job_recovery_failed: {}",error.code); }
+                if flag(&ready,"expired") && let Err(error) = state.run(|db| db.recover_jobs(false)).await { super::observability::event("error", "job_recovery_failed", json!({"error":error.code})); }
                 if !flag(&ready,"queued") && !flag(&ready,"expired") { continue; }
                 while tasks.len()<state.config.browser_capacity {
                     let pool=state.clone();let claim_owner=owner.clone();
@@ -476,7 +476,7 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                         db.jobs.exec("UPDATE jobs SET message=?1 WHERE status='queued' AND available_at<=?2 AND message<>?1", params![message,now()])?;
                         db.claim(&claim_owner,|id,provider|!running.contains(id) && pool.browsers.get_for(id,provider).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
                     }).await;
-                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();let dsp=s(&job,"dsp_id").to_owned();running_dsps.insert(dsp.clone());tasks.spawn(async move{execute(state,job,owner).await;dsp});},Ok(None)=>break,Err(error)=>{eprintln!("job_claim_failed: {}",error.code);break;}}
+                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();let dsp=s(&job,"dsp_id").to_owned();running_dsps.insert(dsp.clone());tasks.spawn(async move{execute(state,job,owner).await;dsp});},Ok(None)=>break,Err(error)=>{super::observability::event("error", "job_claim_failed", json!({"error":error.code}));break;}}
                 }
             }
         }
@@ -507,7 +507,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                         &worker,
                         5,
                         "Waiting for owner verification",
-                        "waiting_verification",
+                        ActiveJobStatus::WaitingVerification,
                     )
                 })
                 .await?;
@@ -530,7 +530,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                     } else {
                         "Collecting workforce"
                     },
-                    "running",
+                    ActiveJobStatus::Running,
                 )
             })
             .await?;
