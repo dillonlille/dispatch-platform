@@ -20,12 +20,16 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   );
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
     setError('');
     setNotice('');
     const form = new FormData(event.currentTarget),
       email = String(form.get('email') ?? ''),
       password = String(form.get('password') ?? '');
+    if ((mode === 'invite' || mode === 'reset') && password !== form.get('confirmPassword')) {
+      setError('The passwords must match.');
+      return;
+    }
+    setBusy(true);
     try {
       if (mode === 'login') {
         await api('/api/auth/login', { email, password });
@@ -110,9 +114,22 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
               <input
                 name="password"
                 type="password"
-                minLength={mode === 'login' ? 1 : 12}
+                minLength={mode === 'login' ? 1 : 8}
                 maxLength={128}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                required
+              />
+            </label>
+          )}
+          {(mode === 'invite' || mode === 'reset') && (
+            <label>
+              Confirm password
+              <input
+                name="confirmPassword"
+                type="password"
+                minLength={8}
+                maxLength={128}
+                autoComplete="new-password"
                 required
               />
             </label>
