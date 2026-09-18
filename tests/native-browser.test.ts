@@ -1,143 +1,373 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
-import path from 'node:path';
-import net from 'node:net';
 import fs from 'node:fs';
-import { fixture } from './helpers.js';
-import { fixtureWorkforce } from '../integrations/paycom/fixture.js';
-import { Egress, publicAddress } from '../services/browsers/egress.js';
-
-test('egress refuses loopback, private addresses and unapproved destinations', async (t) => {
-  for (const address of [
-    '127.0.0.1',
-    '10.1.1.1',
-    '172.16.0.1',
-    '192.168.0.1',
-    '169.254.169.254',
-    '100.64.1.1',
-    '::ffff:127.0.0.1',
-    '::1',
-  ])
-    assert.equal(publicAddress(address), false);
-  const f = await fixture();
-  t.after(() => f.close());
-  const proxy = new Egress(path.join(f.root, 'egress.sock'), { hosts: [] });
-  await proxy.listen();
-  t.after(() => proxy.close());
-  const response = await new Promise<string>((resolve) => {
-    const socket = net.connect(proxy.socketPath);
-    let data = '';
-    socket.on('data', (chunk) => (data += chunk.toString()));
-    socket.once('close', () => resolve(data));
-    socket.on('error', () => {});
-    socket.write('CONNECT 127.0.0.1:80 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
-  });
-  assert.equal(response, '');
-});
+import path from 'node:path';
+import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
+import { until } from './rust-support.js';
 
 test(
-  'native Chromium in a private namespace logs in, verifies, collects and preserves only its DSP profile',
+  'Rust BrowserOS collects complete Paycom records, keeps DSPs isolated and preserves publication on source failure',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 180000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    const owner = await f.client();
+    const north = owner.session.dsps.find(
+      (d: { name: string }) => d.name === 'Northline Logistics',
+    );
+    const summit = owner.session.dsps.find((d: { name: string }) => d.name === 'Summit Delivery');
+    await owner.select(north.id);
+    const saved = await owner.post('/api/dsp/connections/paycom', credentials);
+    assert.equal(saved.value.status, 'ready', saved.body);
+    const run = async (requestId: string, status: string) => {
+      const queued = await owner.post('/api/dsp/jobs', { requestId });
+      assert.equal(queued.status, 202, queued.body);
+      let job: any;
+      await until(async () => {
+        job = (await owner.get('/api/dsp/jobs')).value.find(
+          (j: { id: string }) => j.id === queued.value.id,
+        );
+        if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+          assert.equal(job.status, status, JSON.stringify(job));
+          return true;
+        }
+        return false;
+      }, 60000);
+      return job;
+    };
+    await run('complete', 'succeeded');
+    assert.equal(f.events.filter((e) => e === 'timecard').length, 2);
+    assert.equal(f.events.filter((e) => e === 'primary').length, 1);
+    const selected = f.state.requests.find((r) => r.isAdvancedFilterApplied === false)!;
+    assert.deepEqual(selected.eeCodes, ['AA01', 'BB02']);
+    assert.deepEqual(selected.payClassCodes, ['Driver']);
+    assert.deepEqual(selected.selectedEarnings, []);
+    assert.equal(selected.approvalMode, null);
+    const employees = (await owner.get('/api/dsp/employees')).value;
+    assert.equal(employees.total, 2);
+    const trailingDays = f.collector(north.id, (db) =>
+      db
+        .prepare(
+          "SELECT hours,status,punches FROM timecards WHERE employee_code='BB02' AND hours>0 ORDER BY date",
+        )
+        .all(),
+    );
+    assert.equal(trailingDays.length, 2);
+    for (const day of trailingDays) {
+      assert.equal(day.hours, 8, 'Use the reported daily total on the additional row');
+      assert.equal(day.status, 'Complete');
+      assert.deepEqual(JSON.parse(day.punches as string), [
+        { in: '08:00 AM', out: '04:00 PM', hours: null, inKind: null, outKind: null },
+      ]);
+    }
+    const publication = () =>
+      f.collector(
+        north.id,
+        (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
+      );
+    const id = publication();
+    f.state.incomplete = true;
+    await run('partial', 'failed');
+    assert.equal(publication(), id);
+    f.state.incomplete = false;
+    f.state.mismatch = true;
+    await run('mismatch', 'failed');
+    assert.equal(publication(), id);
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 2);
+    assert.equal(
+      f.events.filter((e) => e === 'primary').length,
+      1,
+      'Collection must reuse persisted provider cookies',
+    );
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    await owner.select(summit.id);
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 0);
+    const second = await owner.post('/api/dsp/connections/paycom', credentials);
+    assert.equal(second.value.status, 'ready', second.body);
+    assert.equal(
+      f.events.filter((e) => e === 'primary').length,
+      2,
+      'Second DSP must authenticate separately',
+    );
+    const profile = (id: string) =>
+      path.join(f.root, 'dsps', id, 'state/browsers/paycom-browseros');
+    assert.notEqual(fs.statSync(profile(north.id)).ino, fs.statSync(profile(summit.id)).ino);
+    assert.equal(fs.statSync(profile(north.id)).mode & 0o077, 0);
+  },
+);
+
+test(
+  'Paycom preserves two-tab collection through page cleanup and rejects cross-employee data',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 90000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.codes = [
+      'AA01',
+      'BB02',
+      ...Array.from({ length: 23 }, (_, i) => `CC${String(i).padStart(2, '0')}`),
+    ];
+    f.state.timecardDelayMs = 600;
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    const run = async (requestId: string, expected: string) => {
+      const queued = await owner.post('/api/dsp/jobs', { requestId });
+      assert.equal(queued.status, 202, queued.body);
+      await until(async () => {
+        const job = (await owner.get('/api/dsp/jobs')).value.find(
+          (j: { id: string }) => j.id === queued.value.id,
+        );
+        if (!['succeeded', 'failed', 'cancelled'].includes(job.status)) return false;
+        assert.equal(job.status, expected, JSON.stringify(job));
+        return true;
+      }, 30000);
+      await until(
+        async () => (await owner.get('/api/platform/health')).value.browsers.active === 0,
+      );
+    };
+    await run('parallel-complete', 'succeeded');
+    assert.equal(
+      f.state.timecardsPeak,
+      2,
+      'Two real document requests must overlap, with a hard limit of two',
+    );
+    assert.equal((await owner.get('/api/dsp/employees')).value.total, 25);
+    assert.equal(f.events.filter((event) => event === 'timecard').length, 25);
+    assert.equal(
+      f.events.filter((event) => event === 'primary').length,
+      1,
+      'Page cleanup must retain the authenticated browser profile',
+    );
+    const publication = () =>
+      f.collector(
+        dsp.id,
+        (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
+      );
+    const id = publication();
+    const cards = f.collector(dsp.id, (db) =>
+      db
+        .prepare(
+          'SELECT employee_code code,count(*) count,sum(hours) hours FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1) GROUP BY employee_code ORDER BY employee_code',
+        )
+        .all(),
+    );
+    assert.deepEqual(
+      cards.map((row) => ({ ...row })),
+      f.state.codes.map((code) => ({ code, count: 14, hours: 16 })),
+    );
+    f.state.wrongIdentity = true;
+    await run('parallel-wrong-employee', 'failed');
+    assert.equal(
+      publication(),
+      id,
+      'A failure in either tab must preserve the previous complete publication',
+    );
+    assert.equal(f.state.timecardsPeak, 2);
+    assert.equal(f.events.filter((e) => e === 'primary').length, 1);
+
+    f.state.wrongIdentity = false;
+    f.state.timecardStatus = 429;
+    const throttled = await owner.post('/api/dsp/jobs', { requestId: 'parallel-throttled' });
+    await until(async () => {
+      const job = (await owner.get('/api/dsp/jobs')).value.find(
+        (j: { id: string }) => j.id === throttled.value.id,
+      );
+      return job.status === 'queued' && job.error === 'provider_unavailable';
+    }, 15000);
+    assert.equal(publication(), id);
+    assert.equal(
+      (await owner.post(`/api/dsp/jobs/${throttled.value.id}/cancel`, {})).value.status,
+      'cancelled',
+    );
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+
+    f.state.timecardStatus = 200;
+    f.state.timecardDelayMs = 3000;
+    const cancelled = await owner.post('/api/dsp/jobs', { requestId: 'parallel-cancelled' });
+    await until(async () => f.state.timecardsActive === 2);
+    assert.equal(
+      (await owner.post(`/api/dsp/jobs/${cancelled.value.id}/cancel`, {})).value.status,
+      'cancelled',
+    );
+    await until(
+      async () =>
+        (await owner.get('/api/platform/health')).value.browsers.active === 0 &&
+        f.state.timecardsActive === 0,
+    );
+    assert.equal(publication(), id);
+  },
+);
+
+test(
+  'retry diagnostics retain the failed attempt after a successful provider retry',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 45000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    f.state.timecardStatus = 429;
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-retry' })).value.id;
+    const current = async () =>
+      (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+    await until(async () => {
+      const job = await current();
+      return job.status === 'queued' && job.attempt === 1;
+    });
+    const failed = (await current()).metrics[0];
+    assert.equal(failed.outcome, 'failed');
+    assert.equal(failed.error, 'provider_unavailable');
+    assert.equal(failed.publicationMs, null);
+    f.state.timecardStatus = 200;
+    // Exercise the real scheduler retry without spending a minute in backoff.
+    f.database('data/preview/jobs.sqlite', (db) =>
+      db.prepare('UPDATE jobs SET available_at=0 WHERE id=?').run(id),
+    );
+    await until(async () => (await current()).status === 'succeeded', 20000);
+    const completed = await current();
+    assert.equal(completed.attempt, 2);
+    assert.deepEqual(completed.metrics[0], failed);
+    assert.equal(completed.metrics[1].outcome, 'succeeded');
+    assert.equal(completed.metrics[1].employees, 2);
+    assert.equal(completed.metrics[1].timecards, 28);
+    assert(completed.metrics[1].peakPssBytes > 0);
+    assert(completed.metrics[1].publicationMs !== null);
+  },
+);
+
+test(
+  'a missing timecard retries only that employee while the other lane continues',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 150000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.codes = ['AA01', 'BB02', 'CC03', 'DD04', 'EE05'];
+    f.state.timecardDelayMs = 250;
+    f.state.missingContent.set('DD04', 1);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
+    );
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'page-recovery' })).value.id;
+    const current = async () =>
+      (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+    await until(async () => (await current()).status === 'succeeded', 30000);
+    const job = await current();
+    assert.equal(job.attempt, 1);
+    assert.deepEqual([...f.state.readsByCode.entries()].sort(), [
+      ['AA01', 1],
+      ['BB02', 1],
+      ['CC03', 1],
+      ['DD04', 2],
+      ['EE05', 1],
+    ]);
+    const metrics = job.metrics[0].pageReads;
+    assert.equal(metrics.completed, 5);
+    assert.equal(metrics.retries, 1);
+    assert.equal(metrics.recovered, 1);
+    assert.equal(metrics.active.length, 0);
+    assert.equal(metrics.failures.length, 1);
+    assert.equal(metrics.failures[0].ordinal, 4);
+    assert.equal(metrics.failures[0].stage, 'content');
+    assert.equal(metrics.failures[0].error, 'provider_content_missing');
+    assert(metrics.failures[0].contentMs >= 3000);
+    assert.equal(job.metrics[0].timecards, 70);
+    const publication = () =>
+      f.collector(
+        dsp.id,
+        (db) => db.prepare('SELECT id FROM publications WHERE active=1').get()!.id,
+      );
+    const previous = publication();
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    f.state.missingContent.set('DD04', 10);
+    const bad = (await owner.post('/api/dsp/jobs', { requestId: 'page-retry-limit' })).value.id;
+    let failed: any;
+    await until(async () => {
+      failed = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === bad);
+      if (['succeeded', 'cancelled'].includes(failed.status)) assert.fail(JSON.stringify(failed));
+      return failed.status === 'failed';
+    }, 60000).catch(async (error) => {
+      console.error(
+        'RECOVERY_STATE',
+        JSON.stringify({
+          job: failed,
+          health: (await owner.get('/api/platform/health')).value.browsers,
+        }),
+      );
+      throw error;
+    });
+    assert.equal(failed.error, 'provider_content_missing');
+    assert.equal(failed.attempt, 1);
+    assert.equal(failed.metrics[0].pageReads.retries, 1);
+    assert.equal(failed.metrics[0].pageReads.completed, 4);
+    assert.equal(publication(), previous);
+    assert.equal(f.state.readsByCode.get('DD04'), 4);
+    await until(async () => (await owner.get('/api/platform/health')).value.browsers.active === 0);
+    f.state.expiredTimecard = true;
+    const expired = (await owner.post('/api/dsp/jobs', { requestId: 'page-expired-auth' })).value
+      .id;
+    await until(async () => {
+      failed = (await owner.get('/api/dsp/jobs')).value.find(
+        (j: { id: string }) => j.id === expired,
+      );
+      return failed.status === 'failed';
+    }, 15000);
+    assert.equal(failed.error, 'authentication_failed');
+    assert.equal(failed.metrics[0].pageReads.retries, 0);
+    assert.equal(failed.metrics[0].pageReads.failures[0].stage, 'navigation');
+    assert.equal(publication(), previous);
+  },
+);
+
+test(
+  'a stalled navigation is diagnosed and retried without discarding its completed sibling',
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
   async (t) => {
-    assert(
-      fs.existsSync('.build/services/runtime/auth-worker.js'),
-      'Build before native verification',
+    const f = await paycomFixture();
+    t.after(f.close);
+    f.state.navigationStalls.set('BB02', 1);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    assert.equal(
+      (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
+      'ready',
     );
-    const f = await fixture({ runtimeBundle: path.resolve('.build/services/runtime') });
-    t.after(() => f.close());
-    const client = await f.client(),
-      dsp = client.session.dsps.find((d) => d.name === 'Northline Logistics')!;
-    let authenticatedRequests = 0;
-    const requests: string[] = [];
-    const server = http.createServer((req, res) => {
-      requests.push(`${req.method} ${req.url}`);
-      const logged = req.headers.cookie?.includes('fixture_session=one');
-      res.setHeader('Content-Type', 'text/html');
-      if (req.url === '/login' && logged) {
-        res.end('<main data-authenticated="true">Connected</main>');
-        return;
-      }
-      if (req.url === '/login') {
-        res.end(
-          '<form method="post" action="/challenge"><input name="clientcode"><input name="username"><input name="password" type="password"><button>Sign in</button></form>',
-        );
-        return;
-      }
-      if (req.url === '/challenge') {
-        res.end(
-          '<form method="post" action="/verified"><input name="code" autocomplete="one-time-code"><button>Verify</button></form>',
-        );
-        return;
-      }
-      if (req.url === '/verified') {
-        res.setHeader('Set-Cookie', 'fixture_session=one; Path=/; Max-Age=3600; HttpOnly');
-        res.end('<main data-authenticated="true">Connected</main>');
-        return;
-      }
-      if (req.url === '/workforce' && logged) {
-        authenticatedRequests++;
-        res.end(`<pre>${JSON.stringify(fixtureWorkforce(dsp))}</pre>`);
-        return;
-      }
-      res.writeHead(403);
-      res.end('Not authenticated');
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    t.after(
-      () =>
-        new Promise<void>((resolve) => {
-          server.closeAllConnections();
-          server.close(() => resolve());
-        }),
-    );
-    const url = `http://fixture.dispatch.invalid:${(server.address() as net.AddressInfo).port}`;
-    let diagnostics = '';
-    const acquiring = f.runtime.browsers.acquire(
-      dsp,
-      { clientCode: 'test', username: 'test', password: 'test' },
-      url,
-    );
-    f.runtime.browsers.sessions
-      .get(dsp.id)
-      ?.on('diagnostic', (text) => (diagnostics += String(text)));
-    let session;
-    try {
-      session = await acquiring;
-    } catch (error) {
-      throw new Error(`${(error as Error).message}\n${diagnostics}`);
-    }
-    assert.equal(session.status, 'challenge');
-    const screenshot = await session.screenshot();
-    assert(screenshot.length > 1000);
-    try {
-      await session.verify('123456');
-      assert.equal(session.status, 'ready');
-      const data = await session.collect(() => {});
-      assert.equal(data.employees.length, 12);
-      assert.equal(authenticatedRequests, 1);
-    } catch (error) {
-      fs.writeFileSync('/tmp/dispatch-native-failure.png', Buffer.from(screenshot, 'base64'));
-      throw new Error(
-        `${(error as Error).message}\nRequests: ${requests.join(', ')}\n${diagnostics}`,
-      );
-    }
-    await session.close();
-    const next = await f.runtime.browsers.acquire(
-      dsp,
-      { clientCode: 'ignored', username: 'ignored', password: 'ignored' },
-      url,
-    );
-    assert.equal(next.status, 'ready');
-    await next.close();
-    const other = client.session.dsps.find((d) => d.name === 'Summit Delivery')!;
-    const separate = await f.runtime.browsers.acquire(
-      other,
-      { clientCode: 'test', username: 'test', password: 'test' },
-      url,
-    );
-    assert.equal(separate.status, 'challenge');
-    await separate.close();
-    assert.equal(f.runtime.browsers.health().active, 0);
+    const id = (await owner.post('/api/dsp/jobs', { requestId: 'navigation-recovery' })).value.id;
+    let job: any;
+    await until(async () => {
+      job = (await owner.get('/api/dsp/jobs')).value.find((j: { id: string }) => j.id === id);
+      if (
+        ['failed', 'cancelled'].includes(job.status) ||
+        (job.status === 'queued' && job.attempt > 0)
+      )
+        assert.fail(JSON.stringify({ job, logs: f.logs() }));
+      return job.status === 'succeeded';
+    }, 90000);
+    assert.equal(job.attempt, 1);
+    assert.equal(f.state.readsByCode.get('AA01'), 1);
+    assert.equal(f.state.readsByCode.get('BB02'), 2);
+    const reads = job.metrics[0].pageReads;
+    assert.equal(reads.completed, 2);
+    assert.equal(reads.recovered, 1);
+    assert.equal(reads.retries, 1);
+    assert.equal(reads.failures[0].error, 'provider_navigation_timeout');
+    assert.equal(reads.failures[0].stage, 'navigation');
+    assert(reads.failures[0].navigationMs >= 45000);
+    assert.equal(reads.failures[0].contentMs, 0);
+    assert.equal(job.metrics[0].timecards, 28);
   },
 );

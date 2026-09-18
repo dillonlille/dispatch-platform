@@ -12,7 +12,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
-  "include": ["api", "services", "integrations", "shared", "dashboard", "tooling", "tests", "*.ts"]
+  "include": ["shared", "dashboard", "tooling", "tests", "*.ts"]
 }

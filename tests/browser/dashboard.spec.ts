@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { capturedMail } from '../mail-support.js';
 async function login(page: Page, email = 'owner@dispatch.test') {
   await page.goto('/');
   await page.getByLabel('Email address').fill(email);
@@ -13,45 +14,84 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await login(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Northline Logistics' })).toBeVisible();
-  await page.screenshot({ path: '/tmp/dispatch-dashboard-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-dashboard-desktop.png'),
+    fullPage: true,
+  });
   await page.getByLabel('Search DSPs').fill('Summit');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await page.getByLabel('Search DSPs').fill('');
   await page
     .getByRole('row')
     .filter({ hasText: 'Northline Logistics' })
-    .getByRole('button', { name: 'Open' })
+    .getByRole('button', { name: /Northline Logistics/ })
     .click();
+  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Northline Logistics', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'Employees', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Avery Morgan' })).toBeVisible();
   await page.getByLabel('Search employees').fill('Avery');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Avery Morgan' }).click();
-  await expect(page.getByRole('dialog')).toContainText('Collected timecards');
-  await page.getByLabel('Close dialog').click();
-  await page.getByRole('link', { name: 'Timecards', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'View punches' })).toHaveCount(12);
-  await page.getByRole('button', { name: 'View punches' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Employee timecard', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to employees' }).click();
+  await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+  await expect(page.getByRole('button', { name: /View punches for/ })).toHaveCount(12);
+  await page
+    .getByRole('button', { name: /View punches for/ })
+    .first()
+    .click();
   await expect(page.getByRole('dialog')).toContainText('08:00');
   await page.getByLabel('Close dialog').click();
-  await page.getByRole('link', { name: 'Connections', exact: true }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Connections', exact: true }).click();
   await page.getByRole('button', { name: 'Update credentials' }).click();
   await page.getByLabel('Client code').fill('DEMO1');
   await page.getByLabel('Username', { exact: true }).fill('test-user');
   await page.getByLabel('Password', { exact: true }).fill('require-verification');
-  await page.getByRole('button', { name: 'Save and connect' }).click();
+  for (const number of [1, 2, 3, 4, 5]) {
+    const field = page.getByLabel(`PIN ${number}`, { exact: true });
+    await expect(field).toHaveAttribute('type', 'password');
+    await field.fill(`test-pin-${number}`);
+  }
+  await page.getByRole('button', { name: 'Save credentials' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByLabel('Verification code').fill('123456');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
-  await page.getByRole('link', { name: 'Overview', exact: true }).click();
-  await page.getByRole('button', { name: 'Collect data', exact: true }).click();
-  await expect(page.getByText('Succeeded', { exact: true }).first()).toBeVisible({
-    timeout: 15000,
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await page.getByRole('button', { name: 'Sync now', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'Paycom synced',
+    {
+      timeout: 15000,
+    },
+  );
+  await page.getByRole('link', { name: 'Collections', exact: true }).click();
+  const history = page.getByRole('region', { name: 'Collection performance history' });
+  await expect(history).toContainText('Last successful collection');
+  await expect(history).toContainText('Median collection time');
+  await expect(history.getByLabel('Collection source')).toBeVisible();
+  await expect(history).toContainText('Needs 5 full runs');
+  const collection = page.getByRole('row').filter({ hasText: 'Collection completed' }).first();
+  await collection.getByText('Attempt details', { exact: true }).click();
+  await expect(collection.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
+    '12 employees · 84 daily records',
+  );
+  await expect(collection).toContainText('Queue wait');
+  await expect(collection).toContainText('Not sampled');
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-job-metrics.png'),
+    fullPage: true,
   });
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Platform collections' })).toContainText(
+    'Attempt details',
+  );
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -63,13 +103,17 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'member@dispatch.test');
   await expect(
-    page.getByRole('heading', { name: 'Northline Logistics', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await expect(page.getByRole('link', { name: 'Connections', exact: true })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Employees', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Employees', exact: true })).toBeVisible();
-  await page.screenshot({ path: '/tmp/dispatch-dashboard-mobile.png', fullPage: true });
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
+  await expect(page.getByLabel('Search employees')).toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-dashboard-mobile.png'),
+    fullPage: true,
+  });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -78,22 +122,168 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
 test('create a DSP and accept its owner invitation while another account is signed in', async ({
   page,
 }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await login(page);
-  await page.getByRole('button', { name: 'Create DSP', exact: true }).click();
-  await page.getByLabel('DSP name').fill('Invitation Test DSP');
+  await page.getByRole('button', { name: 'Create new DSP', exact: true }).click();
   await page.getByLabel('Owner email').fill('invited-owner@dispatch.test');
   await page.getByRole('dialog').getByRole('button', { name: 'Create DSP', exact: true }).click();
-  const link = await page.getByLabel('Invitation link').inputValue();
-  await page.goto(link);
-  await expect(page.getByRole('heading', { name: 'Join your team' })).toBeVisible();
-  await page.getByLabel('Your name').fill('Invited owner');
+  await expect(
+    page.getByText('Invitation email queued for invited-owner@dispatch.test', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Invitation link')).toHaveCount(0);
+  const message = await capturedMail(
+    process.env.DISPATCH_TEST_STATE_ROOT!,
+    'invited-owner@dispatch.test',
+  );
+  await page.goto('about:blank');
+  await page.setContent(message.html);
+  await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'DSP onboarding' })).toBeVisible();
+  await expect(page.getByLabel('Email address')).toHaveValue('invited-owner@dispatch.test');
+  await page.getByLabel('First name', { exact: true }).fill('Invited');
+  await page.getByLabel('Last name', { exact: true }).fill('Owner');
   await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
   await page.getByRole('button', { name: 'Accept invitation' }).click();
-  await expect(page.getByLabel('Email address')).toBeVisible();
-  await page.getByLabel('Email address').fill('invited-owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Invited-owner-password!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-invite-onboarding.png'),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-invite-onboarding-mobile.png'),
+    fullPage: true,
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  expect(errors).toEqual([]);
+  await page.getByLabel('DSP name', { exact: true }).fill('Invitation Test DSP');
+  await page.getByLabel('Abbreviation (optional)', { exact: true }).fill('TEST');
+  await page.getByLabel('Station code', { exact: true }).fill('DEMO1');
+  await page.getByRole('button', { name: 'Save DSP details', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Invitation Test DSP', exact: true }),
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
+});
+
+test('archived account tabs preserve names, appearance and display timezone preferences', async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByText('First name', { exact: true })).toBeVisible();
+  await expect(page.getByText('Last name', { exact: true })).toBeVisible();
+  await page.getByLabel('Display timezone').selectOption('America/Los_Angeles');
+  await page.getByRole('tab', { name: 'Theme', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dark', exact: true }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('tab', { name: 'General', exact: true }).click();
+  await expect(page.getByLabel('Display timezone')).toHaveValue('America/Los_Angeles');
+  await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
+  await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
+  await page.getByLabel('Confirm new password', { exact: true }).fill('Different-password-2!');
+  await page.getByRole('button', { name: 'Change password', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('The new passwords must match.');
+});
+
+test('Timecard schedules can be created, edited, paused and deleted', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: /Northline Logistics/ }).click();
+  let releaseView!: () => void;
+  let viewRequested!: () => void;
+  const viewPending = new Promise<void>((resolve) => (releaseView = resolve));
+  const requested = new Promise<void>((resolve) => (viewRequested = resolve));
+  await page.route('**/api/session/dsp', async (route) => {
+    viewRequested();
+    await viewPending;
+    await route.continue();
+  });
+  try {
+    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+    await requested;
+    const dspId = new URL(page.url()).hash.split('/')[1]!;
+    const paycom = page.getByRole('link', { name: 'Timecard', exact: true });
+    await expect(paycom).toHaveAttribute('href', `#dsp/${dspId}/paycom`);
+    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute(
+      'href',
+      `#dsp/${dspId}/settings`,
+    );
+    await expect(
+      page.locator('.account-popover a').filter({ hasText: 'Account settings' }),
+    ).toHaveAttribute('href', `#dsp/${dspId}/settings`);
+    await paycom.click();
+    expect(new URL(page.url()).hash).toBe(`#dsp/${dspId}/paycom`);
+  } finally {
+    releaseView();
+  }
+  await expect(page.getByRole('tab', { name: 'Collections', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Timecard Settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Workspace view', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Driver departments', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
+  let dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
+  await dialog.getByLabel('Schedule name').fill('Paycom refresh');
+  await dialog.getByLabel('Every', { exact: true }).fill('2');
+  await dialog.getByRole('button', { name: 'Create schedule', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  let row = page.getByRole('row').filter({ hasText: 'Paycom refresh' });
+  await expect(row).toContainText('Every 2 hours');
+  await page.reload();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Edit Paycom refresh' }).click();
+  dialog = page.getByRole('dialog', { name: 'Edit schedule', exact: true });
+  await dialog.getByRole('radio', { name: 'Daily', exact: true }).check();
+  await dialog.getByLabel('Time', { exact: true }).fill('21:00');
+  await dialog.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(row).toContainText('Daily at 9:00 PM');
+  await row.getByRole('switch', { name: 'Enable Paycom refresh' }).uncheck();
+  await expect(row.getByRole('switch')).not.toBeChecked();
+  await page.reload();
+  await expect(row.getByRole('switch')).not.toBeChecked();
+  await row.getByRole('button', { name: 'Edit Paycom refresh' }).click();
+  await dialog.getByRole('button', { name: 'Delete schedule', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Delete schedule', exact: true }).click();
+  await expect(row).toHaveCount(0);
+  // Both collectors can be selected and saved while paused before connecting Cortex.
+  await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
+  dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
+  await dialog.getByLabel('Schedule name').fill('Morning collection');
+  await dialog.getByRole('checkbox', { name: 'Meal Break', exact: true }).check();
+  await dialog.getByRole('switch', { name: 'Enabled', exact: true }).uncheck();
+  await dialog.getByRole('button', { name: 'Create schedule', exact: true }).click();
+  row = page.getByRole('row').filter({ hasText: 'Morning collection' });
+  await expect(row).toContainText('Paycom');
+  await expect(row).toContainText('Meal Break');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(row).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await row.getByRole('button', { name: 'Edit Morning collection' }).click();
+  dialog = page.getByRole('dialog', { name: 'Edit schedule', exact: true });
+  await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('archived Diagnostics creates a synthetic DSP and excludes Plugins and Backups navigation', async ({
+  page,
+}) => {
+  await login(page);
+  await expect(page.getByRole('link', { name: /Plugins|Backups/ })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Runtime health', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Runtime health', exact: true })).toContainText(
+    'MiB needed',
+  );
+  await page.getByRole('button', { name: 'Deploy test DSP', exact: true }).click();
+  await expect(
+    page.getByText('Synthetic data prepared · Available', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('link', { name: 'Manage test DSPs in DSPs', exact: true }).click();
+  await expect(page.getByRole('row').filter({ hasText: /Test DSP 20/ })).toBeVisible();
 });

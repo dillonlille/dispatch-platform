@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for merged Dispatch Dev builds every 10 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=10s
+AccuracySec=1s
+Unit=dispatch-dev-update.service
+
+[Install]
+WantedBy=timers.target

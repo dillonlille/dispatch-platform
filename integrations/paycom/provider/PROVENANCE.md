@@ -1,1 +1,0 @@
-These provider parsing and request-validation routines are retained from the public dillonlille/dispatch-platform repository at 5e0919854c4377eb093d98ae631e44a61705b8b6. They contain provider-domain logic only, with no per-DSP installation framework. Root repository licensing applies. roster-request.js extracts the pure request/response validation functions from browser.js.

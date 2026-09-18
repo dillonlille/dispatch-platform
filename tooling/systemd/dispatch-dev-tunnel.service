@@ -1,0 +1,15 @@
+[Unit]
+Description=Cloudflare Tunnel for Dispatch Dev
+After=network-online.target dispatch-dev.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cloudflared tunnel --no-autoupdate --config %h/dispatch-platform/dev/config/cloudflared.yml run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target

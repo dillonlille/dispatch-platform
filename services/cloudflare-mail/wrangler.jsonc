@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "dispatch-dev-email",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["invitations@dispatchdev.dillonlille.com"],
+    },
+  ],
+  "vars": {
+    "DISPATCH_ENVIRONMENT": "preview",
+    "DISPATCH_ORIGIN": "https://dispatchdev.dillonlille.com",
+    "MAIL_FROM": "invitations@dispatchdev.dillonlille.com",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "secrets": {
+    "required": ["MAIL_TOKEN"],
+  },
+}

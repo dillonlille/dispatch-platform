@@ -1,89 +1,77 @@
-# Builds, release review and future operation
+# Dispatch releases
 
-**This rebuild does not authorize live setup.** The commands below document the
-operator tooling for a later approved setup. Builds, imports and plans alone do
-not start services. There is no publishing or installation on Git merge.
+Development lives on `dispatch-dev`. Its `dev/live` checkout tracks `dev`; passing
+checks for the current merged revision install the verified Dev artifact. Keep
+unfinished work in separate worktrees. Production contains an installed runtime,
+private state and management scripts; it needs neither a Git checkout nor build tools.
 
-## Build and inspect
+## Prepare a release
 
-```bash
-npm run build
-npm run dispatch -- release-import /absolute/path/to/artifact "Release notes"
-npm run dispatch -- release-plan DIGEST preview
-```
+1. Choose an unused stable `X.Y.Z`. Existing tags and release assets are immutable.
+   Pin the accepted Dev revision; exclude unfinished work. Create a release branch
+   containing that revision and the release tooling from `main`, and update the
+   root package files and backend Cargo version/lockfile.
+2. Open a release PR to `main`. Require the complete `platform` check and review
+   the source. The owner's release request authorizes this release PR merge and
+   publication; it does not authorize unrelated development PR merges.
+3. After merging, wait for the exact main commit's `Platform checks` run. It runs
+   backend/API, browser UI, native collector, artifact and dependency checks. The
+   final gate publishes `dispatch-main-<commit>` only after all required jobs pass.
+4. On `dispatch-dev`, run
+   `python3 tooling/prepare-release.py --commit <main-sha> --version X.Y.Z --output <private-new-directory>`.
+   Test the extracted runtime in a disposable environment on this machine. Promote
+   those exact bytes; never rebuild the published artifact on Production.
+5. Enable GitHub release immutability. Create a **draft** `vX.Y.Z` targeting the
+   checked main commit with `dispatch-platform-X.Y.Z.tar.gz`, `release.json`,
+   `provenance.json`, `SHA256SUMS` and release notes. Verify each uploaded digest
+   against the prepared files. Publish the draft as a stable release only after
+   validation. Never replace an existing tag or use `--clobber`.
+6. Confirm the Production updater, public health endpoint, runtime version/digest,
+   login and dashboard. A successful publication alone is not a deployment check.
 
-Set `DISPATCH_STATE_ROOT` to a disposable development root while reviewing these
-commands. `.build/release.json` contains the version, compatibility schema, Node
-major, every runtime file hash/size and the aggregate immutable digest. Verification
-rejects missing, changed, extra, duplicate, traversing, symlink or hard-linked files.
-An import retains its own verified copy so editing the build directory cannot
-change a previously imported release.
+## Production
 
-## Later first setup
+`ssh dispatch-production` connects to the runtime host. Its environment root is
+`/home/thepickle/dispatch-platform/public/`:
 
-The future state root is `/home/thepickle/dispatch-platform`; built code is placed
-directly there. It must have private permissions. Configure Node, a compatible
-Chromium/bubblewrap host, canonical HTTPS origin and SMTP separately.
+- `live/`: verified dashboard and Rust binary, `release.json` and build metadata.
+- `config/`, `data/`, `dsps/`: independent private configuration and persistent state.
+- `management/`: reviewed `update-production.py` and `runtime_artifact.py` installed
+  from the release source. Changes to these host tools require an explicit host update.
+- `.runtime/previous/`: previous verified runtime retained after a successful update.
 
-1. Set `DISPATCH_STATE_ROOT`, `NODE_ENV=production`, `DISPATCH_PROVIDER_MODE=native`
-   and `DISPATCH_ORIGIN=https://your-dashboard-host`.
-2. Bootstrap the owner with `dispatch bootstrap EMAIL NAME`, supplying the password
-   on stdin, not a command-line argument. This creates the permanent Dev DSP.
-3. After explicit setup approval, set `DISPATCH_ENABLE_DEPLOYMENT=1` and use
-   `dispatch initialize ARTIFACT OWNER_EMAIL`. It installs an initial baseline
-   into both runtime locations while the fleet is empty. It starts nothing.
-4. Run the built `tooling/supervisor.js` under the approved process manager. The
-   supervisor starts the two API processes, gives the gateway a private Preview
-   signing key, and processes approved release requests.
-5. Verify Dev authentication, workforce, native browser isolation and provider
-   collection before adding production DSPs. This host’s inner Chromium sandbox
-   compatibility remains an explicit acceptance item.
+For first setup, install the pinned BrowserOS and a root-owned bubblewrap executable
+with its narrow AppArmor user-namespace profile. Install the two management scripts
+and the `dispatch-production*` systemd user units. Use `setup-production.py` with the
+verified archive, exact commit/version, HTTPS origin, owner identity and sandbox
+path. It creates a fresh owner login in private `config/initial-owner.json`; it
+does not copy Dev accounts or DSP data. Configure the separate Production email
+Worker, its random bearer secret and the Production tunnel before starting services.
+Enable user lingering so services survive logout and start at boot.
 
-No systemd unit, proxy configuration, SMTP credentials, DNS record or live state
-is installed by repository scripts. The first-install command refuses an existing
-deployment or a fleet containing production DSPs.
+The production email Worker uses `services/cloudflare-mail/wrangler.production.jsonc`,
+`invitations@dispatch.dillonlille.com`, and its own `MAIL_TOKEN` secret. Configure
+`DISPATCH_PRODUCTION_MAIL_MODE=cloudflare`, `DISPATCH_PRODUCTION_MAIL_WORKER_URL`
+and `DISPATCH_PRODUCTION_MAIL_WORKER_TOKEN` in the private systemd environment file.
+Never copy Dev mail credentials or the Cloudflare account API token to Production.
 
-## Subsequent release flow
+`dispatch-production-update.timer` checks the public GitHub Releases API every two
+minutes without GitHub credentials. Only a newer published stable version can
+install. The updater verifies the tag belongs to `main`, GitHub's archive and
+manifest hashes, the complete runtime inventory and its source commit. Drafts,
+prereleases, old versions and main merges cannot update Production. GitHub API or
+download failures leave the current runtime running.
 
-1. Build once and finish repository checks. Import the verified artifact.
-2. Click **Update Dev** on Releases. Only Preview restarts with the candidate.
-3. Test the permanent Dev DSP, then click **Mark tested** on the current candidate.
-4. Click **Promote**. Only that exact tested digest can become Production.
+Activation is serialized, keeps private state in place, stops the app, swaps the
+runtime and requires production health with the expected digest. Failure restores
+the previous runtime. An interrupted activation is recovered before another update.
+A release that failed health is recorded in `data/platform/production-update.json`
+and is not retried every two minutes; investigate and publish a corrected version.
+The database schema must remain compatible with rollback. Schema changes require
+an explicit migration and recovery plan; this updater refuses incompatible schemas.
 
-The supervisor stops the target API, allows graceful worker shutdown, replaces
-only its managed code directories, starts the selected artifact and checks its
-reported digest. A failed health check restores the previous code and restarts it.
-Production activation affects all production DSPs and causes a short maintenance
-window. DSP data, credentials, profiles, central state, `dev/` and `archive/` are
-outside the replacement list. An update never copies credentials from Dev.
-
-The managed list is `dashboard`, `api`, `services`, `integrations`, `shared`,
-`tooling`, `node_modules`, `package.json`, `package-lock.json` and `release.json`.
-Only entries present in an artifact are installed. Source modules may be bundled
-into the API or worker entrypoints rather than copied as separate runtime trees.
-
-## Interrupted activation
-
-Activation writes its intent receipt before the first directory rename. If the
-supervisor crashes during an activation, it refuses to restart an ambiguous
-running request automatically. With supervisor and both APIs stopped, inspect
-`local/platform/activation-backups/*/receipt.json` and the pending request. Recover
-with `dispatch release-recover RECEIPT_DIRECTORY REQUEST_ID` and the explicit
-deployment switch. It checks the request/receipt match, restores code from the
-recorded moves, and marks that request failed. Then restart the supervisor.
-
-Code rollback does not undo data migrations. This baseline uses schema version 1;
-future schema changes must retain rollback compatibility or provide an explicit
-offline migration/recovery plan before promotion.
-
-## Backup and restore
-
-```text
-dispatch backup /absolute/private/backup-destination
-dispatch restore /absolute/private/backup /absolute/empty/restore-target
-```
-
-Stop services before backup. The command takes API locks so they cannot start
-during the snapshot. Restore verifies checksums, clears old authentication tokens,
-cancels pending jobs and clears release paths. Reimport an artifact and complete
-the later host setup before restarting a restored platform.
+Verify with `systemctl --user status dispatch-production.service`,
+`journalctl --user -u dispatch-production-update.service`, and
+`curl --fail https://dispatch.dillonlille.com/api/health`.
+Keep private backups and verify development work is preserved on `dispatch-dev`
+before removing retired development files from the Production host.

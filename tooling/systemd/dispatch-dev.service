@@ -1,0 +1,23 @@
+[Unit]
+Description=Dispatch independent Dev platform
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dispatch-platform/dev/live/.build
+EnvironmentFile=%h/dispatch-platform/dev/config/platform.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+# This service listens only on loopback behind dispatch-dev-tunnel.service.
+Environment=DISPATCH_TRUSTED_PROXY=cloudflare
+ExecStartPre=/usr/bin/python3 %h/dispatch-platform/dev/live/tooling/update-dev.py --root %h/dispatch-platform/dev --verify
+ExecStart=%h/dispatch-platform/dev/live/.build/services/rust/dispatch-backend serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=mixed
+UMask=0077
+
+[Install]
+WantedBy=default.target

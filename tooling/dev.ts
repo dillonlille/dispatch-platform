@@ -1,25 +1,27 @@
-import { spawn } from 'node:child_process';
-import { configuration } from '../services/config.js';
-import { Runtime } from '../services/runtime.js';
-import { seed, demo } from './seed.js';
-const config = configuration({ development: true, providerMode: 'fixture' });
-const runtime = new Runtime(config);
-await seed(runtime);
-await runtime.close();
+import { spawn, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-development-'));
+const binary = path.resolve('target/debug/dispatch-backend');
 const env = {
   ...process.env,
   NODE_ENV: 'development',
-  DISPATCH_STATE_ROOT: config.stateRoot,
-  DISPATCH_FIXTURE_PREVIEW: '1',
+  DISPATCH_STATE_ROOT: root,
+  DISPATCH_STANDALONE: '1',
+  DISPATCH_ENVIRONMENT: 'preview',
+  DISPATCH_DEV_MAIL_MODE: 'capture',
   DISPATCH_PROVIDER_MODE: 'fixture',
+  DISPATCH_ORIGIN: 'http://127.0.0.1:5173',
 };
-const api = spawn(process.execPath, ['--import', 'tsx', 'api/main.ts'], { stdio: 'inherit', env });
+execFileSync(binary, ['seed'], { env, stdio: 'inherit' });
+const api = spawn(binary, ['serve'], { stdio: 'inherit', env });
 const ui = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1'], {
   stdio: 'inherit',
   env,
 });
 process.stdout.write(
-  `Development fixtures only. Open ${config.origin}\nSign in: ${demo.email} / ${demo.password}\nState: ${config.stateRoot}\n`,
+  `Development fixtures: http://127.0.0.1:5173\nSign in: owner@dispatch.test / Dispatch-demo-2026!\nTemporary state: ${root}\n`,
 );
 let stopping = false;
 function stop() {
@@ -32,3 +34,7 @@ process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 api.once('exit', stop);
 ui.once('exit', stop);
+await Promise.all(
+  [api, ui].map((child) => new Promise<void>((resolve) => child.once('exit', () => resolve()))),
+);
+fs.rmSync(root, { recursive: true, force: true });

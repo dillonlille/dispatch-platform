@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { Layers3, ArrowLeft } from 'lucide-react';
-import { api } from './api.js';
+import { ArrowLeft } from 'lucide-react';
+import { Brand } from './brand.js';
+import { api, useData } from './api.js';
 import { ErrorBox } from './ui.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const hash = window.location.hash.slice(1),
@@ -14,6 +15,9 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
+  const invitation = useData<{ email: string; onboarding: boolean }>(
+    initial === 'invite' ? `/api/invitations/${encodeURIComponent(token ?? '')}` : '',
+  );
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -30,9 +34,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       }
       if (mode === 'forgot') {
         await api('/api/auth/forgot-password', { email });
-        setNotice(
-          'If that account exists, a reset link is on its way. In development, check the private development-mail directory.',
-        );
+        setNotice('If that account exists, a reset link has been requested.');
       }
       if (mode === 'reset') {
         await api('/api/auth/reset-password', { token, password });
@@ -41,10 +43,17 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
         setNotice('Password updated. Sign in with your new password.');
       }
       if (mode === 'invite') {
-        await api(`/api/invitations/${token}/accept`, { name: String(form.get('name')), password });
-        window.location.hash = 'signin';
-        setMode('login');
-        setNotice('Invitation accepted. Sign in with your invited email address.');
+        const accepted = await api<{ email: string; dspId: string }>(
+          `/api/invitations/${token}/accept`,
+          {
+            firstName: String(form.get('firstName')),
+            lastName: String(form.get('lastName')),
+            password,
+          },
+        );
+        await api('/api/auth/login', { email: accepted.email, password });
+        await onLogin();
+        window.location.hash = `dsp/${accepted.dspId}/overview`;
       }
     } catch (error) {
       setError((error as Error).message);
@@ -53,94 +62,65 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     }
   }
   const heading = {
-    login: 'Welcome back',
+    login: 'Sign in to Dispatch',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
-    invite: 'Join your team',
+    invite: invitation.data?.onboarding ? 'DSP onboarding' : 'Join your team',
   }[mode];
   return (
     <main className="auth-layout">
-      <aside className="auth-brand">
-        <a className="brand" href="/">
-          <Layers3 />
-          Dispatch
-        </a>
-        <div>
-          <span className="eyebrow">A CLEARER VIEW OF YOUR OPERATIONS</span>
-          <h1>
-            One place.
-            <br />
-            Every DSP.
-          </h1>
-          <p>Your team, connections, and daily operations — together in Dispatch.</p>
-        </div>
-        <span className="auth-foot">Built for the work ahead.</span>
-      </aside>
-      <div className="auth-main">
-        <div className="auth-card">
-          <span className="eyebrow">DISPATCH PLATFORM</span>
-          <h1>{heading}</h1>
-          <p>
-            {mode === 'login'
-              ? 'Sign in to access your DSP workspace.'
-              : mode === 'invite'
-                ? 'Use a new password, or your current password if you already have a Dispatch account.'
-                : 'We’ll help you get back to your workspace.'}
-          </p>
-          <ErrorBox message={error} />
-          {notice && (
-            <div className="notice" role="status">
-              {notice}
-            </div>
+      <div className="auth-brand">
+        <Brand />
+      </div>
+      <section className="auth-panel">
+        <h1>{heading}</h1>
+
+        <ErrorBox message={error || (mode === 'invite' ? invitation.error : '')} />
+        {notice && (
+          <div className="notice" role="status">
+            {notice}
+          </div>
+        )}
+        <form onSubmit={(event) => void submit(event)}>
+          {(mode === 'login' || mode === 'forgot') && (
+            <label>
+              Email address
+              <input name="email" type="email" autoComplete="email" required />
+            </label>
           )}
-          <form onSubmit={(event) => void submit(event)}>
-            {(mode === 'login' || mode === 'forgot') && (
+          {mode === 'invite' && (
+            <>
               <label>
                 Email address
-                <input
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@company.com"
-                />
+                <input type="email" readOnly value={invitation.data?.email ?? ''} />
               </label>
-            )}
-            {mode === 'invite' && (
               <label>
-                Your name
-                <input name="name" autoComplete="name" required maxLength={100} />
+                First name
+                <input name="firstName" autoComplete="given-name" required maxLength={100} />
               </label>
-            )}
-            {mode !== 'forgot' && (
               <label>
-                Password
-                <input
-                  name="password"
-                  type="password"
-                  minLength={mode === 'login' ? 1 : 12}
-                  maxLength={128}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  required
-                  placeholder={mode === 'login' ? 'Enter your password' : 'At least 12 characters'}
-                />
+                Last name
+                <input name="lastName" autoComplete="family-name" required maxLength={100} />
               </label>
-            )}
-            <button className="primary full" disabled={busy}>
-              {busy
-                ? 'Please wait…'
-                : mode === 'login'
-                  ? 'Sign in'
-                  : mode === 'forgot'
-                    ? 'Send reset link'
-                    : mode === 'invite'
-                      ? 'Accept invitation'
-                      : 'Update password'}
-            </button>
-          </form>
-          {mode === 'login' ? (
+            </>
+          )}
+          {mode !== 'forgot' && (
+            <label>
+              Password
+              <input
+                name="password"
+                type="password"
+                minLength={mode === 'login' ? 1 : 12}
+                maxLength={128}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                required
+              />
+            </label>
+          )}
+          {mode === 'login' && (
             <button
-              className="text-button auth-link"
+              type="button"
+              className="auth-forgot"
               onClick={() => {
                 setMode('forgot');
                 setError('');
@@ -148,21 +128,37 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
             >
               Forgot password?
             </button>
-          ) : (
-            <button
-              className="text-button auth-link"
-              onClick={() => {
-                window.location.hash = '';
-                setMode('login');
-                setError('');
-              }}
-            >
-              <ArrowLeft size={15} />
-              Back to sign in
-            </button>
           )}
-        </div>
-      </div>
+          <button
+            className="primary full"
+            disabled={busy || (mode === 'invite' && !invitation.data)}
+          >
+            {busy
+              ? 'Please wait…'
+              : mode === 'login'
+                ? 'Sign in'
+                : mode === 'forgot'
+                  ? 'Send reset link'
+                  : mode === 'invite'
+                    ? 'Accept invitation'
+                    : 'Update password'}
+          </button>
+        </form>
+        {mode !== 'login' && (
+          <button
+            className="text-button auth-back"
+            onClick={() => {
+              setMode('login');
+              setError('');
+              setNotice('');
+            }}
+          >
+            <ArrowLeft size={15} />
+            Back to sign in
+          </button>
+        )}
+      </section>
+      <p className="auth-footer">Access is by invitation.</p>
     </main>
   );
 }
