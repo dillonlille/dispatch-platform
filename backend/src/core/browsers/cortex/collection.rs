@@ -29,7 +29,12 @@ struct Punch {
     end: Option<i64>,
 }
 impl Driver {
-    async fn meal_read(&self, scope: &Scope, candidate: Option<&Candidate>) -> Result<Value> {
+    async fn meal_read(
+        &self,
+        scope: &Scope,
+        candidate: Option<&Candidate>,
+        metrics: &Recorder,
+    ) -> Result<Value> {
         // Main-world access is needed for the observed React props. Bound both
         // the CDP target and the in-page URL before inspecting application data.
         let frame = self.page.frame().await?;
@@ -49,6 +54,7 @@ impl Driver {
             )
             .await?;
         if let Some(error) = result["error"].as_str() {
+            metrics.detail(s(&result, "reason"));
             let allowed = [
                 "cortex_scope_mismatch",
                 "cortex_content_incomplete",
@@ -70,7 +76,12 @@ impl Driver {
         }
         Ok(result)
     }
-    async fn meal_page(&mut self, scope: &Scope, candidate: Option<&Candidate>) -> Result<Value> {
+    async fn meal_page(
+        &mut self,
+        scope: &Scope,
+        candidate: Option<&Candidate>,
+        metrics: &Recorder,
+    ) -> Result<Value> {
         let path = candidate
             .map(|c| scope.detail_path(&c.id))
             .unwrap_or_else(|| scope.list_path());
@@ -82,7 +93,7 @@ impl Driver {
         let mut stable = 0;
         let mut last_error = "cortex_content_incomplete".to_owned();
         while Instant::now() < deadline {
-            match self.meal_read(scope, candidate).await {
+            match self.meal_read(scope, candidate, metrics).await {
                 Ok(value) => {
                     let mut evidence = value.clone();
                     if let Some(itinerary) = evidence["itinerary"].as_object_mut() {
@@ -118,8 +129,8 @@ impl Driver {
         }
         Err(Error::new(&last_error, 502))
     }
-    async fn candidates(&mut self, scope: &Scope) -> Result<Vec<Candidate>> {
-        let value = self.meal_page(scope, None).await?;
+    async fn candidates(&mut self, scope: &Scope, metrics: &Recorder) -> Result<Vec<Candidate>> {
+        let value = self.meal_page(scope, None, metrics).await?;
         let rows: Vec<Candidate> = serde_json::from_value(value["candidates"].clone())
             .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
         ensure(rows.len() <= 1000, "cortex_source_too_large", 502)?;
@@ -138,7 +149,7 @@ impl Driver {
     {
         scope.validate()?;
         let started_at = now();
-        let mut candidates = self.candidates(scope).await?;
+        let mut candidates = self.candidates(scope, metrics).await?;
         live.start_cortex(
             scope,
             json!(
@@ -152,7 +163,9 @@ impl Driver {
         let mut records: BTreeMap<String, (String, Itinerary)> = BTreeMap::new();
         let mut known = HashSet::new();
         let mut reads = 0;
-        for pass in 0..3 {
+        // Later passes only re-read routes whose meals changed, so they are short.
+        // Swipes arrive every few minutes at midday; allow for several of them.
+        for pass in 0..6 {
             for candidate in &candidates {
                 known.insert(candidate.id.clone());
                 if records
@@ -173,7 +186,7 @@ impl Driver {
                     ),
                 )
                 .await?;
-                let result = self.meal_page(scope, Some(candidate)).await;
+                let result = self.meal_page(scope, Some(candidate), metrics).await;
                 metrics.page_finish(reads, result.as_ref().err().map(|e| e.code.as_str()));
                 match result {
                     Ok(value) => {
@@ -195,9 +208,10 @@ impl Driver {
                         .await?;
                         records.insert(candidate.id.clone(), (candidate.revision.clone(), route));
                     }
+                    // A meal swipe landed after the list was read. Finish the other
+                    // routes; the next pass re-reads this one at its new revision.
                     Err(error) if error.code == "cortex_source_changed" => {
                         records.remove(&candidate.id);
-                        break;
                     }
                     Err(error) => return Err(error),
                 }
@@ -206,7 +220,7 @@ impl Driver {
                 }
             }
             progress(85, format!("Checking source changes (pass {})", pass + 1)).await?;
-            let next = self.candidates(scope).await?;
+            let next = self.candidates(scope, metrics).await?;
             let ids: HashSet<_> = next.iter().map(|c| c.id.clone()).collect();
             ensure(known.is_subset(&ids), "cortex_membership_regressed", 502)?;
             if next.len() == records.len()

@@ -20,8 +20,26 @@ test(
         );
         return true;
       }
+      // Like Cortex, send an itineraries request without a service area to the
+      // execution home, whose station list lives in hook state rather than props.
+      if (url.pathname === '/operations/execution/') {
+        const areas = {
+          'area-2': { serviceAreaID: 'area-2', defaultStationCode: 'ABC1', timeZone: 'US/Pacific' },
+          'area-1': { serviceAreaID: 'area-1', defaultStationCode: 'DOT4', timeZone: 'US/Pacific' },
+        };
+        res.setHeader('Content-Type', 'text/html');
+        res.end(
+          `<title>Delivery Execution</title><main></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:{},memoizedState:{memoizedState:document.body,next:{memoizedState:{current:${JSON.stringify(areas)}},next:null}}};</script>`,
+        );
+        return true;
+      }
       if (!url.pathname.startsWith('/operations/execution/itineraries')) return false;
       paths.push(url.pathname + url.search);
+      if (!url.searchParams.get('serviceAreaId')) {
+        res.writeHead(302, { Location: '/operations/execution/' });
+        res.end();
+        return true;
+      }
       const candidate = {
         itineraryId: 'itinerary-1',
         transporterId: 'driver-1',
@@ -204,8 +222,11 @@ test(
           routeCode: 'CX1',
           companyId: 'provider-1',
           executionStatus: 'COMPLETE',
-          stopProgress: { total: 2, completed: 2 },
-          latestTaskExecutionTime: start + 2400000,
+          // Deliveries keep advancing during a working day; only meal and
+          // route facts may restart a read.
+          stopProgress: { total: 2, completed: lists },
+          latestTaskExecutionTime: start + 2400000 + lists,
+          lastStopExecutionTime: start + 2400000 + lists,
           breaks: grown
             ? [
                 br('meal#1', start, start + 900000),

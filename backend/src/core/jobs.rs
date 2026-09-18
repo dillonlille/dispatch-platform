@@ -567,6 +567,12 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
     let error = result.err().map(|e| e.code);
     let actor = job["actor_id"].as_str().map(str::to_owned);
     let snapshot = metrics.snapshot();
+    // Request logs cannot explain a failed sync; record each attempt's outcome.
+    super::observability::event(
+        if error.is_some() { "warn" } else { "info" },
+        "job.finished",
+        json!({"jobId":id,"dspId":dsp,"kind":s(&job,"kind"),"attempt":n(&job,"attempt"),"error":error,"metrics":job_metrics::summary(&snapshot)}),
+    );
     let changed_dsp = dsp.clone();
     let _ = state
         .run(move |db| {
