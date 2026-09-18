@@ -14,14 +14,7 @@ import {
 import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, credentials, ApiError } from './api.js';
 import { AuthScreen } from './auth.js';
-import {
-  DspList,
-  JobsPage,
-  AuditPage,
-  ReleasesPage,
-  DiagnosticsPage,
-  type Perform,
-} from './platform.js';
+import { DspList, AuditPage, ReleasesPage, DiagnosticsPage, type Perform } from './platform.js';
 import { EmployeesPage, TimecardsPage, ConnectionsPage } from './dsp.js';
 import { Badge, Header, Loading, ErrorBox } from './ui.js';
 import './styles.css';
@@ -174,7 +167,6 @@ function App() {
     ? [
         { id: 'overview', label: 'Home Page', icon: House },
         { id: 'paycom', label: 'Timecard', icon: CalendarDays },
-        ...(canCollect ? [{ id: 'jobs', label: 'Collections', icon: FlaskConical }] : []),
         ...(owner ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
         { id: 'settings', label: 'Settings', icon: Settings },
       ]
@@ -233,8 +225,6 @@ function App() {
               <TimecardsPage timezone={view.dsp.timezone} />
             ) : page === 'connections' && owner ? (
               <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
-            ) : page === 'jobs' ? (
-              <JobsPage platform={false} perform={perform} canCollect={canCollect} />
             ) : page === 'settings' ? (
               <SettingsPage session={session} view={view} perform={perform} />
             ) : (
