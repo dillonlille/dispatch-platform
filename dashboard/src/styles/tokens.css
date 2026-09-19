@@ -1,9 +1,9 @@
 /*
  * Design tokens. Unlayered, and imported before every other stylesheet.
  *
- * appearance.ts sets data-theme="light" | "dark" on <html>; "system" is resolved to one of the two
+ * app/appearance.ts sets data-theme="light" | "dark" on <html>; "system" is resolved to one of the two
  * in JavaScript, so no prefers-color-scheme query is needed here. The light values are the default.
- * theme.tsx renders <span class="theme-preview-scope" data-theme="…"> so that the previews in the
+ * ThemeSection.tsx renders <span class="theme-preview-scope" data-theme="…"> so that the previews in the
  * theme picker show a given theme whatever the page is using.
  */
 :root,
@@ -49,7 +49,7 @@
   --warning-surface: #fff8eb;
   --warning-border: #eed5a7;
 
-  /* Identity tones for DSP avatars (brand.tsx): ink on surface */
+  /* Identity tones for DSP avatars (DspAvatar.tsx): ink on surface */
   --violet: #6553aa;
   --violet-surface: #f0edf9;
   --sage: #36765e;

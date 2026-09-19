@@ -338,7 +338,7 @@
   padding: 12px 24px 24px;
   overflow: auto;
 }
-/* the .modal-heading of a side sheet (ui.tsx) */
+/* the .modal-heading of a side sheet (ui/Modal.tsx) */
 [data-slot='sheet-header'] {
   gap: 10px;
   padding: 30px 24px 20px;
