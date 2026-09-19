@@ -390,6 +390,8 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
     let mut refreshed = 0;
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut checkpoint_cleanup = tokio::time::interval(Duration::from_secs(60));
+    // A year's retention does not need checking every minute.
+    let mut audit_pruned = 0;
     loop {
         tokio::select! {
             _=super::cancelled(&mut stop)=>break,
@@ -397,14 +399,18 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                 match result {Some(Ok(dsp))=>{running_dsps.remove(&dsp);},Some(Err(_))=>return Err(Error::new("collector_task_failed",500)),None=>{}}
             },
             _=checkpoint_cleanup.tick()=>{
-                let result = state.run(|db| {
+                let prune_audit = now()-audit_pruned >= 24*60*60*1000;
+                if prune_audit { audit_pruned = now(); }
+                let result = state.run(move |db| {
+                    if prune_audit {
+                        db.prune_audit()?;
+                    }
                     // Expired access tokens have no remaining authentication purpose.
                     db.platform.transaction(|| {
                         db.platform.exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
                         db.platform.exec("DELETE FROM resets WHERE expires_at<?", [now()])?;
                         db.platform.exec("DELETE FROM invitations WHERE expires_at<?", [now()])?;
                         db.platform.exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
-                        db.prune_audit()?;
                         Ok(())
                     })?;
                     for dsp in db.platform.all("SELECT id FROM dsps WHERE status IN ('active','suspended')", [])? {

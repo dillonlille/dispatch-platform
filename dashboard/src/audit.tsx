@@ -35,7 +35,7 @@ import { paycomColumns } from '../../shared/paycom.js';
 import './audit.css';
 
 const PAGE = 50;
-const EXPORT_LIMIT = 5000;
+const LOAD_LIMIT = 5000;
 const areas: [AuditArea, string, LucideIcon][] = [
   ['team', 'Team', Users],
   ['roles', 'Roles', Shield],
@@ -139,6 +139,7 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
   'dsp.resumed': (e) => ['resumed ', strong(e.dspName ?? 'a DSP')],
   'paycom.settings_updated': () => ['updated Paycom settings'],
   'employees.links_updated': () => ['updated employee links'],
+  'audit.exported': () => ['exported the audit log'],
   'account.signed_in': () => ['signed in'],
   'account.password_changed': () => ['changed their password'],
   'account.password_reset': () => ['reset their password'],
@@ -210,6 +211,7 @@ const spoken = new Set([
   'schedule.updated',
   'schedule.toggled',
   'schedule.deleted',
+  'audit.exported',
   'connection.credentials_saved',
   'connection.disabled',
   'connection.verification_submitted',
@@ -338,6 +340,11 @@ function notes(event: AuditEvent, platform: boolean): string[] {
     ...(event.action === 'collection.completed' && fact(event, 'duration')
       ? [duration(Number(fact(event, 'duration')))]
       : []),
+    ...(event.action === 'audit.exported' && Number(event.detail)
+      ? [
+          `${Number(event.detail).toLocaleString('en-US')} ${event.detail === '1' ? 'event' : 'events'}`,
+        ]
+      : []),
     ...(event.action === 'collection.retrying' ? ['Retrying'] : []),
     ...(event.action === 'collection.failed' && Number.parseInt(fact(event, 'attempt')) > 1
       ? [`After ${Number.parseInt(fact(event, 'attempt'))} attempts`]
@@ -447,6 +454,11 @@ export function AuditLog({ view }: { view?: DspView }) {
     timeZoneName: 'short',
     timeZone,
   });
+  // A DSP's log keeps the DSP's clock, whoever is reading it and wherever.
+  const zone =
+    dateFormatter('en-US', { timeZoneName: 'short', timeZone })
+      .formatToParts(new Date())
+      .find((part) => part.type === 'timeZoneName')?.value ?? timeZone;
   const dayLabel = (at: string) => {
     const key = dayKey.format(new Date(at));
     if (key === dayKey.format(new Date())) return 'Today';
@@ -477,7 +489,12 @@ export function AuditLog({ view }: { view?: DspView }) {
     setExporting(true);
     setExportError('');
     try {
-      const all = await api<AuditPage>(`${base}?${query}&limit=${EXPORT_LIMIT}`);
+      // The server records the export and returns every matching event.
+      const all = await api<AuditPage>(`${base}/export`, Object.fromEntries(query));
+      if (all.total > all.events.length)
+        setExportError(
+          `Exported the newest ${all.events.length.toLocaleString('en-US')} of ${all.total.toLocaleString('en-US')} events.`,
+        );
       const cell = (value: string) => `"${value.replaceAll('"', '""')}"`;
       const rows = all.events.map((event) =>
         [
@@ -543,6 +560,11 @@ export function AuditLog({ view }: { view?: DspView }) {
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
+        {view && (
+          <span className="audit-zone" title={timeZone}>
+            Times in {zone}
+          </span>
+        )}
         {!view && (
           <label className="audit-select">
             <span>DSP</span>
@@ -766,8 +788,8 @@ export function AuditLog({ view }: { view?: DspView }) {
           ))}
           <p className="audit-more">
             Showing {page.events.length} of {page.total}
-            {page.events.length < page.total && limit < EXPORT_LIMIT && (
-              <button onClick={() => setLimit((value) => Math.min(EXPORT_LIMIT, value + PAGE))}>
+            {page.events.length < page.total && limit < LOAD_LIMIT && (
+              <button onClick={() => setLimit((value) => Math.min(LOAD_LIMIT, value + PAGE))}>
                 Load more
               </button>
             )}

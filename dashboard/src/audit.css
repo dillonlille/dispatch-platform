@@ -18,6 +18,11 @@
   font-size: 13px;
   font-weight: 400;
 }
+.audit-zone {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
 /* A native select dressed as the toolbar's buttons: label or icon, value, chevron. */
 .audit-select {
   position: relative;

@@ -289,6 +289,7 @@ fn migrate_audit(db: &Db) -> Result<()> {
     }
     Ok(())
 }
+const EXPORT_LIMIT: i64 = 50_000;
 const VISIT_WINDOW: i64 = 30 * 60 * 1000;
 // Activity older than a year is removed by the collector's periodic cleanup.
 const AUDIT_RETENTION: i64 = 365 * 24 * 60 * 60 * 1000;
@@ -476,6 +477,23 @@ impl Store {
             return Ok(());
         }
         self.audit(Some(actor), Some(dsp), action, detail)
+    }
+    // Taking a copy of everyone's activity is itself recorded, after the copy is
+    // read so an export never lists itself.
+    pub fn audit_export(&self, actor: &str, query: AuditQuery) -> Result<Value> {
+        let page = self.audit_page(&AuditQuery {
+            before: 0,
+            limit: EXPORT_LIMIT,
+            ..query
+        })?;
+        let rows = page["events"].as_array().map_or(0, Vec::len);
+        let scope = if query.within.is_empty() {
+            query.dsp
+        } else {
+            Some(query.within)
+        };
+        self.audit(Some(actor), scope, "audit.exported", &rows.to_string())?;
+        Ok(page)
     }
     pub fn prune_audit(&self) -> Result<usize> {
         self.platform.exec(

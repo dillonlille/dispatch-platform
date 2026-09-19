@@ -60,6 +60,36 @@ test('completed update waits for two idle seconds, restores filters, and reloads
   await page.screenshot({ path: test.info().outputPath('automatic-update-restored.png') });
 });
 
+test('the audit log keeps its filters through an automatic update', async ({ page }) => {
+  let ready = false;
+  let loads = 0;
+  page.on('load', () => loads++);
+  await page.route('**/api/browser-update', (route) =>
+    route.fulfill({ json: { build: 'c'.repeat(64), ready } }),
+  );
+  await login(page);
+  await page.getByRole('link', { name: 'Audit log', exact: true }).click();
+  await page.getByRole('button', { name: /^DSPs/ }).click();
+  await page.getByLabel('Search activity').fill('Northline');
+  await page.getByLabel('Date range').selectOption({ label: 'Last 7 days' });
+  await page.getByLabel('DSP', { exact: true }).selectOption({ label: 'Northline Logistics' });
+  await page.clock.runFor(500);
+  await expect(page.getByRole('listitem').filter({ hasText: 'created Northline' })).toBeVisible();
+  const initialLoads = loads;
+  ready = true;
+  await expect
+    .poll(async () => {
+      await page.clock.runFor(1000);
+      return loads;
+    })
+    .toBe(initialLoads + 1);
+  await expect(page.getByLabel('Search activity')).toHaveValue('Northline');
+  await expect(page.getByLabel('Date range')).toHaveValue('7');
+  await expect(page.getByLabel('DSP', { exact: true })).toHaveValue(/.+/);
+  await expect(page.getByRole('button', { name: /^DSPs/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('listitem').filter({ hasText: 'created Northline' })).toBeVisible();
+});
+
 test('open editing dialog protects input until it closes', async ({ page }) => {
   let ready = false;
   let loads = 0;

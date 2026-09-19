@@ -124,11 +124,18 @@ const events: AuditEvent[] = [
   event('2026-09-15T13:30:00Z', 'vehicle.inspection_logged', 'settings', { detail: 'Van 12' }),
 ];
 
+const exports: URLSearchParams[] = [];
 async function open(page: Page) {
   const requests: URLSearchParams[] = [];
-  await page.route(/\/api\/dsp\/audit\?/, (route) => {
-    const query = new URL(route.request().url()).searchParams;
-    requests.push(query);
+  exports.length = 0;
+  await page.route(/\/api\/dsp\/audit(\/export$|\?)/, (route) => {
+    // The page reads with query parameters and exports by posting the same filters.
+    const exporting = route.request().method() === 'POST';
+    const query = exporting
+      ? new URLSearchParams({ ...route.request().postDataJSON(), limit: '100' })
+      : new URL(route.request().url()).searchParams;
+    if (!exporting) requests.push(query);
+    else exports.push(query);
     const area = query.get('area');
     const subject = query.get('subject');
     const matching = events.filter(
@@ -188,6 +195,8 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
     /^Failures/,
   ]);
   await expect(page.getByPlaceholder('Search people, roles, schedules…')).toBeVisible();
+  // Northline keeps Chicago time, and says so to a reader who may not.
+  await expect(page.getByText(/^Times in C[SD]T$/)).toBeVisible();
 
   const completed = item(page, 'Paycom collection for Sep 15 completed');
   await expect(completed).toContainText('Requested by Maria Lopez·1m 48s');
@@ -276,6 +285,10 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const csv = fs.readFileSync(await (await download).path(), 'utf8');
+  // The export carries the filters in force, not a page of them.
+  expect(exports).toHaveLength(1);
+  expect(exports[0]!.get('actor')).toBe('usr_maria');
+  expect(exports[0]!.get('q')).toBe('role');
   expect(csv).toContain('Time,Person,Area,Event,Details,Action');
   expect(csv).toContain('"Maria Lopez changed Jordan Pike’s role","Role Dispatcher → Manager"');
   expect(errors).toEqual([]);
@@ -327,6 +340,14 @@ test('a DSP lists Platform support only once the platform owner shows it there',
   await expect(row).not.toContainText('times');
   await expect(page.getByRole('list').filter({ hasText: 'Platform Owner' })).toHaveCount(0);
   await expect(page.getByLabel('Person')).toContainText('Platform support');
+
+  // Taking a copy of the log is recorded in it.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await download;
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'Platform support exported the audit log' }),
+  ).toContainText(/\d+ events?/, { timeout: 15000 });
 
   // The platform's own log is in the sidebar, names its owner and narrows to a DSP.
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();

@@ -981,6 +981,26 @@ fn audit_log_filters_pages_and_counts_by_area() {
         .unwrap();
     assert_eq!(db.prune_audit().unwrap(), 1);
 
+    // An export returns what the filters match, then records that it was taken.
+    let before = page(AuditQuery::default())["total"].as_i64().unwrap();
+    let exported = db
+        .audit_export(
+            member,
+            AuditQuery {
+                dsp: Some(dsp),
+                area: "team",
+                limit: 1,
+                ..AuditQuery::default()
+            },
+        )
+        .unwrap();
+    let rows = exported["events"].as_array().unwrap();
+    assert!(rows.len() > 1 && rows.iter().all(|e| s(e, "area") == "team"));
+    let after = page(AuditQuery::default());
+    assert_eq!(after["total"].as_i64().unwrap(), before + 1);
+    assert_eq!(s(&after["events"][0], "action"), "audit.exported");
+    assert_eq!(s(&after["events"][0], "detail"), rows.len().to_string());
+
     let actors: Vec<_> = all["actors"]
         .as_array()
         .unwrap()

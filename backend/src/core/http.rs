@@ -651,6 +651,9 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
         ("GET", "/api/platform/audit") => {
             Ok(Reply::json(db.audit_page(&audit_query(&i.query, None)?)?))
         }
+        ("POST", "/api/platform/audit/export") => {
+            Ok(Reply::json(db.audit_export(actor, audit_query(b, None)?)?))
+        }
         ("GET", "/api/platform/health") => {
             let counts: HashMap<String, Value> = db
                 .jobs
@@ -791,6 +794,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
         ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audit_page(&audit_query(&i.query,Some(id))?)?)),
+        ("POST","/api/dsp/audit/export")=>Ok(Reply::json(db.audit_export(actor,audit_query(b,Some(id))?)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
             if write && endpoint=="schedules" {

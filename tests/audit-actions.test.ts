@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { permissions } from '../shared/contracts/index.js';
 
 // The audit log writes each event as a sentence. An action the backend records
 // without wording would fall back to its raw id, so every one must be covered.
@@ -20,8 +21,8 @@ test('every audit action the backend records has wording in the audit log', () =
   // Password changes pass their action through a helper.
   for (const [, action] of sources.matchAll(/replace_password\([^;]*?"(account\.[a-z_]+)"/g))
     recorded.add(action!);
-  const permissions = /^(timecard|collections|connections|members|roles|settings|audit)\./;
-  const actions = [...recorded].filter((action) => !permissions.test(action)).sort();
+  const granted: readonly string[] = permissions;
+  const actions = [...recorded].filter((action) => !granted.includes(action)).sort();
   assert(actions.length > 30, `found only ${actions.length} actions`);
   const log = fs.readFileSync('dashboard/src/audit.tsx', 'utf8');
   const worded = new Set([...log.matchAll(/^ {2}'([a-z_.]+)':/gm)].map(([, action]) => action));
