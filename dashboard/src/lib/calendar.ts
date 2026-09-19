@@ -38,6 +38,23 @@ export function monthWeeks(month: string) {
 export const clampDay = (day: string, min: string, max: string) =>
   day < min ? min : day > max ? max : day;
 
+/** A day as people write it: `09/19/2026`. */
+export const displayDay = (day: string) => `${day.slice(5, 7)}/${day.slice(8)}/${day.slice(0, 4)}`;
+/** Reads `9/19/2026` or `2026-09-19`. Returns nothing for anything that is not a real day. */
+export function parseDay(text: string) {
+  const written = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text.trim());
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
+  const [year, month, date] = written
+    ? [written[3]!, written[1]!, written[2]!]
+    : iso
+      ? [iso[1]!, iso[2]!, iso[3]!]
+      : [];
+  if (!year) return undefined;
+  const day = `${year}-${pad(Number(month))}-${pad(Number(date))}`;
+  // 02/30 would otherwise roll into March.
+  return format(parse(day)) === day ? day : undefined;
+}
+
 const monthName = new Intl.DateTimeFormat('en-US', {
   month: 'long',
   year: 'numeric',
