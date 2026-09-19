@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
-import { api, useData } from '../../app/api.js';
+import { api } from '../../app/api.js';
 import { DataState, Empty } from '../../ui/index.js';
 import { useAction } from '../../app/useAction.js';
+import { usePlatformDsps } from '../../app/endpoints.js';
 
 // Where it is on, a platform owner's activity is listed in that DSP's audit log,
 // always as "Platform support". It applies from the moment it is switched.
 export function SupportVisibility() {
-  const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps');
+  const { data, error, refresh } = usePlatformDsps();
   const dsps = data?.filter((dsp) => !dsp.profile.removed);
   // The switch moves at once; a refused change puts it back.
   const [chosen, setChosen] = useState<Record<string, boolean>>({});

@@ -112,7 +112,10 @@ fn pending<'a>(done: &BTreeSet<u32>, list: &'a [Migration]) -> Vec<&'a Migration
 /// Applies what is pending. The caller holds the write transaction, so a failure
 /// leaves the database exactly as it was.
 pub(super) fn apply(db: &Db, kind: &str, list: &[Migration]) -> Result<()> {
-    db.0.execute_batch("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)")?;
+    db.0.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY \
+        KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)",
+    )?;
     // Read again under the write lock: another connection may have just finished.
     for migration in pending(&applied(db)?, list) {
         let result = match migration.apply {
@@ -197,14 +200,18 @@ mod tests {
     }
     // Tables, then indexes, then triggers, so a snapshot also runs as a script.
     fn dump(db: &Db) -> String {
-        db.all("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,name", [])
-            .unwrap()
-            .iter()
-            .map(|row| {
-                let sql: Vec<&str> = row["sql"].as_str().unwrap().split_whitespace().collect();
-                format!("{};\n", sql.join(" "))
-            })
-            .collect()
+        db.all(
+            "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE type WHEN \
+            'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,name",
+            [],
+        )
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let sql: Vec<&str> = row["sql"].as_str().unwrap().split_whitespace().collect();
+            format!("{};\n", sql.join(" "))
+        })
+        .collect()
     }
     fn private() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
@@ -241,7 +248,15 @@ mod tests {
         config.root = root.path().into();
         let store = Store::initialize(config).unwrap();
         let id = crate::crypto::id("dsp").unwrap();
-        store.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES (?,'Schema','preview','provisioning','UTC',?)", [&id, &crate::db::iso()]).unwrap();
+        store
+            .platform
+            .exec(
+                "INSERT INTO \
+            dsps(id,name,environment,status,timezone,created_at) VALUES \
+            (?,'Schema','preview','provisioning','UTC',?)",
+                [&id, &crate::db::iso()],
+            )
+            .unwrap();
         store.provision(&id).unwrap();
         let dsp = store.dsp(&id).unwrap();
         let paycom = store
@@ -347,7 +362,11 @@ mod tests {
         let root = private();
         let file = root.path().join("dsp.sqlite");
         let db = Db::create(&file, Kind::Dsp, "").unwrap();
-        db.0.execute_batch("CREATE TABLE from_the_next_release (id TEXT); INSERT INTO schema_migrations VALUES (9000,'from_the_next_release',1);").unwrap();
+        db.0.execute_batch(
+            "CREATE TABLE from_the_next_release (id TEXT); INSERT INTO \
+            schema_migrations VALUES (9000,'from_the_next_release',1);",
+        )
+        .unwrap();
         drop(db);
         let db = Db::create(&file, Kind::Dsp, "").unwrap();
         migrate(&db, Kind::Dsp).unwrap();

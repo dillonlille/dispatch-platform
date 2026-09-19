@@ -5,10 +5,10 @@ import {
   type Permission,
   type Role,
 } from '../../../../shared/contracts/index.js';
-import { api } from '../../app/api.js';
 import { Modal } from '../../ui/index.js';
 import { can, permissionLabels } from '../../app/permissions.js';
 import { useAction } from '../../app/useAction.js';
+import { saveTeamRole, removeRole } from '../../app/endpoints.js';
 
 const groups: [string, Permission[]][] = [
   ['Timecard', ['timecard.view', 'timecard.manage']],
@@ -33,10 +33,10 @@ export function RoleSheet({
   const [chosen, setChosen] = useState<Permission[]>(role?.permissions ?? []);
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
-  const inUse = role ? role.members + role.invitations > 0 : false;
+  const inUse = role ? (role.members ?? 0) + (role.invitations ?? 0) > 0 : false;
   const save = useAction(
     async () => {
-      await api(role ? `/api/dsp/roles/${role.id}` : '/api/dsp/roles', {
+      await saveTeamRole(role?.id, {
         name,
         permissions: allPermissions.filter((p) => chosen.includes(p)),
       });
@@ -47,7 +47,7 @@ export function RoleSheet({
   );
   const remove = useAction(
     async () => {
-      await api(`/api/dsp/roles/${role!.id}/remove`, {});
+      await removeRole(role!.id);
       close();
       await saved(false);
     },

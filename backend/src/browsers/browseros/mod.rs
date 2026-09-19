@@ -472,7 +472,8 @@ async fn serve_child(
             biased;
             _ = cancelled(&mut cancellation) => break,
             _ = request.reply.closed() => break,
-            result = timeout_at(request.deadline.min(lifetime), operation) => result.unwrap_or_else(|_| Err(Error::new("browser_command_timeout", 504))),
+            result = timeout_at(request.deadline.min(lifetime),
+                operation) => result.unwrap_or_else(|_| Err(Error::new("browser_command_timeout", 504))),
         };
         let failed = result.is_err();
         let _ = request.reply.send(result);

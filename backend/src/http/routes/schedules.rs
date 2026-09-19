@@ -1,7 +1,7 @@
 //! Collection schedules. Every change here wakes the scheduler; a preview changes nothing.
 use crate::{
     Result,
-    db::{Store, s},
+    db::Store,
     http::{
         input::{Input, Reply},
         route::{Dsp, Member, Route, read, write},
@@ -23,18 +23,18 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn schedules(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.collection_schedules(c.dsp_id())?))
+    Reply::of(&db.collection_schedules(c.dsp_id())?)
 }
 
 fn preview(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.preview_schedule(c.dsp_id(), &input.body)?))
+    Reply::of(&db.preview_schedule(c.dsp_id(), &input.body)?)
 }
 
 fn create(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let id = c.dsp_id();
-    let result = db.save_collection_schedule(id, None, &input.body)?;
-    let name = s(&result, "name");
-    let subject = Some(("schedule", s(&result, "id")));
+    let result = db.save_schedule(id, None, &input.body)?;
+    let name = result.name.as_str();
+    let subject = Some(("schedule", result.id.as_str()));
     let actor = Some(c.actor());
     db.audit_ref(
         actor,
@@ -45,46 +45,46 @@ fn create(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
         &[],
         subject,
     )?;
-    Ok(Reply::status(result, 201))
+    Reply::of_status(&result, 201)
 }
 
 fn update(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let (id, key) = (c.dsp_id(), input.param("key"));
     let before = db.collection_schedule(id, key)?;
-    let result = db.save_collection_schedule(id, Some(key), &input.body)?;
+    let result = db.save_schedule(id, Some(key), &input.body)?;
     db.audit_ref(
         Some(c.actor()),
         Some(id),
         "schedule.updated",
-        s(&result, "name"),
-        Some(s(&before, "name")),
+        &result.name,
+        Some(&before.name),
         &schedule_changes(&before, &result),
         Some(("schedule", key)),
     )?;
-    Ok(Reply::json(result))
+    Reply::of(&result)
 }
 
 fn toggle(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let (id, key) = (c.dsp_id(), input.param("key"));
     let before = db.collection_schedule(id, key)?;
-    let result = db.enable_collection_schedule(id, key, &input.body)?;
+    let result = db.enable_schedule(id, key, &input.body)?;
     db.audit_ref(
         Some(c.actor()),
         Some(id),
         "schedule.toggled",
-        s(&result, "name"),
-        Some(s(&result, "name")),
+        &result.name,
+        Some(&result.name),
         &schedule_changes(&before, &result),
         Some(("schedule", key)),
     )?;
-    Ok(Reply::json(result))
+    Reply::of(&result)
 }
 
 fn remove(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let (id, key) = (c.dsp_id(), input.param("key"));
     let before = db.collection_schedule(id, key)?;
     db.delete_collection_schedule(id, key, &input.body)?;
-    let name = s(&before, "name");
+    let name = before.name.as_str();
     let subject = Some(("schedule", key));
     let actor = Some(c.actor());
     db.audit_ref(

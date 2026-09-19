@@ -9,6 +9,11 @@ use super::{
 use fs2::FileExt;
 use rusqlite::params;
 use serde_json::{Value, json};
+const CANCEL_RESTORED: &str = concat!(
+    "UPDATE jobs SET status='cancelled',message='Cancelled after restore',error='state_restored',\
+     lease_owner=NULL,lease_until=NULL,completed_at=? WHERE status IN ",
+    crate::job_statuses!(active)
+);
 use std::{
     collections::HashSet,
     fs::{self, File, OpenOptions},
@@ -92,8 +97,8 @@ pub fn bootstrap(
         409,
     )?;
     let owner = db.create_user(email, first, last, password, true)?;
-    let dsp = if db.config.environment == "preview" {
-        Some(db.create_dsp("Dev DSP", "UTC", s(&owner, "id"), true)?)
+    let dsp = if db.config.env().is_preview() {
+        Some(db.new_dsp("Dev DSP", "UTC", &owner.id, true)?)
     } else {
         None
     };
@@ -122,14 +127,9 @@ pub fn seed(db: &Store) -> Result<()> {
         "Dispatch-demo-2026!",
         true,
     )?;
-    let dev = db.create_dsp("Dev DSP", "America/Chicago", s(&owner, "id"), true)?;
-    let north = db.create_dsp(
-        "Northline Logistics",
-        "America/Chicago",
-        s(&owner, "id"),
-        false,
-    )?;
-    db.create_dsp("Summit Delivery", "America/Denver", s(&owner, "id"), false)?;
+    let dev = db.new_dsp("Dev DSP", "America/Chicago", &owner.id, true)?;
+    let north = db.new_dsp("Northline Logistics", "America/Chicago", &owner.id, false)?;
+    db.new_dsp("Summit Delivery", "America/Denver", &owner.id, false)?;
     let member = db.create_user(
         "member@dispatch.test",
         "Jordan",
@@ -141,16 +141,17 @@ pub fn seed(db: &Store) -> Result<()> {
         "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,'member',?)",
         params![
             crypto::id("mem")?,
-            s(&member, "id"),
-            s(&north, "id"),
-            super::roles::default_role(&db.platform, s(&north, "id"), "member")?
+            member.id,
+            north.id,
+            super::roles::default_role(&db.platform, &north.id, "member")?
         ],
     )?;
     for dsp in [&dev, &north] {
-        let id = s(dsp, "id");
+        let id = dsp.id.as_str();
         let area = db.area(id, "secrets")?;
         let key = db::key_file(&area.join("vault.key"))?;
-        let credentials = json!({"clientCode":"DEMO1","username":"fixture-user","password":"synthetic-password","securityAnswers":["one","two","three","four","five"]});
+        let credentials = json!({"clientCode":"DEMO1","username":"fixture-user","password":"synthetic-password",
+            "securityAnswers":["one","two","three","four","five"]});
         db::write_private(
             &area.join("paycom.enc"),
             crypto::encrypt(&key, &format!("{id}:paycom:2"), &credentials)?.as_bytes(),
@@ -159,13 +160,8 @@ pub fn seed(db: &Store) -> Result<()> {
             "UPDATE connections SET enabled=1,status='ready',account_label='DEMO1',verified_at=?",
             [iso()],
         )?;
-        db.publish(id, &workforce::fixture(s(dsp, "timezone"))?)?;
-        db.audit(
-            Some(s(&owner, "id")),
-            Some(id),
-            "development.fixtures_loaded",
-            "",
-        )?;
+        db.publish(id, &workforce::fixture(&dsp.timezone)?)?;
+        db.audit(Some(&owner.id), Some(id), "development.fixtures_loaded", "")?;
     }
     db::write_private(
         &db.config.platform().join("development-seeded"),
@@ -319,7 +315,7 @@ pub fn restore(source: &Path, target: &Path) -> Result<Value> {
         let jobs = target.join("data").join(env).join("jobs.sqlite");
         if jobs.exists() {
             let db = rusqlite::Connection::open(jobs)?;
-            db.execute("UPDATE jobs SET status='cancelled',message='Cancelled after restore',error='state_restored',lease_owner=NULL,lease_until=NULL,completed_at=? WHERE status IN ('queued','running','waiting_verification')",[iso()])?;
+            db.execute(CANCEL_RESTORED, [iso()])?;
         }
     }
     Ok(json!({"target":target,"files":files.len()}))

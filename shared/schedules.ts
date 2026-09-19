@@ -6,17 +6,7 @@ export interface ScheduleInput {
   localTime: string;
   enabled: boolean;
 }
-export interface CollectionSchedule extends ScheduleInput {
-  id: string;
-  revision: number;
-  nextRun: string | null;
-  lastError: string | null;
-}
-export interface CollectionSchedules {
-  timezone: string;
-  dspName: string;
-  schedules: CollectionSchedule[];
-}
+export type { CollectionSchedule, CollectionSchedules } from './contracts/index.js';
 export const scheduleIssues: Record<string, string> = {
   schedule_paycom_required: 'Connect Paycom before enabling this schedule.',
   schedule_meals_required: 'Connect Cortex before enabling Meal Break collections.',

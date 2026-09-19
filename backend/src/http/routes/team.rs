@@ -1,8 +1,9 @@
 //! A DSP's members, roles and invitations, and the public pages an invitation links to.
 use crate::{
     Error, Result, State,
-    contracts::InvitationRequest,
-    db::{Store, flag, s},
+    contracts::Presence,
+    contracts::{InvitationRequest, Member as PublicMember},
+    db::{Store, flag},
     http::{
         input::{Input, Reply},
         route::{Anyone, Dsp, Member, Public, Route, async_post, read, write},
@@ -51,12 +52,16 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn members(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    let mut members = db.members(c.dsp_id())?;
-    for member in members.as_array_mut().into_iter().flatten() {
-        let status = c.state.presence.status(c.dsp_id(), s(member, "userId"));
-        member["status"] = json!(status);
-    }
-    Ok(Reply::json(members))
+    let members: Vec<PublicMember> = db
+        .members(c.dsp_id())?
+        .into_iter()
+        .map(|member| {
+            let status = c.state.presence.status(c.dsp_id(), &member.user_id);
+            let status = Presence::parse(status).unwrap_or(Presence::Offline);
+            member.public(status)
+        })
+        .collect();
+    Reply::of(&members)
 }
 
 fn invite(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -65,17 +70,10 @@ fn invite(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let email = v::email(b, "email")?;
     let role = db.role(id, v::text(b, "role", 1, 100)?)?;
     db.platform.transaction(|| {
-        let raw = db.invite(&c.auth, id, &email, s(&role, "id"))?;
+        let raw = db.invite(&c.auth, id, &email, &role.id)?;
         // The first owner of a DSP that is still being set up is also asked to finish that.
-        let setup = flag(&role, "system") && flag(&db.profile(id)?, "setupRequired");
-        db.invitation_mail(
-            &c.auth,
-            &email,
-            s(&c.dsp, "name"),
-            s(&role, "name"),
-            &raw,
-            setup,
-        )
+        let setup = role.system && flag(&db.profile(id)?, "setupRequired");
+        db.invitation_mail(&c.auth, &email, &c.dsp.name, &role.name, &raw, setup)
     })?;
     Ok(Reply::json(
         json!({"invitation":{"email":email,"status":"queued"}}),
@@ -115,18 +113,18 @@ fn revoke_invitation(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
 }
 
 fn list_roles(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.roles(c.dsp_id())?))
+    Reply::of(&db.roles(c.dsp_id())?)
 }
 
 fn create_role(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let (name, permissions) = role_input(&input.body)?;
-    Ok(Reply::status(db.create_role(c, &name, &permissions)?, 201))
+    Reply::of_status(&db.create_role(c, &name, &permissions)?, 201)
 }
 
 fn update_role(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let (name, permissions) = role_input(&input.body)?;
     let role = db.update_role(c, input.param("id"), &name, &permissions)?;
-    Ok(Reply::json(role))
+    Reply::of(&role)
 }
 
 fn remove_role(db: &Store, c: &Member, input: &Input) -> Result<Reply> {

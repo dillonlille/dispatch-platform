@@ -177,20 +177,35 @@ mod tests {
         server.set_nonblocking(true)?;
         let mut server = tokio::net::UnixStream::from_std(server)?;
         let mut cdp = Cdp::new(client)?;
-        server.write_all(b"{\"method\":\"Fetch.requestPaused\",\"sessionId\":\"one\",\"params\":{\"requestId\":\"roster\"}}\0{\"method\":\"Page.frameNavigated\",\"sessionId\":\"two\",\"params\":{\"frame\":{\"loaderId\":\"other\"}}}\0{\"method\":\"Page.frameNavigated\",").await?;
+        server.write_all(b"{\"method\":\"Fetch.requestPaused\",\"sessionId\":\"one\",\
+                \"params\":{\"requestId\":\"roster\"}}\0{\"method\":\"Page.frameNavigated\",\
+                \"sessionId\":\"two\",\
+                \"params\":{\"frame\":{\"loaderId\":\"other\"}}}\0{\"method\":\"Page.frameNavigated\",").await?;
         assert!(cdp.navigation("one", "old").await?.is_null());
-        server.write_all(b"\"sessionId\":\"one\",\"params\":{\"frame\":{\"loaderId\":\"new\",\"url\":\"https://fixture.invalid/card\"}}}\0").await?;
+        server.write_all(
+            b"\"sessionId\":\"one\",\"params\":{\"frame\":{\"loaderId\":\"new\",\"url\":\"https://fixture.invalid/card\"}}}\0").await?;
+
         assert_eq!(cdp.navigation("one", "old").await?["loaderId"], "new");
         assert_eq!(cdp.navigation("two", "old").await?["loaderId"], "other");
         assert_eq!(cdp.event("one").await?["requestId"], "roster");
-        cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":"one","params":{"frame":{"parentId":"main","loaderId":"subframe"}}}))?;
+        cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":"one",
+            "params":{"frame":{"parentId":"main","loaderId":"subframe"}}}))?;
         assert_eq!(cdp.frames["one"]["loaderId"], "new");
         cdp.observe(&json!({"method":"Target.detachedFromTarget","params":{"sessionId":"one"}}))?;
         assert!(!cdp.frames.contains_key("one"));
         for index in 0..7 {
-            cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":format!("page-{index}"),"params":{"frame":{"loaderId":"new"}}}))?;
+            cdp.observe(
+                &json!({"method":"Page.frameNavigated","sessionId":format!("page-{index}"),
+                "params":{"frame":{"loaderId":"new"}}}),
+            )?;
         }
-        assert!(cdp.observe(&json!({"method":"Page.frameNavigated","sessionId":"overflow","params":{"frame":{"loaderId":"new"}}})).is_err());
+        assert!(
+            cdp.observe(
+                &json!({"method":"Page.frameNavigated","sessionId":"overflow",
+            "params":{"frame":{"loaderId":"new"}}})
+            )
+            .is_err()
+        );
         Ok(())
     }
     #[tokio::test]

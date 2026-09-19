@@ -1,6 +1,7 @@
 //! What only a platform owner sees: every DSP, the platform's health, diagnostics and releases.
 use crate::{
-    Result, State,
+    Error, Result, State,
+    contracts::DspStatus,
     db::{Store, flag, iso, s},
     ensure,
     http::{
@@ -41,7 +42,7 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn dsps(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.dsps(owner)?))
+    Reply::of(&db.dsps(owner)?)
 }
 
 // A DSP is created either by name, or for an invited owner who then names it.
@@ -61,8 +62,8 @@ fn create_dsp(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     if email.is_some() {
         ensure(db.config.mail_available(), "email_unavailable", 503)?;
     }
-    let dsp = db.create_dsp(&name, &tz, owner.actor(), false)?;
-    let id = s(&dsp, "id");
+    let dsp = db.new_dsp(&name, &tz, owner.actor(), false)?;
+    let id = dsp.id.as_str();
     if !named {
         db.set_profile(id, json!({"setupRequired":true}))?;
     }
@@ -81,7 +82,7 @@ fn retry_dsp(db: &Store, _: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &[])?;
     let id = input.param("id");
     db.provision(id)?;
-    Ok(Reply::json(db.get_dsp(id)?))
+    Reply::of(&db.find_dsp(id)?)
 }
 
 // The four changes below close the DSP's browsers once the database step has
@@ -98,10 +99,10 @@ async fn change_dsp(
     let result = state
         .run(move |db| {
             let owner = access.authorize(db, &input)?;
-            change(db, &dsp, s(&owner.user, "id"), &input.body)
+            change(db, &dsp, owner.user.id.as_str(), &input.body)
         })
         .await?;
-    if closes_browsers || s(&result, "status") == "suspended" {
+    if closes_browsers || result["status"] == DspStatus::Suspended.as_str() {
         state.browsers.revoke(&id).await;
     }
     Ok(Reply::json(result))
@@ -111,11 +112,12 @@ async fn set_status(state: Arc<State>, input: Input, access: PlatformOwner) -> R
     change_dsp(state, input, access, false, |db, dsp, actor, b| {
         v::fields(b, &["status"])?;
         let status = v::choice(b, "status", &["active", "suspended"])?;
+        let status = DspStatus::parse(status).ok_or_else(|| Error::new("invalid_input", 400))?;
         let row = db.set_status(dsp, status, actor)?;
-        if status == "suspended" {
+        if status == DspStatus::Suspended {
             db.cancel_dsp(dsp)?;
         }
-        Ok(row)
+        Ok(json!(row))
     })
     .await
 }
@@ -128,7 +130,7 @@ async fn set_support_visibility(
     change_dsp(state, input, access, false, |db, dsp, actor, b| {
         v::fields(b, &["visible"])?;
         let visible = v::boolean(b, "visible")?;
-        db.get_dsp(dsp)?;
+        db.find_dsp(dsp)?;
         db.set_profile(dsp, json!({"supportVisible":visible}))?;
         let detail = if visible { "shown" } else { "hidden" };
         db.audit(
@@ -145,7 +147,7 @@ async fn set_support_visibility(
 async fn remove_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> Result<Reply> {
     change_dsp(state, input, access, true, |db, dsp, actor, b| {
         v::fields(b, &[])?;
-        db.set_status(dsp, "suspended", actor)?;
+        db.set_status(dsp, DspStatus::Suspended, actor)?;
         db.set_profile(dsp, json!({"removed":true}))?;
         db.cancel_dsp(dsp)?;
         db.audit(Some(actor), Some(dsp), "dsp.removed", "")?;
@@ -157,16 +159,16 @@ async fn remove_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> R
 async fn restore_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> Result<Reply> {
     change_dsp(state, input, access, false, |db, dsp, actor, b| {
         v::fields(b, &[])?;
-        let row = db.get_dsp(dsp)?;
+        let row = db.find_dsp(dsp)?;
         ensure(
-            !flag(&row, "permanent") && flag(&db.profile(dsp)?, "removed"),
+            !row.permanent && flag(&db.profile(dsp)?, "removed"),
             "dsp_not_removed",
             409,
         )?;
         db.set_profile(dsp, json!({"removed":false}))?;
-        let row = db.set_status(dsp, "active", actor)?;
+        let row = db.set_status(dsp, DspStatus::Active, actor)?;
         db.audit(Some(actor), Some(dsp), "dsp.restored", "")?;
-        Ok(row)
+        Ok(json!(row))
     })
     .await
 }
@@ -184,13 +186,13 @@ fn health(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
         "capacity":db.config.browser_capacity,
         "memory":state.browsers.admission()
     });
-    let dsps = db.platform.one("SELECT count(*) n FROM dsps", [])?.unwrap();
+    let dsps = db.platform.count("SELECT count(*) FROM dsps", [])?;
     Ok(Reply::json(json!({
         "environment":db.config.environment,
         "release":db.config.release,
         "jobs":counts,
         "browsers":browsers,
-        "dsps":dsps["n"],
+        "dsps":dsps,
         "email":db.config.mail_available(),
         "mail":mail::health(db, state)?,
         "providerMode":if db.config.fixture { "fixture" } else { "native" }
@@ -204,13 +206,13 @@ fn diagnostics(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
 fn load_test_dsp(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &[])?;
     ensure(
-        db.config.development || db.config.environment == "preview",
+        db.config.development || db.config.env().is_preview(),
         "test_dsps_unavailable",
         409,
     )?;
     let name = format!("Test DSP {}", iso());
-    let dsp = db.create_dsp(&name, "America/Chicago", owner.actor(), false)?;
-    let id = s(&dsp, "id");
+    let dsp = db.new_dsp(&name, "America/Chicago", owner.actor(), false)?;
+    let id = dsp.id.as_str();
     db.publish(id, &workforce::fixture("America/Chicago")?)?;
     db.audit(
         Some(owner.actor()),
@@ -224,7 +226,7 @@ fn load_test_dsp(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
 fn diagnostics_report(db: &Store, state: &State) -> Result<Value> {
     let memory = operations::memory();
     Ok(json!({
-        "enabled":db.config.development || db.config.environment == "preview",
+        "enabled":db.config.development || db.config.env().is_preview(),
         "storageAvailableBytes":operations::available_space(&db.config.root)?,
         "runtime":{
             "name":"Shared platform (Rust)",
@@ -239,7 +241,7 @@ fn diagnostics_report(db: &Store, state: &State) -> Result<Value> {
 }
 
 fn releases(db: &Store, _: &User, _: &Input) -> Result<Reply> {
-    let name = if db.config.environment == "production" {
+    let name = if db.config.env().is_production() {
         "production-update.json"
     } else {
         "dev-update.json"

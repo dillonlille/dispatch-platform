@@ -106,7 +106,10 @@ mod tests {
             loading.observe(&json!({"method":"Page.frameNavigated","sessionId":session,"params":{"frame":{"loaderId":"new"}}}))?;
         }
         for (id, kind) in [("data", "XHR"), ("script", "Script"), ("image", "Image")] {
-            loading.observe(&json!({"method":"Network.requestWillBeSent","sessionId":"one","params":{"requestId":id,"loaderId":"new","type":kind}}))?;
+            loading.observe(
+                &json!({"method":"Network.requestWillBeSent","sessionId":"one",
+                "params":{"requestId":id,"loaderId":"new","type":kind}}),
+            )?;
         }
         assert_eq!(loading.status("one", "new")["pending"], 2);
         assert_eq!(loading.status("two", "new")["pending"], 0);

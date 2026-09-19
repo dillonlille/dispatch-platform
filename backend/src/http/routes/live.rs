@@ -1,7 +1,6 @@
 //! What the dashboard polls: readiness, its own updates, collection progress and presence.
 use crate::{
     Error, Result, State, crypto,
-    db::{flag, s},
     http::{
         assets::browser_update_ready,
         input::{Input, Reply},
@@ -49,7 +48,7 @@ async fn collection_updates(state: Arc<State>, input: Input, access: Dsp) -> Res
     let after = v::text(&input.query, "after", 0, 100)?.to_owned();
     let auth = input.clone();
     let dsp = state
-        .read(move |db| Ok(s(&access.authorize(db, &auth)?.dsp, "id").to_owned()))
+        .read(move |db| Ok(access.authorize(db, &auth)?.dsp.id))
         .await?;
     let _slot = state
         .updates
@@ -81,8 +80,12 @@ async fn presence(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply>
         .read(move |db| {
             let c = access.authorize(db, &input)?;
             // A platform owner looking into a DSP is never shown to its team.
-            Ok((!flag(&c.auth.user, "platformOwner"))
-                .then(|| (s(&c.dsp, "id").to_owned(), s(&c.auth.user, "id").to_owned())))
+            Ok((!c.auth.user.platform_owner).then(|| {
+                (
+                    c.dsp.id.as_str().to_owned(),
+                    c.auth.user.id.as_str().to_owned(),
+                )
+            }))
         })
         .await?;
     if let Some((dsp, user)) = member {

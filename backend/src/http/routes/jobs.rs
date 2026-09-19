@@ -1,8 +1,8 @@
 //! Collection jobs: listing, requesting and cancelling them.
 use crate::{
-    Error, Result, State, browsers,
+    Error, Result, State,
     contracts::CollectionRequest,
-    db::{Store, n, s},
+    db::Store,
     http::{
         input::{Input, Reply},
         route::{Dsp, Grant, Member, PlatformOwner, Route, User, async_post, read, write},
@@ -34,11 +34,11 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn all_jobs(db: &Store, _: &User, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.list_jobs(None)?))
+    Reply::of(&db.recent_jobs(None)?)
 }
 
 fn jobs(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.list_jobs(Some(c.dsp_id()))?))
+    Reply::of(&db.recent_jobs(Some(c.dsp_id()))?)
 }
 
 fn collect(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -62,30 +62,26 @@ async fn cancel(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
         .run(move |db| {
             let c = access.authorize(db, &input)?;
             v::fields(&input.body, &[])?;
-            let row = db.job(&job, Some(s(&c.dsp, "id")))?;
-            let active = ["running", "waiting_verification"].contains(&s(&row, "status"));
-            let active_revision = if active {
-                let provider = browsers::Provider::from_job_kind(s(&row, "kind"))?;
-                Some((n(&row, "connection_revision"), provider))
-            } else {
-                None
-            };
-            let result = db.cancel_job(&job, s(&c.dsp, "id"))?;
-            let actor = Some(s(&c.auth.user, "id"));
-            db.audit(actor, Some(s(&c.dsp, "id")), "collection.cancelled", "")?;
+            let row = db.job_row(&job, Some(&c.dsp.id))?;
+            let active_revision = row
+                .status
+                .is_leased()
+                .then(|| (row.connection_revision, row.provider()));
+            let result = db.cancel(&job, &c.dsp.id)?;
+            c.audit(db, "collection.cancelled", "")?;
             Ok((c, result, active_revision))
         })
         .await?;
     if let Some((revision, provider)) = active_revision {
         state
             .browsers
-            .revoke_provider_revision(s(&context.dsp, "id"), revision, provider)
+            .revoke_provider_revision(context.dsp.id.as_str(), revision, provider)
             .await;
     }
     state
         .run(move |db| access.revalidate(db, &context).map(|_| ()))
         .await?;
-    Ok(Reply::json(result))
+    Reply::of(&result)
 }
 
 fn meal_sync_status(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -108,7 +104,7 @@ fn sync_meal_breaks(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
 
 fn collect_cortex_meal_breaks(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let b = &input.body;
-    let scope = meals::Scope::request(b, s(&c.dsp, "timezone"))?;
+    let scope = meals::Scope::request(b, c.dsp.timezone.as_str())?;
     let (id, actor) = (c.dsp_id(), Some(c.actor()));
     let job = db.enqueue_meals(id, actor, v::text(b, "requestId", 1, 128)?, &scope)?;
     db.audit(actor, Some(id), "cortex.collection.requested", "")?;

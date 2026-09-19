@@ -102,7 +102,11 @@ impl Collector for Paycom {
         store.clear_checkpoint(dsp, job)
     }
     fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>> {
-        db.one("SELECT collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC,id DESC LIMIT 1",[date,date])
+        db.one(
+            "SELECT collected_at FROM publications WHERE period_from<=? AND period_to>=? \
+            ORDER BY collected_at DESC,id DESC LIMIT 1",
+            [date, date],
+        )
     }
     fn schedule(&self) -> Option<(&'static str, &'static str)> {
         Some(("paycom", "schedule_paycom_required"))

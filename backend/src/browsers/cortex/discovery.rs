@@ -1,8 +1,15 @@
 use super::*;
 use crate::{
+    Code,
     job_metrics::Recorder,
     meals::{CollectionRequest, Scope},
 };
+// The page is between documents or signing in again; ask it again.
+const PAGE_NOT_READY: &[crate::Code] = &[
+    crate::Code::BrowserNavigationPending,
+    crate::Code::BrowserScriptFailed,
+    crate::Code::VerificationRequired,
+];
 
 const DISCOVER: &str = include_str!("discovery.js");
 
@@ -74,30 +81,27 @@ impl Driver {
                 Ok(value) => {
                     let error = s(&value, "error");
                     metrics.detail(s(&value, "reason"));
-                    if ["cortex_timezone_mismatch", "cortex_source_too_large"].contains(&error) {
+                    if Code::text_is_any(
+                        error,
+                        &[Code::CortexTimezoneMismatch, Code::CortexSourceTooLarge],
+                    ) {
                         return Err(Error::new(error, 502));
                     }
-                    last_error = if [
-                        "cortex_station_unavailable",
-                        "cortex_provider_ambiguous",
-                        "cortex_scope_mismatch",
-                    ]
-                    .contains(&error)
-                    {
+                    last_error = if Code::text_is_any(
+                        error,
+                        &[
+                            Code::CortexStationUnavailable,
+                            Code::CortexProviderAmbiguous,
+                            Code::CortexScopeMismatch,
+                        ],
+                    ) {
                         error
                     } else {
                         "cortex_content_incomplete"
                     }
                     .into();
                 }
-                Err(error)
-                    if [
-                        "browser_navigation_pending",
-                        "browser_script_failed",
-                        "verification_required",
-                    ]
-                    .contains(&error.code.as_str()) =>
-                {
+                Err(error) if error.is_any(PAGE_NOT_READY) => {
                     metrics.detail(&error.code);
                     last_error = error.code
                 }
