@@ -86,13 +86,37 @@ impl Store {
     ) -> Result<Vec<(Value, Vec<Value>)>> {
         let db = self.collector(dsp, provider)?;
         let mut out = vec![];
-        for job in self.jobs.all("SELECT id,lease_owner FROM jobs WHERE dsp_id=? AND kind=? AND status='running' AND lease_until>?", params![dsp,provider.job_kind(),db::now()])? {
+        for job in self.jobs.all(
+            "SELECT id,lease_owner FROM jobs WHERE dsp_id=? AND kind=? \
+            AND status='running' AND lease_until>?",
+            params![dsp, provider.job_kind(), db::now()],
+        )? {
             // Includes current connection revision, actor permissions and lease ownership.
-            if self.guard_job(s(&job,"id"),s(&job,"lease_owner")).is_err() { continue; }
-            if let Some(run) = db.one("SELECT metadata FROM collection_live_runs WHERE job_id=? AND owner=?", [s(&job,"id"),s(&job,"lease_owner")])? {
-                let metadata: Value = serde_json::from_str(s(&run,"metadata"))?;
-                if date < s(&metadata,"from") || date > s(&metadata,"to") { continue; }
-                let items = db.all("SELECT data FROM collection_live_items WHERE job_id=? AND date=? ORDER BY item_key", [s(&job,"id"),date])?.into_iter().map(|item| serde_json::from_str(s(&item,"data")).map_err(Into::into)).collect::<Result<Vec<Value>>>()?;
+            if self
+                .guard_job(s(&job, "id"), s(&job, "lease_owner"))
+                .is_err()
+            {
+                continue;
+            }
+            if let Some(run) = db.one(
+                "SELECT metadata FROM collection_live_runs WHERE \
+                job_id=? AND owner=?",
+                [s(&job, "id"), s(&job, "lease_owner")],
+            )? {
+                let metadata: Value = serde_json::from_str(s(&run, "metadata"))?;
+                if date < s(&metadata, "from") || date > s(&metadata, "to") {
+                    continue;
+                }
+                let items = db
+                    .all(
+                        "SELECT data FROM collection_live_items WHERE job_id=? \
+                    AND date=? ORDER BY \
+                    item_key",
+                        [s(&job, "id"), date],
+                    )?
+                    .into_iter()
+                    .map(|item| serde_json::from_str(s(&item, "data")).map_err(Into::into))
+                    .collect::<Result<Vec<Value>>>()?;
                 out.push((metadata, items));
             }
         }
@@ -120,7 +144,17 @@ pub fn stage_paycom_page(
         for key in ["name", "department", "station"] {
             data[key] = employee[key].clone();
         }
-        db.exec("INSERT OR REPLACE INTO collection_live_items SELECT job_id,?1,?2,?3 FROM collection_live_runs WHERE job_id=?4 AND owner=?5",params![s(employee,"code"),s(record,"date"),data.to_string(),job,owner])?;
+        db.exec(
+            "INSERT OR REPLACE INTO collection_live_items SELECT job_id,?1,?2,?3 FROM \
+            collection_live_runs WHERE job_id=?4 AND owner=?5",
+            params![
+                s(employee, "code"),
+                s(record, "date"),
+                data.to_string(),
+                job,
+                owner
+            ],
+        )?;
     }
     Ok(())
 }
@@ -155,11 +189,18 @@ impl Writer {
     pub async fn cortex_drivers(&self, drivers: Value) -> Result<()> {
         let job = self.job.clone();
         let owner = self.owner.clone();
-        let dsp=self.state.run(move |db| {
-            let dsp=db.guard_job(&job,&owner)?;
-            db.collector(s(&dsp,"id"),Provider::Cortex)?.exec("UPDATE collection_live_runs SET metadata=json_set(metadata,'$.drivers',json(?1)) WHERE job_id=?2 AND owner=?3",params![drivers.to_string(),job,owner])?;
-            Ok(s(&dsp,"id").to_owned())
-        }).await?;
+        let dsp = self
+            .state
+            .run(move |db| {
+                let dsp = db.guard_job(&job, &owner)?;
+                db.collector(s(&dsp, "id"), Provider::Cortex)?.exec(
+                    "UPDATE collection_live_runs \
+                SET metadata=json_set(metadata,'$.drivers',json(?1)) WHERE job_id=?2 AND owner=?3",
+                    params![drivers.to_string(), job, owner],
+                )?;
+                Ok(s(&dsp, "id").to_owned())
+            })
+            .await?;
         self.state.updates.notify(&dsp);
         Ok(())
     }
@@ -172,18 +213,42 @@ impl Writer {
         let capture = capture.clone();
         let job = self.job.clone();
         let owner = self.owner.clone();
-        let dsp=self.state.run(move |db| {
-            let dsp=db.guard_job(&job,&owner)?;
-            let row=db.job(&job,None)?;
-            ensure(s(&row,"kind")==Provider::Cortex.job_kind(),"unsupported_collector",409)?;
-            let storage=db.collector(s(&dsp,"id"),Provider::Cortex)?;
-            let run=storage.one("SELECT metadata FROM collection_live_runs WHERE job_id=? AND owner=?",[&job,&owner])?.ok_or_else(|| Error::new("invalid_live_capture",502))?;
-            let metadata: Value=serde_json::from_str(s(&run,"metadata"))?;
-            let expected: Scope=serde_json::from_value(metadata["scope"].clone())?;
-            capture.validate(&expected)?;
-            storage.exec("INSERT OR REPLACE INTO collection_live_items SELECT job_id,?1,?2,?3 FROM collection_live_runs WHERE job_id=?4 AND owner=?5",params![capture.itineraries[0].id,capture.scope.date,data,job,owner])?;
-            Ok(s(&dsp,"id").to_owned())
-        }).await?;
+        let dsp = self
+            .state
+            .run(move |db| {
+                let dsp = db.guard_job(&job, &owner)?;
+                let row = db.job(&job, None)?;
+                ensure(
+                    s(&row, "kind") == Provider::Cortex.job_kind(),
+                    "unsupported_collector",
+                    409,
+                )?;
+                let storage = db.collector(s(&dsp, "id"), Provider::Cortex)?;
+                let run = storage
+                    .one(
+                        "SELECT metadata FROM collection_live_runs WHERE job_id=? \
+                AND owner=?",
+                        [&job, &owner],
+                    )?
+                    .ok_or_else(|| Error::new("invalid_live_capture", 502))?;
+                let metadata: Value = serde_json::from_str(s(&run, "metadata"))?;
+                let expected: Scope = serde_json::from_value(metadata["scope"].clone())?;
+                capture.validate(&expected)?;
+                storage.exec(
+                    "INSERT OR REPLACE INTO collection_live_items SELECT \
+                job_id,?1,?2,?3 FROM collection_live_runs WHERE job_id=?4 AND \
+                owner=?5",
+                    params![
+                        capture.itineraries[0].id,
+                        capture.scope.date,
+                        data,
+                        job,
+                        owner
+                    ],
+                )?;
+                Ok(s(&dsp, "id").to_owned())
+            })
+            .await?;
         self.state.updates.notify(&dsp);
         Ok(())
     }
@@ -229,7 +294,12 @@ mod tests {
             .await?;
         let period = json!({"start":"2026-01-06","end":"2026-01-19"});
         let employee = old["employees"][0].clone();
-        let records=(6..20).map(|day|json!({"employeeCode":employee["code"],"date":format!("2026-01-{day:02}"),"hours":9,"status":"Complete","punches":[{"in":"09:00","out":"18:00","hours":9}]})).collect::<Vec<_>>();
+        let records = (6..20)
+            .map(|day| {
+                json!({"employeeCode":employee["code"],"date":format!("2026-01-{day:02}"),
+            "hours":9,"status":"Complete","punches":[{"in":"09:00","out":"18:00","hours":9}]})
+            })
+            .collect::<Vec<_>>();
         let checkpoint = Checkpoint::new(state.clone(), &paycom_job, "paycom-owner");
         let resume = checkpoint
             .prepare(&period, old["employees"].as_array().unwrap(), "UTC")

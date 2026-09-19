@@ -90,14 +90,16 @@ impl Checkpoint {
             let storage=db.collector(tenant,Provider::Paycom)?;
             let resume = storage.transaction(|| {
                 let existing=storage.one("SELECT * FROM collection_checkpoints WHERE job_id=?",[&job])?;
-                if let Some(existing)=existing.filter(|r| s(r,"fingerprint")==fingerprint && r["connection_revision"]==row["connection_revision"]) {
+                if let Some(existing)=existing.filter(|r| s(r,
+                    "fingerprint")==fingerprint && r["connection_revision"]==row["connection_revision"]) {
                     let mut pages=BTreeMap::new();
                     let mut valid=true;
                     for page in storage.all("SELECT employee_code,data FROM collection_checkpoint_pages WHERE job_id=?",[&job])? {
                         let code=s(&page,"employee_code");
                         let parsed=serde_json::from_str::<Vec<Value>>(s(&page,"data"));
                         match (roster.iter().find(|e|s(e,"code")==code),parsed) {
-                            (Some(employee),Ok(records)) if validate_page(employee,&period,&records).is_ok()=>{pages.insert(code.into(),records);},
+                            (Some(employee),Ok(records)) if validate_page(employee,&period,
+                                &records).is_ok()=>{pages.insert(code.into(),records);},
                             _=>{valid=false;break;}
                         }
                     }
@@ -105,7 +107,10 @@ impl Checkpoint {
                 }
                 storage.exec("DELETE FROM collection_checkpoints WHERE job_id=?",[&job])?;
                 let token=crypto::id("checkpoint")?;
-                storage.exec("INSERT INTO collection_checkpoints(job_id,connection_revision,fingerprint,created_at,token) VALUES (?,?,?,?,?)",params![job,n(&row,"connection_revision"),fingerprint,db::now(),token])?;
+                storage.exec("INSERT INTO \
+                    collection_checkpoints(job_id,connection_revision,fingerprint,created_at,token) VALUES (?,?,?,?,?)",
+                params![job,n(&row,"connection_revision"),fingerprint,db::now(),
+                token])?;
                 Ok(Resume { token,pages:BTreeMap::new() })
             })?;
             live_metadata["checkpointToken"]=json!(resume.token);
@@ -137,24 +142,51 @@ impl Checkpoint {
         let records = records.to_vec();
         let job = self.job.clone();
         let owner = self.owner.clone();
-        let dsp = self.state.run(move |db| {
-            let dsp=db.guard_job(&job,&owner)?;
-            let row=db.job(&job,None)?;
-            let storage=db.collector(s(&dsp,"id"),Provider::Paycom)?;
-            // Save resume data and visible results with one transaction per driver.
-            storage.transaction(|| {
-            // An expired checkpoint simply stops accepting new progress. The
-            // current in-memory collection may still finish and publish normally.
-            storage.exec("INSERT OR REPLACE INTO collection_checkpoint_pages(job_id,employee_code,data) SELECT job_id,?1,?2 FROM collection_checkpoints WHERE job_id=?3 AND token=?4 AND connection_revision=?5 AND created_at>=?6 AND created_at<=?7",params![code,data,job,token,n(&row,"connection_revision"),db::now()-TTL_MS,db::now()])?;
-            // Expiry limits resume reuse, not validated live visibility. An old
-            // checkpoint token must never write into a replacement run.
-            if storage.one("SELECT 1 FROM collection_live_runs WHERE job_id=? AND json_extract(metadata,'$.checkpointToken')=?", [&job,&token])?.is_some() {
-                super::live_collection::stage_paycom_page(&storage,&job,&owner,&employee,&records)?;
-            }
-                Ok(())
-            })?;
-            Ok(s(&dsp,"id").to_owned())
-        }).await?;
+        let dsp = self
+            .state
+            .run(move |db| {
+                let dsp = db.guard_job(&job, &owner)?;
+                let row = db.job(&job, None)?;
+                let storage = db.collector(s(&dsp, "id"), Provider::Paycom)?;
+                // Save resume data and visible results with one transaction per driver.
+                storage.transaction(|| {
+                    // An expired checkpoint simply stops accepting new progress. The
+                    // current in-memory collection may still finish and publish normally.
+                    storage.exec(
+                        "INSERT OR REPLACE INTO \
+                collection_checkpoint_pages(job_id,employee_code,data) SELECT job_id,?1,?2 \
+                FROM collection_checkpoints WHERE job_id=?3 AND token=?4 AND \
+                connection_revision=?5 AND created_at>=?6 AND \
+                created_at<=?7",
+                        params![
+                            code,
+                            data,
+                            job,
+                            token,
+                            n(&row, "connection_revision"),
+                            db::now() - TTL_MS,
+                            db::now()
+                        ],
+                    )?;
+                    // Expiry limits resume reuse, not validated live visibility. An old
+                    // checkpoint token must never write into a replacement run.
+                    if storage
+                        .one(
+                            "SELECT 1 FROM collection_live_runs WHERE job_id=? AND \
+                json_extract(metadata,'$.checkpointToken')=?",
+                            [&job, &token],
+                        )?
+                        .is_some()
+                    {
+                        super::live_collection::stage_paycom_page(
+                            &storage, &job, &owner, &employee, &records,
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                Ok(s(&dsp, "id").to_owned())
+            })
+            .await?;
         self.state.updates.notify(&dsp);
         Ok(())
     }
@@ -217,7 +249,12 @@ mod tests {
         let checkpoint = Checkpoint::new(state.clone(), &job, "owner");
         let employee = json!({"code":"AA01","name":"Fixture","department":"Driver","position":"Driver","station":"S","active":true});
         let period = json!({"start":"2026-09-06","end":"2026-09-19"});
-        let records = (6..20).map(|day|json!({"employeeCode":"AA01","date":format!("2026-09-{day:02}"),"hours":0,"status":"Complete","punches":[]})).collect::<Vec<_>>();
+        let records = (6..20)
+            .map(|day| {
+                json!({"employeeCode":"AA01","date":format!("2026-09-{day:02}"),"hours":0,
+            "status":"Complete","punches":[]})
+            })
+            .collect::<Vec<_>>();
         let prepare = || checkpoint.prepare(&period, std::slice::from_ref(&employee), "UTC");
         let initial = prepare().await?;
         checkpoint

@@ -101,7 +101,16 @@ impl Egress {
             loop {
                 tokio::select! {
                     accepted=listener.accept()=>match accepted {
-                        Ok((stream,_))=> {if let Ok(permit)=slots.clone().try_acquire_owned(){tasks.spawn(async move {let _permit=permit;let _=tokio::time::timeout(std::time::Duration::from_secs(120),proxy(stream,policy)).await;});}},
+                        Ok((stream,_))=> {
+                            if let Ok(permit)=slots.clone().try_acquire_owned() {
+                                tasks.spawn(async move {
+                                    let _permit=permit;
+                                    let _=tokio::time::timeout(
+                                        std::time::Duration::from_secs(120),proxy(stream,policy)
+                                    ).await;
+                                });
+                            }
+                        },
                         Err(_)=>break,
                     },
                     _=tasks.join_next(),if !tasks.is_empty()=>{},

@@ -285,7 +285,15 @@ mod tests {
     }
     fn pending(store: &Store) -> String {
         let id = crate::crypto::id("dsp").unwrap();
-        store.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES (?,'Collectors','preview','provisioning','UTC',?)", [&id, &db::iso()]).unwrap();
+        store
+            .platform
+            .exec(
+                "INSERT INTO \
+            dsps(id,name,environment,status,timezone,created_at) VALUES \
+            (?,'Collectors','preview','provisioning','UTC',?)",
+                [&id, &db::iso()],
+            )
+            .unwrap();
         id
     }
     fn provisioned() -> (tempfile::TempDir, Store, String) {
@@ -575,7 +583,13 @@ mod tests {
     fn cortex_storage_opens_without_the_emptied_delivery_history_tables() {
         let (_root, store, id) = provisioned();
         let cortex = store.collector(&id, Provider::Cortex).unwrap();
-        cortex.0.execute_batch("DROP TRIGGER minimize_legacy_meal_publication; DROP TABLE meal_breaks; DROP TABLE meal_delivery_events;").unwrap();
+        cortex
+            .0
+            .execute_batch(
+                "DROP TRIGGER minimize_legacy_meal_publication; DROP TABLE \
+            meal_breaks; DROP TABLE meal_delivery_events;",
+            )
+            .unwrap();
         drop(cortex);
         store.open_collectors(&id).unwrap();
         let config = store.config.clone();

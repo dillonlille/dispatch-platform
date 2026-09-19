@@ -55,7 +55,8 @@ impl State {
             [],
         )? {
             for provider in collectors::Provider::ALL {
-                store.collector(db::s(&dsp, "id"), *provider)?.exec("UPDATE connections SET status='error',error='verification_expired' WHERE status IN ('signing_in','needs_verification')",[])?;
+                store.collector(db::s(&dsp, "id"), *provider)?.exec("UPDATE connections SET \
+                    status='error',error='verification_expired' WHERE status IN ('signing_in','needs_verification')",[])?;
             }
         }
         Ok(Arc::new(Self {

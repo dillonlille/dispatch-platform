@@ -52,7 +52,8 @@ pub struct Metrics {
 }
 /// The journal line for one attempt: outcome and timings, without page reads.
 pub fn summary(metrics: &Metrics) -> Value {
-    serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,"elapsedMs":metrics.elapsed_ms,"authenticationMs":metrics.authentication_ms,"collectionMs":metrics.collection_ms})
+    serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,
+        "elapsedMs":metrics.elapsed_ms,"authenticationMs":metrics.authentication_ms,"collectionMs":metrics.collection_ms})
 }
 impl Metrics {
     /// For a job given as its raw row in JSON; a worker starts from the typed row.
@@ -372,7 +373,11 @@ impl Store {
     pub fn save_metrics(&self, job: &str, owner: &str, metrics: &Metrics) -> Result<()> {
         // An interrupted attempt is sealed by recovery. Late writes cannot replace
         // its diagnostics or those of a newer attempt, even after cancellation.
-        self.jobs.exec("UPDATE job_metrics SET metrics=? WHERE job_id=? AND attempt=? AND owner=? AND json_extract(metrics,'$.outcome')='running'",rusqlite::params![serde_json::to_string(metrics)?,job,metrics.attempt,owner])?;
+        self.jobs.exec(
+            "UPDATE job_metrics SET metrics=? WHERE job_id=? AND attempt=? AND \
+            owner=? AND json_extract(metrics,'$.outcome')='running'",
+            rusqlite::params![serde_json::to_string(metrics)?, job, metrics.attempt, owner],
+        )?;
         Ok(())
     }
     pub fn metrics(&self, job: &str) -> Result<Vec<Value>> {

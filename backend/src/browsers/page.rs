@@ -62,7 +62,14 @@ impl Page {
                 None,
             )
             .await?;
-        self.browser.command("Browser.setWindowBounds",json!({"windowId":window["windowId"],"bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),None).await?;
+        self.browser
+            .command(
+                "Browser.setWindowBounds",
+                json!({"windowId":window["windowId"],
+            "bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),
+                None,
+            )
+            .await?;
         Ok(())
     }
     /// Brings the tab forward and closes every other one.
@@ -148,7 +155,13 @@ impl Page {
                 Some((s(frame, "id").into(), s(frame, "loaderId").into(), context));
             context
         };
-        let value=self.command("Runtime.evaluate",json!({"expression":expression,"contextId":context,"returnByValue":true,"awaitPromise":true})).await?;
+        let value = self
+            .command(
+                "Runtime.evaluate",
+                json!({"expression":expression,"contextId":context,
+            "returnByValue":true,"awaitPromise":true}),
+            )
+            .await?;
         if value.get("navigationPending").is_some() {
             *self.world.lock().expect("page world") = None;
         }
@@ -259,7 +272,12 @@ impl Page {
         match s(input, "kind") {
             "click" => {
                 for kind in ["mousePressed", "mouseReleased"] {
-                    self.command("Input.dispatchMouseEvent",json!({"type":kind,"x":input["x"],"y":input["y"],"button":"left","clickCount":1})).await?;
+                    self.command(
+                        "Input.dispatchMouseEvent",
+                        json!({"type":kind,"x":input["x"],"y":input["y"],
+                        "button":"left","clickCount":1}),
+                    )
+                    .await?;
                 }
             }
             "pointer" => {
@@ -268,10 +286,17 @@ impl Page {
                     "up" => "mouseReleased",
                     _ => "mouseMoved",
                 };
-                self.command("Input.dispatchMouseEvent",json!({"type":kind,"x":input["x"],"y":input["y"],"button":if s(input,"phase")=="move"&&input["pressed"]!=true{"none"}else{"left"},"buttons":if input["pressed"]==true{1}else{0},"clickCount":if kind=="mouseMoved"{0}else{1}})).await?;
+                self.command("Input.dispatchMouseEvent",json!({"type":kind,"x":input["x"],"y":input["y"],
+                    "button":if s(input,"phase")=="move"&&input["pressed"]!=true{"none"}else{"left"},
+                    "buttons":if input["pressed"]==true{1}else{0},"clickCount":if kind=="mouseMoved"{0}else{1}})).await?;
             }
             "scroll" => {
-                self.command("Input.dispatchMouseEvent",json!({"type":"mouseWheel","x":input["x"],"y":input["y"],"deltaX":input["deltaX"],"deltaY":input["deltaY"]})).await?;
+                self.command(
+                    "Input.dispatchMouseEvent",
+                    json!({"type":"mouseWheel","x":input["x"],"y":input["y"],
+                    "deltaX":input["deltaX"],"deltaY":input["deltaY"]}),
+                )
+                .await?;
             }
             "type" => {
                 let text = s(input, "text");
@@ -304,7 +329,8 @@ impl Page {
                     _ => return Err(Error::new("invalid_input", 400)),
                 };
                 for kind in ["keyDown", "keyUp"] {
-                    let mut args = json!({"type":kind,"key":key,"windowsVirtualKeyCode":code,"modifiers":if input["shift"]==true{8}else{0}});
+                    let mut args = json!({"type":kind,"key":key,"windowsVirtualKeyCode":code,
+                        "modifiers":if input["shift"]==true{8}else{0}});
                     if key == "Enter" && kind == "keyDown" {
                         args["text"] = json!("\r");
                     }

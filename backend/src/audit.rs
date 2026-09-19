@@ -54,7 +54,8 @@ impl Store {
         reference: Option<(&str, &str)>,
     ) -> Result<()> {
         let data = (target.is_some() || !changes.is_empty() || reference.is_some()).then(|| {
-            json!({"target":target,"ref":reference.map(|(kind,id)|json!({"kind":kind,"id":id})),"changes":changes.iter().map(|(field,from,to)|json!({"field":field,"from":from,"to":to})).collect::<Vec<_>>()}).to_string()
+            json!({"target":target,"ref":reference.map(|(kind,id)|json!({"kind":kind,"id":id})),
+                "changes":changes.iter().map(|(field,from,to)|json!({"field":field,"from":from,"to":to})).collect::<Vec<_>>()}).to_string()
         });
         let shown = self.shown(actor, dsp, action)?;
         self.platform.exec(
@@ -126,17 +127,31 @@ impl Store {
     pub fn audit_page(&self, query: &AuditQuery) -> Result<Value> {
         // Inside a DSP a platform owner is only ever "Platform support".
         const SUPPORT: &str = "(?1 IS NOT NULL AND COALESCE(u.platform_owner,0)=1)";
-        const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (?1 IS NULL OR (a.dsp_id=?1 AND (COALESCE(u.platform_owner,0)=0 OR a.shown=1)))";
+        const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps \
+            d ON d.id=a.dsp_id WHERE (?1 IS NULL OR (a.dsp_id=?1 AND (COALESCE(u.platform_owner,0)=0 OR a.shown=1)))";
         let name = format!(
             "CASE WHEN {SUPPORT} THEN 'Platform support' ELSE COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System') END"
         );
         let actor = format!(
-            "CASE WHEN {SUPPORT} THEN 'support' ELSE COALESCE(a.actor_id,CASE WHEN a.actor_name IS NULL THEN 'system' ELSE 'name:'||a.actor_name END) END"
+            "CASE WHEN {SUPPORT} THEN 'support' ELSE COALESCE(a.actor_id,CASE WHEN \
+                a.actor_name IS NULL THEN 'system' ELSE 'name:'||a.actor_name END) END"
         );
-        const AREA: &str = "CASE WHEN a.action LIKE 'member.%' OR a.action LIKE 'invitation.%' THEN 'team' WHEN a.action LIKE 'role.%' THEN 'roles' WHEN a.action LIKE 'collection.%' OR a.action LIKE 'cortex.collection.%' OR a.action LIKE 'meal_breaks.%' THEN 'collections' WHEN a.action LIKE 'schedule.%' THEN 'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action IN ('dsp.view_opened','dsp.owner_view_opened') THEN CASE WHEN ?1 IS NULL THEN 'access' ELSE 'team' END WHEN a.action LIKE 'account.%' THEN 'access' WHEN a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
+        const AREA: &str = "CASE WHEN a.action LIKE 'member.%' OR a.action LIKE \
+            'invitation.%' THEN 'team' WHEN a.action LIKE 'role.%' THEN 'roles' WHEN \
+            a.action LIKE 'collection.%' OR a.action LIKE 'cortex.collection.%' OR a.action \
+            LIKE 'meal_breaks.%' THEN 'collections' WHEN a.action LIKE 'schedule.%' THEN \
+            'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action \
+            IN ('dsp.view_opened','dsp.owner_view_opened') THEN CASE WHEN ?1 IS NULL THEN \
+            'access' ELSE 'team' END WHEN a.action LIKE 'account.%' THEN 'access' WHEN \
+            a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
         const FAILED: &str = "a.action LIKE '%.failed'";
         let filters = format!(
-            "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {actor}=?3) AND (?4='' OR a.action LIKE ?4 ESCAPE '\\' OR a.detail LIKE ?4 ESCAPE '\\' OR COALESCE(a.data,'') LIKE ?4 ESCAPE '\\' OR {name} LIKE ?4 ESCAPE '\\' OR COALESCE(d.name,'') LIKE ?4 ESCAPE '\\') AND (?5='' OR a.dsp_id=?5) AND ((?6='' AND ?7='') OR (?6<>'' AND json_extract(a.data,'$.ref.kind')||':'||json_extract(a.data,'$.ref.id')=?6) OR (?7<>'' AND json_extract(a.data,'$.target')=?7))"
+            "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {actor}=?3) AND (?4='' OR a.action \
+                LIKE ?4 ESCAPE '\\' OR a.detail LIKE ?4 ESCAPE '\\' OR COALESCE(a.data,'') \
+                LIKE ?4 ESCAPE '\\' OR {name} LIKE ?4 ESCAPE '\\' OR COALESCE(d.name,'') \
+                LIKE ?4 ESCAPE '\\') AND (?5='' OR a.dsp_id=?5) AND ((?6='' AND ?7='') OR \
+                (?6<>'' AND json_extract(a.data,'$.ref.kind')||':'||json_extract(a.data,'$.ref.id')=?6) OR \
+                (?7<>'' AND json_extract(a.data,'$.target')=?7))"
         );
         let area = format!("(?8='' OR (?8='failures' AND {FAILED}) OR {AREA}=?8)");
         let search = if query.q.is_empty() {
@@ -151,7 +166,27 @@ impl Store {
                     .replace('_', "\\_")
             )
         };
-        let mut events = self.platform.all(&format!("SELECT a.id,a.at,CASE WHEN {SUPPORT} THEN NULL ELSE a.actor_id END actorId,{name} actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail,a.data,{AREA} area {filters} AND {area} AND (?9=0 OR a.id<?9) ORDER BY a.id DESC LIMIT ?10"),rusqlite::params![query.dsp,query.from,query.actor,search,query.within,query.subject,query.named,query.area,query.before,query.limit])?;
+        let mut events = self.platform.all(
+            &format!(
+                "SELECT a.id,a.at,CASE WHEN {SUPPORT} \
+            THEN NULL ELSE a.actor_id END actorId,{name} actorName,a.dsp_id dspId,d.name \
+            dspName,a.action,a.detail,a.data,{AREA} area {filters} AND {area} AND (?9=0 OR \
+            a.id<?9) ORDER BY a.id DESC LIMIT \
+            ?10"
+            ),
+            rusqlite::params![
+                query.dsp,
+                query.from,
+                query.actor,
+                search,
+                query.within,
+                query.subject,
+                query.named,
+                query.area,
+                query.before,
+                query.limit
+            ],
+        )?;
         for event in &mut events {
             let data = event["data"]
                 .as_str()

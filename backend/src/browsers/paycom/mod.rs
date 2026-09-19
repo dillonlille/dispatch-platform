@@ -131,10 +131,15 @@ impl Driver {
             .ok_or_else(|| Error::new("manual_verification_required", 409))?;
         // BrowserOS chrome is asymmetric. Derive the content origin from a real
         // browser pointer event instead of assuming equal window borders.
-        self.page.evaluate("(()=>{globalThis.dispatchPointer=null;globalThis.dispatchPointerListener=e=>{if(e.isTrusted)globalThis.dispatchPointer={x:e.clientX,y:e.clientY,screenX:e.screenX,screenY:e.screenY,scale:devicePixelRatio};};window.addEventListener('mousemove',globalThis.dispatchPointerListener,true);return true;})()").await?;
+        self.page.evaluate("(()=>{globalThis.dispatchPointer=null;\
+                globalThis.dispatchPointerListener=e=>{if(e.isTrusted)globalThis.dispatchPointer={x:e.clientX,\
+                y:e.clientY,screenX:e.screenX,screenY:e.screenY,scale:devicePixelRatio};};\
+                window.addEventListener('mousemove',globalThis.dispatchPointerListener,true);return true;})()").await?;
         self.browser.native_move(510, 380).await?;
         self.browser.native_move(512, 384).await?;
-        let geometry=self.page.evaluate("(()=>{window.removeEventListener('mousemove',globalThis.dispatchPointerListener,true);delete globalThis.dispatchPointerListener;const value=globalThis.dispatchPointer;delete globalThis.dispatchPointer;return value;})()").await?;
+        let geometry=self.page.evaluate("(()=>{window.removeEventListener('mousemove',\
+                globalThis.dispatchPointerListener,true);delete globalThis.dispatchPointerListener;const \
+                value=globalThis.dispatchPointer;delete globalThis.dispatchPointer;return value;})()").await?;
         ensure(
             geometry["scale"] == 1 && geometry["screenX"] == 512 && geometry["screenY"] == 384,
             "browser_interaction_required",
@@ -148,7 +153,10 @@ impl Driver {
         Ok(())
     }
     async fn pin_fingerprint(&self) -> Result<Option<Vec<u8>>> {
-        let values=self.page.evaluate("(()=>{const fields=[...document.querySelectorAll('input[name=firstSecurityQuestion],input[name=secondSecurityQuestion]')];return fields.length===2&&fields.every(e=>e.value)?fields.map(e=>[e.name,e.value]):null})()").await?;
+        let values=self.page.evaluate("(()=>{const \
+            fields=[...document.querySelectorAll('input[name=firstSecurityQuestion],\
+                input[name=secondSecurityQuestion]')];return fields.length===2&&fields.every(e=>e.value)\
+                ?fields.map(e=>[e.name,e.value]):null})()").await?;
         Ok(if values.is_null() {
             None
         } else {
@@ -241,7 +249,10 @@ impl Driver {
                         let point=self.script(json!({"action":"focus","challenge":challenge,"index":field["index"]})).await?;
                         self.native_click(&point, "native_challenge_field_ready")
                             .await?;
-                        let focused=self.script(json!({"action":"focus","challenge":challenge,"index":field["index"],"verifyFocus":true})).await?;
+                        let focused = self
+                            .script(json!({"action":"focus","challenge":challenge,
+                            "index":field["index"],"verifyFocus":true}))
+                            .await?;
                         ensure(
                             s(&focused, "status") == "native_challenge_field_focused",
                             "manual_verification_required",
@@ -314,7 +325,12 @@ impl Driver {
                 && assistance.fingerprint.is_some()
                 && assistance.fingerprint == self.pin_fingerprint().await?
             {
-                let point=self.script(json!({"action":"pins","credentials":{},"challenge":assistance.challenge,"retainValues":true})).await?;
+                let point = self
+                    .script(
+                        json!({"action":"pins","credentials":{},"challenge":assistance.challenge,
+                    "retainValues":true}),
+                    )
+                    .await?;
                 self.attempts.submitted()?;
                 self.native_click(&point, "native_challenge_ready").await?;
                 let current = self
@@ -334,12 +350,17 @@ impl Driver {
     }
     pub async fn request(&mut self, command: Value) -> Result<Value> {
         let result=async { match s(&command,"action") {
-            "start" | "check" => self.authenticate(command["credentials"].clone(),s(&command,"action")=="check" || command["ownerRetry"]==true).await,
+            "start" | "check" => self.authenticate(command["credentials"].clone(),s(&command,
+                "action")=="check" || command["ownerRetry"]==true).await,
             "complete_assistance" => self.complete().await,
             "screenshot" => self.page.screenshot().await,
             "assist" => self.page.assisted(&command["input"]).await,
             "verify" => {
-                let focused=self.page.evaluate("(()=>{const fields=[...document.querySelectorAll('input[autocomplete=\"one-time-code\"],input[name=code],input[name=otp],input[name=verificationCode],input[name=verification_code]')].filter(e=>!e.disabled&&e.offsetParent!==null);if(fields.length!==1)return false;fields[0].focus();return true})()").await?;
+                let focused=self.page.evaluate("(()=>{const \
+                    fields=[...document.querySelectorAll('input[autocomplete=\"one-time-code\"],\
+                input[name=code],input[name=otp],input[name=verificationCode],input[name=verification_code]')\
+                ].filter(e=>!e.disabled&&e.offsetParent!==null);if(fields.length!==1)return false;\
+                fields[0].focus();return true})()").await?;
                 ensure(focused==true,"invalid_verification_code",409)?;
                 self.page.command("Input.insertText",json!({"text":command["code"]})).await?;
                 self.page.assist(&json!({"kind":"key","key":"Enter"})).await?;

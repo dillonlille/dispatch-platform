@@ -158,7 +158,10 @@ fn employees(raw: &Value, expected: &BTreeSet<String>) -> Result<Vec<Value>> {
         ] {
             valid(number.as_f64().is_some_and(f64::is_finite))?;
         }
-        employees.push(json!({"code":code,"name":row["fullName"],"department":department["description"],"position":row["position"],"station":station["code"],"active":true}));
+        employees.push(
+            json!({"code":code,"name":row["fullName"],"department":department["description"],
+            "position":row["position"],"station":station["code"],"active":true}),
+        );
     }
     Ok(employees)
 }
@@ -269,7 +272,9 @@ pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
             }
         }
         if !pending.is_null(){punches.push(json!({"in":pending,"out":null,"hours":null,"inKind":pending_kind,"outKind":null}));}
-        Ok(json!({"employeeCode":employee,"date":day["date"],"hours":(values[index]*100.).round()/100.,"status":if day["missingPunch"]==true{"Missing punch"}else if punches.is_empty(){"No punches"}else{"Complete"},"punches":punches}))
+        Ok(json!({"employeeCode":employee,"date":day["date"],"hours":(values[index]*100.).round()/100.,
+            "status":if day["missingPunch"]==true{"Missing punch"}else if punches.is_empty(){"No punches"}else{"Complete"},
+                "punches":punches}))
     }).collect()
 }
 impl Driver {
@@ -349,7 +354,8 @@ impl Driver {
         // Start a bounded fetch in the isolated world, then poll. No command holds
         // the browser transport for a network-length timeout.
         self.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchRoster=null;(async input=>{{try{{
-            const response=await fetch(input.url,{{method:'POST',credentials:'include',redirect:'error',cache:'no-store',headers:input.headers,body:input.body,signal:AbortSignal.timeout(55000)}});
+            const response=await fetch(input.url,{{method:'POST',credentials:'include',redirect:'error',
+                cache:'no-store',headers:input.headers,body:input.body,signal:AbortSignal.timeout(55000)}});
             if(response.status!==200||!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
             const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let size=0,text='';
             for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 0;}}text+=decoder.decode(part.value,{{stream:true}});}}
@@ -424,10 +430,14 @@ impl Driver {
         )?;
         let sources = employees
             .iter()
-            .map(|employee| json!({"employeeCode":employee["code"],"periodKey":period["key"],"url":source_url(&self.origin, employee, &period)}))
+            .map(|employee| {
+                json!({"employeeCode":employee["code"],"periodKey":period["key"],
+                "url":source_url(&self.origin, employee, &period)})
+            })
             .collect::<Vec<_>>();
         Ok(
-            json!({"employees":employees,"timecards":timecards,"sources":sources,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),
+            json!({"employees":employees,"timecards":timecards,"sources":sources,"from":period["start"],
+                "to":period["end"],"collectedAt":db::iso()}),
         )
     }
 }
@@ -707,7 +717,8 @@ async fn read_response(
     let started = page
         .evaluate(&format!(
             r#"(()=>{{globalThis.dispatchTimecard=null;(async()=>{{try{{
-            const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
+            const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',
+                signal:AbortSignal.timeout(30000)}});
             if(response.status===429||response.status>=500)throw 'unavailable';
             if(response.status!==200||!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 'response';
             const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
@@ -785,7 +796,12 @@ async fn read_once(
             ensure(s(&frame, "url") == source, "authentication_failed", 409)?;
             content_started.get_or_insert_with(Instant::now);
             metrics.page_stage(ordinal, "content");
-            match page.evaluate("({parsed:document.readyState!=='loading',complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')&&Array.from(document.querySelectorAll('input[type=password]')).some(e=>e.offsetParent!==null&&e.getClientRects().length>0),status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
+            match page.evaluate("({parsed:document.readyState!=='loading',\
+                complete:document.readyState==='complete',present:!!document.querySelector('#tbltimesheet')\
+                &&!!document.querySelector('#periodtotals'),login:!document.querySelector('#tbltimesheet')\
+                &&Array.from(document.querySelectorAll('input[type=password]'))\
+                .some(e=>e.offsetParent!==null&&e.getClientRects().length>0),\
+                status:performance.getEntriesByType('navigation')[0]?.responseStatus||0})").await {
                 Ok(value) => {
                     let status = value["status"].as_u64().unwrap_or(0);
                     ensure(![401,403].contains(&status) && value["login"] != true, "authentication_failed", 409)?;
@@ -892,8 +908,14 @@ mod tests {
     }
     #[test]
     fn projection_reconciles_additional_totals_without_double_counting() -> Result<()> {
-        let days=(0..14).map(|i|json!({"date":format!("day{i}"),"hours":if i==0{8}else{0},"totalHours":null,"missingPunch":false,"punches":[]})).collect::<Vec<_>>();
-        let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":10}],"weeklyTotals":[10,0],"periodTotalHours":10});
+        let days = (0..14)
+            .map(|i| {
+                json!({"date":format!("day{i}"),"hours":if i==0{8}else{0},"totalHours":null,
+            "missingPunch":false,"punches":[]})
+            })
+            .collect::<Vec<_>>();
+        let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":10}],
+            "weeklyTotals":[10,0],"periodTotalHours":10});
         assert_eq!(project(&record, "AA01")?[0]["hours"], 10.);
         record["periodTotalHours"] = json!(11);
         assert!(project(&record, "AA01").is_err());
@@ -901,7 +923,12 @@ mod tests {
     }
     #[test]
     fn mixed_pay_code_totals_and_cross_row_punches_remain_exact() -> Result<()> {
-        let days = (0..14).map(|i| json!({"date":format!("day{i}"),"hours":null,"totalHours":null,"missingPunch":false,"punches":[]})).collect::<Vec<_>>();
+        let days = (0..14)
+            .map(|i| {
+                json!({"date":format!("day{i}"),"hours":null,"totalHours":null,
+            "missingPunch":false,"punches":[]})
+            })
+            .collect::<Vec<_>>();
         let mut record = json!({"days":days,"additionalRows":[
             {"date":"day0","hours":2,"totalHours":null},
             {"date":"day2","hours":1.5,"totalHours":8},
@@ -938,19 +965,27 @@ mod tests {
         );
         record["periodTotalHours"] = json!(25.5);
         record["days"][0]["missingPunch"] = json!(true);
-        record["days"][0]["punches"] = json!([{"slot":"i1","rowIndex":0,"displayTime":"08:00 AM"},{"slot":"o1","rowIndex":1,"displayTime":"12:00 PM"}]);
+        record["days"][0]["punches"] = json!([{"slot":"i1","rowIndex":0,"displayTime":"08:00 \
+            AM"},{"slot":"o1","rowIndex":1,"displayTime":"12:00 PM"}]);
         let projected = project(&record, "AA01")?;
         assert_eq!(projected[0]["status"], "Missing punch");
         assert_eq!(
             projected[0]["punches"],
-            json!([{"in":"08:00 AM","out":null,"hours":null,"inKind":null,"outKind":null},{"in":null,"out":"12:00 PM","hours":null,"inKind":null,"outKind":null}])
+            json!([{"in":"08:00 AM","out":null,"hours":null,"inKind":null,"outKind":null},{"in":null,
+                "out":"12:00 PM","hours":null,"inKind":null,"outKind":null}])
         );
         Ok(())
     }
     #[test]
     fn blank_leading_row_uses_additional_totals_and_preserves_punches() -> Result<()> {
-        let days = (0..14).map(|i| json!({"date":format!("day{i}"),"hours":null,"totalHours":null,"missingPunch":false,"unresolvedSlots":[],"punches":[]})).collect::<Vec<_>>();
-        let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":4}],"weeklyTotals":[4,0],"periodTotalHours":4});
+        let days = (0..14)
+            .map(|i| {
+                json!({"date":format!("day{i}"),"hours":null,"totalHours":null,
+            "missingPunch":false,"unresolvedSlots":[],"punches":[]})
+            })
+            .collect::<Vec<_>>();
+        let mut record = json!({"days":days,"additionalRows":[{"date":"day0","hours":2,"totalHours":4}],
+            "weeklyTotals":[4,0],"periodTotalHours":4});
         record["days"][0]["punches"] = json!([
             {"slot":"i1","rowIndex":1,"displayTime":"08:00 AM"},
             {"slot":"o1","rowIndex":1,"displayTime":"10:00 AM"}

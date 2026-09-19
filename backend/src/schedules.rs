@@ -538,7 +538,13 @@ mod tests {
         config.root = root.path().into();
         let db = Store::initialize(config).unwrap();
         let id = crypto::id("dsp").unwrap();
-        db.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES (?,'Schedule test','preview','provisioning','America/Chicago',?)",[&id,&iso()]).unwrap();
+        db.platform
+            .exec(
+                "INSERT INTO dsps(id,name,environment,status,timezone,created_at) \
+            VALUES (?,'Schedule test','preview','provisioning','America/Chicago',?)",
+                [&id, &iso()],
+            )
+            .unwrap();
         db.provision(&id).unwrap();
         db.collector(&id, Provider::Paycom)
             .unwrap()
@@ -634,13 +640,25 @@ mod tests {
                 params![old_anchor, key],
             )
             .unwrap();
-        let preview = db.preview_schedule(&id, &json!({"scheduleId":key,"cadence":"interval","intervalMinutes":300,"localTime":"00:00"})).unwrap();
+        let preview = db
+            .preview_schedule(
+                &id,
+                &json!({"scheduleId":key,"cadence":"interval",
+            "intervalMinutes":300,"localTime":"00:00"}),
+            )
+            .unwrap();
         let resumed = db
             .enable_schedule(&id, key, &json!({"revision":1,"enabled":true}))
             .unwrap();
         assert_eq!(Some(&preview.next_run), resumed.next_run.as_ref());
         assert_eq!((ms(&preview.next_run) - old_anchor) % (300 * 60000), 0);
-        let changed = db.preview_schedule(&id, &json!({"scheduleId":key,"cadence":"daily","intervalMinutes":null,"localTime":"06:00"})).unwrap();
+        let changed = db
+            .preview_schedule(
+                &id,
+                &json!({"scheduleId":key,"cadence":"daily","intervalMinutes":null,
+            "localTime":"06:00"}),
+            )
+            .unwrap();
         assert_eq!(
             changed.next_run,
             next_daily("06:00", "America/Chicago", now()).unwrap()

@@ -148,7 +148,11 @@ impl Db {
         }
     }
     pub fn set(&self, key: &str, value: &Value) -> Result<()> {
-        self.exec("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[key,&value.to_string()])?;
+        self.exec(
+            "INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE \
+            SET value=excluded.value",
+            [key, &value.to_string()],
+        )?;
         Ok(())
     }
 }

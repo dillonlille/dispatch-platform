@@ -150,7 +150,8 @@ pub fn seed(db: &Store) -> Result<()> {
         let id = dsp.id.as_str();
         let area = db.area(id, "secrets")?;
         let key = db::key_file(&area.join("vault.key"))?;
-        let credentials = json!({"clientCode":"DEMO1","username":"fixture-user","password":"synthetic-password","securityAnswers":["one","two","three","four","five"]});
+        let credentials = json!({"clientCode":"DEMO1","username":"fixture-user","password":"synthetic-password",
+            "securityAnswers":["one","two","three","four","five"]});
         db::write_private(
             &area.join("paycom.enc"),
             crypto::encrypt(&key, &format!("{id}:paycom:2"), &credentials)?.as_bytes(),

@@ -215,7 +215,8 @@ impl Session {
         let mut cancellation = self.cancel.subscribe();
         let mut worker = tokio::select! {
             _=super::cancelled(&mut cancellation)=>return Err(Error::new("verification_expired",409)),
-            lock=tokio::time::timeout(Duration::from_secs(seconds),self.worker.lock())=>lock.map_err(|_|Error::new("provider_timeout",504))?,
+            lock=tokio::time::timeout(Duration::from_secs(seconds),
+                self.worker.lock())=>lock.map_err(|_|Error::new("provider_timeout",504))?,
         };
         ensure(!self.closed(), "verification_expired", 409)?;
         if let Some((state, context)) = guard {
@@ -306,7 +307,13 @@ impl Store {
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        self.collector(id, provider)?.exec("UPDATE connections SET status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE verified_at END WHERE provider=? AND revision=? AND enabled=1",params![status,error,iso(),status,iso(),provider.id(),revision])?;
+        self.collector(id, provider)?.exec(
+            "UPDATE connections SET \
+            status=?,error=?,updated_at=?,verified_at=CASE WHEN ?='ready' THEN ? ELSE \
+            verified_at END WHERE provider=? AND revision=? AND \
+            enabled=1",
+            params![status, error, iso(), status, iso(), provider.id(), revision],
+        )?;
         Ok(())
     }
     pub fn save_credentials(&self, c: &Context, value: &Value, provider: Provider) -> Result<()> {
@@ -319,7 +326,10 @@ impl Store {
             &area.join(format!("{}.enc", provider.id())),
             crypto::encrypt(&key, &format!("{id}:{}:2", provider.id()), value)?.as_bytes(),
         )?;
-        self.collector(id, provider)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[provider.collector().account_label(value),&iso(),provider.id()])?;
+        self.collector(id, provider)?.exec("UPDATE connections SET \
+            enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",
+                [provider.collector().account_label(value),&iso(),provider.id()])?;
+
         self.clear_collector_browser_state(id, provider)?;
         c.audit(self, "connection.credentials_saved", provider.id())
     }
@@ -339,7 +349,12 @@ impl Store {
         let id = c.dsp.id.as_str();
         let db = self.collector(id, provider)?;
         db.transaction(|| {
-            db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;
+            db.exec(
+                "UPDATE connections SET \
+                enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? \
+                WHERE provider=?",
+                [iso(), provider.id().into()],
+            )?;
             provider.collector().disabled(&db)
         })?;
         self.pause_provider_schedules(id, provider)?;
@@ -507,10 +522,11 @@ impl State {
             }
             sessions.insert(provider.key(id), session.clone());
         }
-        let start=async {
+        let start = async {
             let mut worker = session.worker.lock().await;
             ensure(!session.closed(), "verification_expired", 409)?;
-            let dsp=id.to_owned();self.run(move|db| {
+            let dsp = id.to_owned();
+            self.run(move |db| {
                 let tenant = db.find_dsp(&dsp)?;
                 ensure(tenant.status == DspStatus::Active, "dsp_unavailable", 409)?;
                 let connection = db
@@ -518,28 +534,63 @@ impl State {
                     .ok_or_else(|| Error::new("connection_required", 409))?;
                 let current = connection.enabled && connection.revision == revision;
                 ensure(current, "connection_changed", 409)?;
-                db.connection_state(&dsp,provider,revision,"signing_in",None)
-            }).await?;
+                db.connection_state(&dsp, provider, revision, "signing_in", None)
+            })
+            .await?;
             ensure(!session.closed(), "verification_expired", 409)?;
-            db::private_dir(&run)?;db::private_dir(&profile)?;
+            db::private_dir(&run)?;
+            db::private_dir(&profile)?;
             if session.fixture {
-                *worker=Some(Box::new(fixture::Driver::new(provider)));
+                *worker = Some(Box::new(fixture::Driver::new(provider)));
             } else {
-                attempt::preflight(&profile,provider.id(),retry)?;
-                let policy=if let Some(value)=&self.config.fixture_url {
-                    browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
-                } else { provider.collector().network() };
-                let runtime=self.browsers.runtime(&self.config)?;
-                let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
-                session.process_id.store(browser.process_id(),Ordering::Release);
-                match provider.collector().driver(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
-                    Ok(driver)=>*worker=Some(driver),
-                    Err(error)=>{browser.close().await;return Err(error);},
+                attempt::preflight(&profile, provider.id(), retry)?;
+                let policy = if let Some(value) = &self.config.fixture_url {
+                    browseros::NetworkPolicy::Fixture(
+                        std::num::NonZeroU16::new(
+                            url::Url::parse(value)
+                                .expect("validated fixture URL")
+                                .port()
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                } else {
+                    provider.collector().network()
+                };
+                let runtime = self.browsers.runtime(&self.config)?;
+                let browser = runtime
+                    .start(&profile, browseros::Mode::Windowed, policy)
+                    .await?;
+                session
+                    .process_id
+                    .store(browser.process_id(), Ordering::Release);
+                match provider
+                    .collector()
+                    .driver(
+                        browser.clone(),
+                        &profile,
+                        self.config.fixture_url.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(driver) => *worker = Some(driver),
+                    Err(error) => {
+                        browser.close().await;
+                        return Err(error);
+                    }
                 }
             }
             drop(worker);
-            session.request(json!({"action":"start","credentials":credentials,"timezone":session.timezone,"ownerRetry":retry,"fixtureUrl":self.config.fixture_url}),&["ready","challenge"],180).await
-        }.await;
+            session
+                .request(
+                    json!({"action":"start","credentials":credentials,"timezone":session.timezone,
+                "ownerRetry":retry,"fixtureUrl":self.config.fixture_url}),
+                    &["ready", "challenge"],
+                    180,
+                )
+                .await
+        }
+        .await;
         self.browser_result(&session, &start).await?;
         if let Err(error) = start {
             self.browsers.revoke_current(&session).await;
