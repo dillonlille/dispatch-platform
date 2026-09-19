@@ -618,7 +618,8 @@ mod generated {
         ($cfg:expr, $($ty:ty),* $(,)?) => {
             BTreeMap::from([$((
                 <$ty>::output_path().expect("named type"),
-                <$ty>::export_to_string($cfg).expect("exportable type"),
+                <$ty>::export_to_string($cfg).expect("exportable type")
+                    .lines().map(|line| format!("{}\n", line.trim_end())).collect::<String>(),
             )),*])
         };
     }
