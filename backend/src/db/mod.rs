@@ -1,12 +1,14 @@
 mod connection;
 mod files;
 pub mod migrations;
+mod row;
 mod schema;
 mod store;
 pub use crate::audit::{AuditChange, AuditQuery};
 pub use connection::{Db, boolean, flag, n, s};
 pub use files::{key_file, private_dir, private_file, write_private};
 pub use migrations::{Kind, migrate};
+pub use row::{FromRow, Row};
 pub use store::{DspLease, Store};
 pub fn identifier(value: &str, prefix: &str) -> bool {
     value.strip_prefix(prefix).is_some_and(|s| {

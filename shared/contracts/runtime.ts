@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { permissions, type Job, type JobMetrics, type SessionView, type User } from './index.js';
+import type { Dsp } from './generated/Dsp';
+import {
+  permissions,
+  type DspView,
+  type Job,
+  type JobMetrics,
+  type SessionView,
+  type User,
+} from './index.js';
 
 const text = z.string();
 const count = z.number().int().nonnegative();
@@ -28,7 +36,7 @@ const dsp = z.object({
   permanent: z.boolean(),
   revision: count,
   createdAt: text,
-});
+}) satisfies z.ZodType<Dsp>;
 const profile = z.object({
   abbreviation: text,
   stationCode: text,
@@ -63,7 +71,7 @@ const viewSchema = z.object({
   roles: z.array(viewRole).optional(),
   permissions: z.array(permission),
   profile,
-});
+}) satisfies z.ZodType<DspView>;
 const pageRead = z.object({
   ordinal: count,
   attempt: count,

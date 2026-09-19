@@ -29,7 +29,8 @@ impl Collector for Cortex {
     }
     fn seed(&self, dsp: &str) -> String {
         format!(
-            "INSERT INTO storage_identity VALUES ('{dsp}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');",
+            "INSERT INTO storage_identity VALUES ('{dsp}','cortex','cortex-v1');\nINSERT \
+                INTO connections(provider,updated_at) VALUES ('cortex','{}');",
             db::iso()
         )
     }

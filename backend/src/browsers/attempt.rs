@@ -95,13 +95,7 @@ impl Attempts {
             return Ok(());
         }
         self.record.pending = false;
-        if [
-            "primary_credentials_rejected",
-            "security_answers_rejected",
-            "invalid_credentials",
-        ]
-        .contains(&code)
-        {
+        if crate::Code::text_is_any(code, crate::Code::REJECTED_CREDENTIALS) {
             self.record.failures = (self.record.failures + 1).min(3);
             self.record.manual = self.record.failures == 3;
             self.record.blocked_until = chrono::Utc::now().timestamp_millis()
@@ -113,8 +107,7 @@ impl Attempts {
             self.record.recover = false;
         } else {
             self.record.manual = true;
-            self.record.recover =
-                code != "manual_verification_required" && code != "account_locked";
+            self.record.recover = !crate::Code::text_is_any(code, crate::Code::NEEDS_OWNER);
         }
         self.persist()
     }

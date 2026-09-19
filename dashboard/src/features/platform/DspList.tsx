@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Ellipsis, Plus, RefreshCw, Eye } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
 import { useAction } from '../../app/useAction.js';
-import { api, useData } from '../../app/api.js';
+import { api } from '../../app/api.js';
 import { DspAvatar } from './DspAvatar.js';
 import {
   Badge,
@@ -20,6 +20,7 @@ import {
 } from '../../ui/index.js';
 import { title } from '../../lib/format.js';
 import { open } from './open.js';
+import { usePlatformDsps } from '../../app/endpoints.js';
 
 const runtime = (dsp: DspSummary) =>
   dsp.profile.removed ? 'Stopped' : dsp.status === 'active' ? 'Running' : title(dsp.status);
@@ -32,7 +33,7 @@ const onboarding = (dsp: DspSummary) =>
       ? 'Invitation pending'
       : 'Invite needed';
 export function DspList() {
-  const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000);
+  const { data, error, refresh } = usePlatformDsps(10000);
   const [query, setQuery] = useUpdateState('dsp-query', ''),
     [filter, setFilter] = useUpdateState('dsp-filter', 'all'),
     [creating, setCreating] = useState(false),

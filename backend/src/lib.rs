@@ -27,7 +27,7 @@ pub mod tenants;
 pub mod validate;
 pub mod workforce;
 
-pub use error::{Error, Result, ensure};
+pub use error::{Code, Error, Result, ensure};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Semaphore;
 
@@ -55,7 +55,8 @@ impl State {
             [],
         )? {
             for provider in collectors::Provider::ALL {
-                store.collector(db::s(&dsp, "id"), *provider)?.exec("UPDATE connections SET status='error',error='verification_expired' WHERE status IN ('signing_in','needs_verification')",[])?;
+                store.collector(db::s(&dsp, "id"), *provider)?.exec("UPDATE connections SET \
+                    status='error',error='verification_expired' WHERE status IN ('signing_in','needs_verification')",[])?;
             }
         }
         Ok(Arc::new(Self {

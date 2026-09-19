@@ -4,6 +4,7 @@ import type { BrowserFrame, BrowserInput } from '../../../../shared/browser.js';
 import { api, ApiError } from '../../app/api.js';
 import { ErrorBox, Loading, Modal } from '../../ui/index.js';
 import { messageOf } from '../../lib/errors.js';
+import { connectionUrl } from '../../app/endpoints.js';
 
 export function BrowserVerification({
   sessionId,
@@ -15,7 +16,7 @@ export function BrowserVerification({
   close: () => void;
 }) {
   const name = provider === 'paycom' ? 'Paycom' : 'Cortex';
-  const endpoint = `/api/dsp/connections/${provider}`;
+  const endpoint = connectionUrl(provider);
   const [frame, setFrame] = useState<BrowserFrame>();
   const [error, setError] = useState('');
   const [streamError, setStreamError] = useState('');

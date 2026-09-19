@@ -323,7 +323,8 @@ fn boundaries(route: &Itinerary, meal: &Meal) -> Boundaries {
 }
 pub fn comparison_meal(route: &Itinerary, meal: &Meal) -> Value {
     let b = boundaries(route, meal);
-    json!({"mealId":meal.id,"lastDelivery":b.prior.map(at),"start":at(meal.start),"end":meal.end.map(at),"firstDelivery":b.next.map(at),"beforeStatus":b.before,"afterStatus":b.after})
+    json!({"mealId":meal.id,"lastDelivery":b.prior.map(at),"start":at(meal.start),"end":meal.end.map(at),
+        "firstDelivery":b.next.map(at),"beforeStatus":b.before,"afterStatus":b.after})
 }
 impl Store {
     pub fn publish_meals(
@@ -338,7 +339,9 @@ impl Store {
         db.transaction(|| {
             // Recovered workers may repeat publication after a crash between databases.
             if let Some(existing)=db.one("SELECT id FROM meal_publications WHERE job_id=?",[job])? {return Ok(existing);}
-            let previous=db.one("SELECT id,collected_at FROM meal_publications WHERE active=1 AND report_date=? AND station=? AND service_area_id=? AND provider=?",params![expected.date,expected.station,expected.service_area_id,expected.provider])?;
+            let previous=db.one("SELECT id,collected_at FROM meal_publications WHERE \
+                active=1 AND report_date=? AND station=? AND service_area_id=? AND \
+                provider=?",params![expected.date,expected.station,expected.service_area_id,expected.provider])?;
             if let Some(previous)=&previous {
                 ensure(s(previous,"collected_at")<=at(capture.finished_at).as_str(),"cortex_stale_capture",409)?;
                 let ids:HashSet<_>=capture.itineraries.iter().map(|i|i.id.as_str()).collect();
@@ -348,23 +351,46 @@ impl Store {
             }
             let id=super::crypto::id("pub")?;
             let meals=capture.itineraries.iter().map(|r|r.meals.len()).sum::<usize>();
-            let gaps=capture.itineraries.iter().flat_map(|r|r.meals.iter().map(move|m|boundaries(r,m))).filter(|b|b.prior.is_some()&&b.next.is_some()).count();
-            db.exec("INSERT INTO meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,3)",params![id,job,expected.date,expected.station,expected.service_area_id,expected.provider,expected.timezone,at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,meals as i64,gaps as i64])?;
+            let gaps=capture.itineraries.iter().flat_map(|r|r.meals.iter().map(move|m|boundaries(r,
+                m))).filter(|b|b.prior.is_some()&&b.next.is_some()).count();
+            db.exec("INSERT INTO \
+                meal_publications(id,job_id,report_date,station,service_area_id,provider,timezone,started_at,\
+                collected_at,itinerary_count,meal_count,verified_gap_count,adapter_version) VALUES (?,?,?,?,?,\
+                ?,?,?,?,?,?,?,3)",params![id,job,expected.date,expected.station,
+                expected.service_area_id,expected.provider,expected.timezone,
+                at(capture.started_at),at(capture.finished_at),capture.itineraries.len() as i64,
+                meals as i64,gaps as i64])?;
             for route in &capture.itineraries {
-                let state=if route.meals.is_empty(){"none_recorded"}else if route.meals.iter().any(|m|m.end.is_none()){"in_progress"}else{"recorded"};
-                db.exec("INSERT INTO meal_itineraries VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,route.transporter_id,route.driver,route.route,at(route.observed_at),route.route_complete,if route.delivery_coverage==Coverage::Complete{"complete"}else{"unavailable"},state])?;
+                let state=if route.meals.is_empty(){"none_recorded"}
+                else if route.meals.iter().any(|m|m.end.is_none()){"in_progress"}else{"recorded"};
+
+                db.exec("INSERT INTO meal_itineraries VALUES \
+                    (?,?,?,?,?,?,?,?,?)",params![id,route.id,route.transporter_id,
+                route.driver,route.route,at(route.observed_at),route.route_complete,
+                if route.delivery_coverage==Coverage::Complete{"complete"}else{"unavailable"},
+                state])?;
                 if let Some(url)=&route.source_url {
                     db.exec("INSERT INTO meal_sources VALUES (?,?,?)",params![id,route.id,url])?;
                 }
                 for meal in &route.meals {
                     let b=boundaries(route,meal);
-                    db.exec("INSERT INTO meal_records(publication_id,itinerary_id,meal_id,last_delivery_at,started_at,ended_at,first_delivery_at,before_status,after_status) VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,meal.id,b.prior.map(at),at(meal.start),meal.end.map(at),b.next.map(at),b.before,b.after])?;
+                    db.exec("INSERT INTO \
+                        meal_records(publication_id,itinerary_id,meal_id,last_delivery_at,started_at,ended_at,\
+                first_delivery_at,before_status,after_status) VALUES (?,?,?,?,?,?,?,?,?)",
+                params![id,route.id,meal.id,b.prior.map(at),at(meal.start),
+                meal.end.map(at),b.next.map(at),b.before,b.after])?;
                 }
             }
             if let Some(previous)=previous {db.exec("UPDATE meal_publications SET active=0 WHERE id=?",[s(&previous,"id")])?;}
             db.exec("UPDATE meal_publications SET active=1 WHERE id=?",[&id])?;
             // Keep the active version and four prior accepted versions per scope.
-            db.exec("DELETE FROM meal_publications WHERE active=0 AND report_date=? AND station=? AND service_area_id=? AND provider=? AND id NOT IN (SELECT id FROM meal_publications WHERE active=0 AND report_date=? AND station=? AND service_area_id=? AND provider=? ORDER BY collected_at DESC,id DESC LIMIT 4)",params![expected.date,expected.station,expected.service_area_id,expected.provider,expected.date,expected.station,expected.service_area_id,expected.provider])?;
+            db.exec("DELETE FROM meal_publications WHERE active=0 AND report_date=? AND \
+                station=? AND service_area_id=? AND provider=? AND id NOT IN (SELECT id FROM \
+                meal_publications WHERE active=0 AND report_date=? AND station=? AND \
+                service_area_id=? AND provider=? ORDER BY collected_at DESC,id DESC LIMIT \
+                4)",params![expected.date,expected.station,expected.service_area_id,
+                expected.provider,expected.date,expected.station,expected.service_area_id,
+                expected.provider])?;
             Ok(json!({"id":id,"itineraries":capture.itineraries.len(),"meals":meals,"verifiedGapPairs":gaps}))
         })
     }
@@ -374,7 +400,15 @@ impl Store {
             "invalid_date",
             400,
         )?;
-        Ok(json!(self.collector(dsp,Provider::Cortex)?.all("SELECT id,job_id jobId,report_date date,station,service_area_id serviceAreaId,provider,timezone,started_at startedAt,collected_at collectedAt,itinerary_count itineraryCount,meal_count mealCount,verified_gap_count verifiedGapPairs FROM meal_publications WHERE report_date=? AND active=1 ORDER BY station,service_area_id,provider",[date])?))
+        Ok(json!(self.collector(dsp, Provider::Cortex)?.all(
+            "SELECT id,job_id \
+            jobId,report_date date,station,service_area_id \
+            serviceAreaId,provider,timezone,started_at startedAt,collected_at \
+            collectedAt,itinerary_count itineraryCount,meal_count \
+            mealCount,verified_gap_count verifiedGapPairs FROM meal_publications WHERE \
+            report_date=? AND active=1 ORDER BY station,service_area_id,provider",
+            [date]
+        )?))
     }
 }
 // Used only by the explicitly configured synthetic provider mode.

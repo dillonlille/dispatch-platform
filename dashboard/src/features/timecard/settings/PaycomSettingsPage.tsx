@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
-import { api, useData } from '../../../app/api.js';
 import { DataState, ErrorBox, Header } from '../../../ui/index.js';
 import {
   scheduleIssues,
   type CollectionSchedule,
-  type CollectionSchedules,
   type ScheduleInput,
 } from '../../../../../shared/schedules.js';
 import { dspHash } from '../../../app/navigation.js';
@@ -14,6 +12,7 @@ import { LateDas } from './LateDas.js';
 import { nextCollection } from './nextCollection.js';
 import { ScheduleEditor } from './ScheduleEditor.js';
 import './timecard-schedules.css';
+import { useSchedules, getSchedules, setScheduleEnabled } from '../../../app/endpoints.js';
 
 function clock(value: string) {
   const [hour, minute] = value.split(':').map(Number);
@@ -37,7 +36,7 @@ function CollectionLabels({ collection }: Pick<ScheduleInput, 'collection'>) {
   );
 }
 export function PaycomSettingsPage({ dspId }: { dspId: string }) {
-  const query = useData<CollectionSchedules>('/api/dsp/schedules', 10000, dspId, dspId);
+  const query = useSchedules(dspId);
   const [editing, setEditing] = useState<CollectionSchedule | null | undefined>();
   const [busyId, setBusyId] = useState<string>();
   const [updated, setUpdated] = useState<CollectionSchedule>();
@@ -57,10 +56,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
       revision: schedule.revision + 1,
     });
     try {
-      const result = await api<CollectionSchedule>(`/api/dsp/schedules/${schedule.id}/enabled`, {
-        enabled: !schedule.enabled,
-        revision: schedule.revision,
-      });
+      const result = await setScheduleEnabled(schedule.id, !schedule.enabled, schedule.revision);
       setUpdated(result);
       setMessage(schedule.enabled ? 'Schedule paused' : 'Schedule enabled');
     } catch (cause) {
@@ -190,7 +186,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
                   query.refresh();
                 }}
                 onReload={async () => {
-                  const fresh = await api<CollectionSchedules>('/api/dsp/schedules');
+                  const fresh = await getSchedules();
                   const schedule = fresh.schedules.find((value) => value.id === editing?.id);
                   setEditing(schedule);
                   query.refresh();

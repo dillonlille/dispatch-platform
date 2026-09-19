@@ -56,7 +56,10 @@ fn role_columns(db: &Db) -> Result<()> {
     add_column(db, "memberships", "role_id", "TEXT REFERENCES roles(id)")?;
     add_column(db, "invitations", "role_id", "TEXT")?;
     // Here rather than in the baseline, which would fail on a database without the columns.
-    db.0.execute_batch("CREATE INDEX IF NOT EXISTS memberships_role ON memberships(role_id); CREATE INDEX IF NOT EXISTS invitations_role ON invitations(role_id) WHERE used_at IS NULL;")?;
+    db.0.execute_batch(
+        "CREATE INDEX IF NOT EXISTS memberships_role ON memberships(role_id); \
+        CREATE INDEX IF NOT EXISTS invitations_role ON invitations(role_id) WHERE used_at IS NULL;",
+    )?;
     Ok(())
 }
 // Names the actor once their account is deleted.

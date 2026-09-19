@@ -36,7 +36,15 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
                 }
             }
         }
-        let pending=state.read(|db|db.platform.all("SELECT id,encrypted_message,attempts FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",[db::now()])).await;
+        let pending = state
+            .read(|db| {
+                db.platform.all(
+                    "SELECT id,encrypted_message,attempts \
+            FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",
+                    [db::now()],
+                )
+            })
+            .await;
         let rows = match pending {
             Ok(rows) => rows,
             Err(error) => {

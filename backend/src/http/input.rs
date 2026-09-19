@@ -57,6 +57,13 @@ impl Reply {
     pub fn json(value: Value) -> Self {
         Self::status(value, 200)
     }
+    /// A typed response: the struct the route answers with, as the dashboard's contract has it.
+    pub fn of<T: serde::Serialize>(value: &T) -> Result<Self> {
+        Self::of_status(value, 200)
+    }
+    pub fn of_status<T: serde::Serialize>(value: &T, status: u16) -> Result<Self> {
+        Ok(Self::status(serde_json::to_value(value)?, status))
+    }
     pub fn ok() -> Self {
         Self::json(json!({"ok":true}))
     }

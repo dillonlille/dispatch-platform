@@ -35,7 +35,21 @@ pub async fn run() -> Result<()> {
                 503,
             )?;
             let state = crate::State::new(config.clone())?;
-            state.run(|db|ensure(db.platform.one("SELECT id FROM users WHERE platform_owner=1 AND status='active' LIMIT 1",[])?.is_some(),"run_bootstrap_before_starting",503)).await?;
+            state
+                .run(|db| {
+                    ensure(
+                        db.platform
+                            .one(
+                                "SELECT id FROM users WHERE \
+                platform_owner=1 AND status='active' LIMIT 1",
+                                [],
+                            )?
+                            .is_some(),
+                        "run_bootstrap_before_starting",
+                        503,
+                    )
+                })
+                .await?;
             state
                 .run(|db| {
                     db.recover_jobs(true)?;

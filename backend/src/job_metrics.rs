@@ -52,19 +52,35 @@ pub struct Metrics {
 }
 /// The journal line for one attempt: outcome and timings, without page reads.
 pub fn summary(metrics: &Metrics) -> Value {
-    serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,"elapsedMs":metrics.elapsed_ms,"authenticationMs":metrics.authentication_ms,"collectionMs":metrics.collection_ms})
+    serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,
+        "elapsedMs":metrics.elapsed_ms,"authenticationMs":metrics.authentication_ms,"collectionMs":metrics.collection_ms})
 }
 impl Metrics {
+    /// For a job given as its raw row in JSON; a worker starts from the typed row.
     pub fn new(job: &Value) -> Self {
+        Self::begin(
+            n(job, "attempt"),
+            s(job, "started_at"),
+            n(job, "available_at"),
+        )
+    }
+    pub fn start(job: &crate::contracts::JobRow) -> Self {
+        Self::begin(
+            job.attempt,
+            job.started_at.as_deref().unwrap_or(""),
+            job.available_at,
+        )
+    }
+    fn begin(attempt: i64, started_at: &str, available_at: i64) -> Self {
         Self {
-            attempt: n(job, "attempt"),
-            started_at: s(job, "started_at").into(),
+            attempt,
+            started_at: started_at.into(),
             finished_at: None,
             outcome: "running".into(),
             error: None,
             phase: Some(Phase::Starting),
             detail: None,
-            queue_ms: db::now().saturating_sub(n(job, "available_at")).max(0) as u64,
+            queue_ms: db::now().saturating_sub(available_at).max(0) as u64,
             elapsed_ms: 0,
             authentication_ms: None,
             verification_ms: None,
@@ -144,9 +160,15 @@ struct Clock {
 pub struct Recorder(Arc<Mutex<Clock>>);
 impl Recorder {
     pub fn new(job: &Value) -> Self {
+        Self::of(Metrics::new(job))
+    }
+    pub fn start(job: &crate::contracts::JobRow) -> Self {
+        Self::of(Metrics::start(job))
+    }
+    fn of(value: Metrics) -> Self {
         let now = Instant::now();
         Self(Arc::new(Mutex::new(Clock {
-            value: Metrics::new(job),
+            value,
             started: now,
             changed: now,
             pages: Vec::new(),
@@ -351,7 +373,11 @@ impl Store {
     pub fn save_metrics(&self, job: &str, owner: &str, metrics: &Metrics) -> Result<()> {
         // An interrupted attempt is sealed by recovery. Late writes cannot replace
         // its diagnostics or those of a newer attempt, even after cancellation.
-        self.jobs.exec("UPDATE job_metrics SET metrics=? WHERE job_id=? AND attempt=? AND owner=? AND json_extract(metrics,'$.outcome')='running'",rusqlite::params![serde_json::to_string(metrics)?,job,metrics.attempt,owner])?;
+        self.jobs.exec(
+            "UPDATE job_metrics SET metrics=? WHERE job_id=? AND attempt=? AND \
+            owner=? AND json_extract(metrics,'$.outcome')='running'",
+            rusqlite::params![serde_json::to_string(metrics)?, job, metrics.attempt, owner],
+        )?;
         Ok(())
     }
     pub fn metrics(&self, job: &str) -> Result<Vec<Value>> {

@@ -9,7 +9,7 @@ use crate::{
     Result, State,
     accounts::{Auth, Context},
     crypto,
-    db::{Store, flag, s},
+    db::Store,
     ensure,
 };
 use axum::{
@@ -79,7 +79,7 @@ impl Grant for PlatformOwner {
     }
     fn authorize(self, db: &Store, input: &Input) -> Result<Auth> {
         let auth = Session.authorize(db, input)?;
-        let owner = flag(&auth.user, "platformOwner");
+        let owner = auth.user.platform_owner;
         ensure(owner, "platform_owner_required", 403)?;
         Ok(auth)
     }
@@ -115,15 +115,15 @@ impl<W> std::ops::Deref for Ctx<'_, W> {
 impl Ctx<'_, Auth> {
     /// The signed-in user's id, for the audit log.
     pub fn actor(&self) -> &str {
-        s(&self.who.user, "id")
+        self.who.user.id.as_str()
     }
 }
 impl Ctx<'_, Context> {
     pub fn actor(&self) -> &str {
-        s(&self.who.auth.user, "id")
+        self.who.auth.user.id.as_str()
     }
     pub fn dsp_id(&self) -> &str {
-        s(&self.who.dsp, "id")
+        self.who.dsp.id.as_str()
     }
 }
 pub type Anyone<'a> = Ctx<'a, ()>;

@@ -206,6 +206,11 @@ impl Config {
     pub fn environment_root(&self) -> PathBuf {
         self.root.join("data").join(&self.environment)
     }
+    /// The validated environment. The field stays text because it also names a directory.
+    pub fn env(&self) -> crate::contracts::Environment {
+        use crate::contracts::Environment;
+        Environment::parse(&self.environment).unwrap_or(Environment::Preview)
+    }
     pub fn mail_available(&self) -> bool {
         self.mail_mode != "disabled"
     }

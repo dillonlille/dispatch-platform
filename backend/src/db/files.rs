@@ -70,7 +70,9 @@ pub fn private_file(path: &Path, create: bool) -> Result<()> {
                         "links":s.nlink(), "mode":s.mode() & 0o777,
                         "ownerMatches":s.uid() == unsafe { libc::geteuid() },
                         "regular":s.is_file(), "symlink":s.file_type().is_symlink(),
-                        "sqliteSidecar":path.to_string_lossy().ends_with("-wal") || path.to_string_lossy().ends_with("-shm") || path.to_string_lossy().ends_with("-journal")
+                        "sqliteSidecar":path.to_string_lossy().ends_with("-wal")
+                            || path.to_string_lossy().ends_with("-shm")
+                            || path.to_string_lossy().ends_with("-journal")
                     }),
                 );
             }

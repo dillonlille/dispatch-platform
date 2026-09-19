@@ -19,15 +19,16 @@ import { useAction } from '../../app/useAction.js';
 import { RoleSheet } from './RoleSheet.js';
 import { RolesTab } from './RolesTab.js';
 import { assignable } from './assignable.js';
+import { useMembers, inviteMember, setMemberRole, useRoles } from '../../app/endpoints.js';
 
 type Invitation = { email: string; role: string; expiresAt: number; accepted: boolean };
 export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promise<void> }) {
-  const { data, error, refresh } = useData<Membership[]>('/api/dsp/members', 10000);
+  const { data, error, refresh } = useMembers(10000);
   const canInvite = can(view, 'members.invite'),
     canManage = can(view, 'members.manage'),
     canRoles = can(view, 'roles.manage');
   const invitations = useData<Invitation[]>(canInvite ? '/api/dsp/invitations' : '', 10000);
-  const roles = useData<Role[]>('/api/dsp/roles', 10000);
+  const roles = useRoles(10000);
   const [roleEditor, setRoleEditor] = useState<Role | 'new'>();
   const grantable = roles.data?.filter((role) => assignable(view, role)) ?? [];
   const [tab, setTab] = useState('members');
@@ -46,7 +47,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
   );
   const invite = useAction(
     async (form: FormData) => {
-      await api('/api/dsp/members/invite', { email: form.get('email'), role: form.get('role') });
+      await inviteMember(form.get('email'), form.get('role'));
       setInviting(false);
       invitations.refresh();
       roles.refresh();
@@ -56,7 +57,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
   // A null role removes the member.
   const assign = useAction(
     async (member: Membership, role: FormDataEntryValue | null) => {
-      await api(`/api/dsp/members/${member.id}`, { role });
+      await setMemberRole(member.id, role === null ? null : String(role));
       setEditing(undefined);
       await reopen();
       refresh();

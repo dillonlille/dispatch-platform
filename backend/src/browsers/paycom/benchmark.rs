@@ -106,7 +106,8 @@ async fn measure_live_collection() -> Result<()> {
     });
     let result = async {
         let secrets = dsp.join("secrets");
-        let credentials = crate::crypto::decrypt(&db::key_file(&secrets.join("vault.key"))?, &format!("{}:paycom:2",dsp.file_name().unwrap().to_str().unwrap()), &std::fs::read_to_string(secrets.join("paycom.enc"))?)?;
+        let credentials = crate::crypto::decrypt(&db::key_file(&secrets.join("vault.key"))?,
+            &format!("{}:paycom:2",dsp.file_name().unwrap().to_str().unwrap()), &std::fs::read_to_string(secrets.join("paycom.enc"))?)?;
         let auth=driver.authenticate(credentials,false).await?;
         ensure(auth["type"]=="ready","benchmark_verification_required",409)?;
         driver.credentials=Value::Null;
@@ -119,14 +120,19 @@ async fn measure_live_collection() -> Result<()> {
         }).await?;
         let elapsed=started.elapsed().as_millis();
         let reads=serde_json::to_value(recorder.snapshot())?["pageReads"].clone();
-        eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],"spotChecked":reads["spotChecked"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
+        eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],
+            "spotChecked":reads["spotChecked"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
         let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
-        let database=rusqlite::Connection::open_with_flags(crate::collectors::database_path(&dsp, crate::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let database=rusqlite::Connection::open_with_flags(crate::collectors::database_path(&dsp,
+            crate::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();
-        let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
-        for value in statement.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,f64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
+        let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches \
+            FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
+        for value in statement.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,
+            f64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
             let (code,date,hours,status,punches)=value?;
-            expected.insert((code.clone(),date.clone()),json!({"employeeCode":code,"date":date,"hours":hours,"status":status,"punches":serde_json::from_str::<Value>(&punches)?}));
+            expected.insert((code.clone(),date.clone()),json!({"employeeCode":code,"date":date,"hours":hours,
+                "status":status,"punches":serde_json::from_str::<Value>(&punches)?}));
         }
         let records=data["timecards"].as_array().unwrap();
         let mut equal=0; let mut changed=0; let mut added=0;
@@ -138,7 +144,11 @@ async fn measure_live_collection() -> Result<()> {
                 None => added+=1,
             }
         }
-        eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak[0],"collectionPeakPssKiB":collection_peak[1],"collectionPeakPrivateKiB":collection_peak[2],"unreadableSmaps":collection_peak[3]}));
+        eprintln!("BENCH {}",json!({"collectionMs":elapsed,
+            "employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),
+            "comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,
+            "previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak[0],
+            "collectionPeakPssKiB":collection_peak[1],"collectionPeakPrivateKiB":collection_peak[2],"unreadableSmaps":collection_peak[3]}));
 
         // "1" keeps the original six-page probe; a larger number (or "all") covers
         // the roster so parity is measured rather than sampled.
@@ -155,7 +165,8 @@ async fn measure_live_collection() -> Result<()> {
             driver.new_page().await?;
             let from=s(&data,"from"); let to=s(&data,"to");
             let day=chrono::NaiveDate::parse_from_str(from,"%Y-%m-%d").map_err(|_|Error::new("invalid_period",409))?;
-            let period=json!({"start":from,"end":to,"key":format!("{from}_{to}"),"dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
+            let period=json!({"start":from,"end":to,"key":format!("{from}_{to}"),
+                "dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
             let mut confirmed=0;
             for code in &differences {
                 let reference=reference_timecard(&driver,code,&period).await?;
@@ -171,7 +182,9 @@ async fn measure_live_collection() -> Result<()> {
     let exit = driver.browser.close().await;
     eprintln!(
         "BENCH {}",
-        json!({"peakRssKiB":peak[0].load(Ordering::Relaxed),"peakPssKiB":peak[1].load(Ordering::Relaxed),"peakPrivateKiB":peak[2].load(Ordering::Relaxed),"unreadableSmaps":peak[3].load(Ordering::Relaxed),"supervisorReaped":exit.supervisor_reaped})
+        json!({"peakRssKiB":peak[0].load(Ordering::Relaxed),"peakPssKiB":peak[1].load(Ordering::Relaxed),
+            "peakPrivateKiB":peak[2].load(Ordering::Relaxed),"unreadableSmaps":peak[3].load(Ordering::Relaxed),
+            "supervisorReaped":exit.supervisor_reaped})
     );
     result
 }
@@ -189,7 +202,18 @@ async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Resu
     loop {
         ensure(Instant::now() < deadline, "provider_timeout", 504)?;
         let frame = driver.page.frame().await?;
-        if s(&frame,"url")==source && driver.page.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await?==true {break;}
+        if s(&frame, "url") == source
+            && driver
+                .page
+                .evaluate(
+                    "document.readyState==='complete'&&!!document.query\
+                Selector('#tbltimesheet')&&!!document.querySelector('#periodtotals')",
+                )
+                .await?
+                == true
+        {
+            break;
+        }
         ensure(
             driver.page.trusted(s(&frame, "url")),
             "authentication_failed",
@@ -213,7 +237,8 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
     let to = s(data, "to");
     let day = chrono::NaiveDate::parse_from_str(from, "%Y-%m-%d")
         .map_err(|_| Error::new("invalid_period", 409))?;
-    let period = json!({"start":from,"end":to,"key":format!("{from}_{to}"),"dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
+    let period = json!({"start":from,"end":to,"key":format!("{from}_{to}"),
+        "dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
     let mut equal = 0;
     let mut validated = 0;
     let mut rejected = Vec::new();
@@ -236,16 +261,19 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         let extractor = include_str!("timecard.js").trim().trim_end_matches(';');
         driver.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchProbe=null;(async()=>{{try{{
           let stage='fetch';
-          const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
+          const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',
+              signal:AbortSignal.timeout(30000)}});
           if(response.status!==200)throw 'status_'+response.status;
           if(!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 'content_type';
           const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
           for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 'size';}}text+=decoder.decode(part.value,{{stream:true}});}}
           text+=decoder.decode();const document=new DOMParser().parseFromString(text,'text/html'),location={{href:{source}}};
-          const result={{bytes:size,tablePresent:!!document.querySelector('#tbltimesheet'),rows:document.querySelectorAll('#tbltimesheet > tbody > tr').length,scripts:document.scripts.length,record:null}};
+          const result={{bytes:size,tablePresent:!!document.querySelector('#tbltimesheet'),
+              rows:document.querySelectorAll('#tbltimesheet > tbody > tr').length,scripts:document.scripts.length,record:null}};
           try{{result.record=({extractor})({config});}}catch{{}}
           globalThis.dispatchProbe={{ok:true,value:result}};
-        }}catch(error){{globalThis.dispatchProbe={{ok:false,reason:typeof error==='string'?error:String(error&&error.name||'error')}};}}}})();return true;}})()"#, source=json!(source))).await?;
+        }}catch(error){{globalThis.dispatchProbe={{ok:false,reason:typeof error==='string'?error:String(error&&error.name||'error')}};}}}})();return true;}})()"#,
+                 source=json!(source))).await?;
         let deadline = Instant::now() + Duration::from_secs(35);
         let probe = loop {
             ensure(Instant::now() < deadline, "provider_timeout", 504)?;
@@ -316,13 +344,16 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         }
         eprintln!(
             "RESPONSE {}",
-            json!({"ordinal":index+1,"ms":fetched.elapsed().as_millis(),"bytes":value["bytes"],"tablePresent":value["tablePresent"],"rows":value["rows"],"scripts":value["scripts"],"validated":!value["record"].is_null(),"matchesRendered":matches,"differs":differs,"error":failure})
+            json!({"ordinal":index+1,"ms":fetched.elapsed().as_millis(),"bytes":value["bytes"],
+                "tablePresent":value["tablePresent"],"rows":value["rows"],"scripts":value["scripts"],
+                "validated":!value["record"].is_null(),"matchesRendered":matches,"differs":differs,"error":failure})
         );
         driver.page.collect_garbage().await?;
     }
     eprintln!(
         "RESPONSE {}",
-        json!({"samples":samples.min(data["employees"].as_array().unwrap().len()),"validated":validated,"equal":equal,"elapsedMs":started.elapsed().as_millis()})
+        json!({"samples":samples.min(data["employees"].as_array().unwrap().len()),"validated":validated,
+            "equal":equal,"elapsedMs":started.elapsed().as_millis()})
     );
     // Why detached extraction was rejected: on the rendered page, tally each punch
     // cell child's static signature against whether layout shows it. No values.
@@ -334,17 +365,28 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         driver.navigate(&path).await?;
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline
-            && driver.page.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await? != true
+            && driver
+                .page
+                .evaluate(
+                    "document.readyState==='complete'&&!!document.querySelector('#tbltimesheet\
+                ')&&!!document.querySelector('#periodtotals')",
+                )
+                .await?
+                != true
         {
             sleep(Duration::from_millis(200)).await;
         }
         let shape = driver.page.evaluate(r#"(()=>{const t=document.querySelector('#tbltimesheet');if(!t)return null;
           const heads=Array.from(t.querySelectorAll('thead [data-column]')).map(e=>e.getAttribute('data-column'));
           const time=/^(0?[1-9]|1[0-2]):[0-5][0-9] [AP]M$/,tally={};
-          for(const row of t.querySelectorAll(':scope > tbody > tr'))for(const slot of ['i1','o1','i2','o2']){const cell=row.children[heads.indexOf(slot)];if(!cell)continue;
+          for(const row of t.querySelectorAll(':scope > tbody > tr'))for(const slot of ['i1','o1','i2',
+              'o2']){const cell=row.children[heads.indexOf(slot)];if(!cell)continue;
             const kids=Array.from(cell.children);if(kids.length<2)continue;
             for(const kid of kids){const text=(kid.textContent||'').replace(/\s+/g,' ').trim();
-              const key=[kid.tagName.toLowerCase(),'.'+Array.from(kid.classList).sort().join('.'),kid.getAttribute('style')?'[style='+kid.getAttribute('style').replace(/\s+/g,'')+']':'',kid.hidden?'[hidden]':'',time.test(text)?'<time>':text?'<text>':'<empty>',(kid.offsetParent!==null&&kid.getClientRects().length>0)?'VISIBLE':'hidden'].join(' ');
+              const key=[kid.tagName.toLowerCase(),'.'+Array.from(kid.classList).sort().join('.'),
+                  kid.getAttribute('style')?'[style='+kid.getAttribute('style').replace(/\s+/g,'')+']':'',
+                  kid.hidden?'[hidden]':'',time.test(text)?'<time>':text?'<text>':'<empty>',
+                  (kid.offsetParent!==null&&kid.getClientRects().length>0)?'VISIBLE':'hidden'].join(' ');
               tally[key]=(tally[key]||0)+1;}}
           return tally;})()"#).await?;
         eprintln!("SHAPE {}", json!({"rendered":shape}));

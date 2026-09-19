@@ -222,14 +222,16 @@ impl Store {
                 if !change["paycomCode"].is_null() {
                     let code = v::text(change,"paycomCode",1,64)?;
                     ensure(paycom.one("SELECT 1 FROM employees WHERE code=? LIMIT 1",[code])?.is_some()
-                        && cortex.one("SELECT 1 FROM meal_itineraries WHERE transporter_id=? LIMIT 1",[cortex_id])?.is_some(),"employee_link_source_missing",409)?;
+                        && cortex.one("SELECT 1 FROM meal_itineraries WHERE transporter_id=? \
+                            LIMIT 1",[cortex_id])?.is_some(),"employee_link_source_missing",409)?;
                     links.push(json!({"id":super::crypto::id("employee")?,"cortexId":cortex_id,"paycomCode":code}));
                 } else if !automatic {
                     separate.push(json!(cortex_id));
                 }
             }
             let mut codes = HashSet::new();
-            ensure(links.len() + separate.len() <= 5000 && links.iter().all(|l| codes.insert(s(l,"paycomCode"))),"employee_already_linked",409)?;
+            ensure(links.len() + separate.len() <= 5000 && links.iter().all(|l| codes.insert(s(l,"paycomCode"))),
+                "employee_already_linked",409)?;
             let value = json!({"revision":revision+1,"links":links,"separate":separate});
             db.set(LINKS,&value)?;
             Ok(value)
@@ -284,7 +286,12 @@ impl Store {
                 json!({"id":key,"name":row["name"],"paycom":row,"cortex":[]}),
             );
         }
-        let publications = cortex.all("SELECT id,station,service_area_id serviceAreaId,provider,timezone,collected_at collectedAt FROM meal_publications WHERE report_date=? AND active=1 ORDER BY collected_at DESC,id DESC",[date])?;
+        let publications = cortex.all(
+            "SELECT id,station,service_area_id \
+            serviceAreaId,provider,timezone,collected_at collectedAt FROM meal_publications \
+            WHERE report_date=? AND active=1 ORDER BY collected_at DESC,id DESC",
+            [date],
+        )?;
         // Broader and narrower provider scopes may observe the same itinerary.
         // The newest observation wins, including a newer snapshot with no meal.
         let mut itineraries = HashSet::new();
@@ -297,12 +304,14 @@ impl Store {
             }
             for capture in captures {
                 let capture: super::meals::Capture = serde_json::from_value(capture.clone())?;
-                let p = json!({"station":capture.scope.station,"serviceAreaId":capture.scope.service_area_id,"timezone":capture.scope.timezone,"collectedAt":super::db::at(capture.finished_at)});
+                let p = json!({"station":capture.scope.station,"serviceAreaId":capture.scope.service_area_id,
+                    "timezone":capture.scope.timezone,"collectedAt":super::db::at(capture.finished_at)});
                 for route in capture.itineraries {
                     if !itineraries.insert((s(&p, "serviceAreaId").to_owned(), route.id.clone())) {
                         continue;
                     }
-                    let itinerary = json!({"itinerary_id":route.id,"transporter_id":route.transporter_id,"driver_name":route.driver,"sourceUrl":route.source_url});
+                    let itinerary = json!({"itinerary_id":route.id,"transporter_id":route.transporter_id,
+                        "driver_name":route.driver,"sourceUrl":route.source_url});
                     let meals = route
                         .meals
                         .iter()
@@ -318,18 +327,40 @@ impl Store {
         }
         for p in &publications {
             let mut by_itinerary: HashMap<String, Vec<Value>> = HashMap::new();
-            for mut meal in cortex.all("SELECT itinerary_id,meal_id mealId,last_delivery_at lastDelivery,started_at start,ended_at end,first_delivery_at firstDelivery,before_status beforeStatus,after_status afterStatus FROM meal_records WHERE publication_id=? ORDER BY itinerary_id,started_at,meal_id", [s(p,"id")])? {
+            for mut meal in cortex.all(
+                "SELECT itinerary_id,meal_id mealId,last_delivery_at \
+                lastDelivery,started_at start,ended_at end,first_delivery_at \
+                firstDelivery,before_status beforeStatus,after_status afterStatus FROM \
+                meal_records WHERE publication_id=? ORDER BY itinerary_id,started_at,meal_id",
+                [s(p, "id")],
+            )? {
                 let id = s(&meal, "itinerary_id").to_owned();
                 meal.as_object_mut().unwrap().remove("itinerary_id");
                 by_itinerary.entry(id).or_default().push(meal);
             }
-            for itinerary in cortex.all("SELECT i.itinerary_id,i.transporter_id,i.driver_name,u.url sourceUrl FROM meal_itineraries i LEFT JOIN meal_sources u ON u.publication_id=i.publication_id AND u.itinerary_id=i.itinerary_id WHERE i.publication_id=? ORDER BY i.itinerary_id",[s(p,"id")])? {
-                if !itineraries.insert((s(p,"serviceAreaId").to_owned(),s(&itinerary,"itinerary_id").to_owned())) {continue;}
-                let meals = by_itinerary.remove(s(&itinerary,"itinerary_id")).unwrap_or_default();
-                let transporter = s(&itinerary,"transporter_id");
+            for itinerary in cortex.all(
+                "SELECT \
+                i.itinerary_id,i.transporter_id,i.driver_name,u.url sourceUrl FROM \
+                meal_itineraries i LEFT JOIN meal_sources u ON \
+                u.publication_id=i.publication_id AND u.itinerary_id=i.itinerary_id WHERE \
+                i.publication_id=? ORDER BY i.itinerary_id",
+                [s(p, "id")],
+            )? {
+                if !itineraries.insert((
+                    s(p, "serviceAreaId").to_owned(),
+                    s(&itinerary, "itinerary_id").to_owned(),
+                )) {
+                    continue;
+                }
+                let meals = by_itinerary
+                    .remove(s(&itinerary, "itinerary_id"))
+                    .unwrap_or_default();
+                let transporter = s(&itinerary, "transporter_id");
                 // Include meal-free drivers in uniqueness checks so a name shared by
                 // two drivers cannot match just because one did not take a meal.
-                drivers.entry(transporter.to_owned()).or_insert(json!({"id":transporter,"name":itinerary["driver_name"]}));
+                drivers
+                    .entry(transporter.to_owned())
+                    .or_insert(json!({"id":transporter,"name":itinerary["driver_name"]}));
                 observations.push((p.clone(), itinerary, meals));
             }
         }
@@ -379,15 +410,19 @@ impl Store {
         rows.sort_by(|a, b| {
             workforce::compare(s(a, "name"), s(b, "name")).then_with(|| s(a, "id").cmp(s(b, "id")))
         });
-        let latest_zone = cortex.one("SELECT timezone FROM meal_publications WHERE active=1 ORDER BY collected_at DESC,id DESC LIMIT 1",[])?;
+        let latest_zone = cortex.one(
+            "SELECT timezone FROM meal_publications WHERE active=1 \
+            ORDER BY collected_at DESC,id DESC LIMIT 1",
+            [],
+        )?;
         let live_zone = live.first().map(|(meta, _)| &meta["scope"]);
         let zone = live_zone
             .or(publications.first().or(latest_zone.as_ref()))
             .map(|p| s(p, "timezone"))
             .unwrap_or(timezone);
-        Ok(
-            json!({"date":date,"timezone":zone,"rows":rows,"paycomCollectedAt":publication.map(|p|p["collected_at"].clone()),"cortexPublications":publications,"employees":roster,"drivers":drivers.into_values().collect::<Vec<_>>(),"links":links}),
-        )
+        Ok(json!({"date":date,"timezone":zone,"rows":rows,
+                "paycomCollectedAt":publication.map(|p|p["collected_at"].clone()),
+                "cortexPublications":publications,"employees":roster,"drivers":drivers.into_values().collect::<Vec<_>>(),"links":links}))
     }
 }
 

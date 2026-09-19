@@ -1,5 +1,5 @@
 import { FlaskConical } from 'lucide-react';
-import type { Job, PlatformHealth } from '../../../../shared/contracts/index.js';
+import type { PlatformHealth } from '../../../../shared/contracts/index.js';
 import { platformHash } from '../../app/navigation.js';
 import { useAction } from '../../app/useAction.js';
 import { api, useData } from '../../app/api.js';
@@ -7,6 +7,7 @@ import { CollectionHistory } from './CollectionHistory.js';
 import { DataState, DetailList, ErrorBox, Header } from '../../ui/index.js';
 import { bytes, deviceTimezone, time, title } from '../../lib/format.js';
 import { JobTable } from './JobTable.js';
+import { usePlatformJobs } from '../../app/endpoints.js';
 
 export function DiagnosticsPage() {
   const health = useData<PlatformHealth>('/api/platform/health', 10000);
@@ -16,7 +17,7 @@ export function DiagnosticsPage() {
     runtime: { name: string; status: string; memoryBytes: number; browsers: number };
     dsps: { id: string; name: string; status: string }[];
   }>('/api/platform/diagnostics', 5000);
-  const jobs = useData<Job[]>('/api/platform/jobs', 3000);
+  const jobs = usePlatformJobs(3000);
   const deploy = useAction(
     async () => {
       await api('/api/platform/diagnostics', {});
