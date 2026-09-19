@@ -17,7 +17,9 @@ import { SettingsPage } from '../settings.js';
 import { ErrorBox } from '../ui/index.js';
 import { title } from '../lib/format.js';
 import { can } from './permissions.js';
-import { HomePage, PaycomPage, TeamPage } from '../workspace.js';
+import { HomePage } from '../features/home/index.js';
+import { PaycomPage } from '../features/timecard/index.js';
+import { TeamPage } from '../features/team/index.js';
 
 type Access = { session: SessionView; view?: DspView };
 type PageContext = { session: SessionView };
