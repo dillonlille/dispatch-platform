@@ -503,7 +503,9 @@ export function TeamPage({
                     <tr key={`${invitation.email}:${index}`}>
                       <td>{invitation.email}</td>
                       <td>{invitation.role}</td>
-                      <td>{time(new Date(invitation.expiresAt).toISOString())}</td>
+                      <td>
+                        {time(new Date(invitation.expiresAt).toISOString(), view.dsp.timezone)}
+                      </td>
                       <td>
                         <button
                           className="text-button"

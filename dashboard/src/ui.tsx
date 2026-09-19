@@ -1,12 +1,13 @@
 import { dateFormatter } from '../../shared/date-format.js';
 import { useEffect, useRef, useId, type ReactNode } from 'react';
 import { X, LoaderCircle, Inbox } from 'lucide-react';
-import { displayTimezone } from './preferences.js';
 import type { DspView, Permission } from '../../shared/contracts/index.js';
 export const can = (view: DspView | undefined, permission: Permission) =>
   Boolean(view && (view.role.owner || view.permissions.includes(permission)));
-// Timecard pages pass the DSP's timezone; elsewhere the viewer's preference applies.
-export const time = (value: string | null | undefined, timeZone = displayTimezone()) =>
+// Platform owner pages span every DSP, so they show the viewer's device time.
+export const deviceTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+// DSP pages pass the DSP's timezone so every member reads the same clock.
+export const time = (value: string | null | undefined, timeZone: string) =>
   value
     ? dateFormatter('en-US', {
         month: 'short',

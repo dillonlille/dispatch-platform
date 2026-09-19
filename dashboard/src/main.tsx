@@ -25,10 +25,8 @@ import { SettingsPage } from './settings.js';
 import { PaycomPage, HomePage, TeamPage } from './workspace.js';
 type Session = SessionView;
 import { readAppearance, applyAppearance } from './appearance.js';
-import { initializePreferences } from './preferences.js';
 import { leavePresence, usePresence } from './presence.js';
 function App() {
-  const [, setPreferencesRevision] = useState(0);
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [route, setRoute] = useState(window.location.hash.slice(1) || 'dsps'),
@@ -37,7 +35,6 @@ function App() {
     [switching, setSwitching] = useState(false);
   useEffect(() => {
     const id = session?.user.id ?? 'signed-out';
-    initializePreferences(id);
     const apply = () => applyAppearance(readAppearance(id));
     const media = matchMedia('(prefers-color-scheme: dark)');
     apply();
@@ -48,16 +45,10 @@ function App() {
       window.removeEventListener('dispatch-appearance', apply);
     };
   }, [session?.user.id]);
-  useEffect(() => {
-    const changed = () => setPreferencesRevision((value) => value + 1);
-    window.addEventListener('dispatch-preferences', changed);
-    return () => window.removeEventListener('dispatch-preferences', changed);
-  }, []);
   const load = useCallback(async (afterLogin = false) => {
     try {
       const next = await api<Session>('/api/session');
       credentials(next.csrf);
-      initializePreferences(next.user.id);
       setSession(next);
       if (
         !next.user.platformOwner &&
@@ -239,7 +230,11 @@ function App() {
             ) : page === 'timecards' && canViewTimecard ? (
               <TimecardsPage timezone={view.dsp.timezone} />
             ) : page === 'connections' && can(view, 'connections.manage') ? (
-              <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
+              <ConnectionsPage
+                perform={perform}
+                development={session.providerMode === 'fixture'}
+                timezone={view.dsp.timezone}
+              />
             ) : page === 'settings' ? (
               <SettingsPage session={session} view={view} perform={perform} />
             ) : (

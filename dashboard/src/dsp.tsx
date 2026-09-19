@@ -446,9 +446,11 @@ export function TimecardsPage({
 export function ConnectionsPage({
   perform,
   development,
+  timezone,
 }: {
   perform: Perform;
   development: boolean;
+  timezone: string;
 }) {
   return (
     <section className="connections-view" aria-labelledby="connections-heading">
@@ -456,8 +458,18 @@ export function ConnectionsPage({
         <h2 id="connections-heading">Connections</h2>
       </div>
       <div className="connection-cards">
-        <ConnectionCard provider="paycom" perform={perform} development={development} />
-        <ConnectionCard provider="cortex" perform={perform} development={development} />
+        <ConnectionCard
+          provider="paycom"
+          perform={perform}
+          development={development}
+          timezone={timezone}
+        />
+        <ConnectionCard
+          provider="cortex"
+          perform={perform}
+          development={development}
+          timezone={timezone}
+        />
       </div>
       <p className="connection-permissions muted">
         <ShieldCheck size={16} />
@@ -470,10 +482,12 @@ function ConnectionCard({
   perform,
   development,
   provider,
+  timezone,
 }: {
   perform: Perform;
   development: boolean;
   provider: Connection['provider'];
+  timezone: string;
 }) {
   const name = provider === 'paycom' ? 'Paycom' : 'Cortex';
   const endpoint = `/api/dsp/connections/${provider}`;
@@ -598,7 +612,7 @@ function ConnectionCard({
             )}
 
             {data.lastVerifiedAt && (
-              <p className="muted">Last checked: {time(data.lastVerifiedAt)}</p>
+              <p className="muted">Last checked: {time(data.lastVerifiedAt, timezone)}</p>
             )}
           </div>
           <footer>

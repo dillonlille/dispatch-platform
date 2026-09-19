@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Job } from '../../shared/contracts/index.js';
 import { collectionHistory } from './collection-history.js';
 import { duration, memory } from './job-performance.js';
-import { Badge, time } from './ui.js';
+import { Badge, time, deviceTimezone } from './ui.js';
 
 export function CollectionHistory({ jobs }: { jobs: Job[] }) {
   const groups = useMemo(() => collectionHistory(jobs), [jobs]);
@@ -39,7 +39,7 @@ export function CollectionHistory({ jobs }: { jobs: Job[] }) {
       <dl className="collection-history-stats">
         <div>
           <dt>Last successful collection</dt>
-          <dd>{last ? time(last) : 'None in this history'}</dd>
+          <dd>{last ? time(last, deviceTimezone()) : 'None in this history'}</dd>
         </div>
         <div>
           <dt>Median collection time</dt>
@@ -83,7 +83,7 @@ export function CollectionHistory({ jobs }: { jobs: Job[] }) {
                 r="3"
               >
                 <title>
-                  {time(r.job.completedAt!)}: {duration(r.collectionMs)}
+                  {time(r.job.completedAt!, deviceTimezone())}: {duration(r.collectionMs)}
                 </title>
               </circle>
             ))}
@@ -109,7 +109,7 @@ export function CollectionHistory({ jobs }: { jobs: Job[] }) {
           <tbody>
             {group.runs.slice(0, 10).map((run) => (
               <tr key={run.job.id}>
-                <td>{time(run.job.completedAt ?? run.job.createdAt)}</td>
+                <td>{time(run.job.completedAt ?? run.job.createdAt, deviceTimezone())}</td>
                 <td>
                   <Badge value={run.job.status} />
                 </td>

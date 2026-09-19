@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { displayTimezone, saveTimezone } from './preferences.js';
 import type { DspView, SessionView, AuditEvent } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, time, can } from './ui.js';
+import { Header, Tabs, ErrorBox, time, can, deviceTimezone } from './ui.js';
 import { ConnectionsPage } from './dsp.js';
 import { type Perform } from './platform.js';
 import { ThemeSection } from './theme.js';
@@ -19,8 +18,6 @@ export function SettingsPage({
   const [requestedTab, setTab] = useState(
     new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'general',
   );
-  const [timezone, setTimezone] = useState(() => displayTimezone() ?? '');
-  const timezones = ['UTC', ...Intl.supportedValuesOf('timeZone')];
   const [passwordError, setPasswordError] = useState('');
   const [busy, setBusy] = useState(false);
   const connections = can(view, 'connections.manage');
@@ -76,37 +73,6 @@ export function SettingsPage({
                 </dd>
               </div>
             </dl>
-          </section>
-          <section className="settings-section">
-            <div>
-              <h2>Date &amp; time</h2>
-            </div>
-            <div className="theme-pack-field">
-              <label htmlFor="display-timezone">Display timezone</label>
-              <select
-                id="display-timezone"
-                value={timezone}
-                onChange={(event) => {
-                  setTimezone(event.target.value);
-                  saveTimezone(event.target.value);
-                }}
-              >
-                <option value="">
-                  Automatic — device timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone})
-                </option>
-                {timezones.map((zone) => (
-                  <option value={zone} key={zone}>
-                    {zone.replaceAll('_', ' ')}
-                  </option>
-                ))}
-              </select>
-              <p>
-                Calendar dates, sync and activity times use{' '}
-                {timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}. Paycom punches keep
-                the DSP’s business time; Flex times keep the station’s timezone.
-              </p>
-              <p>Saved for your account on this browser.</p>
-            </div>
           </section>
           {view && (
             <section className="settings-section">
@@ -204,9 +170,13 @@ export function SettingsPage({
           </form>
         </section>
       )}
-      {tab === 'connections' && connections && (
+      {tab === 'connections' && connections && view && (
         <div className="settings-connections">
-          <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
+          <ConnectionsPage
+            perform={perform}
+            development={session.providerMode === 'fixture'}
+            timezone={view.dsp.timezone}
+          />
         </div>
       )}
       {tab === 'theme' && <ThemeSection userId={session.user.id} />}
@@ -237,7 +207,7 @@ function SettingsAudit({ view }: { view?: DspView }) {
               <tr key={event.id}>
                 <td>{event.action.replaceAll('.', ' ')}</td>
                 <td>{event.actorName}</td>
-                <td>{time(event.at)}</td>
+                <td>{time(event.at, view?.dsp.timezone ?? deviceTimezone())}</td>
               </tr>
             ))}
           </tbody>
