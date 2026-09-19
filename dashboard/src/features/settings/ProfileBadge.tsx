@@ -25,8 +25,8 @@ function settle(badge: HTMLElement) {
  * page, and the badge a second, stiffer one about its hook, pushed the other way by the clip's
  * acceleration so that it lags and then catches up.
  * Dragging the badge pulls the strap toward the pointer; letting go keeps the velocity it had.
- * The page opens with the lanyard dropping from above the tab rule until its strap snaps taut, which
- * bounces it and sets it swinging. The reflection on the badge slides only as the badge itself leans.
+ * The page opens with the lanyard dropping from above the tab rule until its strap draws taut, which
+ * gives a little under the weight and sets it gently swinging. The reflection on the badge slides only as the badge itself leans.
  * Angles are radians, clockwise positive, written to CSS variables so that nothing re-renders.
  */
 const GRAVITY = 15; // g / length: a swing of about 1.6 seconds
@@ -37,9 +37,14 @@ const HOOK_STIFFNESS = 70;
 const HOOK_DAMPING = 7;
 const HOOK_LAG = 0.55;
 const LIMIT = 0.5;
-const REST = 0.0004;
-const FALL = 2800; // pixels per second squared
-const BOUNCE = 0.3; // how much speed the strap gives back when it snaps taut
+// The hook's friction matters only once the swing is small, where it eases the badge to a stop.
+const FRICTION = 2.6;
+// Stop only once what is left is far less than a pixel, so that coming to rest never shows.
+const REST = 1e-7;
+const FALL = 1800; // pixels per second squared
+// Once taut the strap gives a little and soaks up the fall, rather than stopping it dead.
+const STRETCH = 900;
+const STRETCH_DAMPING = 54;
 const SHEEN = 140; // percent the reflection slides per radian the badge leans
 const STRAP = 92; // from the anchors down to the clip, in the lanyard's own pixels
 const CENTRE = 120;
@@ -98,7 +103,8 @@ function usePendulum() {
           remaining -= dt;
           const acceleration =
             target === null
-              ? -GRAVITY * Math.sin(swing) - AIR * swingSpeed
+              ? -GRAVITY * Math.sin(swing) -
+                (AIR + FRICTION / (1 + 40 * (Math.abs(swing) + Math.abs(swingSpeed)))) * swingSpeed
               : PULL * (target - swing) - PULL_DAMPING * swingSpeed;
           swingSpeed += acceleration * dt;
           swing += swingSpeed * dt;
@@ -106,16 +112,17 @@ function usePendulum() {
             swing = Math.sign(swing) * LIMIT;
             swingSpeed *= -0.3;
           }
-          if (drop < 0 || dropSpeed) {
-            dropSpeed += FALL * dt;
+          if (drop || dropSpeed) {
+            const taut = drop > 0;
+            dropSpeed += (taut ? -STRETCH * drop - STRETCH_DAMPING * dropSpeed : FALL) * dt;
+            const before = drop;
             drop += dropSpeed * dt;
-            if (drop >= 0) {
-              // The strap snaps taut: the jolt kicks the swing and tips the badge on its hook.
-              swingSpeed += dropSpeed * 0.0009;
-              swaySpeed -= dropSpeed * 0.0022;
-              drop = 0;
-              dropSpeed = dropSpeed > 120 ? -dropSpeed * BOUNCE : 0;
+            if (before < 0 && drop >= 0) {
+              // The strap draws taut: a nudge to the swing, and a slight tip of the badge on its hook.
+              swingSpeed += dropSpeed * 0.0003;
+              swaySpeed -= dropSpeed * 0.0002;
             }
+            if (Math.abs(drop) < 0.3 && Math.abs(dropSpeed) < 6) drop = dropSpeed = 0;
           }
           swaySpeed +=
             (-HOOK_STIFFNESS * sway - HOOK_DAMPING * swaySpeed - HOOK_LAG * acceleration) * dt;
