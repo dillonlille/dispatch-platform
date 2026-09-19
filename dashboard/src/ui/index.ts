@@ -1,5 +1,4 @@
 export { Badge } from './Badge.js';
-export { ColumnMenu } from './ColumnMenu.js';
 export { ConfirmDialog } from './ConfirmDialog.js';
 export { DataState } from './DataState.js';
 export { DataTable, TablePagination } from './DataTable.js';

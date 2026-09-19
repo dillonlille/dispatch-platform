@@ -8,7 +8,6 @@ import type { PaycomPreferences } from '../../../../shared/paycom.js';
 import { useData } from '../../app/api.js';
 import { useTableState } from '../../app/useTableState.js';
 import {
-  ColumnMenu,
   DataState,
   DataTable,
   downloadTable,
@@ -73,7 +72,6 @@ export function TimecardsPage({
         id: 'name',
         header: 'Employee',
         sortable: true,
-        hideable: false,
         sticky: true,
         value: (card) => card.name,
         cell: (card) => (
@@ -122,17 +120,14 @@ export function TimecardsPage({
               setSelectedCode(undefined);
             }}
           />
-          <div className="table-tools">
-            <ColumnMenu table={table} />
-            <button
-              className="icon-button"
-              aria-label="Export timecards"
-              disabled={!data?.rows.length}
-              onClick={() => downloadTable(table, `timecards-${date}.csv`)}
-            >
-              <Download size={16} />
-            </button>
-          </div>
+          <button
+            className="icon-button"
+            aria-label="Export timecards"
+            disabled={!data?.rows.length}
+            onClick={() => downloadTable(table, `timecards-${date}.csv`)}
+          >
+            <Download size={16} />
+          </button>
         </div>
         <DataState data={data} error={error} failed={Boolean(error)}>
           {(data) =>

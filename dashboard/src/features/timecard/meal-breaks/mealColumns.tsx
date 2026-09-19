@@ -59,7 +59,6 @@ export const mealColumns: TableColumn<MealLine>[] = [
     name: 'Employee',
     scope: 'col',
     rowHeader: true,
-    hideable: false,
     sortable: true,
     sticky: true,
     sortHeader: {

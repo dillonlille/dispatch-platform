@@ -49,7 +49,6 @@ export function RolesTab({
       id: 'role',
       header: 'Role',
       headerClassName: 'role-name-column',
-      hideable: false,
       value: (role) => role.name,
       cell: (role) => (
         <strong className="role-name">
@@ -74,8 +73,6 @@ export function RolesTab({
     {
       id: 'actions',
       header: <span className="sr-only">Actions</span>,
-      name: 'Actions',
-      hideable: false,
       cell: (role) =>
         manage &&
         !role.owner &&
