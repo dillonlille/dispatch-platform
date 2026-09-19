@@ -9,4 +9,4 @@ CREATE TABLE resets (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES use
 CREATE TABLE audit (id INTEGER PRIMARY KEY, at TEXT NOT NULL, actor_id TEXT REFERENCES users(id), dsp_id TEXT REFERENCES dsps(id), action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
 CREATE INDEX audit_dsp_time ON audit(dsp_id,id DESC);
 CREATE TABLE throttle (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
-CREATE TABLE outbox (id TEXT PRIMARY KEY, encrypted_message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL, sent_at TEXT);
+CREATE TABLE outbox (id TEXT PRIMARY KEY, encrypted_message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL, sent_at TEXT, created_at INTEGER, last_attempt_at INTEGER, last_error TEXT);

@@ -10,25 +10,6 @@ use super::{
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-// Preserve the original user_version so the prior runtime can still operate Paycom
-// after rollback. The new request column has a default for its old INSERTs.
-pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
-    let columns = db.all("PRAGMA table_info(jobs)", [])?;
-    if columns.iter().any(|c| s(c, "name") == "request") {
-        return Ok(());
-    }
-    db.0.execute_batch("PRAGMA foreign_keys=OFF")?;
-    let result=db.transaction(|| {
-        let schema=include_str!("jobSchema.sql");
-        let (table,indexes)=schema.split_once('\n').unwrap();
-        db.0.execute_batch(&table.replacen("CREATE TABLE jobs ","CREATE TABLE jobs_next ",1))?;
-        let names=columns.iter().map(|c|s(c,"name")).collect::<Vec<_>>().join(",");
-        db.0.execute_batch(&format!("INSERT INTO jobs_next ({names}) SELECT {names} FROM jobs; DROP TABLE jobs; ALTER TABLE jobs_next RENAME TO jobs; {indexes}"))?;
-        ensure(db.all("PRAGMA foreign_key_check",[])?.is_empty(),"invalid_job_migration",503)
-    });
-    db.0.execute_batch("PRAGMA foreign_keys=ON")?;
-    result
-}
 fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Result<Value> {
     Ok(serde_json::to_value(PublicJob::from_row(
         row, name, metrics,
@@ -648,43 +629,5 @@ mod retry_tests {
         let delay = retry_delay("job-test", 2);
         assert!((120000..=180000).contains(&delay));
         assert_eq!(delay, retry_delay("job-test", 2));
-    }
-}
-
-#[cfg(test)]
-mod migration_tests {
-    use super::*;
-    #[test]
-    fn extending_job_kinds_preserves_jobs_metrics_and_legacy_inserts() {
-        let db = super::super::db::Db(rusqlite::Connection::open_in_memory().unwrap());
-        let old = include_str!("jobSchema.sql")
-            .replace(
-                "CHECK(kind IN ('paycom.collect','cortex.meal_breaks.collect'))",
-                "CHECK(kind='paycom.collect')",
-            )
-            .replace(" request TEXT NOT NULL DEFAULT '{}',", "");
-        db.0.execute_batch(&old).unwrap();
-        db.0.execute_batch(include_str!("jobMetricsSchema.sql"))
-            .unwrap();
-        let insert = "INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,'dsp','preview','paycom.collect','queued',0,'2026','test',1,?)";
-        db.exec(insert, ["job-1", "key-1"]).unwrap();
-        db.exec(
-            "INSERT INTO job_metrics VALUES ('job-1',1,'worker','{}')",
-            [],
-        )
-        .unwrap();
-        migrate(&db).unwrap();
-        migrate(&db).unwrap();
-        assert_eq!(
-            db.one("SELECT request FROM jobs WHERE id='job-1'", [])
-                .unwrap()
-                .unwrap()["request"],
-            "{}"
-        );
-        assert_eq!(db.all("SELECT * FROM job_metrics", []).unwrap().len(), 1);
-        db.exec(insert, ["job-2", "key-2"]).unwrap();
-        assert!(db.all("PRAGMA foreign_key_check", []).unwrap().is_empty());
-        db.exec("DELETE FROM jobs WHERE id='job-1'", []).unwrap();
-        assert!(db.all("SELECT * FROM job_metrics", []).unwrap().is_empty());
     }
 }
