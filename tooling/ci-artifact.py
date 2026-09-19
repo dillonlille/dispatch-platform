@@ -6,11 +6,14 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
+import sys
 import tempfile
 import tarfile
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import runtime_artifact as runtime
 
 
 def module(name, filename):
@@ -21,7 +24,6 @@ def module(name, filename):
 
 
 ci = module("ci_plan", "ci-plan.py")
-runtime = module("dev_artifact", "update-dev.py")
 rust = module("cargo_build", "cargo-build.py")
 
 
@@ -38,7 +40,8 @@ def require_validation(context):
         raise ValidationChanged("Actual merged commit required")
     try:
         verified = ci.validated_receipt(context, base_ref() or "dev")
-    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, zipfile.BadZipFile,
+            subprocess.SubprocessError) as error:
         raise ValidationChanged("Cannot confirm PR validation; rerun the workflow") from error
     if not verified:
         raise ValidationChanged("PR validation changed; rerun the workflow for a fresh validation plan")
@@ -87,26 +90,9 @@ def restore(destination):
     name = f"dispatch-pr-build-{run['id']}-{run.get('run_attempt', 1)}"
     matches = [a for a in artifacts if a["name"] == name and not a["expired"]]
     runtime.require(len(matches) == 1, "Gated PR build unavailable")
-    artifact = matches[0]
-    runtime.require(0 < artifact["size_in_bytes"] <= runtime.MAX_BYTES, "Invalid artifact size")
     runtime.require(not destination.exists() and not destination.is_symlink(), "Build destination already exists")
     with tempfile.TemporaryDirectory(prefix="dispatch-pr-build-", dir=destination.parent) as temp:
-        temp = Path(temp)
-        archive = temp / "build.zip"
-        with archive.open("xb") as output:
-            subprocess.run(["gh", "api", f"repos/{ci.REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
-                           stdout=output, stderr=subprocess.PIPE, check=True, timeout=180)
-        runtime.require(archive.stat().st_size == artifact["size_in_bytes"] and
-                        artifact.get("digest") == "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest(),
-                        "GitHub artifact digest mismatch")
-        with zipfile.ZipFile(archive) as bundle:
-            runtime.require(bundle.namelist() == ["dispatch-dev.tar.gz"] and
-                            bundle.getinfo("dispatch-dev.tar.gz").file_size <= runtime.MAX_BYTES,
-                            "Unexpected PR build package")
-            with bundle.open("dispatch-dev.tar.gz") as source, (temp / "build.tar.gz").open("xb") as output:
-                shutil.copyfileobj(source, output)
-        candidate = temp / "candidate"
-        runtime.unpack(temp / "build.tar.gz", candidate)
+        candidate, _manifest = runtime.download_run_artifact(matches[0], temp, receipt["commit"])
         retarget(candidate, receipt["commit"], context["commit"])
         # Do not revive validation if a new run/rerun failed or became pending while downloading.
         if require_validation(context) != verified:

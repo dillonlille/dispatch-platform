@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
-import { until } from './rust-support.js';
+import { until } from './support.js';
 
 const native = { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 };
 test(
@@ -110,6 +110,31 @@ test(
     assert.equal(f.state.verifications, 2);
     assert.equal(job.metrics[1].pageReads.direct, 0);
     assert.notEqual(publication(), previous);
+    // Resumed employees were never re-read, yet every timecard keeps its page link.
+    const sources = f.collector(dsp.id, (db) =>
+      db
+        .prepare(
+          'SELECT employee_code code,url FROM timecard_sources WHERE publication_id=(SELECT id FROM publications WHERE active=1) ORDER BY employee_code',
+        )
+        .all(),
+    ) as { code: string; url: string }[];
+    assert.deepEqual(
+      sources.map((s) => s.code),
+      ['AA01', 'BB02', 'CC03', 'DD04', 'EE05'],
+    );
+    for (const { code, url } of sources) {
+      const link = new URL(url);
+      assert.equal(link.pathname, '/v4/cl/web.php/timecard/index');
+      assert.deepEqual(
+        [...link.searchParams.keys()].sort(),
+        ['firstrefno', 'formtype', 'perioddates'],
+        'The collector marker is not part of the retained link',
+      );
+      assert.equal(link.searchParams.get('firstrefno'), code);
+    }
+    const published = (await owner.get(`/api/dsp/timecards?date=${firstDate}`)).value;
+    for (const row of published.rows)
+      assert.equal(row.sourceUrl, sources.find((s) => s.code === row.employeeCode)!.url);
     assert.equal(
       f.collector(
         dsp.id,

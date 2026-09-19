@@ -28,8 +28,8 @@ export interface BenchmarkReport {
   measurements: Measurement[];
   failures?: Failure[];
 }
-// Deliberately broad across host/CI hardware. Keep tighter comparisons in the
-// recorded baseline; never auto-adjust these budgets to accept a failed run.
+// Deliberately broad across host/CI hardware; compare runs through the measurements
+// CI preserves. Never auto-adjust these budgets to accept a failed run.
 export const budgets = {
   startupMs: 5000,
   idleRssBytes: 64 * 1024 ** 2,

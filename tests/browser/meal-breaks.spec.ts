@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login } from './fixtures.js';
 import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 
@@ -89,12 +89,7 @@ function sample(): MealComparison {
   };
 }
 async function open(page: Page, member = false, selectedDate: string | null = date) {
-  await page.goto('/');
-  await page
-    .getByLabel('Email address')
-    .fill(member ? 'member@dispatch.test' : 'owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await login(page, member ? demo.member : demo.email);
   if (!member) {
     await page
       .getByRole('row')
@@ -182,12 +177,17 @@ test('approved comparison table, filters, details, links, date errors and mobile
     path: test.info().outputPath('dispatch-meal-breaks-desktop.png'),
     fullPage: true,
   });
+  await page.getByRole('button', { name: 'Late DAs 1', exact: true }).click();
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
+  await expect(page.locator('.meal-table tbody > tr')).toContainText('Sam Patel');
   await page.getByRole('button', { name: 'Different times 1', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Missing data 3', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
   await page.getByRole('button', { name: 'All 5', exact: true }).click();
   await page.getByLabel('Search meal break employees').fill('Alex');
+  await page.locator('.meal-employee > span').click();
+  await expect(page.locator('.meal-detail')).toHaveCount(0);
   await page.getByRole('button', { name: 'Details for Alex Morgan', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Paycom punches', exact: true })).toBeVisible();
   await expect(page.locator('.meal-detail')).toContainText('America/Los_Angeles');
@@ -300,9 +300,9 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
   });
   await page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
-  await expect(
-    page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }),
-  ).toContainText('Gap over 5m on another meal');
+  await expect(page.getByRole('row').filter({ hasText: 'Casey Brooks' })).toContainText(
+    'Gap over 5m on another meal',
+  );
   await page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }).click();
   await expect(page.locator('.meal-extra .meal-gap.over-limit')).toHaveText([
     '8m before lunch',
@@ -656,20 +656,30 @@ test.describe('DSP calendar dates', () => {
   test('activity times follow the DSP clock, with no personal timezone setting', async ({
     page,
   }) => {
-    await page.route('**/api/dsp/audit', (route) =>
+    await page.route(/\/api\/dsp\/audit\?/, (route) =>
       route.fulfill({
-        json: [
-          {
-            id: 1,
-            at: '2026-09-17T04:10:00Z',
-            actorId: null,
-            actorName: 'Avery Morgan',
-            dspId: null,
-            dspName: null,
-            action: 'member.invited',
-            detail: '',
-          },
-        ],
+        json: {
+          events: [
+            {
+              id: 1,
+              at: '2026-09-17T04:10:00Z',
+              actorId: null,
+              actorName: 'Avery Morgan',
+              dspId: null,
+              dspName: null,
+              action: 'member.invited',
+              detail: '',
+              area: 'team',
+              target: null,
+              ref: null,
+              changes: [],
+            },
+          ],
+          total: 1,
+          counts: { team: 1 },
+          actors: [],
+          dsps: [],
+        },
       }),
     );
     await open(page, false, null);
@@ -678,8 +688,9 @@ test.describe('DSP calendar dates', () => {
     await expect(page.getByLabel('Display timezone')).toHaveCount(0);
     await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
     // 12:10 AM on 9/17 in New York is 11:10 PM on 9/16 for the DSP.
-    await expect(page.getByRole('row').filter({ hasText: 'Avery Morgan' })).toContainText(
-      'Sep 16, 11:10 PM',
+    await expect(page.getByRole('heading', { name: /Sep 16/ })).toBeVisible();
+    await expect(page.getByRole('listitem').filter({ hasText: 'Avery Morgan' })).toContainText(
+      '11:10 PM',
     );
   });
 });

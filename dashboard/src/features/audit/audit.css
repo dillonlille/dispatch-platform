@@ -1,0 +1,313 @@
+.audit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.audit-toolbar .search {
+  margin-right: auto;
+}
+.audit-toolbar .search {
+  width: 307px;
+}
+.audit-toolbar .search input {
+  font-size: 13px;
+}
+.audit-toolbar > button {
+  font-size: 13px;
+  font-weight: 400;
+}
+.audit-zone {
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+/* A native select dressed as the toolbar's buttons: label or icon, value, chevron. */
+.audit-select {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--control-height);
+  padding-left: 12px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: 13px;
+  cursor: pointer;
+}
+.audit-select:hover {
+  background: var(--accent);
+}
+.audit-select:focus-within {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 1px;
+}
+.audit-select > span {
+  color: var(--muted-foreground);
+}
+.audit-select > svg {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.audit-select > svg:last-child {
+  position: absolute;
+  right: 10px;
+}
+.audit-select select {
+  appearance: none;
+  max-width: 200px;
+  min-height: 0;
+  padding: 0 34px 0 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.audit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+button.audit-chip {
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 400;
+  gap: 6px;
+}
+button.audit-chip i {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+button.audit-chip.failures {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 35%, transparent);
+}
+button.audit-chip[aria-pressed='true'] {
+  background: var(--foreground);
+  border-color: var(--foreground);
+  color: var(--background);
+  font-weight: 500;
+}
+button.audit-chip.subject {
+  margin-left: auto;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+button.audit-chip.failures[aria-pressed='true'] {
+  background: var(--destructive);
+  border-color: var(--destructive);
+}
+.audit-log[aria-busy='true'] section {
+  opacity: 0.6;
+}
+.audit-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 18px 0 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.audit-day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.audit-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+button.audit-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font-weight: 400;
+  text-align: left;
+}
+button.audit-row:hover,
+button.audit-row[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.audit-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-top: 1px;
+  border-radius: 8px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.audit-icon.failed {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+.audit-icon.done {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
+}
+.audit-body {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.audit-body strong {
+  font-weight: 600;
+}
+.audit-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+}
+.audit-failure {
+  color: var(--destructive);
+}
+.audit-change {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.audit-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.audit-pill.old {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+.audit-pill.added {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
+}
+.audit-pill.removed {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+.audit-row time {
+  padding-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.audit-row time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.audit-chevron {
+  transition: transform var(--motion-duration);
+}
+.audit-row[aria-expanded='true'] .audit-chevron {
+  transform: rotate(180deg);
+}
+.audit-feed .quiet .audit-row {
+  color: var(--muted-foreground);
+}
+/* Visits, retries and anything Platform support did are outlined, not filled. */
+.audit-feed .quiet .audit-icon,
+.audit-icon.support {
+  border: 1px dashed var(--border);
+  background: transparent;
+}
+.audit-detail {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 8px;
+  padding: 4px 12px 14px 58px;
+  border-radius: 0 0 9px 9px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  font-size: 13px;
+}
+.audit-feed li:has(> .audit-detail) .audit-row {
+  border-radius: 9px 9px 0 0;
+}
+.audit-detail > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 16px;
+}
+.audit-detail dt {
+  color: var(--muted-foreground);
+}
+.audit-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.audit-detail code {
+  color: var(--muted-foreground);
+  font: 12px var(--font-mono, ui-monospace, monospace);
+}
+.audit-links {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.audit-links a {
+  color: var(--primary);
+}
+.audit-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px 0 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+@media (width <= 640px) {
+  .audit-toolbar .search {
+    width: 100%;
+  }
+  .audit-select {
+    flex: 1;
+  }
+  .audit-select select {
+    flex: 1;
+    max-width: none;
+  }
+  .audit-detail {
+    padding-left: 12px;
+  }
+  .audit-detail > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

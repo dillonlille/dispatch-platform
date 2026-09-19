@@ -22,6 +22,10 @@ jobs:
     timeout-minutes: 3
     outputs:
       mode: ${{ steps.validation.outputs.mode }}
+      # A PR from this repository into a trusted branch: its validation and build may be promoted.
+      trusted-pr: ${{ github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository }}
+      # Runs whose build is packaged for the final gate: trusted pushes and trusted PRs.
+      candidate: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -75,19 +79,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - name: Package runtime candidate
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.plan.outputs.candidate == 'true'
         run: tar -czf dispatch-dev.tar.gz -C .build .
       - name: Pass candidate to final gate
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.plan.outputs.candidate == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 2
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   core:
     needs: plan
     if: needs.plan.outputs.mode == 'full'
@@ -103,9 +104,6 @@ jobs:
           profile: debug
       - name: Backend, API, dependency and Python checks
         run: npm run check:ci -- core
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   collectors:
     needs: plan
     if: needs.plan.outputs.mode == 'full'
@@ -126,9 +124,6 @@ jobs:
       - uses: ./.github/actions/setup-browseros
       - name: Native collector verification
         run: npm run test:browseros -- --shard ${{ matrix.shard }}
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   # Keep one stable required check. No receipt or deployable artifact is published
   # until every required job has succeeded, including every collector shard.
   platform:
@@ -146,12 +141,12 @@ jobs:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python3 tooling/ci-gate.py
       - name: Record PR validation
-        if: github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository
+        if: needs.plan.outputs.trusted-pr == 'true'
         env:
           CI_RUST_KEY: ${{ needs.build.outputs.rust-key }}
         run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
       - name: Upload PR validation
-        if: github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository
+        if: needs.plan.outputs.trusted-pr == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dispatch-validation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -159,15 +154,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Retrieve this run's runtime candidate
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.plan.outputs.candidate == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify candidate source and inventory
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.plan.outputs.candidate == 'true'
         run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
       - name: Preserve the gated PR build
-        if: github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository
+        if: needs.plan.outputs.trusted-pr == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}

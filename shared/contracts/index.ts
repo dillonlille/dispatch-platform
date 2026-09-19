@@ -1,4 +1,23 @@
-export type Environment = 'production' | 'preview';
+// Shapes the backend answers with are generated from its Rust types into `./generated`
+// (`npm run contracts:generate`); this file gives them their dashboard names and narrows
+// the fields Rust keeps as plain text or JSON. Everything else here is still hand-written.
+import type { CollectionSchedule as GeneratedSchedule } from './generated/CollectionSchedule';
+import type { CollectionSchedules as GeneratedSchedules } from './generated/CollectionSchedules';
+import type { Connection as GeneratedConnection } from './generated/Connection';
+import type { DspSummary as GeneratedDspSummary } from './generated/DspSummary';
+import type { DspView as GeneratedDspView } from './generated/DspView';
+import type { Environment } from './generated/Environment';
+import type { PublicJob } from './generated/PublicJob';
+import type { Role as GeneratedRole } from './generated/Role';
+import type { SessionResponse } from './generated/SessionResponse';
+
+export type { PublicUser as User } from './generated/PublicUser';
+export type { Member as Membership } from './generated/Member';
+export type { SchedulePreview } from './generated/SchedulePreview';
+// A generated shape with some fields given the narrower type the backend really sends.
+// The narrower type must fit the generated one, so a renamed or retyped field fails here.
+type Narrow<T, N extends { [K in keyof N]: K extends keyof T ? T[K] : never }> = Omit<T, keyof N> &
+  N;
 export const permissions = [
   'timecard.view',
   'timecard.manage',
@@ -11,99 +30,27 @@ export const permissions = [
   'audit.view',
 ] as const;
 export type Permission = (typeof permissions)[number];
-export interface Role {
-  id: string;
-  name: string;
-  owner: boolean;
-  permissions: Permission[];
-  members: number;
-  invitations: number;
-}
-export type DspStatus = 'provisioning' | 'active' | 'suspended' | 'failed';
-export type ConnectionStatus =
-  | 'not_connected'
-  | 'ready'
-  | 'signing_in'
-  | 'needs_verification'
-  | 'error';
-export type JobStatus =
-  | 'queued'
-  | 'running'
-  | 'waiting_verification'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled';
-export interface User {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  platformOwner: boolean;
-}
-export interface Dsp {
-  id: string;
-  name: string;
-  environment: Environment;
-  status: DspStatus;
-  timezone: string;
-  permanent: boolean;
-  revision: number;
-  createdAt: string;
-}
-export interface DspProfile {
+/** `members` and `invitations` are counted by the role list only; a saved role has null. */
+export type Role = Narrow<GeneratedRole, { permissions: Permission[] }>;
+export type DspSummary = Narrow<GeneratedDspSummary, { profile: DspProfile }>;
+export type SessionView = Narrow<SessionResponse, { dsps: DspSummary[] }>;
+type ViewRole = Pick<Role, 'id' | 'name' | 'owner'>;
+export type DspView = Narrow<
+  GeneratedDspView,
+  { profile: DspProfile; permissions: Permission[]; role: ViewRole; roles?: ViewRole[] }
+>;
+export type Connection = Narrow<GeneratedConnection, { provider: 'paycom' | 'cortex' }>;
+export type CollectionSchedule = GeneratedSchedule;
+export type CollectionSchedules = GeneratedSchedules;
+interface DspProfile {
   abbreviation: string;
   stationCode: string;
   setupRequired: boolean;
   removed: boolean;
+  // Whether this DSP's audit log lists platform owners, as "Platform support".
+  supportVisible: boolean;
 }
-export interface DspSummary extends Dsp {
-  profile: DspProfile;
-  ownerEmail: string | null;
-  ownerStatus: 'active' | 'invited' | 'missing';
-  paycom: ConnectionStatus;
-  lastCollection: string | null;
-  role: string | null;
-}
-export interface Membership {
-  id: string;
-  userId: string;
-  dspId: string;
-  email: string;
-  name: string;
-  role: string;
-  roleId: string | null;
-  owner: boolean;
-  status: 'active' | 'idle' | 'offline';
-}
-export interface SessionView {
-  user: User;
-  csrf: string;
-  dsps: DspSummary[];
-  development: boolean;
-  environment: Environment;
-  release: string;
-  providerMode?: 'fixture' | 'native';
-}
-export interface DspView {
-  profile?: DspProfile;
-  dsp: Dsp;
-  token: string;
-  role: Pick<Role, 'id' | 'name' | 'owner'>;
-  /** Every role of the DSP, sent only to a platform owner so they can look through one. */
-  roles?: Pick<Role, 'id' | 'name' | 'owner'>[];
-  permissions: Permission[];
-}
-export interface Connection {
-  verificationSessionId?: string;
-  provider: 'paycom' | 'cortex';
-  enabled: boolean;
-  status: ConnectionStatus;
-  error: string | null;
-  updatedAt: string;
-  lastVerifiedAt: string | null;
-  accountLabel: string | null;
-}
-export interface PageRead {
+interface PageRead {
   ordinal: number;
   attempt: number;
   stage: 'navigation' | 'content' | 'extraction';
@@ -152,33 +99,7 @@ export interface JobMetrics {
     failures: PageRead[];
   };
 }
-export interface Job {
-  id: string;
-  dspId: string;
-  dspName: string;
-  environment: Environment;
-  kind: 'paycom.collect' | 'cortex.meal_breaks.collect';
-  status: JobStatus;
-  progress: number;
-  message: string;
-  attempt: number;
-  maxAttempts: number;
-  availableAt: string;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  error: string | null;
-  release: string;
-  actorId: string | null;
-  metrics: JobMetrics[];
-}
-export interface Schedule {
-  intervalSeconds?: number;
-  enabled: boolean;
-  localTime: string;
-  timezone: string;
-  nextRun: string | null;
-}
+export type Job = Narrow<PublicJob, { metrics: JobMetrics[] }>;
 export interface Employee {
   code: string;
   name: string;
@@ -200,13 +121,9 @@ export interface Timecard {
   hours: number;
   status: string;
   punches: Punch[];
-}
-export interface Workforce {
-  employees: Employee[];
-  timecards: Timecard[];
-  collectedAt: string;
-  from: string;
-  to: string;
+  // The employee's Paycom timecard page for the pay period containing `date`.
+  // Absent on rows still being collected; null before links were retained.
+  sourceUrl?: string | null;
 }
 export interface AuditEvent {
   id: number;
@@ -217,6 +134,34 @@ export interface AuditEvent {
   dspName: string | null;
   action: string;
   detail: string;
+  area: AuditArea;
+  target: string | null;
+  // The record the event is about, when it has one that outlives a rename.
+  ref: { kind: 'member' | 'role' | 'schedule' | 'job'; id: string } | null;
+  changes: AuditChange[];
+}
+export type AuditArea =
+  | 'team'
+  | 'roles'
+  | 'collections'
+  | 'schedules'
+  | 'connections'
+  | 'access'
+  | 'dsps'
+  | 'settings';
+// A changed field; a granted value has no `from` and a revoked one has no `to`.
+export interface AuditChange {
+  field: string;
+  from: string | null;
+  to: string | null;
+}
+export interface AuditPage {
+  events: AuditEvent[];
+  total: number;
+  counts: Partial<Record<AuditArea | 'failures', number>>;
+  actors: { id: string; name: string }[];
+  // DSPs with activity, for narrowing the platform's log; empty inside a DSP.
+  dsps: { id: string; name: string }[];
 }
 export interface PlatformHealth {
   environment: Environment;

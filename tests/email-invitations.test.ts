@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 import { capturedMail, smtpCapture } from './mail-support.js';
 import worker from '../services/cloudflare-mail/worker.js';
 import type { Env } from '../services/cloudflare-mail/worker-configuration.js';

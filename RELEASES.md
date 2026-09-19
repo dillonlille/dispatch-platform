@@ -33,7 +33,7 @@ again; a bare rerun continues the unfinished release. The command:
    on the identical merge tree, so main promotes those tested bytes after a smoke
    check, exactly as Dev does. Without a matching validation main runs every suite.
    The final gate publishes `dispatch-main-<commit>` only after all required jobs pass.
-5. Runs `prepare-release.py` into `releases/vX.Y.Z` and smoke tests that extracted
+5. Downloads that artifact into `releases/vX.Y.Z` and smoke tests the extracted
    runtime against disposable state on this machine. Those exact bytes are
    promoted; the published artifact is never rebuilt, on Production or elsewhere.
 6. Waits for the release notes in `releases/vX.Y.Z-notes.md`; write them while the
@@ -88,12 +88,18 @@ Activation is serialized, keeps private state in place, stops the app, swaps the
 runtime and requires production health with the expected digest. Failure restores
 the previous runtime. An interrupted activation is recovered before another update.
 A release that failed health is recorded in `data/platform/production-update.json`
-and is not retried every two minutes; investigate and publish a corrected version.
+and is not retried by the 30-second timer; investigate and publish a corrected version.
 The database schema must remain compatible with rollback. Schema changes require
 an explicit migration and recovery plan; this updater refuses incompatible schemas.
+Rollback reaches one release back: each release must open, and leave usable, the
+data of the immediately previous release, and nothing older. Backups from before
+v0.0.6 are never restored. Code kept only so an older release can run, or so its
+data can be converted, may be deleted once two releases have shipped after it.
+Database migrations are therefore additive, and a release tolerates migrations that
+a newer release recorded. Dropping, renaming or rewriting anything takes two releases:
+the first stops using it and ships, and only the next one, whose rollback target no
+longer needs it, removes it.
 
 Verify with `systemctl --user status dispatch-production.service`,
 `journalctl --user -u dispatch-production-update.service`, and
 `curl --fail https://dispatch.dillonlille.com/api/health`.
-Keep private backups and verify development work is preserved on `dispatch-dev`
-before removing retired development files from the Production host.

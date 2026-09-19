@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 const request = {
   requestId: 'meal-1',
   date: '2026-01-10',

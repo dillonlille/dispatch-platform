@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { permissions, type Job, type JobMetrics, type SessionView, type User } from './index.js';
+import type { Dsp } from './generated/Dsp';
+import {
+  permissions,
+  type DspView,
+  type Job,
+  type JobMetrics,
+  type SessionView,
+  type User,
+} from './index.js';
 
 const text = z.string();
 const count = z.number().int().nonnegative();
@@ -12,7 +20,7 @@ const connectionStatus = z.enum([
   'needs_verification',
   'error',
 ]);
-export const userSchema = z.object({
+const userSchema = z.object({
   id: text.min(1),
   email: text.min(1),
   firstName: text,
@@ -28,12 +36,13 @@ const dsp = z.object({
   permanent: z.boolean(),
   revision: count,
   createdAt: text,
-});
+}) satisfies z.ZodType<Dsp>;
 const profile = z.object({
   abbreviation: text,
   stationCode: text,
   setupRequired: z.boolean(),
   removed: z.boolean(),
+  supportVisible: z.boolean(),
 });
 const permission = z.enum(permissions);
 export const sessionSchema = z.object({
@@ -62,7 +71,7 @@ const viewSchema = z.object({
   roles: z.array(viewRole).optional(),
   permissions: z.array(permission),
   profile,
-});
+}) satisfies z.ZodType<DspView>;
 const pageRead = z.object({
   ordinal: count,
   attempt: count,
@@ -75,7 +84,7 @@ const pageRead = z.object({
   pendingRequests: count.nullable().optional(),
   documentState: z.enum(['loading', 'interactive', 'complete']).nullable().optional(),
 });
-export const metricsSchema = z.object({
+const metricsSchema = z.object({
   attempt: count,
   startedAt: text,
   finishedAt: text.nullable(),
@@ -116,7 +125,7 @@ export const metricsSchema = z.object({
     })
     .optional(),
 }) satisfies z.ZodType<JobMetrics>;
-export const jobStatusSchema = z.enum([
+const jobStatusSchema = z.enum([
   'queued',
   'running',
   'waiting_verification',

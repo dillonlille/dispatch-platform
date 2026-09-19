@@ -4,8 +4,10 @@
 CI release builds can restore an exact-input binary from a trusted branch cache.
 Local entries live beside Git metadata,
 never in a runtime/data directory, and are copied into each checkout's own target.
+Only the most recently used local entries are retained.
 """
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -16,6 +18,9 @@ import shutil
 import subprocess
 import tempfile
 import tomllib
+
+# Debug binaries are about 140 MB each; every worktree with its own Rust change adds one.
+KEEP = 8
 
 
 def output(*args, cwd=None):
@@ -63,6 +68,55 @@ def cached_binary(entry):
         return binary if hashlib.sha256(binary.read_bytes()).hexdigest() == expected else None
     except OSError:
         return None
+
+
+@contextmanager
+def entry_lock(cache, key, wait=True):
+    """Hold the key's lock, or yield False when another process has it and wait is off."""
+    name = cache / (key + ".lock")
+    while True:
+        with name.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+            except BlockingIOError:
+                yield False
+                return
+            # Pruning removes lock files; a lock on a removed file excludes nobody.
+            try:
+                current = name.stat().st_ino == os.fstat(lock.fileno()).st_ino
+            except FileNotFoundError:
+                current = False
+            if current:
+                yield True
+                return
+
+
+def stale_entries(cache, keep, protect):
+    """Keys beyond the most recently used; hits and stores refresh an entry's time."""
+    used = {}
+    for item in cache.iterdir():
+        try:
+            if item.is_dir() and not item.is_symlink():
+                used[item.name] = item.stat().st_mtime_ns
+            elif item.name.endswith(".lock"):
+                used.setdefault(item.name[:-len(".lock")], 0)
+        except OSError:
+            continue
+    used.pop(protect, None)
+    recent = sorted(used, key=lambda key: (used[key], key), reverse=True)
+    return recent[max(keep - 1, 0):]
+
+
+def prune(cache, keep, protect):
+    """Other worktrees prune and build at the same time: skip busy keys, tolerate missing files."""
+    for key in stale_entries(cache, keep, protect):
+        try:
+            with entry_lock(cache, key, wait=False) as held:
+                if held:
+                    shutil.rmtree(cache / key, ignore_errors=True)
+                    (cache / (key + ".lock")).unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def cache_eligible(root, environment, allow_ci=False):
@@ -130,20 +184,22 @@ def build(release=False):
     cache.mkdir(mode=0o700, exist_ok=True)
     entry = cache / key
     target = root / "target" / profile / "dispatch-backend"
-    with (cache / (key + ".lock")).open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with entry_lock(cache, key):
         binary = cached_binary(entry)
         if binary:
             copy_binary(binary, target)
             print(f"Reused {profile} backend for identical Rust inputs.", flush=True)
-            return
-        subprocess.run(args, cwd=root, check=True)
-        if fingerprint(root, profile, compiler, os.environ) != key:
-            raise RuntimeError("Rust inputs changed during the build; run it again before packaging")
-        entry.mkdir(mode=0o700, exist_ok=True)
-        copy_binary(target, entry / "dispatch-backend")
-        (entry / "sha256").write_text(hashlib.sha256(target.read_bytes()).hexdigest() + "\n")
-        print(f"Cached {profile} backend for identical inputs.", flush=True)
+        else:
+            subprocess.run(args, cwd=root, check=True)
+            if fingerprint(root, profile, compiler, os.environ) != key:
+                raise RuntimeError("Rust inputs changed during the build; run it again before packaging")
+            entry.mkdir(mode=0o700, exist_ok=True)
+            copy_binary(target, entry / "dispatch-backend")
+            (entry / "sha256").write_text(hashlib.sha256(target.read_bytes()).hexdigest() + "\n")
+            print(f"Cached {profile} backend for identical inputs.", flush=True)
+        if not ci_cache:
+            os.utime(entry)
+            prune(cache, KEEP, key)
 
 
 if __name__ == "__main__":

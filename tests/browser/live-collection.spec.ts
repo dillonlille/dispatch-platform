@@ -1,5 +1,5 @@
 import type { Route } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login } from './fixtures.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 
 test('driver results update open timecards and meal breaks without resetting the view', async ({
@@ -69,10 +69,7 @@ test('driver results update open timecards and meal breaks without resetting the
       },
     });
   });
-  await page.goto('/');
-  await page.getByLabel('Email address').fill('member@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await login(page, demo.member);
   await page.getByRole('heading', { name: 'Currently under development' }).waitFor();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByLabel('Paycom date').fill(date);

@@ -1,4 +1,6 @@
-@import './base.css';
+@import './styles/tokens.css';
+@import './styles/reset.css';
+@import './styles/base-components.css';
 @import './paycom-workforce.css';
 
 /* Shared native controls. */
@@ -94,25 +96,11 @@ select {
 .full {
   width: 100%;
 }
-.muted,
-.result-count {
+.muted {
   color: var(--muted-foreground);
 }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.row-actions,
 .form-actions,
-.inline-form,
-.badge-row {
+.inline-form {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -127,10 +115,6 @@ select {
 }
 .form-actions > span {
   margin-right: auto;
-  font-size: 13px;
-}
-.badge-row {
-  color: var(--muted-foreground);
   font-size: 13px;
 }
 .account-menu {
@@ -262,9 +246,6 @@ select {
   color: var(--primary);
   background: transparent;
 }
-.auth-panel .auth-description {
-  margin-bottom: 28px;
-}
 .auth-footer {
   text-align: center;
   color: var(--muted-foreground);
@@ -324,67 +305,43 @@ select {
 .empty > svg {
   display: none;
 }
-.summary-strip {
-  display: flex;
-  margin: 0 0 28px;
-  padding-block: 4px;
-}
-.summary-strip > div {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-.summary-strip > div + div {
-  border-left: 1px solid var(--border);
-}
-.summary-strip strong {
-  order: -1;
-  color: var(--foreground);
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: -0.8px;
-}
-.summary-strip strong.metric-label {
-  font-size: 17px;
-}
 .restored-tabs {
   display: flex;
   gap: 30px;
   width: 100%;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  height: 43px;
+  margin-bottom: 8px;
   overflow-x: auto;
 }
 .restored-tabs button {
   flex-shrink: 0;
-  min-height: 48px;
-  padding: 0 0 15px;
+  min-height: 0;
+  height: 100%;
+  padding: 0 0 14px;
   border: 0;
   border-radius: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 450;
   color: var(--muted-foreground);
 }
 .restored-tabs button[aria-selected='true'] {
   border-color: var(--primary);
   color: var(--primary);
-  font-weight: 500;
+  font-weight: 550;
 }
-.toolbar,
+.restored-tabs:has(+ .table-toolbar) {
+  margin-bottom: 0;
+}
 .table-toolbar {
   display: flex;
   gap: 14px;
   align-items: center;
   justify-content: space-between;
-  margin: 20px 0 16px;
+  margin: 0;
+  padding: 19px 0 15px;
 }
 .search {
   position: relative;
@@ -525,68 +482,12 @@ td small {
   overflow-y: auto;
   visibility: hidden;
 }
-.panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-top: 24px;
-  overflow: hidden;
-}
-.panel-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
-  gap: 12px;
-}
-.panel-heading h2 {
-  font-size: 16px;
-  font-weight: 600;
-}
-.build-details {
-  display: grid;
-  gap: 12px;
-  padding: 24px;
-}
-.activity {
-  padding: 0 24px;
-}
-.activity > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 0;
-}
-.activity > div + div {
-  border-top: 1px solid var(--border);
-}
-.activity strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.activity small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  margin-top: 3px;
-}
-.activity time {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.activity-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--primary);
-  border-radius: 50%;
-}
-.settings-form {
-  padding: 24px;
-  max-width: 680px;
-}
-.settings-section > form {
+.settings-section > form,
+.support-visibility {
   max-width: 448px;
+}
+.support-visibility {
+  margin-top: 0;
 }
 .settings-section > form > button {
   margin-top: 24px;
@@ -606,72 +507,8 @@ td small {
 .details dd {
   margin: 0;
 }
-.theme-mode-options {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.theme-mode-options button {
-  min-height: 68px;
-}
-.theme-mode-options button[aria-pressed='true'] {
-  color: var(--primary);
-  border-color: var(--primary);
-  background: var(--selection);
-}
-.checkbox-label {
-  flex-direction: row;
-  align-items: center;
-}
 .inline-form label {
   min-width: 140px;
-}
-.panel-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  border-top: 1px solid var(--border);
-  padding: 18px 24px;
-}
-.panel-footer small {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.connection-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 24px;
-}
-.connection-description {
-  flex: 1;
-}
-.connection-description h3 {
-  font-size: 16px;
-  font-weight: 600;
-}
-.connection-description p {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  margin-top: 6px;
-}
-.connection-description small {
-  color: var(--muted-foreground);
-  display: block;
-  margin-top: 12px;
-}
-.provider-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius);
-  background: var(--accent);
-  color: var(--primary);
-  font-weight: 600;
-  font-size: 20px;
 }
 .verification {
   margin: 0 24px 24px;
@@ -760,15 +597,6 @@ td small {
   height: 100%;
   background: var(--primary);
 }
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 18px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
 .employee-link {
   display: flex;
   align-items: center;
@@ -796,39 +624,14 @@ td small {
   gap: 16px;
   text-align: left;
 }
-.date-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.date-controls input {
-  width: 160px;
-}
 .paycom-page {
   max-width: none;
 }
 .paycom-page .page-heading {
   margin-bottom: 24px;
 }
-.paycom-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 20px 0;
-}
 .paycom-page .embedded-page > .page-heading {
   display: none;
-}
-.paycom-page .embedded-page .summary-strip {
-  display: none;
-}
-.paycom-page .embedded-page .toolbar {
-  margin-top: 0;
-}
-.paycom-subnav {
-  margin-top: 12px;
 }
 .paycom-connect {
   margin-top: 28px;
@@ -871,31 +674,14 @@ td small {
   .page-heading {
     align-items: flex-start;
   }
-  .heading-actions,
-  .page-actions {
+  .heading-actions {
     flex-shrink: 0;
   }
   .page-heading h1 {
     font-size: 27px;
   }
-  .toolbar {
-    flex-wrap: wrap;
-  }
   .search {
     width: min(100%, 330px);
-  }
-  .result-count {
-    font-size: 12px;
-  }
-  .connection-body {
-    flex-wrap: wrap;
-  }
-  .connection-body .row-actions {
-    width: 100%;
-  }
-  .panel-footer {
-    align-items: flex-start;
-    flex-direction: column;
   }
   .restored-tabs {
     gap: 24px;
@@ -939,39 +725,10 @@ td small {
   align-items: center;
   gap: 12px;
 }
-
-/* Geometry matches the archived line tabs. */
-.restored-tabs {
-  height: 43px;
-  margin-bottom: 8px;
-}
-.restored-tabs button {
-  min-height: 0;
-  height: 100%;
-  padding-bottom: 14px;
-  font-weight: 450;
-}
-.restored-tabs button[aria-selected='true'] {
-  font-weight: 550;
-}
-.restored-tabs:has(+ .table-toolbar) {
-  margin-bottom: 0;
-}
-.table-toolbar {
-  margin: 0;
-  padding: 19px 0 15px;
-}
 .page-container > .restored-tabs + .settings-section {
   margin-top: 8px;
 }
 
-.paycom-data-view {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding-top: 24px;
-  min-width: 0;
-}
 .paycom-day-toolbar {
   display: flex;
   align-items: center;
@@ -1055,11 +812,6 @@ td small {
 .paycom-data-table .employee-link:hover {
   text-decoration: underline;
 }
-.paycom-settings-button {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
-}
 .paycom-workspace-controls {
   padding: 18px 0;
   border-bottom: 1px solid var(--border);
@@ -1074,20 +826,18 @@ td small {
 .paycom-controls-row > button {
   margin-left: auto;
 }
-.paycom-calendar-note {
-  margin: 8px 0 0;
-  font-size: 12px;
-}
 .paycom-sync-status {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 16px;
   margin-top: 12px;
+  margin-bottom: 20px;
   font-size: 13px;
 }
 @media (max-width: 600px) {
   .paycom-date-controls {
+    width: 100%;
     gap: 6px;
     flex-wrap: nowrap;
   }
@@ -1240,15 +990,6 @@ td small {
   }
 }
 
-.plugin-settings-fields select {
-  width: 100%;
-  margin-top: 8px;
-}
-.plugin-settings-fields small {
-  display: block;
-  margin-top: 8px;
-}
-
 .dsp-detail-list {
   margin-top: 24px;
 }
@@ -1395,13 +1136,6 @@ td small {
 }
 .permission-row input[role='switch']:disabled {
   opacity: 0.5;
-}
-
-.plugin-setting-choice {
-  flex-direction: row;
-}
-.plugin-setting-choices > .plugin-setting-choice {
-  padding-inline: 0.85rem;
 }
 
 .side-sheet .modal-heading {

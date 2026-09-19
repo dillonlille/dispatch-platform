@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  clockLabel,
   cortexClock,
   flexDeliveryGaps,
   mealPairs,
   paycomDay,
   type MealEmployee,
 } from '../shared/meal-breaks.js';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 
 function employee(): MealEmployee {
   return {
@@ -141,6 +142,32 @@ test('minute-precision differences, provider ordering and missing values', () =>
   row.paycom = null;
   assert.equal(mealPairs(row, '2026-09-15').status, 'Flex only');
 });
+test('Late DAs have an IN DAY punch at or after the configured time, in the chosen departments', () => {
+  const row = employee();
+  const late = (inDay: string | null, rule = { time: '10:01', departments: [] as string[] }) => {
+    row.paycom!.punches[0]!.in = inDay;
+    return mealPairs(row, '2026-09-15', rule).lateIn;
+  };
+  assert.equal(late('10:00 AM'), false);
+  assert.equal(late('10:01 AM'), true);
+  assert.equal(late('01:15 PM'), true);
+  assert.equal(late('09:42 AM', { time: '09:30', departments: [] }), true);
+  assert.equal(late('09:42 AM', { time: 'later', departments: [] }), false);
+  row.paycom!.department = 'Dispatch';
+  assert.equal(late('10:30 AM', { time: '10:01', departments: ['Driver'] }), false);
+  assert.equal(late('10:30 AM', { time: '10:01', departments: ['Driver', 'Dispatch'] }), true);
+  // Without a rule, an IN DAY punch, or a Paycom card, nobody is late.
+  row.paycom!.punches[0]!.in = '10:30 AM';
+  assert.equal(mealPairs(row, '2026-09-15').lateIn, false);
+  row.paycom!.punches = [
+    { in: null, out: '02:34 PM', hours: null, inKind: null, outKind: 'OUT LUNCH' },
+  ];
+  assert.equal(late(null), false);
+  row.paycom = null;
+  assert.equal(mealPairs(row, '2026-09-15', { time: '10:01', departments: [] }).lateIn, false);
+  assert.equal(clockLabel('10:01'), '10:01 AM');
+  assert.equal(clockLabel('13:05'), '1:05 PM');
+});
 test('typed partial punches retain kind; older partial punches are never relabeled as day boundaries', () => {
   const row = employee();
   row.paycom!.punches = [
@@ -221,6 +248,11 @@ test('meal API requires DSP context, exposes the punch union to members, restric
     const response = await owner.get(`/api/dsp/paycom/meal-breaks?date=${date}`);
     assert.equal(response.status, 200);
     assert.equal(response.value.rows.length, 12);
+    // The Late DAs filter reads each card's department.
+    assert.deepEqual(
+      [...new Set(response.value.rows.map((r: MealEmployee) => r.paycom?.department))].sort(),
+      ['Delivery', 'Operations'],
+    );
     assert.equal(response.value.links.revision, 0);
     assert.equal((await owner.get('/api/dsp/paycom/meal-breaks?date=invalid')).status, 400);
     const member = await f.client('member@dispatch.test');

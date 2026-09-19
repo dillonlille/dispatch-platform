@@ -1,5 +1,7 @@
+import fcntl
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -151,6 +153,91 @@ class PipelineTests(unittest.TestCase):
             binary.write_bytes(b"corrupted")
             self.assertIsNone(cache.cached_binary(entry))
             self.assertEqual(destination.read_bytes(), b"compiled backend")
+
+    def test_local_cache_keeps_only_recently_used_entries_and_never_the_one_in_use(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch-cache-prune-") as temp:
+            store = Path(temp)
+            for age, key in enumerate(["newest", "newer", "older", "oldest", "current"]):
+                (store / key).mkdir()
+                (store / key / "dispatch-backend").write_bytes(b"compiled backend")
+                (store / (key + ".lock")).touch()
+                os.utime(store / key, (1_000_000 - age, 1_000_000 - age))
+            (store / "abandoned.lock").touch()
+            (store / "building.lock").touch()
+            self.assertEqual(cache.stale_entries(store, 3, "current"),
+                             ["older", "oldest", "building", "abandoned"])
+            # Another worktree is compiling one key and reading another.
+            with (store / "building.lock").open("a") as building, (store / "oldest.lock").open("a") as reading:
+                fcntl.flock(building, fcntl.LOCK_EX)
+                fcntl.flock(reading, fcntl.LOCK_EX)
+                # A concurrent pruner can remove an entry between listing and deletion.
+                original = cache.stale_entries
+                with patch.object(cache, "stale_entries",
+                                  side_effect=lambda *args: [*original(*args), "already-removed"]):
+                    cache.prune(store, 3, "current")
+            self.assertEqual(sorted(item.name for item in store.iterdir()),
+                             ["building.lock", "current", "current.lock", "newer", "newer.lock",
+                              "newest", "newest.lock", "oldest", "oldest.lock"])
+            self.assertEqual((store / "oldest/dispatch-backend").read_bytes(), b"compiled backend")
+            cache.prune(store, 3, "current")
+            self.assertEqual(sorted(item.name for item in store.iterdir() if item.is_dir()),
+                             ["current", "newer", "newest"])
+            cache.prune(store, 0, "current")
+            self.assertEqual(sorted(item.name for item in store.iterdir()), ["current", "current.lock"])
+
+    def test_lock_on_a_pruned_key_is_taken_again_instead_of_excluding_nobody(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch-cache-lock-") as temp:
+            root = Path(temp)
+            with cache.entry_lock(root, "key") as held:
+                self.assertTrue(held)
+                with cache.entry_lock(root, "key", wait=False) as second:
+                    self.assertFalse(second)
+            stale = (root / "key.lock").open("a")
+            self.addCleanup(stale.close)
+            fcntl.flock(stale, fcntl.LOCK_EX)
+            (root / "key.lock").unlink()
+            with cache.entry_lock(root, "key", wait=False) as held:
+                self.assertTrue(held)
+                self.assertTrue((root / "key.lock").exists())
+
+    def test_local_cache_hits_refresh_recency_before_pruning(self):
+        with tempfile.TemporaryDirectory(prefix="dispatch-cache-recency-") as temp:
+            root = Path(temp)
+            (root / "backend/src").mkdir(parents=True)
+            (root / "tooling").mkdir()
+            (root / ".git").mkdir()
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["backend"]\n')
+            (root / "backend/Cargo.toml").write_text('[package]\nname = "fixture"\n')
+            source = root / "backend/src/main.rs"
+            builds = []
+            def compile(args, **_kwargs):
+                builds.append(args)
+                binary = root / "target/debug/dispatch-backend"
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_text(source.read_text())
+            def build(contents, age=None):
+                source.write_text(contents)
+                before = set((root / ".git/dispatch-rust-builds").glob("*/"))
+                cache.build()
+                for entry in set((root / ".git/dispatch-rust-builds").glob("*/")) - before if age else []:
+                    os.utime(entry, (age, age))
+            with patch.dict(cache.os.environ, {"CARGO_HOME": str(root / "cargo-home")}, clear=True), \
+                    patch.object(cache, "__file__", str(root / "tooling/cargo-build.py")), \
+                    patch.object(cache, "KEEP", 2), \
+                    patch.object(cache, "output", side_effect=lambda *args, **_kw: str(root / ".git") if args[0] == "git" else "pinned compiler"), \
+                    patch.object(cache.subprocess, "run", side_effect=compile):
+                build("first", age=1_000_000)
+                build("second", age=2_000_000)
+                build("first")
+                self.assertEqual(len(builds), 2)
+                build("third")
+                build("first")
+                self.assertEqual(len(builds), 3, "The reused entry outlived the newer unused one")
+                build("second")
+                self.assertEqual(len(builds), 4)
+            entries = [item for item in (root / ".git/dispatch-rust-builds").iterdir() if item.is_dir()]
+            self.assertEqual(len(entries), 2)
+            self.assertTrue(all(cache.cached_binary(entry) for entry in entries))
 
     def test_pr_preflight_coordinates_ready_branches_without_blocking_drafts(self):
         draft = {"number": 1, "headRefName": "another", "isDraft": True}

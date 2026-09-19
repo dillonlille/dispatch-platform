@@ -2,11 +2,14 @@
 """Fail closed on missing CI jobs and verify the artifact before Dev publication."""
 
 import argparse
-import importlib.util
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from runtime_artifact import unpack, verify_artifact
 
 
 def validate(needs):
@@ -23,13 +26,10 @@ def validate(needs):
 
 
 def verify(archive, commit):
-    spec = importlib.util.spec_from_file_location("updater", Path(__file__).with_name("update-dev.py"))
-    updater = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(updater)
     with tempfile.TemporaryDirectory(prefix="dispatch-ci-artifact-") as temp:
         root = Path(temp) / "build"
-        updater.unpack(archive, root)
-        updater.verify_artifact(root, commit)
+        unpack(archive, root)
+        verify_artifact(root, commit)
 
 
 if __name__ == "__main__":

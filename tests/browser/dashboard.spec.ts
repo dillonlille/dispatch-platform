@@ -1,12 +1,5 @@
-import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login, openDsp } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
-async function login(page: Page, email = 'owner@dispatch.test') {
-  await page.goto('/');
-  await page.getByLabel('Email address').fill(email);
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-}
 test('owner dashboard, search, workforce, timecards, connection verification and collection', async ({
   page,
   dispatch,
@@ -153,6 +146,29 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   );
 });
 
+test('the mobile drawer stays open while the DSP behind it finishes loading', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/session/dsp', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  const settings = page.getByRole('link', { name: 'Settings', exact: true });
+  await expect(settings).toBeVisible();
+  const opened = page.waitForResponse((response) => response.url().endsWith('/api/session/dsp'));
+  release();
+  await opened;
+  await expect(page.getByRole('link', { name: 'Timecard', exact: true })).toBeVisible();
+  await expect(settings).toBeVisible();
+  await settings.click();
+  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toBeVisible();
+  await expect(settings).toBeHidden();
+});
+
 test('platform owner looks through a DSP role until they leave the DSP', async ({
   page,
   dispatch,
@@ -255,6 +271,20 @@ test('create a DSP and accept its owner invitation while another account is sign
   ).toBeVisible();
 });
 
+test('the account menu closes on a press outside it and on Escape', async ({ page }) => {
+  await login(page);
+  const menu = page.locator('details.account-menu');
+  const trigger = menu.locator('summary');
+  await trigger.click();
+  await expect(menu.locator('.account-popover')).toBeVisible();
+  await page.getByRole('heading', { name: 'DSPs', exact: true }).click();
+  await expect(menu.locator('.account-popover')).toBeHidden();
+  await trigger.click();
+  await expect(menu.locator('.account-popover')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu.locator('.account-popover')).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
 test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
@@ -266,7 +296,7 @@ test('archived account tabs preserve names and appearance preferences', async ({
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
-  await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
+  await page.getByLabel('Current password', { exact: true }).fill(demo.password);
   await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
   await page.getByLabel('Confirm new password', { exact: true }).fill('Different-password-2!');
   await page.getByRole('button', { name: 'Change password', exact: true }).click();
@@ -308,6 +338,28 @@ test('Timecard schedules can be created, edited, paused and deleted', async ({ p
   await expect(page.getByRole('heading', { name: 'Timecard Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Workspace view', exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Driver departments', exact: true })).toHaveCount(0);
+  const lateDas = page.getByRole('region', { name: 'Late DAs', exact: true });
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('10:01');
+  await expect(lateDas.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await lateDas.getByLabel('Late at or after').fill('09:45');
+  await lateDas.getByRole('checkbox', { name: /^Delivery/ }).check();
+  await lateDas.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('10:01');
+  await lateDas.getByLabel('Late at or after').fill('09:45');
+  await lateDas.getByRole('checkbox', { name: /^Delivery/ }).check();
+  await lateDas.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Late DAs saved' })).toBeVisible();
+  await expect(lateDas.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('09:45');
+  await expect(lateDas.getByRole('checkbox', { name: /^Delivery/ })).toBeChecked();
+  await expect(lateDas.getByRole('checkbox', { name: /^Operations/ })).not.toBeChecked();
+  await lateDas.getByRole('checkbox', { name: /^Operations/ }).check();
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-late-das-settings.png'),
+    fullPage: true,
+  });
+  await lateDas.getByRole('button', { name: 'Discard', exact: true }).click();
   await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
   let dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
   await dialog.getByLabel('Schedule name').fill('Paycom refresh');

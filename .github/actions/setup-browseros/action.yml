@@ -3,6 +3,19 @@ description: Install the pinned browser with the host isolation used by native v
 runs:
   using: composite
   steps:
+    - name: Restore the pinned browser package
+      id: package
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.cache/dispatch-browseros/browseros.deb
+        key: dispatch-browseros-${{ hashFiles('tooling/browseros-release.json') }}
+    - name: Download the pinned browser package
+      if: steps.package.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.cache/dispatch-browseros
+        url=$(python3 -c "import json; print(json.load(open('tooling/browseros-release.json'))['url'])")
+        curl --fail --location --silent --show-error --retry 3 --output ~/.cache/dispatch-browseros/browseros.deb "$url"
     - shell: bash
       run: |
         sudo apt-get update -qq
@@ -13,4 +26,5 @@ runs:
           sudo apparmor_parser -r tooling/host/dispatch-dev-bwrap.apparmor
         fi
         sudo install -d -o root -g root -m 755 /opt
-        sudo python3 tooling/install-browseros.py
+        # The installer verifies the pinned checksum and size of its own copy, cached or not.
+        sudo python3 tooling/install-browseros.py --archive ~/.cache/dispatch-browseros/browseros.deb
