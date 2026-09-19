@@ -8,8 +8,60 @@
 .audit-toolbar .search {
   margin-right: auto;
 }
-.audit-toolbar select {
-  max-width: 220px;
+.audit-toolbar .search {
+  width: 307px;
+}
+.audit-toolbar .search input {
+  font-size: 13px;
+}
+.audit-toolbar > button {
+  font-size: 13px;
+  font-weight: 400;
+}
+/* A native select dressed as the toolbar's buttons: label or icon, value, chevron. */
+.audit-select {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--control-height);
+  padding-left: 12px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  font-size: 13px;
+  cursor: pointer;
+}
+.audit-select:hover {
+  background: var(--accent);
+}
+.audit-select:focus-within {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 1px;
+}
+.audit-select > span {
+  color: var(--muted-foreground);
+}
+.audit-select > svg {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.audit-select > svg:last-child {
+  position: absolute;
+  right: 10px;
+}
+.audit-select select {
+  appearance: none;
+  max-width: 200px;
+  min-height: 0;
+  padding: 0 34px 0 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 .audit-chips {
   display: flex;
@@ -86,7 +138,7 @@ button.audit-row {
 }
 button.audit-row:hover,
 button.audit-row[aria-expanded='true'] {
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .audit-icon {
   display: grid;
@@ -162,25 +214,19 @@ button.audit-row[aria-expanded='true'] {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.audit-chevron {
-  margin-top: 3px;
-  color: var(--muted-foreground);
-  opacity: 0;
-  transition: transform var(--motion-duration);
+.audit-row time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
-.audit-row:hover .audit-chevron,
-.audit-row:focus-visible .audit-chevron,
-.audit-row[aria-expanded='true'] .audit-chevron {
-  opacity: 1;
+.audit-chevron {
+  transition: transform var(--motion-duration);
 }
 .audit-row[aria-expanded='true'] .audit-chevron {
   transform: rotate(180deg);
 }
 .audit-feed .quiet .audit-row {
   color: var(--muted-foreground);
-}
-.audit-feed .quiet .audit-body strong {
-  font-weight: 500;
 }
 .audit-feed .quiet .audit-icon {
   border: 1px dashed var(--border);
@@ -192,7 +238,7 @@ button.audit-row[aria-expanded='true'] {
   margin: 0 0 8px;
   padding: 4px 12px 14px 58px;
   border-radius: 0 0 9px 9px;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
   font-size: 13px;
 }
 .audit-feed li:has(> .audit-detail) .audit-row {
@@ -227,12 +273,12 @@ button.audit-row[aria-expanded='true'] {
   .audit-toolbar .search {
     width: 100%;
   }
-  .audit-toolbar select {
+  .audit-select {
+    flex: 1;
+  }
+  .audit-select select {
     flex: 1;
     max-width: none;
-  }
-  .audit-chevron {
-    display: none;
   }
   .audit-detail {
     padding-left: 12px;

@@ -773,7 +773,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
-            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("abbreviation",None,Some(abbreviation.to_owned())),("station",None,Some(station.to_uppercase()))])?;Ok(Reply::ok())
+            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("station",None,Some(station.to_uppercase())),("abbreviation",None,Some(abbreviation.to_owned()))])?;Ok(Reply::ok())
         },
         ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !c.can("timecard.manage"){value["history"]=json!([]);}Ok(Reply::json(value))},
         ("GET","/api/dsp/paycom/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_comparison(id,v::text(&i.query,"date",10,10)?,s(&c.dsp,"timezone"))?))},
@@ -881,7 +881,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
         && parts.len() == 5
         && parts[1] == "platform"
         && parts[2] == "dsps"
-        && ["status", "remove", "restore"].contains(&parts[4])
+        && ["status", "remove", "restore", "support-visibility"].contains(&parts[4])
     {
         let id = parts[3].to_owned();
         let action = parts[4].to_owned();
@@ -901,6 +901,19 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                             db.cancel_dsp(&tenant)?;
                         }
                         Ok(dsp)
+                    }
+                    "support-visibility" => {
+                        v::fields(b, &["visible"])?;
+                        let visible = v::boolean(b, "visible")?;
+                        db.get_dsp(&tenant)?;
+                        db.set_profile(&tenant, json!({"supportVisible":visible}))?;
+                        db.audit(
+                            Some(actor),
+                            Some(&tenant),
+                            "dsp.support_visibility_changed",
+                            if visible { "shown" } else { "hidden" },
+                        )?;
+                        Ok(json!({"ok":true}))
                     }
                     "remove" => {
                         v::fields(b, &[])?;

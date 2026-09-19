@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
   Building2,
-  CalendarClock,
+  Calendar,
   Check,
   ChevronDown,
   Download,
@@ -36,11 +36,20 @@ const areas: [AuditArea, string, LucideIcon][] = [
   ['team', 'Team', Users],
   ['roles', 'Roles', Shield],
   ['collections', 'Collections', RefreshCw],
-  ['schedules', 'Schedules', CalendarClock],
+  ['schedules', 'Schedules', Calendar],
   ['connections', 'Connections', Plug],
   ['access', 'Access', Eye],
   ['dsps', 'DSPs', Building2],
   ['settings', 'Settings', Settings],
+];
+// A DSP's log always offers the same areas; the platform's adds those it has.
+const dspAreas: AuditArea[] = [
+  'team',
+  'roles',
+  'collections',
+  'schedules',
+  'connections',
+  'settings',
 ];
 const ranges: [string, string][] = [
   ['7', 'Last 7 days'],
@@ -94,15 +103,28 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
     return [verb, ...named('schedule', e.detail)];
   },
   'schedule.deleted': (e) => ['deleted ', ...named('schedule', e.detail)],
+  'connection.credentials_saved': (e) => [
+    'saved ',
+    strong(providers[e.detail] ?? title(e.detail || 'connection')),
+    ' credentials',
+  ],
+  'connection.disabled': (e) => [
+    'disconnected ',
+    strong(providers[e.detail] ?? title(e.detail || 'a connection')),
+  ],
   'connection.verification_submitted': (e) => [
     'submitted verification for ',
     strong(providers[e.detail] ?? title(e.detail || 'a connection')),
   ],
-  'dsp.view_opened': () => ['opened the DSP'],
+  'dsp.view_opened': () => ['opened this DSP'],
   'dsp.owner_view_opened': (e) => [
     'opened ',
-    strong(e.dspName ?? 'a DSP'),
+    ...(support(e) ? ['this DSP'] : [strong(e.dspName ?? 'a DSP')]),
     ...(e.detail ? [' as ', strong(e.detail)] : []),
+  ],
+  'dsp.support_visibility_changed': (e) => [
+    e.detail === 'shown' ? 'showed Platform support to ' : 'hid Platform support from ',
+    strong(e.dspName ?? 'a DSP'),
   ],
   'dsp.settings_updated': () => ['updated DSP settings'],
   'dsp.profile_completed': () => ['completed the DSP profile'],
@@ -121,8 +143,41 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
 };
 // Outcomes describe the work itself; whoever asked for it moves to the second line.
 const outcomes: Record<string, string> = {
-  'collection.completed': 'Collection completed',
-  'collection.failed': 'Collection failed',
+  'collection.completed': 'completed',
+  'collection.failed': 'failed',
+};
+// Outcomes and joins carry facts rather than edits; their sentences spell them out.
+const facts = new Set(['provider', 'date', 'duration', 'invitedBy']);
+const fact = (event: AuditEvent, field: string) =>
+  event.changes.find((change) => change.field === field)?.to ?? '';
+const collected: Record<string, string> = { paycom: 'Paycom', cortex: 'Meal break' };
+function outcome(event: AuditEvent): Part[] {
+  const result = ` ${outcomes[event.action]}`;
+  if (event.target) return ['Scheduled collection ', strong(event.target), result];
+  const provider = collected[fact(event, 'provider')];
+  const date = fact(event, 'date');
+  return [
+    provider ? `${provider} collection` : 'Collection',
+    ...(date ? [' for ', strong(day(date))] : []),
+    result,
+  ];
+}
+function duration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+const failures: Record<string, (provider: string) => string> = {
+  manual_verification_required: (p) => `${p} needs verification — sign-in was challenged`,
+  verification_expired: () => 'Verification expired before it was completed',
+  provider_timeout: (p) => `${p} took too long to respond`,
+  connection_required: (p) => `${p} is not connected`,
+  roster_not_complete: () => 'The roster was not complete yet',
+  job_cancelled: () => 'The collection was cancelled',
+  browser_unavailable: () => 'The collection browser was unavailable',
+  browser_start_failed: () => 'The collection browser could not start',
+  browser_lost: () => 'The collection browser stopped responding',
+  browser_closed: () => 'The collection browser stopped responding',
+  browser_command_timeout: () => 'The collection browser stopped responding',
 };
 // These sentences already say what `detail` holds.
 const spoken = new Set([
@@ -137,16 +192,22 @@ const spoken = new Set([
   'schedule.updated',
   'schedule.toggled',
   'schedule.deleted',
+  'connection.credentials_saved',
+  'connection.disabled',
   'connection.verification_submitted',
   'dsp.owner_view_opened',
+  'dsp.support_visibility_changed',
+  'employees.links_updated',
+  'paycom.settings_updated',
 ]);
 
 const system = (event: AuditEvent) => !event.actorId && event.actorName === 'System';
+// Inside a DSP the server names every platform owner this way.
+const support = (event: AuditEvent) => !event.actorId && event.actorName === 'Platform support';
 function sentence(event: AuditEvent): Part[] {
-  const outcome = outcomes[event.action];
-  if (outcome) return [outcome];
+  if (outcomes[event.action]) return outcome(event);
   const phrase = phrases[event.action]?.(event) ?? [title(event.action).toLowerCase()];
-  return [strong(event.actorName), ' ', ...phrase];
+  return [views.has(event.action) ? event.actorName : strong(event.actorName), ' ', ...phrase];
 }
 const plain = (parts: Part[]) =>
   parts.map((part) => (typeof part === 'string' ? part : part.strong)).join('');
@@ -208,7 +269,9 @@ function Change({ change }: { change: AuditChange }) {
 }
 const failure = (event: AuditEvent) =>
   event.action.endsWith('.failed')
-    ? (errorLabel(event.detail) ?? (event.detail ? title(event.detail) : ''))
+    ? (failures[event.detail]?.(providers[fact(event, 'provider')] ?? 'The provider') ??
+      errorLabel(event.detail) ??
+      (event.detail ? title(event.detail) : ''))
     : '';
 // The second line: what changed, why it failed, or who asked.
 function notes(event: AuditEvent, platform: boolean): string[] {
@@ -217,7 +280,18 @@ function notes(event: AuditEvent, platform: boolean): string[] {
       ? [event.dspName]
       : []),
     ...(outcomes[event.action] && !system(event) ? [`Requested by ${event.actorName}`] : []),
+    ...(event.action === 'collection.completed' && fact(event, 'duration')
+      ? [duration(Number(fact(event, 'duration')))]
+      : []),
+    ...(fact(event, 'invitedBy') ? [`Invited by ${fact(event, 'invitedBy')}`] : []),
+    ...(event.action === 'employees.links_updated' ? linked(event.detail) : []),
   ];
+}
+
+// Link saves record "Revision 3; 2 changes"; the count is what a reader wants.
+function linked(detail: string) {
+  const count = Number(/(\d+) changes?$/.exec(detail)?.[1]);
+  return count ? [`${count} ${count === 1 ? 'link' : 'links'} changed`] : [];
 }
 
 type Entry = { key: string; events: AuditEvent[] };
@@ -326,8 +400,11 @@ export function AuditLog({ view }: { view?: DspView }) {
           areas.find(([id]) => id === event.area)?.[1] ?? '',
           plain(sentence(event)),
           [
-            ...event.changes.map(changeText),
-            ...(event.changes.length || spoken.has(event.action) || !event.detail
+            ...notes(event, false),
+            ...event.changes.filter((change) => !facts.has(change.field)).map(changeText),
+            ...(event.changes.some((change) => !facts.has(change.field)) ||
+            spoken.has(event.action) ||
+            !event.detail
               ? []
               : [event.detail]),
             failure(event),
@@ -374,26 +451,34 @@ export function AuditLog({ view }: { view?: DspView }) {
           <input
             type="search"
             aria-label="Search activity"
-            placeholder="Search activity…"
+            placeholder="Search people, roles, schedules…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <select aria-label="Person" value={actor} onChange={(e) => setActor(e.target.value)}>
-          <option value="">Everyone</option>
-          {page?.actors.map((person) => (
-            <option key={person.id} value={person.id}>
-              {person.name}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Date range" value={range} onChange={(e) => setRange(e.target.value)}>
-          {ranges.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <label className="audit-select">
+          <span>Person</span>
+          <select aria-label="Person" value={actor} onChange={(e) => setActor(e.target.value)}>
+            <option value="">Everyone</option>
+            {page?.actors.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={16} aria-hidden />
+        </label>
+        <label className="audit-select">
+          <Calendar size={16} aria-hidden />
+          <select aria-label="Date range" value={range} onChange={(e) => setRange(e.target.value)}>
+            {ranges.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={16} aria-hidden />
+        </label>
         <button onClick={() => void download()} disabled={exporting || !page?.total}>
           <Download size={16} />
           Export
@@ -404,7 +489,7 @@ export function AuditLog({ view }: { view?: DspView }) {
           All <i>{everything}</i>
         </button>
         {areas
-          .filter(([id]) => counts[id] || area === id)
+          .filter(([id]) => (view && dspAreas.includes(id)) || counts[id] || area === id)
           .map(([id, label]) => (
             <button
               key={id}
@@ -415,7 +500,7 @@ export function AuditLog({ view }: { view?: DspView }) {
               {label} <i>{counts[id] ?? 0}</i>
             </button>
           ))}
-        {(Boolean(counts.failures) || area === 'failures') && (
+        {(view || Boolean(counts.failures) || area === 'failures') && (
           <button
             className="audit-chip failures"
             aria-pressed={area === 'failures'}
@@ -444,15 +529,35 @@ export function AuditLog({ view }: { view?: DspView }) {
                     ? TriangleAlert
                     : event.action === 'collection.completed'
                       ? Check
-                      : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
+                      : views.has(event.action)
+                        ? Eye
+                        : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
                   const text = run
                     ? [...sentence(event), ` ${entry.events.length} times`]
                     : sentence(event);
-                  const detail =
-                    !run && !event.changes.length && !spoken.has(event.action) && event.detail;
-                  const lines = notes(event, !view);
+                  const edits = event.changes.filter((change) => !facts.has(change.field));
+                  const granted = edits.filter((change) => change.field === 'permission');
+                  const detail = !edits.length && !spoken.has(event.action) && event.detail;
+                  // The second line reads left to right, its parts set apart by dots.
+                  const second: ReactNode[] = run
+                    ? []
+                    : [
+                        failed && <span className="audit-failure">{failed}</span>,
+                        ...notes(event, !view),
+                        detail && <span className="audit-pill">{detail}</span>,
+                        ...edits
+                          .filter((change) => change.field !== 'permission')
+                          .map((change, index) => <Change key={index} change={change} />),
+                        granted.length > 0 && (
+                          <span className="audit-change">
+                            {granted.map((change, index) => (
+                              <Change key={index} change={change} />
+                            ))}
+                          </span>
+                        ),
+                      ].filter(Boolean);
                   return (
-                    <li key={entry.key} className={run ? 'quiet' : undefined}>
+                    <li key={entry.key} className={views.has(event.action) ? 'quiet' : undefined}>
                       <button
                         className="audit-row"
                         aria-expanded={expanded}
@@ -473,26 +578,23 @@ export function AuditLog({ view }: { view?: DspView }) {
                               ),
                             )}
                           </span>
-                          {(failed || detail || lines.length > 0 || event.changes.length > 0) &&
-                            !run && (
-                              <span className="audit-sub">
-                                {failed && <span className="audit-failure">{failed}</span>}
-                                {lines.map((line) => (
-                                  <span key={line}>{line}</span>
-                                ))}
-                                {detail && <span className="audit-pill">{detail}</span>}
-                                {event.changes.map((change, index) => (
-                                  <Change key={index} change={change} />
-                                ))}
-                              </span>
-                            )}
+                          {second.length > 0 && (
+                            <span className="audit-sub">
+                              {second.map((part, index) => (
+                                <Fragment key={index}>
+                                  {index > 0 && <span aria-hidden>·</span>}
+                                  {typeof part === 'string' ? <span>{part}</span> : part}
+                                </Fragment>
+                              ))}
+                            </span>
+                          )}
                         </span>
                         <time dateTime={event.at}>
                           {run
                             ? `${clock.format(new Date(entry.events.at(-1)!.at))} – ${clock.format(new Date(event.at))}`
                             : clock.format(new Date(event.at))}
+                          {run && <ChevronDown size={16} className="audit-chevron" aria-hidden />}
                         </time>
-                        <ChevronDown size={16} className="audit-chevron" aria-hidden />
                       </button>
                       {expanded && (
                         <dl className="audit-detail">
@@ -508,6 +610,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                           <Row label="By">{event.actorName}</Row>
                           {!view && event.dspName && <Row label="DSP">{event.dspName}</Row>}
                           {event.target && <Row label="Subject">{event.target}</Row>}
+                          {!run && event.detail && <Row label="Detail">{event.detail}</Row>}
                           <Row label="Event">
                             <code>
                               {event.action} · #{event.id}

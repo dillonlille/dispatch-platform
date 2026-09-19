@@ -619,6 +619,68 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     let platform = actions(None);
     assert!(platform.contains(&"collection.requested".to_owned()));
     assert!(platform.contains(&"development.fixtures_loaded".to_owned()));
+
+    // Once the DSP shows Platform support, later owner actions appear there
+    // without a name. Earlier ones, and managing the DSP itself, stay out.
+    db.set_profile(id, json!({"supportVisible":true})).unwrap();
+    let owner_id = s(&owner, "id");
+    db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
+        .unwrap();
+    db.audit(Some(owner_id), Some(id), "dsp.suspended", "")
+        .unwrap();
+    assert_eq!(
+        actions(Some(id)),
+        [
+            "dsp.owner_view_opened",
+            "collection.completed",
+            "schedule.updated"
+        ]
+    );
+    let log = db.audits(Some(id), 200).unwrap();
+    assert_eq!(s(&log[0], "actorName"), "Platform support");
+    assert!(log[0]["actorId"].is_null());
+    assert!(!log.to_string().contains(owner_id));
+    let page = db
+        .audit_page(&dispatch_backend::core::db::AuditQuery {
+            dsp: Some(id),
+            actor: "support",
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(page["total"], 1);
+    assert!(
+        page["actors"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"id":"support","name":"Platform support"}))
+    );
+    // The platform's own log keeps the real name.
+    let named = db.audits(None, 200).unwrap();
+    assert_ne!(s(&named[0], "actorName"), "Platform support");
+    db.set_profile(id, json!({"supportVisible":false})).unwrap();
+    db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
+        .unwrap();
+    assert_eq!(actions(Some(id)).len(), 3);
+}
+#[test]
+fn collection_outcomes_record_their_schedule_provider_date_and_duration() {
+    let (_root, db) = store();
+    let started = db::at(db::now() - 108_000);
+    let job = json!({"kind":"paycom.collect","idempotency_key":"manual","request":"{\"date\":\"2026-09-18\"}","started_at":started});
+    let (schedule, facts) = db.outcome_facts("missing", &job);
+    assert!(schedule.is_none());
+    assert_eq!(
+        facts,
+        [
+            ("provider", None, Some("paycom".to_owned())),
+            ("date", None, Some("2026-09-18".to_owned())),
+            ("duration", None, Some("108".to_owned())),
+        ]
+    );
+    let job = json!({"kind":"cortex.meal_breaks.collect","idempotency_key":"schedule:gone:2026:flex:0","request":"{}","started_at":null});
+    let (schedule, facts) = db.outcome_facts("missing", &job);
+    assert!(schedule.is_none());
+    assert_eq!(facts, [("provider", None, Some("cortex".to_owned()))]);
 }
 #[test]
 fn audit_log_filters_pages_and_counts_by_area() {

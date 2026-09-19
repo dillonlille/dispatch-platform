@@ -300,5 +300,5 @@ impl Store {
     }
 }
 pub fn profile_default() -> Value {
-    json!({"abbreviation":"","stationCode":"","setupRequired":false,"removed":false})
+    json!({"abbreviation":"","stationCode":"","setupRequired":false,"removed":false,"supportVisible":false})
 }

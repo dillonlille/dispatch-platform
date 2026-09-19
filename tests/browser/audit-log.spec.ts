@@ -21,12 +21,27 @@ const event = (at: string, action: string, area: AuditEvent['area'], rest: Parti
   }) satisfies AuditEvent;
 const system = { actorId: null, actorName: 'System' };
 // Northline keeps Chicago time, five hours behind these instants.
+const support = { actorId: null, actorName: 'Platform support' };
 const events: AuditEvent[] = [
-  event('2026-09-16T14:44:00Z', 'collection.completed', 'collections', {}),
+  event('2026-09-16T14:44:00Z', 'collection.completed', 'collections', {
+    changes: [
+      { field: 'provider', from: null, to: 'paycom' },
+      { field: 'date', from: null, to: '2026-09-15' },
+      { field: 'duration', from: null, to: '108' },
+    ],
+  }),
   event('2026-09-16T14:42:00Z', 'collection.requested', 'collections', { detail: '2026-09-15' }),
   event('2026-09-16T11:00:00Z', 'collection.failed', 'collections', {
     ...system,
-    detail: 'verification_required',
+    detail: 'manual_verification_required',
+    target: 'Morning Paycom pull',
+    changes: [{ field: 'provider', from: null, to: 'paycom' }],
+  }),
+  event('2026-09-15T21:38:00Z', 'member.joined', 'team', {
+    actorId: 'usr_sam',
+    actorName: 'Sam Rivera',
+    detail: 'Dispatcher',
+    changes: [{ field: 'invitedBy', from: null, to: 'Maria Lopez' }],
   }),
   event('2026-09-15T20:50:00Z', 'member.role_changed', 'team', {
     detail: 'Manager',
@@ -50,14 +65,27 @@ const events: AuditEvent[] = [
       { field: 'permission', from: 'members.invite', to: null },
     ],
   }),
-  event('2026-09-15T17:02:00Z', 'dsp.view_opened', 'access', {}),
-  event('2026-09-15T16:40:00Z', 'dsp.view_opened', 'access', {}),
-  event('2026-09-15T16:01:00Z', 'dsp.view_opened', 'access', {}),
+  event('2026-09-15T17:02:00Z', 'dsp.owner_view_opened', 'team', support),
+  event('2026-09-15T16:40:00Z', 'dsp.owner_view_opened', 'team', support),
+  event('2026-09-15T16:01:00Z', 'dsp.owner_view_opened', 'team', support),
+  event('2026-09-15T15:30:00Z', 'dsp.profile_completed', 'settings', {
+    changes: [
+      { field: 'station', from: null, to: 'DEN4' },
+      { field: 'abbreviation', from: null, to: 'FSLG' },
+    ],
+  }),
   // Written before events named their subject.
   event('2026-09-15T15:00:00Z', 'member.role_changed', 'team', { detail: 'Member' }),
+  event('2026-09-15T14:30:00Z', 'collection.completed', 'collections', system),
   event('2026-09-15T14:00:00Z', 'schedule.deleted', 'schedules', {
     detail: 'schedule_0123456789abcdef0123456789abcdef',
   }),
+  event('2026-09-15T13:50:00Z', 'connection.disabled', 'connections', { detail: 'cortex' }),
+  event('2026-09-15T13:40:00Z', 'employees.links_updated', 'settings', {
+    detail: 'Revision 3; 2 changes',
+  }),
+  // An event this build has no wording for still reads, with its detail.
+  event('2026-09-15T13:30:00Z', 'vehicle.inspection_logged', 'settings', { detail: 'Van 12' }),
 ];
 
 async function open(page: Page) {
@@ -75,7 +103,7 @@ async function open(page: Page) {
     return route.fulfill({
       json: {
         // The first page is short so the log has more to load.
-        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 10),
+        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 12),
         total: matching.length,
         counts,
         actors: [
@@ -109,9 +137,28 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(page.getByRole('heading', { name: /Sep 16/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Sep 15/ })).toBeVisible();
 
-  await expect(item(page, 'Collection completed')).toContainText('Requested by Maria Lopez');
+  // Every area is offered, as in the approved design, even before it has events.
+  await expect(page.getByRole('group', { name: 'Area' }).getByRole('button')).toHaveText([
+    /^All/,
+    /^Team/,
+    /^Roles/,
+    /^Collections/,
+    /^Schedules/,
+    /^Connections/,
+    /^Settings/,
+    /^Failures/,
+  ]);
+  await expect(page.getByPlaceholder('Search people, roles, schedules…')).toBeVisible();
+
+  const completed = item(page, 'Paycom collection for Sep 15 completed');
+  await expect(completed).toContainText('Requested by Maria Lopez·1m 48s');
   await expect(item(page, 'started a Paycom collection')).toContainText('for Sep 15');
-  await expect(item(page, 'Collection failed')).toContainText(/verification/i);
+  await expect(item(page, 'Scheduled collection Morning Paycom pull failed')).toContainText(
+    'Paycom needs verification — sign-in was challenged',
+  );
+  await expect(item(page, 'Sam Rivera joined the team')).toContainText(
+    'Invited by Maria Lopez·Dispatcher',
+  );
   const role = item(page, 'changed Jordan Pike’s role');
   await expect(role).toContainText('Dispatcher');
   await expect(role).toContainText('Manager');
@@ -121,23 +168,33 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(item(page, 'updated the role Dispatcher')).toContainText('+ Manage Timecard');
   await expect(item(page, 'updated the role Dispatcher')).toContainText('− Invite Members');
 
-  const visits = item(page, 'opened the DSP 3 times');
+  const visits = item(page, 'Platform support opened this DSP 3 times');
   await expect(visits).toHaveCount(1);
   await expect(visits).toContainText('11:01 AM – 12:02 PM');
   await visits.getByRole('button').click();
   await expect(visits).toContainText('12:02 PM, 11:40 AM, 11:01 AM');
 
   await role.getByRole('button').click();
-  await expect(role).toContainText('member.role_changed · #97');
+  await expect(role).toContainText('member.role_changed · #96');
   await expect(role).toContainText(/Tue, Sep 15, 2026.*3:50:00 PM/);
+  await expect(item(page, 'completed the DSP profile')).toContainText(
+    'StationDEN4·AbbreviationFSLG',
+  );
   await page.screenshot({ path: test.info().outputPath('audit-log.png'), fullPage: true });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  await page.screenshot({ path: test.info().outputPath('audit-log-dark.png'), fullPage: true });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
 
-  await expect(page.getByText('Showing 10 of 12')).toBeVisible();
+  await expect(page.getByText('Showing 12 of 18')).toBeVisible();
   await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect.poll(() => requests.at(-1)?.get('limit')).toBe('100');
   // Older events fall back to the wording their data supports.
   await expect(item(page, 'changed a member’s role')).toContainText('Member');
+  await expect(item(page, 'Collection completed')).toBeVisible();
   await expect(item(page, 'deleted a schedule')).toBeVisible();
+  await expect(item(page, 'Maria Lopez disconnected Cortex')).toBeVisible();
+  await expect(item(page, 'updated employee links')).toContainText('2 links changed');
+  await expect(item(page, 'Maria Lopez vehicle inspection logged')).toContainText('Van 12');
   await expect(page.getByText('schedule_0123', { exact: false })).toHaveCount(0);
 
   await page.getByRole('button', { name: /^Failures/ }).click();
@@ -173,4 +230,42 @@ test('the audit log fits a phone', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+});
+
+test('a DSP lists Platform support only once the platform owner shows it there', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByLabel('Email address').fill('owner@dispatch.test');
+  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  const visit = async () => {
+    await page.getByRole('link', { name: 'DSPs', exact: true }).click();
+    await page.getByText('Northline Logistics', { exact: true }).first().click();
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
+  };
+  await visit();
+  // Hidden by default: the visit that opened this page is not in the log.
+  await expect(page.getByRole('group', { name: 'Area' })).toBeVisible();
+  await expect(page.getByText('Platform support', { exact: false })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Platform support', exact: true }).click();
+  const northline = page.getByRole('switch', { name: 'Northline Logistics', exact: true });
+  await expect(northline).not.toBeChecked();
+  await northline.check();
+  await expect(page.getByText('Platform support shown to Northline Logistics')).toBeVisible();
+  await expect(northline).toBeChecked();
+  await page.screenshot({ path: test.info().outputPath('support-visibility.png') });
+
+  await visit();
+  const row = page.getByRole('listitem').filter({ hasText: 'Platform support opened this DSP' });
+  await expect(row).toHaveCount(1);
+  // Only the visit made after switching it on is listed, and never by name.
+  await expect(row).not.toContainText('times');
+  await expect(page.getByRole('list').filter({ hasText: 'Platform Owner' })).toHaveCount(0);
+  await expect(page.getByLabel('Person')).toContainText('Platform support');
 });

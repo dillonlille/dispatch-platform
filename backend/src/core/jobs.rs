@@ -3,7 +3,7 @@ use super::{
     Error, Result, State,
     contracts::{ActiveJobStatus, PublicJob},
     crypto,
-    db::{Store, flag, iso, n, now, s},
+    db::{AuditChange, Store, flag, iso, n, now, s},
     ensure,
     job_metrics::{self, Metrics, Phase, Recorder},
 };
@@ -311,6 +311,33 @@ impl Store {
         }
         Ok(())
     }
+    // What an outcome's log entry says beyond pass or fail: the schedule that
+    // queued it, and the provider, collected date and run time.
+    pub fn outcome_facts(&self, dsp: &str, job: &Value) -> (Option<String>, Vec<AuditChange>) {
+        let schedule = s(job, "idempotency_key")
+            .strip_prefix("schedule:")
+            .and_then(|key| key.split(':').next())
+            .and_then(|id| self.collection_schedule(dsp, id).ok())
+            .map(|row| s(&row, "name").to_owned());
+        let provider = if s(job, "kind") == "paycom.collect" {
+            "paycom"
+        } else {
+            "cortex"
+        };
+        let mut facts = vec![("provider", None, Some(provider.to_owned()))];
+        let request = serde_json::from_str::<Value>(s(job, "request")).unwrap_or_default();
+        if let Some(date) = request["date"].as_str() {
+            facts.push(("date", None, Some(date.to_owned())));
+        }
+        if let Some(started) = job["started_at"]
+            .as_str()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        {
+            let seconds = (now() - started.timestamp_millis()).max(0) / 1000;
+            facts.push(("duration", None, Some(seconds.to_string())));
+        }
+        (schedule, facts)
+    }
     pub fn schedule(&self, id: &str) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
         let r = db
@@ -590,7 +617,8 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                     db.finish(&id, &owner, Some(error))
                 })?;
             }
-            db.audit(
+            let (schedule, facts) = db.outcome_facts(&dsp, &job);
+            db.audit_with(
                 actor.as_deref(),
                 Some(&dsp),
                 if error.is_some() {
@@ -599,6 +627,8 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                     "collection.completed"
                 },
                 error.as_deref().unwrap_or(""),
+                schedule.as_deref(),
+                &facts,
             )
         })
         .await;

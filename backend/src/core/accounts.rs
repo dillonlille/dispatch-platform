@@ -439,7 +439,10 @@ impl super::State {
             let role = db.role(s(&invite,"dspId"),s(&invite,"roleId"))?;
             db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),Store::legacy_role(&role),s(&role,"id")])?;
             db.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(&raw)])?;
-            db.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"))?;
+            // A platform owner's name never reaches a DSP's log.
+            let inviter = db.platform.one("SELECT u.first_name||' '||u.last_name name,u.platform_owner FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?",[crypto::sha(&raw)])?;
+            let invited_by = inviter.and_then(|u| if !flag(&u,"platform_owner") { Some(s(&u,"name").to_owned()) } else if db.support_visible(s(&invite,"dspId")) { Some("Platform support".to_owned()) } else { None });
+            db.audit_with(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"),None,&invited_by.map(|name| ("invitedBy",None,Some(name))).into_iter().collect::<Vec<_>>())?;
             Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
         })).await
     }

@@ -55,6 +55,8 @@ export interface DspProfile {
   stationCode: string;
   setupRequired: boolean;
   removed: boolean;
+  // Whether this DSP's audit log lists platform owners, as "Platform support".
+  supportVisible: boolean;
 }
 export interface DspSummary extends Dsp {
   profile: DspProfile;

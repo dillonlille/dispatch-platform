@@ -34,6 +34,7 @@ const profile = z.object({
   stationCode: text,
   setupRequired: z.boolean(),
   removed: z.boolean(),
+  supportVisible: z.boolean(),
 });
 const permission = z.enum(permissions);
 export const sessionSchema = z.object({

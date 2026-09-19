@@ -283,8 +283,23 @@ fn migrate_audit(db: &Db) -> Result<()> {
     if !columns.iter().any(|c| s(c, "name") == "data") {
         db.0.execute_batch("ALTER TABLE audit ADD COLUMN data TEXT")?;
     }
+    // Set when a platform owner acted in a DSP that shows Platform support.
+    if !columns.iter().any(|c| s(c, "name") == "shown") {
+        db.0.execute_batch("ALTER TABLE audit ADD COLUMN shown INTEGER")?;
+    }
     Ok(())
 }
+// Managing a DSP from the platform is never part of that DSP's own log.
+const PLATFORM_ONLY: [&str; 8] = [
+    "dsp.created",
+    "dsp.removed",
+    "dsp.restored",
+    "dsp.suspended",
+    "dsp.resumed",
+    "dsp.support_visibility_changed",
+    "diagnostics.fixtures_loaded",
+    "development.fixtures_loaded",
+];
 impl Store {
     pub fn initialize(config: Config) -> Result<Self> {
         private_dir(&config.root)?;
@@ -415,11 +430,31 @@ impl Store {
         let data = (target.is_some() || !changes.is_empty()).then(|| {
             json!({"target":target,"changes":changes.iter().map(|(field,from,to)|json!({"field":field,"from":from,"to":to})).collect::<Vec<_>>()}).to_string()
         });
+        // Decided as the event is written, so a visit made while hidden stays hidden.
+        let shown = match (actor, dsp) {
+            (Some(actor), Some(dsp)) if !PLATFORM_ONLY.contains(&action) => {
+                self.platform_owner(actor)? && self.support_visible(dsp)
+            }
+            _ => false,
+        };
         self.platform.exec(
-            "INSERT INTO audit(at,actor_id,dsp_id,action,detail,data) VALUES (?,?,?,?,?,?)",
-            rusqlite::params![iso(), actor, dsp, action, detail, data],
+            "INSERT INTO audit(at,actor_id,dsp_id,action,detail,data,shown) VALUES (?,?,?,?,?,?,?)",
+            rusqlite::params![iso(), actor, dsp, action, detail, data, shown.then_some(1)],
         )?;
         Ok(())
+    }
+    pub fn platform_owner(&self, user: &str) -> Result<bool> {
+        Ok(self
+            .platform
+            .one(
+                "SELECT 1 FROM users WHERE id=? AND platform_owner=1",
+                [user],
+            )?
+            .is_some())
+    }
+    pub fn support_visible(&self, dsp: &str) -> bool {
+        self.profile(dsp)
+            .is_ok_and(|profile| flag(&profile, "supportVisible"))
     }
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
         let mut page = self.audit_page(&AuditQuery {
@@ -429,15 +464,22 @@ impl Store {
         })?;
         Ok(page["events"].take())
     }
-    // A DSP's log lists its members' and the system's actions, never a platform owner's.
+    // A DSP's log lists its members' and the system's actions. A platform owner's
+    // appear only where the DSP shows Platform support, and never under their name.
     pub fn audit_page(&self, query: &AuditQuery) -> Result<Value> {
-        const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (?1 IS NULL OR (a.dsp_id=?1 AND COALESCE(u.platform_owner,0)=0))";
-        const NAME: &str = "COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System')";
-        const ACTOR: &str = "COALESCE(a.actor_id,CASE WHEN a.actor_name IS NULL THEN 'system' ELSE 'name:'||a.actor_name END)";
-        const AREA: &str = "CASE WHEN a.action LIKE 'member.%' OR a.action LIKE 'invitation.%' THEN 'team' WHEN a.action LIKE 'role.%' THEN 'roles' WHEN a.action LIKE 'collection.%' OR a.action LIKE 'cortex.collection.%' OR a.action LIKE 'meal_breaks.%' THEN 'collections' WHEN a.action LIKE 'schedule.%' THEN 'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action LIKE 'account.%' OR a.action IN ('dsp.view_opened','dsp.owner_view_opened') THEN 'access' WHEN a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
+        // Inside a DSP a platform owner is only ever "Platform support".
+        const SUPPORT: &str = "(?1 IS NOT NULL AND COALESCE(u.platform_owner,0)=1)";
+        const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (?1 IS NULL OR (a.dsp_id=?1 AND (COALESCE(u.platform_owner,0)=0 OR a.shown=1)))";
+        let name = format!(
+            "CASE WHEN {SUPPORT} THEN 'Platform support' ELSE COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System') END"
+        );
+        let actor = format!(
+            "CASE WHEN {SUPPORT} THEN 'support' ELSE COALESCE(a.actor_id,CASE WHEN a.actor_name IS NULL THEN 'system' ELSE 'name:'||a.actor_name END) END"
+        );
+        const AREA: &str = "CASE WHEN a.action LIKE 'member.%' OR a.action LIKE 'invitation.%' THEN 'team' WHEN a.action LIKE 'role.%' THEN 'roles' WHEN a.action LIKE 'collection.%' OR a.action LIKE 'cortex.collection.%' OR a.action LIKE 'meal_breaks.%' THEN 'collections' WHEN a.action LIKE 'schedule.%' THEN 'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action IN ('dsp.view_opened','dsp.owner_view_opened') THEN CASE WHEN ?1 IS NULL THEN 'access' ELSE 'team' END WHEN a.action LIKE 'account.%' THEN 'access' WHEN a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
         const FAILED: &str = "a.action LIKE '%.failed'";
         let filters = format!(
-            "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {ACTOR}=?3) AND (?4='' OR a.action LIKE ?4 ESCAPE '\\' OR a.detail LIKE ?4 ESCAPE '\\' OR COALESCE(a.data,'') LIKE ?4 ESCAPE '\\' OR {NAME} LIKE ?4 ESCAPE '\\' OR COALESCE(d.name,'') LIKE ?4 ESCAPE '\\')"
+            "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {actor}=?3) AND (?4='' OR a.action LIKE ?4 ESCAPE '\\' OR a.detail LIKE ?4 ESCAPE '\\' OR COALESCE(a.data,'') LIKE ?4 ESCAPE '\\' OR {name} LIKE ?4 ESCAPE '\\' OR COALESCE(d.name,'') LIKE ?4 ESCAPE '\\')"
         );
         let area = format!("(?5='' OR (?5='failures' AND {FAILED}) OR {AREA}=?5)");
         let search = if query.q.is_empty() {
@@ -452,7 +494,7 @@ impl Store {
                     .replace('_', "\\_")
             )
         };
-        let mut events = self.platform.all(&format!("SELECT a.id,a.at,a.actor_id actorId,{NAME} actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail,a.data,{AREA} area {filters} AND {area} AND (?6=0 OR a.id<?6) ORDER BY a.id DESC LIMIT ?7"),rusqlite::params![query.dsp,query.from,query.actor,search,query.area,query.before,query.limit])?;
+        let mut events = self.platform.all(&format!("SELECT a.id,a.at,CASE WHEN {SUPPORT} THEN NULL ELSE a.actor_id END actorId,{name} actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail,a.data,{AREA} area {filters} AND {area} AND (?6=0 OR a.id<?6) ORDER BY a.id DESC LIMIT ?7"),rusqlite::params![query.dsp,query.from,query.actor,search,query.area,query.before,query.limit])?;
         for event in &mut events {
             let data = event["data"]
                 .as_str()
@@ -483,7 +525,7 @@ impl Store {
         }
         counts.insert("failures".into(), json!(failures));
         let actors = self.platform.all(
-            &format!("SELECT DISTINCT {ACTOR} id,{NAME} name {FROM} ORDER BY 2"),
+            &format!("SELECT DISTINCT {actor} id,{name} name {FROM} ORDER BY 2"),
             rusqlite::params![query.dsp],
         )?;
         Ok(
