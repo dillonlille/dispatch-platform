@@ -10,7 +10,7 @@ import { api } from './api.js';
 import { Empty, Loading, Modal, can } from './ui.js';
 import { type Perform } from './platform.js';
 
-const labels: Record<Permission, string> = {
+export const permissionLabels: Record<Permission, string> = {
   'timecard.view': 'View Timecard',
   'timecard.manage': 'Manage Timecard',
   'collections.run': 'Run Collections',
@@ -39,7 +39,7 @@ export function assignable(view: DspView, role: Role) {
 function PermissionSummary({ role }: { role: Role }) {
   if (role.owner) return <span className="muted">All permissions</span>;
   if (!role.permissions.length) return <span className="muted">No permissions</span>;
-  const names = role.permissions.map((p) => labels[p]);
+  const names = role.permissions.map((p) => permissionLabels[p]);
   if (names.length <= visible) return <span className="muted">{names.join(', ')}</span>;
   return (
     <span
@@ -182,12 +182,12 @@ export function RoleSheet({
               {items.map((permission) => (
                 <label className="permission-row" key={permission}>
                   <span>
-                    {labels[permission]}
+                    {permissionLabels[permission]}
                     {locked(permission) && (
                       <small>
                         Included with{' '}
                         {
-                          labels[
+                          permissionLabels[
                             allPermissions.find(
                               (p) => implied[p] === permission && chosen.includes(p),
                             )!

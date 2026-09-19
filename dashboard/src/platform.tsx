@@ -1,13 +1,14 @@
 import { useUpdateState } from './browser-update.js';
 import { useState, type FormEvent } from 'react';
 import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
-import type { DspSummary, AuditEvent, Job, PlatformHealth } from '../../shared/contracts/index.js';
+import type { DspSummary, Job, PlatformHealth } from '../../shared/contracts/index.js';
 import { api, errorLabel, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
 import { JobPerformance } from './job-performance.js';
 import { CollectionHistory } from './collection-history-view.js';
 import { providerName } from './collection-history.js';
+import { AuditLog } from './audit.js';
 import {
   Badge,
   Empty,
@@ -15,7 +16,6 @@ import {
   Header,
   Loading,
   Modal,
-  Section,
   time,
   deviceTimezone,
   title,
@@ -385,30 +385,6 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     </>
   );
 }
-export function Activity({ events }: { events: AuditEvent[] }) {
-  return events.length ? (
-    <div className="activity">
-      {events.map((event) => (
-        <div key={event.id}>
-          <span className="activity-dot" />
-          <div>
-            <strong>
-              {event.dspName && `${event.dspName} · `}
-              {title(event.action)}
-            </strong>
-            <small>
-              {event.actorName}
-              {event.detail && ` · ${event.detail}`}
-            </small>
-          </div>
-          <time>{time(event.at, deviceTimezone())}</time>
-        </div>
-      ))}
-    </div>
-  ) : (
-    <Empty title="No activity yet">Actions taken in this workspace will appear here.</Empty>
-  );
-}
 export function JobTable({
   jobs,
   perform,
@@ -638,12 +614,10 @@ function mailFailure(code: string | null): string {
   return labels[code] ?? 'Email delivery failed. Check the service logs for details.';
 }
 export function AuditPage() {
-  const { data, error } = useData<AuditEvent[]>('/api/platform/audit', 10000);
   return (
     <>
       <Header title="Audit log" />
-      <ErrorBox message={error} />
-      <Section title="Latest events">{data ? <Activity events={data} /> : <Loading />}</Section>
+      <AuditLog />
     </>
   );
 }

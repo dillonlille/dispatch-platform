@@ -212,11 +212,13 @@ impl Store {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
         let raw = crypto::token()?;
         self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) VALUES (?,?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),Self::legacy_role(&role),s(&role,"id"),now()+INVITATION_TTL,s(&a.user,"id")])?;
-        self.audit(
+        self.audit_with(
             Some(s(&a.user, "id")),
             Some(dsp),
             "member.invited",
             s(&role, "name"),
+            Some(&email.to_lowercase()),
+            &[],
         )?;
         Ok(raw)
     }
@@ -437,7 +439,7 @@ impl super::State {
             let role = db.role(s(&invite,"dspId"),s(&invite,"roleId"))?;
             db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),Store::legacy_role(&role),s(&role,"id")])?;
             db.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(&raw)])?;
-            db.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined","")?;
+            db.audit(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"))?;
             Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
         })).await
     }

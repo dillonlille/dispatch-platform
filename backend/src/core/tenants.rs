@@ -183,11 +183,24 @@ impl Store {
                 .exec("UPDATE schedules SET timezone=?,next_run=NULL", [timezone])?;
             self.retime_schedules(id, timezone)?;
         }
-        self.audit(
+        let changes: Vec<_> = [("name", name), ("timezone", timezone)]
+            .into_iter()
+            .filter(|(field, value)| s(&c.dsp, field) != *value)
+            .map(|(field, value)| {
+                (
+                    field,
+                    Some(s(&c.dsp, field).to_owned()),
+                    Some(value.to_owned()),
+                )
+            })
+            .collect();
+        self.audit_with(
             Some(s(&c.auth.user, "id")),
             Some(id),
             "dsp.settings_updated",
             "",
+            None,
+            &changes,
         )?;
         self.get_dsp(id)
     }
@@ -229,7 +242,15 @@ impl Store {
             }
             self.platform
                 .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
-            self.audit(
+            let user = self
+                .platform
+                .one(
+                    "SELECT first_name||' '||last_name name FROM users WHERE id=?",
+                    [s(&row, "user_id")],
+                )?
+                .ok_or_else(|| Error::new("member_not_found", 404))?;
+            let name = |role: &Value| s(role, "name").to_owned();
+            self.audit_with(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 if next.is_some() {
@@ -238,6 +259,12 @@ impl Store {
                     "member.removed"
                 },
                 next.as_ref().map_or("", |next| s(next, "name")),
+                Some(s(&user, "name")),
+                &[(
+                    "role",
+                    Some(name(&self.role(dsp, &current.id)?)),
+                    next.as_ref().map(name),
+                )],
             )?;
             if next.is_none() {
                 self.delete_account(s(&row, "user_id"), s(&c.auth.user, "id"))?;
