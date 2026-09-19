@@ -1,5 +1,6 @@
 {
   "dashboard": [
+    "tests/calendar.test.ts",
     "tests/collection-history.test.ts",
     "tests/dashboard-format.test.ts",
     "tests/dashboard-structure.test.ts",

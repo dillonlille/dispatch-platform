@@ -766,7 +766,7 @@ td small {
   gap: 8px;
   flex-wrap: wrap;
 }
-.paycom-date-controls label {
+.paycom-date-controls .date-field {
   width: 165px;
   font-size: 13px;
 }
@@ -865,7 +865,7 @@ td small {
     gap: 6px;
     flex-wrap: nowrap;
   }
-  .paycom-date-controls label {
+  .paycom-date-controls .date-field {
     width: 148px;
   }
 }
@@ -1491,7 +1491,7 @@ td small {
   align-items: center;
   flex-wrap: nowrap;
 }
-.paycom-date-controls-compact label {
+.paycom-date-controls-compact .date-field {
   width: 165px;
   min-width: 0;
 }
@@ -1579,7 +1579,7 @@ td small {
   .paycom-timecard-footer {
     padding: 12px;
   }
-  .paycom-date-controls-compact label {
+  .paycom-date-controls-compact .date-field {
     width: auto;
     flex: 1;
   }

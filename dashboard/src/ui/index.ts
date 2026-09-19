@@ -2,6 +2,7 @@ export { Badge } from './Badge.js';
 export { ConfirmDialog } from './ConfirmDialog.js';
 export { DataState } from './DataState.js';
 export { DataTable, TablePagination } from './DataTable.js';
+export { DateField } from './DateField.js';
 export { DetailList } from './DetailList.js';
 export { Empty } from './Empty.js';
 export { ErrorBox } from './ErrorBox.js';
