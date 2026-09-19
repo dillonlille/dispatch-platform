@@ -15,11 +15,19 @@ export interface CortexMeal {
   firstDelivery: string | null;
   beforeStatus: string;
   afterStatus: string;
+  // The Cortex itinerary page the meal was read from; null before links were retained.
+  sourceUrl?: string | null;
 }
 export interface MealEmployee {
   id: string;
   name: string;
-  paycom: { employeeCode: string; name: string; status: string; punches: Punch[] } | null;
+  paycom: {
+    employeeCode: string;
+    name: string;
+    status: string;
+    punches: Punch[];
+    sourceUrl?: string | null;
+  } | null;
   cortex: CortexMeal[];
 }
 export interface EmployeeLink {

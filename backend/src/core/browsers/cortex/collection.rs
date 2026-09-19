@@ -198,9 +198,14 @@ impl Driver {
                 metrics.page_finish(reads, result.as_ref().err().map(|e| e.code.as_str()));
                 match result {
                     Ok(value) => {
-                        let route: Itinerary =
+                        let mut route: Itinerary =
                             serde_json::from_value(value["itinerary"].clone())
                                 .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
+                        route.source_url = Some(format!(
+                            "{}{}",
+                            self.origin,
+                            scope.detail_path(&candidate.id)
+                        ));
                         ensure(
                             route.id == candidate.id
                                 && route.transporter_id == candidate.transporter_id,
