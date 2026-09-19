@@ -71,3 +71,18 @@ pub fn code(value: &str) -> Result<()> {
         400,
     )
 }
+/// A retained provider page link: identifiers only, never credentials.
+pub fn source_url(value: &str) -> Result<()> {
+    ensure(
+        value.len() <= 2048
+            && url::Url::parse(value).is_ok_and(|url| {
+                ["http", "https"].contains(&url.scheme())
+                    && url.host_str().is_some()
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.fragment().is_none()
+            }),
+        "invalid_source_url",
+        400,
+    )
+}

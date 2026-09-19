@@ -260,9 +260,15 @@ impl Store {
         timecards.sort_by(|a, b| {
             (s(a, "employeeCode"), s(a, "date")).cmp(&(s(b, "employeeCode"), s(b, "date")))
         });
-        let fingerprint = crypto::sha(serde_json::to_vec(
-            &json!({"from":value["from"],"to":value["to"],"employees":employees,"timecards":timecards}),
-        )?);
+        // Links are part of the fingerprint so a collection whose hours did not
+        // change still publishes them; payloads without links keep their digest.
+        let mut sources = sources(value).to_vec();
+        sources.sort_by(|a, b| s(a, "employeeCode").cmp(s(b, "employeeCode")));
+        let mut fingerprint = json!({"from":value["from"],"to":value["to"],"employees":employees,"timecards":timecards});
+        if !sources.is_empty() {
+            fingerprint["sources"] = json!(sources);
+        }
+        let fingerprint = crypto::sha(serde_json::to_vec(&fingerprint)?);
         db.transaction(|| {
             let previous = db.setting("paycom.publicationFingerprint",Value::Null)?;
             if s(&previous,"digest") == fingerprint {
@@ -303,6 +309,17 @@ impl Store {
                         t["hours"].as_f64(),
                         s(t, "status"),
                         t["punches"].to_string()
+                    ],
+                )?;
+            }
+            for source in &sources {
+                db.exec(
+                    "INSERT INTO timecard_sources VALUES (?,?,?,?)",
+                    params![
+                        publication,
+                        s(source, "employeeCode"),
+                        s(source, "periodKey"),
+                        s(source, "url")
                     ],
                 )?;
             }
@@ -365,7 +382,7 @@ impl Store {
         let mut row=db.one("SELECT e.* FROM employees e JOIN publications p ON p.id=e.publication_id WHERE e.code=? ORDER BY p.collected_at DESC LIMIT 1",[code])?.ok_or_else(||Error::new("employee_not_found",404))?;
         let timecards = cards(
             &db,
-            "SELECT employee_code employeeCode,date,hours,status,punches FROM timecards WHERE publication_id=? AND employee_code=? ORDER BY date DESC",
+            "SELECT t.employee_code employeeCode,t.date,t.hours,t.status,t.punches,u.url sourceUrl FROM timecards t LEFT JOIN timecard_sources u ON u.publication_id=t.publication_id AND u.employee_code=t.employee_code WHERE t.publication_id=? AND t.employee_code=? ORDER BY t.date DESC",
             [s(&row, "publication_id"), code],
         )?;
         row.as_object_mut().unwrap().remove("publication_id");
@@ -395,7 +412,7 @@ impl Store {
             }
             for row in cards(
                 &db,
-                "SELECT t.employee_code employeeCode,e.name,e.department,e.station,t.date,t.hours,t.status,t.punches FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code WHERE t.publication_id=? AND t.date=?",
+                "SELECT t.employee_code employeeCode,e.name,e.department,e.station,t.date,t.hours,t.status,t.punches,u.url sourceUrl FROM timecards t JOIN employees e ON e.publication_id=t.publication_id AND e.code=t.employee_code LEFT JOIN timecard_sources u ON u.publication_id=t.publication_id AND u.employee_code=t.employee_code WHERE t.publication_id=? AND t.date=?",
                 [s(p, "id"), date],
             )? {
                 rows.insert(s(&row, "employeeCode").to_owned(), row);
@@ -471,7 +488,14 @@ fn sort_key<'a>(row: &'a Value, sort: &str) -> &'a Value {
 pub fn validate_workforce(value: &Value) -> Result<()> {
     v::fields(
         value,
-        &["employees", "timecards", "collectedAt", "from", "to"],
+        &[
+            "employees",
+            "timecards",
+            "sources",
+            "collectedAt",
+            "from",
+            "to",
+        ],
     )?;
     v::date(s(value, "from"))?;
     v::date(s(value, "to"))?;
@@ -566,7 +590,27 @@ pub fn validate_workforce(value: &Value) -> Result<()> {
             )?;
         }
     }
+    ensure(
+        value.get("sources").is_none_or(Value::is_array),
+        "invalid_workforce",
+        400,
+    )?;
+    let mut linked = HashSet::new();
+    for source in sources(value) {
+        v::fields(source, &["employeeCode", "periodKey", "url"])?;
+        v::text(source, "periodKey", 1, 200)?;
+        v::source_url(s(source, "url"))?;
+        ensure(
+            codes.contains(s(source, "employeeCode")) && linked.insert(s(source, "employeeCode")),
+            "timecard_source_mismatch",
+            400,
+        )?;
+    }
     Ok(())
+}
+/// Collections from before links were retained, and fixtures, carry none.
+fn sources(value: &Value) -> &[Value] {
+    value["sources"].as_array().map_or(&[], Vec::as_slice)
 }
 /// A missing date preserves scheduled/current-period collection behavior.
 pub fn collection_date(request: &Value, timezone: &str) -> Result<Option<chrono::NaiveDate>> {

@@ -15,6 +15,8 @@ export interface CortexMeal {
   firstDelivery: string | null;
   beforeStatus: string;
   afterStatus: string;
+  // The Cortex itinerary page the meal was read from; null before links were retained.
+  sourceUrl?: string | null;
 }
 export interface MealEmployee {
   id: string;
@@ -25,6 +27,7 @@ export interface MealEmployee {
     department?: string;
     status: string;
     punches: Punch[];
+    sourceUrl?: string | null;
   } | null;
   cortex: CortexMeal[];
 }

@@ -202,6 +202,9 @@ export interface Timecard {
   hours: number;
   status: string;
   punches: Punch[];
+  // The employee's Paycom timecard page for the pay period containing `date`.
+  // Absent on rows still being collected; null before links were retained.
+  sourceUrl?: string | null;
 }
 export interface Workforce {
   employees: Employee[];

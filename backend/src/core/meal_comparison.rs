@@ -280,7 +280,7 @@ impl Store {
                     if !itineraries.insert((s(&p, "serviceAreaId").to_owned(), route.id.clone())) {
                         continue;
                     }
-                    let itinerary = json!({"itinerary_id":route.id,"transporter_id":route.transporter_id,"driver_name":route.driver});
+                    let itinerary = json!({"itinerary_id":route.id,"transporter_id":route.transporter_id,"driver_name":route.driver,"sourceUrl":route.source_url});
                     let meals = route
                         .meals
                         .iter()
@@ -301,7 +301,7 @@ impl Store {
                 meal.as_object_mut().unwrap().remove("itinerary_id");
                 by_itinerary.entry(id).or_default().push(meal);
             }
-            for itinerary in cortex.all("SELECT itinerary_id,transporter_id,driver_name FROM meal_itineraries WHERE publication_id=? ORDER BY itinerary_id",[s(p,"id")])? {
+            for itinerary in cortex.all("SELECT i.itinerary_id,i.transporter_id,i.driver_name,u.url sourceUrl FROM meal_itineraries i LEFT JOIN meal_sources u ON u.publication_id=i.publication_id AND u.itinerary_id=i.itinerary_id WHERE i.publication_id=? ORDER BY i.itinerary_id",[s(p,"id")])? {
                 if !itineraries.insert((s(p,"serviceAreaId").to_owned(),s(&itinerary,"itinerary_id").to_owned())) {continue;}
                 let meals = by_itinerary.remove(s(&itinerary,"itinerary_id")).unwrap_or_default();
                 let transporter = s(&itinerary,"transporter_id");
@@ -338,6 +338,7 @@ impl Store {
                 meal["cortexId"] = json!(transporter);
                 meal["driverName"] = itinerary["driver_name"].clone();
                 meal["itineraryId"] = itinerary["itinerary_id"].clone();
+                meal["sourceUrl"] = itinerary["sourceUrl"].clone();
                 meal["station"] = p["station"].clone();
                 meal["timezone"] = p["timezone"].clone();
                 meal["collectedAt"] = p["collectedAt"].clone();
