@@ -539,14 +539,30 @@
 .settings-section:last-child {
   border-bottom: 0;
 }
-@media (max-width: 700px) {
-  .profile-badge {
-    width: min(340px, 100%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
+/* Nothing moves on a phone or for anyone who asks for less motion, and a phone shows the card alone. */
+@media (max-width: 700px), (prefers-reduced-motion: reduce) {
   .profile-badge {
     cursor: auto;
+    touch-action: auto;
+    transform: none;
+  }
+}
+@media (max-width: 700px) {
+  .profile-stage {
+    margin-top: 16px;
+    padding-bottom: 24px;
+  }
+  .profile-straps,
+  .profile-clip,
+  .profile-punch {
+    display: none;
+  }
+  .profile-hang {
+    margin-top: 0;
+  }
+  .profile-badge {
+    width: min(340px, 100%);
+    padding-top: 36px;
   }
 }
 

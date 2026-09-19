@@ -292,6 +292,12 @@ test('archived account tabs preserve names and appearance preferences', async ({
   const badge = page.locator('.profile-badge');
   await expect(badge.getByRole('heading', { name: 'Platform Owner' })).toBeVisible();
   await expect(badge).toContainText(demo.email);
+  // A phone shows the card alone: no lanyard, and nothing to swing.
+  await expect(page.locator('.profile-straps')).toBeVisible();
+  await page.setViewportSize({ width: 400, height: 900 });
+  await expect(page.locator('.profile-straps')).toBeHidden();
+  await expect(page.locator('.profile-hang')).not.toHaveAttribute('style', /transform/);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

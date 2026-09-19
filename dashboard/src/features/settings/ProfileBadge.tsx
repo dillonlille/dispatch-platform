@@ -4,9 +4,12 @@ import { timezoneName } from '../../lib/format.js';
 import { Badge } from '../../ui/index.js';
 import { DspAvatar, dspTone } from '../platform/DspAvatar.js';
 
+// Nothing moves on a phone or for anyone who asks for less motion: see the same query in the CSS.
+const STILL = '(max-width: 700px), (prefers-reduced-motion: reduce)';
+
 // The badge leans toward a mouse pointer. CSS variables carry the tilt so moving it never re-renders.
 function tilt(event: PointerEvent<HTMLElement>) {
-  if (event.pointerType !== 'mouse' || event.buttons) return;
+  if (event.pointerType !== 'mouse' || event.buttons || matchMedia(STILL).matches) return;
   const badge = event.currentTarget;
   const box = badge.getBoundingClientRect();
   const x = (event.clientX - box.left) / box.width - 0.5;
@@ -56,91 +59,112 @@ function usePendulum() {
     const strapsEl = straps.current;
     const hangEl = hang.current;
     const badgeEl = badge.current;
-    if (!strapsEl || !hangEl || !badgeEl || matchMedia('(prefers-reduced-motion: reduce)').matches)
-      return;
-    // It starts held to one side, as if just let go.
-    let swing = 0.13;
-    let swingSpeed = 0;
-    let sway = 0;
-    let swaySpeed = 0;
-    let target: number | null = null;
-    let frame = 0;
-    let last = 0;
-    // The right strap is drawn first, so that the left one lies over it at the clip.
-    const [right, left] = [...strapsEl.querySelectorAll('.profile-strap')];
-    const draw = () => {
-      const x = -STRAP * Math.sin(swing);
-      const y = STRAP * Math.cos(swing) - STRAP;
-      left!.setAttribute('transform', strapTransform(-1, x, y));
-      right!.setAttribute('transform', strapTransform(1, x, y));
-      hangEl.style.transform = `translate(${x}px, ${y}px) rotate(${swing}rad)`;
-      badgeEl.style.setProperty('--sway', `${sway}rad`);
-    };
-    const step = (now: number) => {
-      // Fixed small steps keep the integration stable after a slow frame or a background tab.
-      let remaining = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      while (remaining > 0) {
-        const dt = Math.min(remaining, 0.004);
-        remaining -= dt;
-        const acceleration =
-          target === null
-            ? -GRAVITY * Math.sin(swing) - AIR * swingSpeed
-            : PULL * (target - swing) - PULL_DAMPING * swingSpeed;
-        swingSpeed += acceleration * dt;
-        swing += swingSpeed * dt;
-        if (Math.abs(swing) > LIMIT) {
-          swing = Math.sign(swing) * LIMIT;
-          swingSpeed *= -0.3;
+    if (!strapsEl || !hangEl || !badgeEl) return;
+    const still = matchMedia(STILL);
+    let stop = () => {};
+    const start = () => {
+      // It starts held to one side, as if just let go.
+      let swing = 0.13;
+      let swingSpeed = 0;
+      let sway = 0;
+      let swaySpeed = 0;
+      let target: number | null = null;
+      let frame = 0;
+      let last = 0;
+      // The right strap is drawn first, so that the left one lies over it at the clip.
+      const [right, left] = [...strapsEl.querySelectorAll('.profile-strap')];
+      const draw = () => {
+        const x = -STRAP * Math.sin(swing);
+        const y = STRAP * Math.cos(swing) - STRAP;
+        left!.setAttribute('transform', strapTransform(-1, x, y));
+        right!.setAttribute('transform', strapTransform(1, x, y));
+        hangEl.style.transform = `translate(${x}px, ${y}px) rotate(${swing}rad)`;
+        badgeEl.style.setProperty('--sway', `${sway}rad`);
+      };
+      const step = (now: number) => {
+        // Fixed small steps keep the integration stable after a slow frame or a background tab.
+        let remaining = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        while (remaining > 0) {
+          const dt = Math.min(remaining, 0.004);
+          remaining -= dt;
+          const acceleration =
+            target === null
+              ? -GRAVITY * Math.sin(swing) - AIR * swingSpeed
+              : PULL * (target - swing) - PULL_DAMPING * swingSpeed;
+          swingSpeed += acceleration * dt;
+          swing += swingSpeed * dt;
+          if (Math.abs(swing) > LIMIT) {
+            swing = Math.sign(swing) * LIMIT;
+            swingSpeed *= -0.3;
+          }
+          swaySpeed +=
+            (-HOOK_STIFFNESS * sway - HOOK_DAMPING * swaySpeed - HOOK_LAG * acceleration) * dt;
+          sway += swaySpeed * dt;
         }
-        swaySpeed +=
-          (-HOOK_STIFFNESS * sway - HOOK_DAMPING * swaySpeed - HOOK_LAG * acceleration) * dt;
-        sway += swaySpeed * dt;
-      }
-      draw();
-      const energy = swing * swing + swingSpeed * swingSpeed + sway * sway + swaySpeed * swaySpeed;
-      if (target === null && energy < REST) {
-        frame = 0;
-        swing = swingSpeed = sway = swaySpeed = 0;
         draw();
-        return;
-      }
-      frame = requestAnimationFrame(step);
-    };
-    const wake = () => {
-      if (frame) return;
-      last = performance.now();
-      frame = requestAnimationFrame(step);
-    };
-    const aim = (event: { clientX: number; clientY: number }) => {
-      const box = strapsEl.getBoundingClientRect();
-      const pivotX = box.left + box.width / 2;
-      const angle = Math.atan2(pivotX - event.clientX, Math.max(event.clientY - box.top, 40));
-      target = Math.max(-LIMIT, Math.min(LIMIT, angle));
-    };
-    const move = (event: globalThis.PointerEvent) => aim(event);
-    const release = () => {
-      target = null;
-      badgeEl.classList.remove('held');
-      badgeEl.removeEventListener('pointermove', move);
-    };
-    grab.current = (event) => {
-      if (event.button !== 0) return;
-      badgeEl.setPointerCapture(event.pointerId);
-      badgeEl.classList.add('held');
-      settle(badgeEl);
-      aim(event);
-      badgeEl.addEventListener('pointermove', move);
+        const energy =
+          swing * swing + swingSpeed * swingSpeed + sway * sway + swaySpeed * swaySpeed;
+        if (target === null && energy < REST) {
+          frame = 0;
+          swing = swingSpeed = sway = swaySpeed = 0;
+          draw();
+          return;
+        }
+        frame = requestAnimationFrame(step);
+      };
+      const wake = () => {
+        if (frame) return;
+        last = performance.now();
+        frame = requestAnimationFrame(step);
+      };
+      const aim = (event: { clientX: number; clientY: number }) => {
+        const box = strapsEl.getBoundingClientRect();
+        const pivotX = box.left + box.width / 2;
+        const angle = Math.atan2(pivotX - event.clientX, Math.max(event.clientY - box.top, 40));
+        target = Math.max(-LIMIT, Math.min(LIMIT, angle));
+      };
+      const move = (event: globalThis.PointerEvent) => aim(event);
+      const release = () => {
+        target = null;
+        badgeEl.classList.remove('held');
+        badgeEl.removeEventListener('pointermove', move);
+      };
+      grab.current = (event) => {
+        if (event.button !== 0) return;
+        badgeEl.setPointerCapture(event.pointerId);
+        badgeEl.classList.add('held');
+        settle(badgeEl);
+        aim(event);
+        badgeEl.addEventListener('pointermove', move);
+        wake();
+      };
+      badgeEl.addEventListener('pointerup', release);
+      badgeEl.addEventListener('pointercancel', release);
       wake();
+      return () => {
+        cancelAnimationFrame(frame);
+        release();
+        grab.current = () => {};
+        badgeEl.removeEventListener('pointerup', release);
+        badgeEl.removeEventListener('pointercancel', release);
+        swing = sway = 0;
+        draw();
+        hangEl.style.removeProperty('transform');
+        badgeEl.style.removeProperty('--sway');
+        settle(badgeEl);
+      };
     };
-    badgeEl.addEventListener('pointerup', release);
-    badgeEl.addEventListener('pointercancel', release);
-    wake();
+    // Turning a phone, or resizing the window, moves between the still card and the hanging one.
+    const choose = () => {
+      stop();
+      stop = still.matches ? () => {} : start();
+    };
+    choose();
+    still.addEventListener('change', choose);
     return () => {
-      cancelAnimationFrame(frame);
-      release();
-      badgeEl.removeEventListener('pointerup', release);
-      badgeEl.removeEventListener('pointercancel', release);
+      still.removeEventListener('change', choose);
+      stop();
     };
   }, []);
   return { straps, hang, badge, grab };
