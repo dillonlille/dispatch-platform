@@ -89,6 +89,8 @@ export interface DspView {
   dsp: Dsp;
   token: string;
   role: Pick<Role, 'id' | 'name' | 'owner'>;
+  /** Every role of the DSP, sent only to a platform owner so they can look through one. */
+  roles?: Pick<Role, 'id' | 'name' | 'owner'>[];
   permissions: Permission[];
 }
 export interface Connection {

@@ -1,8 +1,56 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Menu, X, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
+import { Menu, X, Check, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { Brand } from './brand.js';
 import { title } from './ui.js';
+
+// Lets a platform owner look through any role the DSP has, custom ones included.
+function ViewRoleMenu({ view, viewAs }: { view: DspView; viewAs: (roleId?: string) => void }) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!details.current?.contains(event.target as Node)) details.current!.open = false;
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [open]);
+  const current = (role: { id: string; owner: boolean }) =>
+    view.role.owner ? role.owner : role.id === view.role.id;
+  return (
+    <details
+      ref={details}
+      className="view-role-menu"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.currentTarget.open = false;
+        event.currentTarget.querySelector('summary')?.focus();
+      }}
+    >
+      <summary aria-label="View as role">
+        {view.roles?.find(current)?.name ?? view.role.name}
+        <ChevronDown aria-hidden="true" />
+      </summary>
+      <div className="account-popover">
+        {view.roles?.map((role) => (
+          <button
+            key={role.id}
+            aria-current={current(role) || undefined}
+            onClick={() => {
+              details.current!.open = false;
+              if (!current(role)) viewAs(role.owner ? undefined : role.id);
+            }}
+          >
+            <span>{role.name}</span>
+            {current(role) && <Check size={16} aria-hidden="true" />}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 export function Shell({
   session,
@@ -12,6 +60,7 @@ export function Shell({
   navigation,
   logout,
   exitView,
+  viewAs,
   children,
 }: {
   session: SessionView;
@@ -21,6 +70,7 @@ export function Shell({
   navigation: { id: string; label: string; icon: LucideIcon }[];
   logout: () => void;
   exitView: () => void;
+  viewAs: (roleId?: string) => void;
   children: ReactNode;
 }) {
   const [mobile, setMobile] = useState(false);
@@ -180,9 +230,15 @@ export function Shell({
           <div className="dsp-view-banner" role="region" aria-label="DSP viewing mode">
             <Eye aria-hidden="true" />
             <div>
-              <strong>Viewing {view.dsp.name} as DSP owner</strong>
-              <span>Full owner access. Changes are saved to this DSP.</span>
+              <strong>
+                Viewing {view.dsp.name} as {view.role.owner ? 'DSP owner' : view.role.name}
+              </strong>
+              <span>
+                {view.role.owner ? 'Full owner' : view.role.name} access. Changes are saved to this
+                DSP.
+              </span>
             </div>
+            <ViewRoleMenu view={view} viewAs={viewAs} />
             <button onClick={exitView}>Exit view</button>
           </div>
         )}

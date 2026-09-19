@@ -547,22 +547,40 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
             })?));
         }
         ("POST", "/api/session/dsp") => {
-            let a = i.auth(db)?;
-            v::fields(b, &["dspId"])?;
+            let mut a = i.auth(db)?;
+            v::fields(b, &["dspId", "roleId"])?;
+            let platform = flag(&a.user, "platformOwner");
+            // Only a platform owner may look through a role other than their own.
+            if !b["roleId"].is_null() {
+                ensure(platform, "permission_denied", 403)?;
+                a.preview = Some(v::text(b, "roleId", 1, 100)?.to_owned());
+            }
             let c = db.context(&a, v::text(b, "dspId", 1, 100)?, roles::ACCESS)?;
             db.audit(
                 Some(s(&a.user, "id")),
                 Some(s(&c.dsp, "id")),
-                if flag(&a.user, "platformOwner") {
+                if platform {
                     "dsp.owner_view_opened"
                 } else {
                     "dsp.view_opened"
                 },
-                "",
+                if a.preview.is_some() {
+                    &c.role_name
+                } else {
+                    ""
+                },
             )?;
-            return Ok(Reply::json(
-                json!({"dsp":c.dsp,"role":{"id":c.role,"name":c.role_name,"owner":c.owner},"permissions":if c.owner{roles::all()}else{c.permissions.clone()},"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?}),
-            ));
+            let mut view = json!({"dsp":c.dsp,"role":{"id":c.role,"name":c.role_name,"owner":c.owner},"permissions":if c.owner{roles::all()}else{c.permissions.clone()},"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?});
+            if platform {
+                view["roles"] = db
+                    .roles(s(&c.dsp, "id"))?
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|role| json!({"id":role["id"],"name":role["name"],"owner":role["owner"]}))
+                    .collect();
+            }
+            return Ok(Reply::json(view));
         }
         _ => {}
     }

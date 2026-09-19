@@ -130,6 +130,16 @@ pub struct Grant {
     pub owner: bool,
     pub permissions: Vec<String>,
 }
+impl Grant {
+    pub fn of(row: &Value) -> Self {
+        Self {
+            id: s(row, "id").to_owned(),
+            name: s(row, "name").to_owned(),
+            owner: flag(row, "system"),
+            permissions: stored(row),
+        }
+    }
+}
 impl Store {
     // A member's effective role. Rows written by an older runtime have no
     // role_id yet, so they resolve through the legacy value without writing.
@@ -157,12 +167,7 @@ impl Store {
                 [dsp, name],
             )?
         };
-        Ok(row.map(|row| Grant {
-            id: s(&row, "id").to_owned(),
-            name: s(&row, "name").to_owned(),
-            owner: flag(&row, "system"),
-            permissions: stored(&row),
-        }))
+        Ok(row.as_ref().map(Grant::of))
     }
     pub fn owner_role(&self, dsp: &str) -> Result<String> {
         default_role(&self.platform, dsp, "owner")
