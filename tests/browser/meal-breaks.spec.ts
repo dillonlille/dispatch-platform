@@ -581,7 +581,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
 
 test.describe('DSP calendar dates', () => {
   // A manager in another state works on the DSP's business day (America/Chicago
-  // for the seeded DSP), not their device's or their personal display timezone.
+  // for the seeded DSP), not their device's.
   test.use({ timezoneId: 'America/New_York' });
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/dsp/paycom/settings', (route) =>
@@ -653,18 +653,33 @@ test.describe('DSP calendar dates', () => {
     await expect(input).toHaveValue('2026-09-17');
   });
 
-  test('a personal display timezone does not move the Timecard calendar', async ({ page }) => {
-    await page.clock.setFixedTime(new Date('2026-09-17T00:39:00Z'));
-    await open(page, true, null);
+  test('activity times follow the DSP clock, with no personal timezone setting', async ({
+    page,
+  }) => {
+    await page.route('**/api/dsp/audit', (route) =>
+      route.fulfill({
+        json: [
+          {
+            id: 1,
+            at: '2026-09-17T04:10:00Z',
+            actorId: null,
+            actorName: 'Avery Morgan',
+            dspId: null,
+            dspName: null,
+            action: 'member.invited',
+            detail: '',
+          },
+        ],
+      }),
+    );
+    await open(page, false, null);
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
-    await page.getByLabel('Display timezone').selectOption('UTC');
-    await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-    const input = page.getByLabel('Paycom date');
-    await expect(input).toHaveValue('2026-09-16');
-    await expect(input).toHaveAttribute('max', '2026-09-16');
-    await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
-    await expect(
-      page.getByLabel('Timecard timezones').getByText('America/Chicago', { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText('Business timezone', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Display timezone')).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
+    // 12:10 AM on 9/17 in New York is 11:10 PM on 9/16 for the DSP.
+    await expect(page.getByRole('row').filter({ hasText: 'Avery Morgan' })).toContainText(
+      'Sep 16, 11:10 PM',
+    );
   });
 });

@@ -17,6 +17,7 @@ import {
   Modal,
   Section,
   time,
+  deviceTimezone,
   title,
   Tabs,
 } from './ui.js';
@@ -400,7 +401,7 @@ export function Activity({ events }: { events: AuditEvent[] }) {
               {event.detail && ` · ${event.detail}`}
             </small>
           </div>
-          <time>{time(event.at)}</time>
+          <time>{time(event.at, deviceTimezone())}</time>
         </div>
       ))}
     </div>
@@ -452,7 +453,7 @@ export function JobTable({
                 </div>
                 <small>{job.message}</small>
               </td>
-              <td>{time(job.createdAt)}</td>
+              <td>{time(job.createdAt, deviceTimezone())}</td>
               <td>
                 {job.attempt} / {job.maxAttempts}
               </td>
@@ -548,13 +549,17 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
                 <div>
                   <dt>Last delivered</dt>
                   <dd>
-                    {health.data.mail.lastSuccessAt ? time(health.data.mail.lastSuccessAt) : '—'}
+                    {health.data.mail.lastSuccessAt
+                      ? time(health.data.mail.lastSuccessAt, deviceTimezone())
+                      : '—'}
                   </dd>
                 </div>
                 <div>
                   <dt>Last attempt</dt>
                   <dd>
-                    {health.data.mail.lastAttemptAt ? time(health.data.mail.lastAttemptAt) : '—'}
+                    {health.data.mail.lastAttemptAt
+                      ? time(health.data.mail.lastAttemptAt, deviceTimezone())
+                      : '—'}
                   </dd>
                 </div>
               </dl>
@@ -668,7 +673,9 @@ export function ReleasesPage() {
         {data.update && (
           <section className="archived-card update-status" role="status" aria-label="Update status">
             <h2>{title(data.update.status)}</h2>
-            <p className="muted">Last update status {time(data.update.updatedAt)}</p>
+            <p className="muted">
+              Last update status {time(data.update.updatedAt, deviceTimezone())}
+            </p>
           </section>
         )}
         {['Core', 'DSP'].map((product) => (

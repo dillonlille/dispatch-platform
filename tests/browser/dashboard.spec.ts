@@ -204,21 +204,16 @@ test('create a DSP and accept its owner invitation while another account is sign
   ).toBeVisible();
 });
 
-test('archived account tabs preserve names, appearance and display timezone preferences', async ({
-  page,
-}) => {
+test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByText('First name', { exact: true })).toBeVisible();
   await expect(page.getByText('Last name', { exact: true })).toBeVisible();
-  await page.getByLabel('Display timezone').selectOption('America/Los_Angeles');
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
-  await expect(page.getByLabel('Display timezone')).toHaveValue('America/Los_Angeles');
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
   await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
   await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
