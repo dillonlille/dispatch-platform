@@ -16,6 +16,8 @@ updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 import runtime_artifact as runtime
 
+TOOLING = Path(__file__).parents[1] / "tooling"
+
 
 def artifact(root, commit, marker="candidate"):
     root.mkdir(mode=0o700, parents=True)
@@ -222,6 +224,109 @@ class DevUpdaterTests(unittest.TestCase):
         self.git("reset", "--hard", self.old)
         subprocess.run(["python3", str(script), "--root", str(self.root), "--verify"],
                        check=True, capture_output=True)
+
+    def track_updater(self, change=""):
+        """Commit the real host updater, as a dev merge that touches it would."""
+        (self.live / "tooling").mkdir(exist_ok=True)
+        for name in updater.MANAGEMENT:
+            (self.live / "tooling" / name).write_text((TOOLING / name).read_text() + change)
+        self.git("add", "tooling")
+        self.git("commit", "-m", "host updater" + change)
+        return self.git("rev-parse", "HEAD")
+
+    def installed(self, name="update-dev.py"):
+        return (self.live / ".runtime/management" / name).read_text()
+
+    def test_activation_installs_the_updater_of_the_activated_checkout(self):
+        current = self.track_updater()
+        artifact(self.live / ".build.next", current, "current")
+        shutil.rmtree(self.live / ".build")
+        (self.live / ".build.next").rename(self.live / ".build")
+        latest = self.track_updater("\n# Reviewed change\n")
+        self.git("update-ref", "refs/remotes/origin/dev", latest)
+        self.git("reset", "--hard", current)
+        candidate = self.instance.runtime / "latest"
+        manifest = artifact(candidate, latest)
+        run = {"id": 1, "head_sha": latest, "head_branch": "dev", "event": "push", "status": "completed",
+               "conclusion": "success", "head_repository": {"full_name": updater.REPOSITORY}}
+        original = self.instance.git
+        def git(*args):
+            if args[0] == "fetch":
+                # The installed copy was missing: every run first follows the active checkout.
+                self.assertEqual(self.installed(), (TOOLING / "update-dev.py").read_text())
+                return ""
+            return original(*args)
+        with patch.object(self.instance, "git", side_effect=git), patch.object(self.instance, "service"), \
+                patch.object(self.instance, "healthy", return_value=True), \
+                patch.object(updater, "github", side_effect=[{"workflow_runs": [run]}, {"artifacts": [
+                    {"name": f"dispatch-dev-{latest}", "expired": False}]}]), \
+                patch.object(updater, "download_run_artifact", return_value=(candidate, manifest)):
+            self.instance.update()
+        self.assertEqual(self.git("rev-parse", "HEAD"), latest)
+        for name in updater.MANAGEMENT:
+            self.assertEqual(self.installed(name), (self.live / "tooling" / name).read_text())
+            self.assertEqual((self.live / ".runtime/management" / name).stat().st_mode & 0o777, 0o600)
+        self.assertTrue(self.installed().endswith("# Reviewed change\n"))
+        self.assertEqual(updater.management_drift(self.live), [])
+        self.assertFalse(list(self.instance.runtime.glob("management-*")), "Staging is removed")
+
+    def test_failed_activation_keeps_the_updater_that_performs_the_recovery(self):
+        current = self.track_updater()
+        artifact(self.live / ".build.next", current, "current")
+        shutil.rmtree(self.live / ".build")
+        (self.live / ".build.next").rename(self.live / ".build")
+        self.instance.refresh_management()
+        latest = self.track_updater("\n# Change that fails its health check\n")
+        self.git("update-ref", "refs/remotes/origin/dev", latest)
+        self.git("reset", "--hard", current)
+        candidate = self.instance.runtime / "latest"
+        artifact(candidate, latest)
+        with patch.object(self.instance, "service"), patch.object(self.instance, "healthy", side_effect=[False, True]), \
+                self.assertRaisesRegex(RuntimeError, "New Dev build"):
+            self.instance.activate(candidate, latest)
+        self.assertEqual(self.installed(), (TOOLING / "update-dev.py").read_text())
+        self.assertEqual(updater.management_drift(self.live), [])
+
+    def test_updater_that_cannot_start_or_is_uncommitted_is_never_installed(self):
+        self.track_updater()
+        self.instance.refresh_management()
+        working = self.installed()
+        (self.live / "tooling/update-dev.py").write_text("import missing_host_module\n")
+        self.git("commit", "-am", "broken updater")
+        self.git("update-ref", "refs/remotes/origin/dev", "HEAD")
+        with patch.object(self.instance, "git", side_effect=lambda *args: "" if args[0] == "fetch" else self.git(*args)), \
+                patch.object(updater.sys, "stderr") as stderr:
+            self.instance.update()
+        self.assertIn("was not installed", "".join(call.args[0] for call in stderr.write.call_args_list))
+        self.assertEqual(self.installed(), working)
+        self.assertEqual(updater.management_drift(self.live), ["update-dev.py"])
+        (self.live / "tooling/update-dev.py").write_text(working + "\n# Unreviewed edit\n")
+        with self.assertRaisesRegex(RuntimeError, "unfinished"):
+            self.instance.update()
+        self.assertEqual(self.installed(), working)
+
+    def test_verify_reports_an_installed_updater_that_differs_from_the_checkout(self):
+        self.track_updater()
+        artifact(self.live / ".build.next", self.git("rev-parse", "HEAD"), "current")
+        shutil.rmtree(self.live / ".build")
+        (self.live / ".build.next").rename(self.live / ".build")
+        # As in the service unit, running the checkout's script leaves no bytecode in the checkout.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        verify = lambda script: subprocess.run(["python3", str(script), "--root", str(self.root), "--verify"],
+                                               capture_output=True, text=True, env=env)
+        missing = verify(self.live / "tooling/update-dev.py")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("runtime_artifact.py, update-dev.py", missing.stderr)
+        self.assertIn("--install-management", missing.stderr)
+        subprocess.run(["python3", str(self.live / "tooling/update-dev.py"), "--root", str(self.root),
+                        "--install-management"], check=True, capture_output=True, env=env)
+        script = self.live / ".runtime/management/update-dev.py"
+        self.assertEqual(verify(script).returncode, 0)
+        (self.live / ".runtime/management/runtime_artifact.py").write_text(
+            (TOOLING / "runtime_artifact.py").read_text() + "\n# Older installed copy\n")
+        drifted = verify(script)
+        self.assertNotEqual(drifted.returncode, 0)
+        self.assertIn("differs from the checkout (runtime_artifact.py)", drifted.stderr)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -21,11 +22,24 @@ from runtime_artifact import (REPOSITORY, command, download_run_artifact, github
 PRIVATE_PATHS = ("config", "data", "dsps", ".platform.lock")
 
 
-def install_management(live):
-    """Keep the reviewed host updater independent of checkout changes/rollback."""
+# The updater imports the shared module, so that is replaced first.
+MANAGEMENT = ("runtime_artifact.py", "update-dev.py")
+
+
+def management_drift(live, tooling=None):
+    """Installed host updater files that differ from the checkout's copies."""
+    tooling = Path(tooling) if tooling else Path(live) / "tooling"
+    installed = Path(live) / ".runtime/management"
+    return [name for name in MANAGEMENT if (tooling / name).is_file() and not (
+        (installed / name).is_file() and (installed / name).read_bytes() == (tooling / name).read_bytes())]
+
+
+def install_management(live, tooling=None):
+    """The units run this copy, so rolling a failed update's source back never
+    changes the updater performing the recovery."""
     target = private_directory(Path(live) / ".runtime/management")
-    for name in ("update-dev.py", "runtime_artifact.py"):
-        source = Path(__file__).with_name(name)
+    for name in MANAGEMENT:
+        source = (Path(tooling) if tooling else Path(__file__).parent) / name
         if not source.is_file():
             continue
         fd, temporary = tempfile.mkstemp(prefix=".install-", dir=target)
@@ -158,9 +172,25 @@ class DevUpdater:
             self.recover()
             raise
 
+    def refresh_management(self):
+        """Follow the clean, activated checkout so the installed updater cannot drift from it."""
+        tooling = self.live / "tooling"
+        if not (tooling / "update-dev.py").is_file() or not management_drift(self.live):
+            return
+        with tempfile.TemporaryDirectory(prefix="management-", dir=self.runtime) as staged:
+            install_management(staged, tooling)
+            try:
+                # Never replace a working updater with one this host cannot even load.
+                command(sys.executable, str(Path(staged) / ".runtime/management/update-dev.py"), "--help", timeout=30)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                print(f"Host updater of the checkout does not start and was not installed: {error}", file=sys.stderr)
+                return
+        install_management(self.live, tooling)
+
     def update(self):
         self.recover()
         self.clean_checkout()
+        self.refresh_management()
         self.git("fetch", "origin", "dev")
         commit = self.git("rev-parse", "origin/dev")
         current = self.git("rev-parse", "HEAD")
@@ -182,6 +212,7 @@ class DevUpdater:
                 self.status("waiting_for_checks", current)
                 return
             self.activate(candidate, commit)
+        self.refresh_management()
 
 
 def main():
@@ -201,6 +232,9 @@ def main():
         updater.clean_checkout()
         verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
         (updater.live / ".build/services/rust/dispatch-backend").chmod(0o700)
+        drift = management_drift(updater.live)
+        require(not drift, f"Installed host updater differs from the checkout ({', '.join(drift)}); "
+                "run tooling/update-dev.py --install-management from the checkout")
         return
     with (updater.platform / "dev-update.lock").open("a") as lock:
         try:
