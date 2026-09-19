@@ -1,9 +1,3 @@
-/** Keeps a client-side page inside the rows it slices. */
-export function usePagination(page: number, total: number, pageSize: number) {
-  const current = Math.min(page, Math.max(0, Math.ceil(total / pageSize) - 1));
-  return { page: current, start: current * pageSize, end: (current + 1) * pageSize };
-}
-
 export function Pagination({
   page,
   pageSize,

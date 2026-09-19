@@ -2,13 +2,65 @@ import { useMemo, useState } from 'react';
 import type { Job } from '../../../../shared/contracts/index.js';
 import { collectionHistory } from './collection-history.js';
 import { memory } from './JobPerformance.js';
-import { Badge, DetailList } from '../../ui/index.js';
+import { Badge, DataTable, DetailList, useDataTable, type TableColumn } from '../../ui/index.js';
 import { deviceTimezone, duration, time } from '../../lib/format.js';
+
+type Run = ReturnType<typeof collectionHistory>[number]['runs'][number];
+const columns: TableColumn<Run>[] = [
+  {
+    id: 'finished',
+    header: 'Finished',
+    hideable: false,
+    value: (run) => run.job.completedAt ?? run.job.createdAt,
+    cell: (run) => time(run.job.completedAt ?? run.job.createdAt, deviceTimezone()),
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    value: (run) => run.job.status,
+    cell: (run) => <Badge value={run.job.status} />,
+  },
+  {
+    id: 'time',
+    header: 'Collection time',
+    value: (run) => run.collectionMs,
+    cell: (run) => (
+      <>
+        {duration(run.collectionMs)}
+        {run.partial && <small>Partial timing before interruption</small>}
+      </>
+    ),
+  },
+  {
+    id: 'retries',
+    header: 'Retries',
+    value: (run) => run.pageRetries + run.jobRetries,
+    cell: (run) => (
+      <>
+        {run.pageRetries} page · {run.jobRetries} job
+      </>
+    ),
+  },
+  {
+    id: 'memory',
+    header: 'Peak browser memory',
+    value: (run) => run.peakBytes,
+    cell: (run) => memory(run.peakBytes),
+  },
+  {
+    id: 'resumed',
+    header: 'Resumed employees',
+    value: (run) => run.resumed,
+    cell: (run) => run.resumed || '—',
+  },
+];
 
 export function CollectionHistory({ jobs }: { jobs: Job[] }) {
   const groups = useMemo(() => collectionHistory(jobs), [jobs]);
   const [selected, setSelected] = useState('');
   const group = groups.find((g) => g.key === selected) ?? groups[0];
+  const recent = useMemo(() => group?.runs.slice(0, 10) ?? [], [group]);
+  const table = useDataTable({ columns, rows: recent, rowId: (run) => run.job.id });
   if (!group) return null;
   const trend = group.runs
     .filter((r) => r.job.status === 'succeeded' && r.collectionMs !== null)
@@ -89,38 +141,7 @@ export function CollectionHistory({ jobs }: { jobs: Job[] }) {
         </figure>
       )}
       <div className="table-wrap">
-        <table>
-          <caption className="sr-only">Last ten completed collections for {group.label}</caption>
-          <thead>
-            <tr>
-              <th>Finished</th>
-              <th>Status</th>
-              <th>Collection time</th>
-              <th>Retries</th>
-              <th>Peak browser memory</th>
-              <th>Resumed employees</th>
-            </tr>
-          </thead>
-          <tbody>
-            {group.runs.slice(0, 10).map((run) => (
-              <tr key={run.job.id}>
-                <td>{time(run.job.completedAt ?? run.job.createdAt, deviceTimezone())}</td>
-                <td>
-                  <Badge value={run.job.status} />
-                </td>
-                <td>
-                  {duration(run.collectionMs)}
-                  {run.partial && <small>Partial timing before interruption</small>}
-                </td>
-                <td>
-                  {run.pageRetries} page · {run.jobRetries} job
-                </td>
-                <td>{memory(run.peakBytes)}</td>
-                <td>{run.resumed || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable table={table} caption={`Last ten completed collections for ${group.label}`} />
       </div>
       <p className="muted">
         Based on up to 200 recent jobs. Collection time sums recorded attempts and excludes sign-in,

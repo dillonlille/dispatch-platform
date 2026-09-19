@@ -17,6 +17,7 @@ type Session = SessionView;
 import { readAppearance, applyAppearance } from './app/appearance.js';
 import { leavePresence, usePresence } from './app/presence.js';
 import { openView, saveRole } from './app/session.js';
+import { tablePreferencesFor } from './app/useTableState.js';
 import { getSession } from './app/endpoints.js';
 function App() {
   const [session, setSession] = useState<Session | null>(),
@@ -41,6 +42,7 @@ function App() {
       try {
         const next = await getSession();
         credentials(next.csrf);
+        tablePreferencesFor(next.user.id);
         setSession(next);
         if (
           !next.user.platformOwner &&

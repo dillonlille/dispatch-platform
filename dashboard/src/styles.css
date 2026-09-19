@@ -482,6 +482,71 @@ td small {
   overflow-y: auto;
   visibility: hidden;
 }
+.table-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.column-menu summary {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  transition: background-color var(--motion-duration);
+}
+.column-menu summary:hover {
+  background: var(--accent);
+}
+.column-menu fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.column-menu legend {
+  padding: 7px 10px 5px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.column-menu label {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.column-menu label:hover {
+  background: var(--accent);
+}
+.team-member-column {
+  width: 45%;
+}
+.role-name-column {
+  width: 30%;
+}
+.role-members-column {
+  width: 14%;
+}
+.fleet-dsp-column {
+  width: 28%;
+}
+.cell-end {
+  text-align: right;
+}
+@media (max-width: 700px) {
+  .sticky-column {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--background);
+    border-right: 1px solid var(--border);
+  }
+}
 .settings-section > form,
 .support-visibility {
   max-width: 448px;

@@ -1,20 +1,54 @@
 import { useUpdateState } from '../../app/browser-update.js';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Employee } from '../../../../shared/contracts/index.js';
 import { useData } from '../../app/api.js';
-import { DataState, Empty, Pagination, SortHeader } from '../../ui/index.js';
+import { useTableState } from '../../app/useTableState.js';
+import {
+  DataState,
+  DataTable,
+  Empty,
+  TablePagination,
+  useDataTable,
+  type TableColumn,
+} from '../../ui/index.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
 import { pageSize } from './pageSize.js';
 
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
+const none: Employee[] = [];
 export function EmployeesPage() {
-  const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
+  const state = useTableState('employee', { id: 'name', desc: false });
   const [query, setQuery] = useUpdateState('employee-query', ''),
-    [page, setPage] = useUpdateState('employee-page', 0),
     [employee, setEmployee] = useState<string>();
   const { data, error } = useData<Employees>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${page * pageSize}&limit=${pageSize}&direction=${direction}`,
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${state.page * pageSize}&limit=${pageSize}&direction=${state.sort?.desc ? 'desc' : 'asc'}`,
   );
+  const columns = useMemo<TableColumn<Employee>[]>(
+    () => [
+      {
+        id: 'name',
+        header: 'Employee',
+        sortable: true,
+        hideable: false,
+        value: (person) => person.name,
+        cell: (person) => (
+          <button className="employee-link" onClick={() => setEmployee(person.code)}>
+            {person.name}
+          </button>
+        ),
+      },
+    ],
+    [],
+  );
+  const table = useDataTable({
+    columns,
+    rows: data?.employees ?? none,
+    rowId: (person) => person.code,
+    state,
+    sorting: 'server',
+    pageSize,
+    total: data?.total ?? 0,
+  });
   if (employee) return <EmployeeDetail code={employee} close={() => setEmployee(undefined)} />;
   return (
     <div className="paycom-data-view">
@@ -28,7 +62,7 @@ export function EmployeesPage() {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setPage(0);
+              state.setPage(0);
             }}
           />
         </label>
@@ -41,32 +75,7 @@ export function EmployeesPage() {
               <span>{data.total} employees</span>
             </div>
             <div className="table-wrap">
-              <table aria-label="Employee directory">
-                <thead>
-                  <tr>
-                    <SortHeader
-                      direction={direction === 'asc' ? 'asc' : 'desc'}
-                      onSort={() => {
-                        setDirection(direction === 'asc' ? 'desc' : 'asc');
-                        setPage(0);
-                      }}
-                    >
-                      Employee
-                    </SortHeader>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.employees.map((person) => (
-                    <tr key={person.code}>
-                      <td>
-                        <button className="employee-link" onClick={() => setEmployee(person.code)}>
-                          {person.name}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable table={table} label="Employee directory" />
             </div>
             {!data.employees.length && (
               <Empty title={query ? 'No employees match your search' : 'No workforce data yet'}>
@@ -75,7 +84,7 @@ export function EmployeesPage() {
                   : 'Employees will appear after the first collection finishes.'}
               </Empty>
             )}
-            <Pagination page={page} pageSize={pageSize} total={data.total} onChange={setPage} />
+            <TablePagination table={table} />
           </div>
         )}
       </DataState>

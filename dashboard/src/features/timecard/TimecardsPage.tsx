@@ -1,22 +1,41 @@
-import { useUpdateState } from '../../app/browser-update.js';
 import { useCollectionUpdates } from '../../app/live-collection.js';
 import { PaycomDateControls } from './DateControls.js';
 import { localDate } from '../../../../shared/meal-breaks.js';
-import { useState } from 'react';
-import { Globe, Info } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Download, Globe, Info } from 'lucide-react';
 import type { Timecard } from '../../../../shared/contracts/index.js';
-import { paycomColumns, type PaycomPreferences } from '../../../../shared/paycom.js';
+import type { PaycomPreferences } from '../../../../shared/paycom.js';
 import { useData } from '../../app/api.js';
-import { DataState, Empty, Modal, Pagination, SortHeader, usePagination } from '../../ui/index.js';
+import { useTableState } from '../../app/useTableState.js';
+import {
+  ColumnMenu,
+  DataState,
+  DataTable,
+  downloadTable,
+  Empty,
+  Modal,
+  TablePagination,
+  useDataTable,
+  type TableColumn,
+} from '../../ui/index.js';
 import { time } from '../../lib/format.js';
-import { PunchCells } from './PunchCells.js';
+import { punchColumns } from './punchColumns.js';
 import { pageSize } from './pageSize.js';
 
+type Card = Timecard & { name: string };
 type Daily = {
-  rows: (Timecard & { name: string })[];
+  rows: Card[];
   collectedAt: string | null;
   available: boolean;
 };
+type Punch = Card['punches'][number];
+const none: Card[] = [];
+const noPunches: Punch[] = [];
+const punchDetail: TableColumn<Punch>[] = [
+  { id: 'in', header: 'In', cell: (punch) => punch.in ?? '—' },
+  { id: 'out', header: 'Out', cell: (punch) => punch.out ?? '—' },
+  { id: 'hours', header: 'Hours', cell: (punch) => punch.hours?.toFixed(2) ?? '—' },
+];
 export function TimecardsPage({
   date,
   onDateChange,
@@ -30,18 +49,17 @@ export function TimecardsPage({
   timezone: string;
   preferences: PaycomPreferences;
 }) {
-  const [requestedPage, setPage] = useUpdateState('timecard-page', 0);
+  const state = useTableState('timecard', { id: 'name', desc: false });
+  const sort = state.sort!;
   const calendarToday = localDate(timezone);
-  const [sort, setSort] = useUpdateState('timecard-sort', 'name'),
-    [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
-    [selectedCode, setSelectedCode] = useState<string>();
+  const [selectedCode, setSelectedCode] = useState<string>();
   const liveRevision = useCollectionUpdates(date);
   const {
     data: current,
     stale,
     error,
   } = useData<Daily>(
-    `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${direction}`,
+    `/api/dsp/timecards?date=${date}&sort=${sort.id}&direction=${sort.desc ? 'desc' : 'asc'}`,
     0,
     `${refreshKey}:${liveRevision}`,
     date,
@@ -49,14 +67,42 @@ export function TimecardsPage({
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? stale;
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
-  const { page, start, end } = usePagination(requestedPage, data?.rows.length ?? 0, pageSize);
-  function order(key: string) {
-    setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
-    setSort(key);
-    setPage(0);
-  }
-  const sorted = (key: string) =>
-    sort === key ? (direction === 'asc' ? 'asc' : 'desc') : undefined;
+  const columns = useMemo<TableColumn<Card>[]>(
+    () => [
+      {
+        id: 'name',
+        header: 'Employee',
+        sortable: true,
+        hideable: false,
+        sticky: true,
+        value: (card) => card.name,
+        cell: (card) => (
+          <button
+            className="employee-timecard"
+            aria-label={`View punches for ${card.name}`}
+            onClick={() => setSelectedCode(card.employeeCode)}
+          >
+            {card.name}
+          </button>
+        ),
+      },
+      ...punchColumns<Card>(true),
+    ],
+    [],
+  );
+  const table = useDataTable({
+    columns,
+    rows: data?.rows ?? none,
+    rowId: (card) => card.employeeCode,
+    state,
+    sorting: 'server',
+    pageSize,
+  });
+  const punchTable = useDataTable({
+    columns: punchDetail,
+    rows: selected?.punches ?? noPunches,
+    rowId: (_, index) => String(index),
+  });
   return (
     <div className="paycom-data-view">
       <div className="paycom-data-table paycom-timecard-table">
@@ -72,10 +118,21 @@ export function TimecardsPage({
             today={calendarToday}
             onChange={(value) => {
               onDateChange(value);
-              setPage(0);
+              state.setPage(0);
               setSelectedCode(undefined);
             }}
           />
+          <div className="table-tools">
+            <ColumnMenu table={table} />
+            <button
+              className="icon-button"
+              aria-label="Export timecards"
+              disabled={!data?.rows.length}
+              onClick={() => downloadTable(table, `timecards-${date}.csv`)}
+            >
+              <Download size={16} />
+            </button>
+          </div>
         </div>
         <DataState data={data} error={error} failed={Boolean(error)}>
           {(data) =>
@@ -86,43 +143,13 @@ export function TimecardsPage({
             ) : (
               <div className="paycom-day-results" aria-busy={!current} inert={!current}>
                 <div className="table-wrap">
-                  <table className="paycom-day-table" aria-label="Daily employee timecards">
-                    <thead>
-                      <tr>
-                        <SortHeader direction={sorted('name')} onSort={() => order('name')}>
-                          Employee
-                        </SortHeader>
-                        {paycomColumns.map(([key, label]) => (
-                          <SortHeader key={key} direction={sorted(key)} onSort={() => order(key)}>
-                            {label}
-                          </SortHeader>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.rows.slice(start, end).map((card) => (
-                        <tr key={card.employeeCode}>
-                          <td>
-                            <button
-                              className="employee-timecard"
-                              aria-label={`View punches for ${card.name}`}
-                              onClick={() => setSelectedCode(card.employeeCode)}
-                            >
-                              {card.name}
-                            </button>
-                          </td>
-                          <PunchCells card={card} />
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <DataTable
+                    table={table}
+                    className="paycom-day-table"
+                    label="Daily employee timecards"
+                  />
                 </div>
-                <Pagination
-                  page={page}
-                  pageSize={pageSize}
-                  total={data.rows.length}
-                  onChange={setPage}
-                />
+                <TablePagination table={table} />
                 {!data.rows.length && (
                   <Empty
                     title={
@@ -162,24 +189,7 @@ export function TimecardsPage({
           onClose={() => setSelectedCode(undefined)}
         >
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>In</th>
-                  <th>Out</th>
-                  <th>Hours</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selected.punches.map((p, i) => (
-                  <tr key={i}>
-                    <td>{p.in ?? '—'}</td>
-                    <td>{p.out ?? '—'}</td>
-                    <td>{p.hours?.toFixed(2) ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable table={punchTable} />
           </div>
         </Modal>
       )}

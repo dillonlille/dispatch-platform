@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
-import { DataState, ErrorBox, Header } from '../../../ui/index.js';
+import {
+  DataState,
+  DataTable,
+  ErrorBox,
+  Header,
+  useDataTable,
+  type TableColumn,
+} from '../../../ui/index.js';
 import {
   scheduleIssues,
   type CollectionSchedule,
@@ -42,8 +49,12 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
   const [updated, setUpdated] = useState<CollectionSchedule>();
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const schedules = (query.data?.schedules ?? []).map((schedule) =>
-    updated?.id === schedule.id && updated.revision > schedule.revision ? updated : schedule,
+  const schedules = useMemo(
+    () =>
+      (query.data?.schedules ?? []).map((schedule) =>
+        updated?.id === schedule.id && updated.revision > schedule.revision ? updated : schedule,
+      ),
+    [query.data, updated],
   );
   const active = schedules.filter((schedule) => schedule.enabled).length;
   async function toggle(schedule: CollectionSchedule) {
@@ -67,6 +78,90 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
       setBusyId(undefined);
     }
   }
+  const timezone = query.data?.timezone ?? 'UTC';
+  const columns: TableColumn<CollectionSchedule>[] = [
+    {
+      id: 'schedule',
+      header: 'Schedule',
+      scope: 'col',
+      rowHeader: true,
+      hideable: false,
+      value: (schedule) => schedule.name,
+      cell: (schedule) => schedule.name,
+    },
+    {
+      id: 'collection',
+      header: 'Collection',
+      scope: 'col',
+      dataLabel: 'Collection',
+      value: (schedule) => schedule.collection,
+      cell: (schedule) => <CollectionLabels collection={schedule.collection} />,
+    },
+    {
+      id: 'repeat',
+      header: 'Repeat',
+      scope: 'col',
+      dataLabel: 'Repeat',
+      value: repeat,
+      cell: repeat,
+    },
+    {
+      id: 'next',
+      header: 'Next collection',
+      scope: 'col',
+      dataLabel: 'Next collection',
+      className: 'schedule-next',
+      value: (schedule) => schedule.nextRun,
+      cell: (schedule) => (
+        <>
+          {schedule.enabled ? nextCollection(schedule.nextRun, timezone) : 'Paused'}
+          {schedule.lastError && (
+            <small>
+              {scheduleIssues[schedule.lastError] ?? 'Collection delayed. Check connections.'}
+            </small>
+          )}
+        </>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      scope: 'col',
+      dataLabel: 'Status',
+      value: (schedule) => (schedule.enabled ? 'On' : 'Paused'),
+      cell: (schedule) => (
+        <label className="schedule-toggle">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label={`Enable ${schedule.name}`}
+            checked={schedule.enabled}
+            disabled={busyId !== undefined}
+            onChange={() => void toggle(schedule)}
+          />
+          <span>{schedule.enabled ? 'On' : 'Paused'}</span>
+        </label>
+      ),
+    },
+    {
+      id: 'actions',
+      header: <span className="sr-only">Actions</span>,
+      name: 'Actions',
+      scope: 'col',
+      hideable: false,
+      className: 'schedule-row-actions',
+      cell: (schedule) => (
+        <button
+          className="icon-button"
+          aria-label={`Edit ${schedule.name}`}
+          onClick={() => setEditing(schedule)}
+        >
+          <Pencil size={16} aria-hidden="true" />
+        </button>
+      ),
+    },
+  ];
+  const table = useDataTable({ columns, rows: schedules, rowId: (schedule) => schedule.id });
   return (
     <div className="timecard-schedules">
       <a className="schedule-back" href={dspHash(dspId, 'paycom')}>
@@ -95,65 +190,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
             </div>
             {schedules.length ? (
               <div className="schedule-table-wrap">
-                <table className="schedule-table">
-                  <caption className="sr-only">Sync schedules</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Schedule</th>
-                      <th scope="col">Collection</th>
-                      <th scope="col">Repeat</th>
-                      <th scope="col">Next collection</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {schedules.map((schedule) => (
-                      <tr key={schedule.id}>
-                        <th scope="row">{schedule.name}</th>
-                        <td data-label="Collection">
-                          <CollectionLabels collection={schedule.collection} />
-                        </td>
-                        <td data-label="Repeat">{repeat(schedule)}</td>
-                        <td data-label="Next collection" className="schedule-next">
-                          {schedule.enabled
-                            ? nextCollection(schedule.nextRun, data.timezone)
-                            : 'Paused'}
-                          {schedule.lastError && (
-                            <small>
-                              {scheduleIssues[schedule.lastError] ??
-                                'Collection delayed. Check connections.'}
-                            </small>
-                          )}
-                        </td>
-                        <td data-label="Status">
-                          <label className="schedule-toggle">
-                            <input
-                              type="checkbox"
-                              role="switch"
-                              aria-label={`Enable ${schedule.name}`}
-                              checked={schedule.enabled}
-                              disabled={busyId !== undefined}
-                              onChange={() => void toggle(schedule)}
-                            />
-                            <span>{schedule.enabled ? 'On' : 'Paused'}</span>
-                          </label>
-                        </td>
-                        <td className="schedule-row-actions">
-                          <button
-                            className="icon-button"
-                            aria-label={`Edit ${schedule.name}`}
-                            onClick={() => setEditing(schedule)}
-                          >
-                            <Pencil size={16} aria-hidden="true" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable table={table} className="schedule-table" caption="Sync schedules" />
               </div>
             ) : (
               <div className="schedule-empty">
