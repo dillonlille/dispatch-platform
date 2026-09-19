@@ -1,26 +1,26 @@
 import { useState } from 'react';
 import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, Loading, Empty, can } from './ui.js';
+import { DataState, DetailList, Empty, ErrorBox, Header, Tabs } from './ui/index.js';
+import { can } from './app/permissions.js';
 import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
-import { type Perform } from './platform.js';
+import { useAction } from './lib/useAction.js';
 import { ThemeSection } from './theme.js';
+import { hashQuery, navigate, replaceHashQuery, signInHash } from './app/navigation.js';
 
-export function SettingsPage({
-  session,
-  view,
-  perform,
-}: {
-  session: SessionView;
-  view?: DspView;
-  perform: Perform;
-}) {
-  const [requestedTab, setTab] = useState(
-    new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'general',
-  );
+export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
+  const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
   const [passwordError, setPasswordError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const changePassword = useAction(async (form: FormData) => {
+    await api('/api/auth/password', {
+      currentPassword: form.get('currentPassword'),
+      password: form.get('password'),
+    });
+    navigate(signInHash);
+    location.reload();
+  });
+  const busy = changePassword.busy;
   const connections = can(view, 'connections.manage');
   const tabs = [
     ['general', 'General'],
@@ -38,11 +38,7 @@ export function SettingsPage({
         value={tab}
         onChange={(value) => {
           setTab(value);
-          history.replaceState(
-            {},
-            '',
-            `${location.pathname}${location.search}${location.hash.split('?')[0]}?tab=${value}`,
-          );
+          replaceHashQuery({ tab: value });
         }}
         items={tabs}
         label="Settings"
@@ -53,52 +49,33 @@ export function SettingsPage({
             <div>
               <h2>Account</h2>
             </div>
-            <dl className="detail-list">
-              <div>
-                <dt>First name</dt>
-                <dd>{session.user.firstName}</dd>
-              </div>
-              <div>
-                <dt>Last name</dt>
-                <dd>{session.user.lastName}</dd>
-              </div>
-              <div>
-                <dt>Email address</dt>
-                <dd>{session.user.email}</dd>
-              </div>
-              <div>
-                <dt>Role</dt>
-                <dd>
-                  {session.user.platformOwner
+            <DetailList
+              items={[
+                ['First name', session.user.firstName],
+                ['Last name', session.user.lastName],
+                ['Email address', session.user.email],
+                [
+                  'Role',
+                  session.user.platformOwner
                     ? 'Platform owner'
-                    : (view?.role.name ?? 'Team member')}
-                </dd>
-              </div>
-            </dl>
+                    : (view?.role.name ?? 'Team member'),
+                ],
+              ]}
+            />
           </section>
           {view && (
             <section className="settings-section">
               <div>
                 <h2>Workspace</h2>
               </div>
-              <dl className="detail-list">
-                <div>
-                  <dt>DSP</dt>
-                  <dd>{view.dsp.name}</dd>
-                </div>
-                <div>
-                  <dt>Station</dt>
-                  <dd>{view.profile?.stationCode || '—'}</dd>
-                </div>
-                <div>
-                  <dt>Business timezone</dt>
-                  <dd>{view.dsp.timezone}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>{view.dsp.status}</dd>
-                </div>
-              </dl>
+              <DetailList
+                items={[
+                  ['DSP', view.dsp.name],
+                  ['Station', view.profile?.stationCode || '—'],
+                  ['Business timezone', view.dsp.timezone],
+                  ['Status', view.dsp.status],
+                ]}
+              />
             </section>
           )}
         </>
@@ -118,15 +95,7 @@ export function SettingsPage({
                 setPasswordError('The new passwords must match.');
                 return;
               }
-              setBusy(true);
-              void perform(async () => {
-                await api('/api/auth/password', {
-                  currentPassword: form.get('currentPassword'),
-                  password: form.get('password'),
-                });
-                location.hash = 'signin';
-                location.reload();
-              }).finally(() => setBusy(false));
+              void changePassword.run(form);
             }}
           >
             <label>
@@ -175,7 +144,6 @@ export function SettingsPage({
       {tab === 'connections' && connections && view && (
         <div className="settings-connections">
           <ConnectionsPage
-            perform={perform}
             development={session.providerMode === 'fixture'}
             timezone={view.dsp.timezone}
           />
@@ -183,55 +151,61 @@ export function SettingsPage({
       )}
       {tab === 'theme' && <ThemeSection userId={session.user.id} />}
       {tab === 'audit' && view && <AuditLog view={view} />}
-      {tab === 'support' && <SupportVisibility perform={perform} />}
+      {tab === 'support' && <SupportVisibility />}
     </>
   );
 }
 
 // Where it is on, a platform owner's activity is listed in that DSP's audit log,
 // always as "Platform support". It applies from the moment it is switched.
-function SupportVisibility({ perform }: { perform: Perform }) {
+function SupportVisibility() {
   const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps');
   const dsps = data?.filter((dsp) => !dsp.profile.removed);
   // The switch moves at once; a refused change puts it back.
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const show = useAction(
+    (dsp: DspSummary, visible: boolean) =>
+      api(`/api/platform/dsps/${dsp.id}/support-visibility`, { visible }),
+    {
+      success: (dsp, visible) =>
+        visible
+          ? `Platform support shown to ${dsp.name}`
+          : `Platform support hidden from ${dsp.name}`,
+    },
+  );
   return (
     <section className="settings-section">
       <div>
         <h2>Show Platform support in audit logs</h2>
       </div>
-      <ErrorBox message={error} />
-      {!dsps ? (
-        !error && <Loading />
-      ) : !dsps.length ? (
-        <Empty title="No DSPs" />
-      ) : (
-        <div className="permission-rows support-visibility">
-          {dsps.map((dsp) => (
-            <label className="permission-row" key={dsp.id}>
-              <span>{dsp.name}</span>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={chosen[dsp.id] ?? dsp.profile.supportVisible}
-                onChange={(event) => {
-                  const visible = event.target.checked;
-                  setChosen((current) => ({ ...current, [dsp.id]: visible }));
-                  void perform(
-                    () => api(`/api/platform/dsps/${dsp.id}/support-visibility`, { visible }),
-                    visible
-                      ? `Platform support shown to ${dsp.name}`
-                      : `Platform support hidden from ${dsp.name}`,
-                  ).then((saved) => {
-                    if (!saved) setChosen((current) => ({ ...current, [dsp.id]: !visible }));
-                    refresh();
-                  });
-                }}
-              />
-            </label>
-          ))}
-        </div>
-      )}
+      <DataState data={dsps} error={error} failed={Boolean(error)}>
+        {(dsps) =>
+          !dsps.length ? (
+            <Empty title="No DSPs" />
+          ) : (
+            <div className="permission-rows support-visibility">
+              {dsps.map((dsp) => (
+                <label className="permission-row" key={dsp.id}>
+                  <span>{dsp.name}</span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={chosen[dsp.id] ?? dsp.profile.supportVisible}
+                    onChange={(event) => {
+                      const visible = event.target.checked;
+                      setChosen((current) => ({ ...current, [dsp.id]: visible }));
+                      void show.run(dsp, visible).then((saved) => {
+                        if (!saved) setChosen((current) => ({ ...current, [dsp.id]: !visible }));
+                        refresh();
+                      });
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          )
+        }
+      </DataState>
     </section>
   );
 }

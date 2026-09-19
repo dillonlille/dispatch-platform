@@ -9,10 +9,19 @@ import {
   Info,
   Link2,
   RefreshCw,
-  Search,
 } from 'lucide-react';
 import { api, useData } from './api.js';
-import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
+import {
+  DataState,
+  Empty,
+  ErrorBox,
+  Modal,
+  Pagination,
+  SearchInput,
+  SortHeader,
+  usePagination,
+} from './ui/index.js';
+import { personName, time } from './lib/format.js';
 import {
   clockLabel,
   cortexClock,
@@ -25,6 +34,7 @@ import {
 } from '../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../shared/paycom.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
+import { useAction } from './lib/useAction.js';
 import './meal-breaks.css';
 
 function Source({ name }: { name: 'Paycom' | 'Flex' }) {
@@ -289,9 +299,7 @@ function LinkEmployees({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(data.drivers.map((d) => [d.id, selection(d.id)])),
   );
-  const [query, setQuery] = useState(''),
-    [error, setError] = useState(''),
-    [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
   const changes = data.drivers
     .filter((d) => values[d.id] !== selection(d.id))
     .map((d) => ({
@@ -299,6 +307,14 @@ function LinkEmployees({
       paycomCode: values[d.id]?.startsWith('paycom:') ? values[d.id]!.slice(7) : null,
       ...(values[d.id] === 'auto' ? { automatic: true } : {}),
     }));
+  const save = useAction(
+    async () => {
+      await api('/api/dsp/paycom/employee-links', { revision: data.links.revision, changes });
+      saved();
+    },
+    { inline: true },
+  );
+  const { busy, error } = save;
   return (
     <Modal
       title="Link employees"
@@ -310,15 +326,12 @@ function LinkEmployees({
     >
       <ErrorBox message={error} />
       <div className="meal-link-tools">
-        <label className="search">
-          <Search size={18} />
-          <input
-            aria-label="Search Flex drivers"
-            placeholder="Search Flex drivers…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
+        <SearchInput
+          label="Search Flex drivers"
+          placeholder="Search Flex drivers…"
+          value={query}
+          onChange={setQuery}
+        />
       </div>
       <p className="muted">
         Automatic matching handles capitalization, punctuation, spacing, extra surnames, omitted
@@ -381,21 +394,7 @@ function LinkEmployees({
         <button
           className="primary"
           disabled={busy || !changes.length}
-          onClick={async () => {
-            setBusy(true);
-            setError('');
-            try {
-              await api('/api/dsp/paycom/employee-links', {
-                revision: data.links.revision,
-                changes,
-              });
-              saved();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : 'Unable to save employee links.');
-            } finally {
-              setBusy(false);
-            }
-          }}
+          onClick={() => void save.run()}
         >
           {busy
             ? 'Saving…'
@@ -425,7 +424,7 @@ export function MealBreaksPage({
 }) {
   const [query, setQuery] = useUpdateState('meal-query', ''),
     [filter, setFilter] = useUpdateState('meal-filter', 'all'),
-    [page, setPage] = useUpdateState('meal-page', 0),
+    [requestedPage, setPage] = useUpdateState('meal-page', 0),
     [descending, setDescending] = useUpdateState('meal-descending', false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()),
     [linking, setLinking] = useState(false);
@@ -441,15 +440,7 @@ export function MealBreaksPage({
   const data = current ?? request.stale;
   const shownDate = data?.date ?? date;
   const zone = data?.timezone ?? timezone;
-  const name = (row: MealEmployee) => {
-    const value = fullName(row.name);
-    const parts = value.split(' ');
-    return preferences.name_order === 'last_first' && parts.length > 1
-      ? row.name.includes(',')
-        ? row.name
-        : `${parts.at(-1)}, ${parts.slice(0, -1).join(' ')}`
-      : value;
-  };
+  const name = (row: MealEmployee) => personName(row.name, preferences.name_order);
   const lateTime = preferences.late_da_time,
     lateDepartments = preferences.late_da_departments;
   const rows = useMemo(
@@ -484,8 +475,8 @@ export function MealBreaksPage({
     )
     .sort((a, b) => (descending ? -1 : 1) * name(a.row).localeCompare(name(b.row)));
   const pageSize = 100;
-  const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
-  const visible = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const { page, start, end } = usePagination(requestedPage, filtered.length, pageSize);
+  const visible = filtered.slice(start, end);
   const unlinked = data?.drivers.filter((d) => d.matchType === 'unmatched').length ?? 0;
   const automatic = data?.drivers.filter((d) => d.matchType === 'name').length ?? 0;
   const separate = data?.drivers.filter((d) => d.matchType === 'separate').length ?? 0;
@@ -515,18 +506,15 @@ export function MealBreaksPage({
         />
       </header>
       <div className="meal-toolbar">
-        <label className="search">
-          <Search size={18} />
-          <input
-            aria-label="Search meal break employees"
-            placeholder="Search employees…"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(0);
-            }}
-          />
-        </label>
+        <SearchInput
+          label="Search meal break employees"
+          placeholder="Search employees…"
+          value={query}
+          onChange={(value) => {
+            setQuery(value);
+            setPage(0);
+          }}
+        />
         <div className="meal-filters" aria-label="Filter meal breaks">
           {(
             [
@@ -590,113 +578,110 @@ export function MealBreaksPage({
           )}
         </div>
       )}
-      {!data ? (
-        !request.error && <Loading />
-      ) : !data.rows.length ? (
-        <Empty title="No meal breaks or punches for this date">
-          {!data.paycomCollectedAt && !data.cortexPublications.length
-            ? 'Neither source has a collection for this date.'
-            : 'Choose another date to compare collected records.'}
-        </Empty>
-      ) : (
-        <div className="paycom-day-results" aria-busy={!current} inert={!current}>
-          {(!data.paycomCollectedAt || !data.cortexPublications.length) && (
-            <p className="meal-source-notice" role="status">
-              <AlertTriangle size={16} aria-hidden="true" />
-              <span>
-                {!data.paycomCollectedAt
-                  ? 'Paycom has no collection for this date. Showing Flex records.'
-                  : 'Flex has no collection for this date. Showing Paycom records.'}
-              </span>
-            </p>
-          )}
-          <div
-            className="meal-table-scroll"
-            role="region"
-            aria-label="Meal break comparison"
-            tabIndex={0}
-          >
-            <table className="meal-table">
-              <caption className="sr-only">
-                Meal breaks for {shownDate}. Paycom local clock times and Flex station-local times,
-                compared to the minute.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col" aria-sort={descending ? 'descending' : 'ascending'}>
-                    <button className="meal-sort" onClick={() => setDescending(!descending)}>
-                      Employee <span aria-hidden="true">{descending ? '↓' : '↑'}</span>
-                    </button>
-                  </th>
-                  <th scope="col">
-                    IN DAY
-                    <Source name="Paycom" />
-                  </th>
-                  <th scope="col">
-                    Last delivery
-                    <Source name="Flex" />
-                  </th>
-                  <th scope="col" className="meal-lunch">
-                    OUT LUNCH
-                  </th>
-                  <th scope="col" className="meal-lunch">
-                    IN LUNCH
-                  </th>
-                  <th scope="col">
-                    First delivery
-                    <Source name="Flex" />
-                  </th>
-                  <th scope="col">
-                    OUT DAY
-                    <Source name="Paycom" />
-                  </th>
-                  <th scope="col">Comparison</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map(({ row, summary }) => (
-                  <Fragment key={row.id}>
-                    <EmployeeRows
-                      row={row}
-                      summary={summary}
-                      date={shownDate}
-                      name={name(row)}
-                      expanded={expanded.has(row.id)}
-                      toggle={() =>
-                        setExpanded((previous) => {
-                          const next = new Set(previous);
-                          if (next.has(row.id)) next.delete(row.id);
-                          else next.add(row.id);
-                          return next;
-                        })
-                      }
-                    />
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!filtered.length && (
-            <Empty title="No matching employees">Try another name or filter.</Empty>
-          )}
-          {filtered.length > pageSize && (
-            <div className="meal-pagination">
-              <button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
-                Previous
-              </button>
-              <span>
-                Page {currentPage + 1} of {Math.ceil(filtered.length / pageSize)}
-              </span>
-              <button
-                disabled={(currentPage + 1) * pageSize >= filtered.length}
-                onClick={() => setPage(currentPage + 1)}
+      <DataState data={data} failed={Boolean(request.error)}>
+        {(data) =>
+          !data.rows.length ? (
+            <Empty title="No meal breaks or punches for this date">
+              {!data.paycomCollectedAt && !data.cortexPublications.length
+                ? 'Neither source has a collection for this date.'
+                : 'Choose another date to compare collected records.'}
+            </Empty>
+          ) : (
+            <div className="paycom-day-results" aria-busy={!current} inert={!current}>
+              {(!data.paycomCollectedAt || !data.cortexPublications.length) && (
+                <p className="meal-source-notice" role="status">
+                  <AlertTriangle size={16} aria-hidden="true" />
+                  <span>
+                    {!data.paycomCollectedAt
+                      ? 'Paycom has no collection for this date. Showing Flex records.'
+                      : 'Flex has no collection for this date. Showing Paycom records.'}
+                  </span>
+                </p>
+              )}
+              <div
+                className="meal-table-scroll"
+                role="region"
+                aria-label="Meal break comparison"
+                tabIndex={0}
               >
-                Next
-              </button>
+                <table className="meal-table">
+                  <caption className="sr-only">
+                    Meal breaks for {shownDate}. Paycom local clock times and Flex station-local
+                    times, compared to the minute.
+                  </caption>
+                  <thead>
+                    <tr>
+                      <SortHeader
+                        scope="col"
+                        className="meal-sort"
+                        direction={descending ? 'desc' : 'asc'}
+                        onSort={() => setDescending(!descending)}
+                        indicator={<span aria-hidden="true">{descending ? '↓' : '↑'}</span>}
+                      >
+                        {'Employee '}
+                      </SortHeader>
+                      <th scope="col">
+                        IN DAY
+                        <Source name="Paycom" />
+                      </th>
+                      <th scope="col">
+                        Last delivery
+                        <Source name="Flex" />
+                      </th>
+                      <th scope="col" className="meal-lunch">
+                        OUT LUNCH
+                      </th>
+                      <th scope="col" className="meal-lunch">
+                        IN LUNCH
+                      </th>
+                      <th scope="col">
+                        First delivery
+                        <Source name="Flex" />
+                      </th>
+                      <th scope="col">
+                        OUT DAY
+                        <Source name="Paycom" />
+                      </th>
+                      <th scope="col">Comparison</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map(({ row, summary }) => (
+                      <Fragment key={row.id}>
+                        <EmployeeRows
+                          row={row}
+                          summary={summary}
+                          date={shownDate}
+                          name={name(row)}
+                          expanded={expanded.has(row.id)}
+                          toggle={() =>
+                            setExpanded((previous) => {
+                              const next = new Set(previous);
+                              if (next.has(row.id)) next.delete(row.id);
+                              else next.add(row.id);
+                              return next;
+                            })
+                          }
+                        />
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!filtered.length && (
+                <Empty title="No matching employees">Try another name or filter.</Empty>
+              )}
+              <Pagination
+                variant="pages"
+                page={page}
+                pageSize={pageSize}
+                total={filtered.length}
+                onChange={setPage}
+              />
             </div>
-          )}
-        </div>
-      )}
+          )
+        }
+      </DataState>
       <footer className="paycom-timecard-footer" aria-label="Meal break timezones">
         <span>
           <Globe size={16} aria-hidden="true" />

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import type { BrowserFrame, BrowserInput } from '../../shared/browser.js';
 import { api, ApiError } from './api.js';
-import { ErrorBox, Loading, Modal } from './ui.js';
+import { ErrorBox, Loading, Modal } from './ui/index.js';
+import { messageOf } from './lib/errors.js';
 
 export function BrowserVerification({
   sessionId,
@@ -36,7 +37,7 @@ export function BrowserVerification({
 
   const failed = useCallback((error: Error) => {
     if (controller.current?.signal.aborted || error.name === 'AbortError') return;
-    setError(error.message);
+    setError(messageOf(error));
     if (
       error instanceof ApiError &&
       ['verification_expired', 'permission_denied'].includes(error.code)
@@ -62,7 +63,7 @@ export function BrowserVerification({
       setStreamError('');
     } catch (error) {
       if (!signal?.aborted && (error as Error).name !== 'AbortError') {
-        setStreamError((error as Error).message);
+        setStreamError(messageOf(error));
         if (error instanceof ApiError && [401, 403, 409].includes(error.status)) failed(error);
       }
     } finally {

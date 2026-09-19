@@ -37,6 +37,35 @@ checks must pass for the final PR head. Keep its branch and worktree until merge
 4. Add the route's row to the inventory in `backend/tests/http_routes.rs`.
 5. When the dashboard consumes the response, add its type to `shared/contracts`.
 
+## Adding a page
+
+1. Write the page as one component file in `dashboard/src/` (a `features/` folder per
+   product area arrives in a follow-up).
+2. Add one entry to the table in `dashboard/src/app/routes.tsx`: `id` (its address),
+   `scope` (`dsp` for `#dsp/<id>/<page>`, `platform` for `#<page>`), `label`, `icon`,
+   `nav`, and `render`, which receives the session, the DSP view and `reopen`.
+3. Access goes in the entry's `permission`, written once: the sidebar, the page and
+   the "not available for your role" message all follow it.
+4. A page without its own sidebar item names the item to highlight in `parent`.
+5. Link with `dspHash`/`platformHash` and move with `navigate` from
+   `dashboard/src/app/navigation.ts`; do not write hash strings by hand.
+6. `tests/dashboard-structure.test.ts` fails on a duplicate id or an unknown parent.
+
+## Adding a UI component
+
+- Generic building blocks live in `dashboard/src/ui/`, one per file, exported from
+  `ui/index.ts`. They hold no product knowledge: no API calls, no permission checks,
+  no contracts, nothing about timecards or DSPs. The structure test enforces the imports.
+- A component that knows the product stays next to the page that uses it.
+- Before writing markup, look for the primitive: `Header`, `Tabs`, `Modal`,
+  `ConfirmDialog`, `Popover`, `DataState`, `SearchInput`, `Pagination`, `SortHeader`,
+  `DetailList`, `Badge`, `Empty`, `ErrorBox`, `Loading`, `useFocusTrap`.
+- Loading and errors use `DataState`: no data shows the spinner, data shows the content.
+- Mutations use `useAction` from `dashboard/src/lib/useAction.ts` for `run`, `busy` and
+  `error`. Failures show at the top of the page and `success` is toasted; pass `inline`
+  to render `error` inside a form or dialog instead.
+- Formatting (`time`, `duration`, `bytes`, `title`, names) comes from `dashboard/src/lib/format.ts`.
+
 ## Faster builds and deployment
 
 The workflow selects full checks for backend, tooling, dependencies and unknown

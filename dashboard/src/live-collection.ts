@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, view } from './api.js';
+import { backoff } from './lib/backoff.js';
 
 /** One bounded, sleeping request per visible table. Driver events carry no records. */
 export function useCollectionUpdates(date: string) {
@@ -40,7 +41,7 @@ export function useCollectionUpdates(date: string) {
       } catch (error) {
         if (!request.signal.aborted && !disposed) {
           stopped = error instanceof ApiError && [401, 403].includes(error.status);
-          delay = Math.min(15000, 1000 * 2 ** Math.min(failures++, 4));
+          delay = backoff(failures++);
           // A transient transport failure still gets a conventional data refresh.
           if (!stopped) refresh();
         }
