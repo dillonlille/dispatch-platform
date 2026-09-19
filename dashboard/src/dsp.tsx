@@ -6,12 +6,7 @@ import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
 import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
-import {
-  paycomDefaults,
-  paycomColumns,
-  type PaycomPreferences,
-  type PaycomColumn,
-} from '../../shared/paycom.js';
+import { paycomColumns, type PaycomPreferences, type PaycomColumn } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Loading, Modal, time, title } from './ui.js';
 import { type Perform } from './platform.js';
@@ -21,11 +16,7 @@ type Daily = {
   collectedAt: string | null;
   available: boolean;
 };
-export function EmployeesPage({
-  preferences = paycomDefaults,
-}: {
-  preferences?: PaycomPreferences;
-}) {
+export function EmployeesPage({ preferences }: { preferences: PaycomPreferences }) {
   const limit = preferences.rows_per_page;
   const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
   const [query, setQuery] = useUpdateState('employee-query', ''),
@@ -236,22 +227,20 @@ function PunchCells({
   );
 }
 export function TimecardsPage({
-  date: sharedDate,
+  date,
   onDateChange,
   refreshKey,
   timezone,
-  preferences = paycomDefaults,
+  preferences,
 }: {
-  date?: string;
-  onDateChange?: (date: string) => void;
+  date: string;
+  onDateChange: (date: string) => void;
   refreshKey?: string | null;
   timezone: string;
-  preferences?: PaycomPreferences;
+  preferences: PaycomPreferences;
 }) {
   const [offset, setOffset] = useUpdateState('timecard-offset', 0);
   const calendarToday = localDate(timezone);
-  const [localDay, setLocalDay] = useState(calendarToday);
-  const date = sharedDate ?? (localDay > calendarToday ? calendarToday : localDay);
   const [sort, setSort] = useUpdateState(
       'timecard-sort',
       preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
@@ -290,11 +279,9 @@ export function TimecardsPage({
           <PaycomDateControls
             date={date}
             today={calendarToday}
-            label={sharedDate ? 'Paycom date' : 'Timecard date'}
             compact
             onChange={(value) => {
-              if (onDateChange) onDateChange(value);
-              else setLocalDay(value);
+              onDateChange(value);
               setOffset(0);
               setSelectedCode(undefined);
             }}

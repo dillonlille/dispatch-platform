@@ -81,9 +81,6 @@ export function Shell({
     navigation.find((item) => item.id === page)?.label ??
     ({
       'paycom-settings': 'Timecard',
-      employees: 'Timecard',
-      timecards: 'Timecard',
-      connections: 'Settings',
       account: 'Settings',
       jobs: 'Diagnostics',
     }[page] ||
@@ -169,11 +166,7 @@ export function Shell({
               href={`#${dspId ? `dsp/${dspId}/` : ''}${id}`}
               className="nav-item"
               aria-current={
-                page === id ||
-                (id === 'paycom' && ['employees', 'timecards', 'paycom-settings'].includes(page)) ||
-                (id === 'settings' && page === 'connections')
-                  ? 'page'
-                  : undefined
+                page === id || (id === 'paycom' && page === 'paycom-settings') ? 'page' : undefined
               }
               onClick={() => setMobile(false)}
             >
