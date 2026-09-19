@@ -69,7 +69,9 @@ Worker, its random bearer secret and the Production tunnel before starting servi
 Enable user lingering so services survive logout and start at boot.
 
 The production email Worker uses `services/cloudflare-mail/wrangler.production.jsonc`,
-`invitations@dispatch.dillonlille.com`, and its own `MAIL_TOKEN` secret. Configure
+`no-reply@dispatch.dillonlille.com`, and its own `MAIL_TOKEN` secret. Every email
+Dispatch sends is automated and says replies are not read. A changed sender address or
+Worker takes effect only after `wrangler deploy` with that config. Configure
 `DISPATCH_PRODUCTION_MAIL_MODE=cloudflare`, `DISPATCH_PRODUCTION_MAIL_WORKER_URL`
 and `DISPATCH_PRODUCTION_MAIL_WORKER_TOKEN` in the private systemd environment file.
 Never copy Dev mail credentials or the Cloudflare account API token to Production.

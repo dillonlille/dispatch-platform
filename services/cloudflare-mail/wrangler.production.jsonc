@@ -9,13 +9,13 @@
   "send_email": [
     {
       "name": "EMAIL",
-      "allowed_sender_addresses": ["invitations@dispatch.dillonlille.com"],
+      "allowed_sender_addresses": ["no-reply@dispatch.dillonlille.com"],
     },
   ],
   "vars": {
     "DISPATCH_ENVIRONMENT": "production",
     "DISPATCH_ORIGIN": "https://dispatch.dillonlille.com",
-    "MAIL_FROM": "invitations@dispatch.dillonlille.com",
+    "MAIL_FROM": "no-reply@dispatch.dillonlille.com",
   },
   "observability": {
     "enabled": true,
