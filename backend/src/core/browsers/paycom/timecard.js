@@ -677,6 +677,16 @@
       clone.querySelectorAll('script,style').forEach((node) => node.remove());
       return clean(clone.textContent);
     };
+    // A fetched response is parsed without layout, so nothing reports as shown.
+    // Paycom marks each punch cell's displayed time with a class and keeps a
+    // hidden read-only copy beside it; anything else stays unresolved and the
+    // hours validation sends that employee to a rendered read.
+    const detached = !document.defaultView;
+    const shown = (element) =>
+      detached
+        ? element.matches('span.current-timecard-cell') &&
+          !element.closest('.readOnly-combined-cell,[hidden]')
+        : element.offsetParent !== null && element.getClientRects().length > 0;
     const controlValue = (element) => {
       if (!element) return '';
       const select = element.querySelector('select');
@@ -685,14 +695,16 @@
       if (input) return clean(input.value);
       const triggers = Array.from(
         element.querySelectorAll('a.popoverTrigger.popoverTrigger--text'),
-      ).filter((e) => e.offsetParent !== null);
+      ).filter((e) =>
+        detached ? !e.closest('.readOnly-combined-cell,[hidden]') : e.offsetParent !== null,
+      );
       return triggers.length === 1 ? clean(triggers[0].textContent) : visible(element);
     };
     const renderedPunchTime = (element) => {
       if (!element) return '';
       const pattern = /^(0?[1-9]|1[0-2]):([0-5][0-9]) ([AP])M$/;
       const values = Array.from(element.children)
-        .filter((child) => child.offsetParent !== null && child.getClientRects().length > 0)
+        .filter(shown)
         .map((child) => clean(child.textContent))
         .filter((value) => pattern.test(value));
       if (values.length !== 1) return controlValue(element);

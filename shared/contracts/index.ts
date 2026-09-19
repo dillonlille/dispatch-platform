@@ -142,6 +142,8 @@ export interface JobMetrics {
     recovered: number;
     resumed?: number;
     earlyReady?: number;
+    direct?: number;
+    spotChecked?: number;
     totalMs: number;
     active: PageRead[];
     slowest: PageRead[];

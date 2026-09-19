@@ -103,6 +103,8 @@ struct PageReads {
     recovered: usize,
     resumed: usize,
     early_ready: usize,
+    direct: usize,
+    spot_checked: usize,
     total_ms: u64,
     active: Vec<PageRead>,
     slowest: Vec<PageRead>,
@@ -160,6 +162,27 @@ impl Recorder {
             .value
             .page_reads
             .early_ready += 1;
+    }
+    /// Timecards read from the provider's response instead of a rendered page.
+    pub fn direct(&self) {
+        self.0.lock().expect("job metrics").value.page_reads.direct += 1;
+    }
+    /// Response reads that a rendered read of the same employee confirmed.
+    pub fn spot_checked(&self) {
+        self.0
+            .lock()
+            .expect("job metrics")
+            .value
+            .page_reads
+            .spot_checked += 1;
+    }
+    /// A response read that handed over to a rendered read is not a page failure.
+    pub fn page_cancel(&self, ordinal: usize) {
+        self.0
+            .lock()
+            .expect("job metrics")
+            .pages
+            .retain(|(page, _, _)| page.ordinal != ordinal);
     }
     pub fn page_start(&self, ordinal: usize, attempt: usize) {
         let mut clock = self.0.lock().expect("job metrics");
