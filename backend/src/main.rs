@@ -67,7 +67,7 @@ async fn run() -> Result<()> {
             let mail_state = state.clone();
             let mail = tokio::spawn(dispatch_backend::supervise(
                 async move {
-                    operations::mailer(mail_state, receiver).await;
+                    dispatch_backend::mail::mailer(mail_state, receiver).await;
                     Ok(())
                 },
                 stop.clone(),

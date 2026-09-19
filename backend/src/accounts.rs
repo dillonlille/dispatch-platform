@@ -1,7 +1,9 @@
 use super::{
     Error, Result, crypto,
     db::{Store, flag, iso, n, now, s},
-    email, ensure, validate as v,
+    ensure,
+    mail::templates as email,
+    validate as v,
 };
 use rusqlite::params;
 use serde_json::{Value, json};

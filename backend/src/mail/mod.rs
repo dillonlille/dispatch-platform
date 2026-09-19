@@ -1,4 +1,4 @@
-use super::{
+use crate::{
     Result, State,
     db::{self, Store, n},
     ensure,
@@ -6,6 +6,10 @@ use super::{
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::{Value, json};
+
+mod delivery;
+pub mod templates;
+pub use delivery::mailer;
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +37,7 @@ pub fn health(db: &Store, state: &State) -> Result<Value> {
     let transport = state
         .mail_transport
         .lock()
-        .map_err(|_| super::Error::new("mail_health_unavailable", 503))?
+        .map_err(|_| crate::Error::new("mail_health_unavailable", 503))?
         .clone();
     Ok(json!({
         "enabled":db.config.mail_available(),
