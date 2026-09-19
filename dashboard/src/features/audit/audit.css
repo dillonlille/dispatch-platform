@@ -238,8 +238,7 @@ button.audit-row[aria-expanded='true'] {
 .audit-feed .quiet .audit-row {
   color: var(--muted-foreground);
 }
-/* Visits, retries and anything Platform support did are outlined, not filled. */
-.audit-feed .quiet .audit-icon,
+/* Only what Platform support did is outlined, not filled: every action of theirs, and nobody else's. */
 .audit-icon.support {
   border: 1px dashed var(--border);
   background: transparent;

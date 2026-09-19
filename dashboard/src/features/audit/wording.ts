@@ -165,10 +165,13 @@ const system = (event: AuditEvent) => !event.actorId && event.actorName === 'Sys
 // Inside a DSP the server names every platform owner this way.
 export const support = (event: AuditEvent) =>
   !event.actorId && event.actorName === 'Platform support';
+// Whatever a platform owner did reads quietly, their visits included. A member's visit is theirs to see.
+export const quiet = (event: AuditEvent) =>
+  support(event) || event.action === 'dsp.owner_view_opened';
 export function sentence(event: AuditEvent): Part[] {
   if (outcomes[event.action]) return outcome(event);
   const phrase = phrases[event.action]?.(event) ?? [title(event.action).toLowerCase()];
-  return [views.has(event.action) ? event.actorName : strong(event.actorName), ' ', ...phrase];
+  return [quiet(event) ? event.actorName : strong(event.actorName), ' ', ...phrase];
 }
 export const plain = (parts: Part[]) =>
   parts.map((part) => (typeof part === 'string' ? part : part.strong)).join('');

@@ -43,6 +43,7 @@ import {
   plain,
   sentence,
   spoken,
+  quiet,
   support,
   views,
 } from './wording.js';
@@ -401,7 +402,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                       return (
                         <li
                           key={entry.key}
-                          className={views.has(event.action) || retrying ? 'quiet' : undefined}
+                          className={quiet(event) || retrying ? 'quiet' : undefined}
                         >
                           <button
                             className="audit-row"
