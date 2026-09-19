@@ -59,7 +59,8 @@ export default {
       return reply(400, { error: 'invalid_message' });
     try {
       const result = await env.EMAIL.send({
-        from: env.MAIL_FROM,
+        // Every email is automated; the name keeps "no-reply@" from being all a reader sees.
+        from: { name: 'Dispatch', email: env.MAIL_FROM },
         to: message.to,
         subject: message.subject,
         text: message.text,

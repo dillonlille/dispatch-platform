@@ -7,6 +7,9 @@ const MUTED: &str = "#626b7a";
 const BORDER: &str = "#e3e7ee";
 const PRIMARY: &str = "#2055ed";
 const PAGE: &str = "#f4f6fa";
+// Every email comes from a no-reply address; each one says so where a reader looks first
+// when they want to answer.
+const NO_REPLY: &str = "This is an automated email. Replies to it are not read.";
 // Matches the dashboard DspAvatar tones as (ink, surface).
 const TONES: [(&str, &str); 5] = [
     ("#51647d", "#eaf0f7"),
@@ -151,7 +154,7 @@ pub fn invitation(i: &Invitation) -> Message {
     let (lead, lead_html) = (lead(&str::to_owned), lead(&strong));
     let note = format!("This invitation expires on {expires}.");
     let footer = format!(
-        "This invitation was sent to {}. If you weren't expecting it, you can safely ignore this email.",
+        "This invitation was sent to {}. If you weren't expecting it, you can safely ignore this email. {NO_REPLY}",
         i.to
     );
     let body = format!(
@@ -176,7 +179,9 @@ pub fn invitation(i: &Invitation) -> Message {
 
 pub fn reset(origin: &str, dev: bool, to: &str, url: &str) -> Message {
     let note = "This link expires in 30 minutes and can only be used once.";
-    let footer = "If you didn't request a password reset, you can safely ignore this email. Your password won't change.";
+    let footer = format!(
+        "If you didn't request a password reset, you can safely ignore this email. Your password won't change. {NO_REPLY}"
+    );
     let body = format!(
         r#"{}<p style="margin:0 0 26px;font:400 15px/1.6 {FONT};color:{MUTED}">We received a request to reset the password for {}.</p>{}"#,
         heading("Reset your password"),
@@ -193,7 +198,7 @@ pub fn reset(origin: &str, dev: bool, to: &str, url: &str) -> Message {
             dev,
             "Reset your Dispatch password. This link expires in 30 minutes.",
             &body,
-            footer,
+            &footer,
         ),
     }
 }
@@ -228,6 +233,7 @@ mod tests {
             mail.html.contains("Full &lt;Scale&gt; Logistics") && !mail.html.contains("<Scale>")
         );
         assert!(mail.html.contains(">Accept invitation</a>"));
+        assert!(mail.text.ends_with(NO_REPLY) && mail.html.contains(NO_REPLY));
         assert!(mail.text.contains("Dillon Lillehaug invited you to join"));
         assert!(mail.text.contains("expires on September 25, 2026."));
         assert!(
@@ -243,5 +249,16 @@ mod tests {
         assert!(
             mail.html.contains(">Start DSP onboarding</a>") && !mail.html.contains("Logistics")
         );
+    }
+
+    #[test]
+    fn every_email_says_replies_are_not_read() {
+        let mail = reset(
+            "https://dispatch.example",
+            false,
+            "owner@example.com",
+            "https://dispatch.example/#reset?token=t",
+        );
+        assert!(mail.text.ends_with(NO_REPLY) && mail.html.contains(NO_REPLY));
     }
 }
