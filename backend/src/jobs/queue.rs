@@ -1,15 +1,15 @@
-use super::collectors::Provider;
-use super::{
-    Error, Result, State,
+use crate::collectors::Provider;
+use crate::{
+    Error, Result,
     contracts::{ActiveJobStatus, PublicJob},
     crypto,
     db::{AuditChange, Store, flag, iso, n, now, s},
     ensure,
-    job_metrics::{self, Metrics, Phase, Recorder},
+    job_metrics::Metrics,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::collections::HashMap;
 fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Result<Value> {
     Ok(serde_json::to_value(PublicJob::from_row(
         row, name, metrics,
@@ -81,7 +81,7 @@ impl Store {
         date: &str,
     ) -> Result<Value> {
         let request = json!({"date":date});
-        super::workforce::collection_date(&request, s(&self.get_dsp(id)?, "timezone"))?;
+        crate::workforce::collection_date(&request, s(&self.get_dsp(id)?, "timezone"))?;
         self.enqueue_for(id, actor, key, Provider::Paycom, &request)
     }
     pub fn enqueue_meals(
@@ -89,7 +89,7 @@ impl Store {
         id: &str,
         actor: Option<&str>,
         key: &str,
-        scope: &super::meals::Scope,
+        scope: &crate::meals::Scope,
     ) -> Result<Value> {
         scope.validate()?;
         self.enqueue_for(
@@ -333,287 +333,6 @@ fn retry_delay(id: &str, attempt: i64) -> i64 {
     let base = 30000 * 2_i64.pow(attempt.clamp(0, 8) as u32);
     let digest = Sha256::digest(format!("{id}:{attempt}"));
     base + i64::from(u32::from_le_bytes(digest[..4].try_into().unwrap())) % (base / 2 + 1)
-}
-pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bool>) -> Result<()> {
-    let owner = crypto::id("worker")?;
-    let mut tasks = tokio::task::JoinSet::new();
-    let mut running_dsps = std::collections::HashSet::new();
-    let mut timer = tokio::time::interval(Duration::from_secs(1));
-    let mut deadlines = std::collections::HashMap::<String, i64>::new();
-    let mut schedule_revision = u64::MAX;
-    let mut refreshed = 0;
-    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut checkpoint_cleanup = tokio::time::interval(Duration::from_secs(60));
-    // A year's retention does not need checking every minute.
-    let mut audit_pruned = 0;
-    loop {
-        tokio::select! {
-            _=super::cancelled(&mut stop)=>break,
-            result=tasks.join_next(),if !tasks.is_empty()=>{
-                match result {Some(Ok(dsp))=>{running_dsps.remove(&dsp);},Some(Err(_))=>return Err(Error::new("collector_task_failed",500)),None=>{}}
-            },
-            _=checkpoint_cleanup.tick()=>{
-                let prune_audit = now()-audit_pruned >= 24*60*60*1000;
-                if prune_audit { audit_pruned = now(); }
-                let result = state.run(move |db| {
-                    if prune_audit {
-                        db.prune_audit()?;
-                    }
-                    // Expired access tokens have no remaining authentication purpose.
-                    db.platform.transaction(|| {
-                        db.platform.exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
-                        db.platform.exec("DELETE FROM resets WHERE expires_at<?", [now()])?;
-                        db.platform.exec("DELETE FROM invitations WHERE expires_at<?", [now()])?;
-                        db.platform.exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
-                        Ok(())
-                    })?;
-                    for dsp in db.platform.all("SELECT id FROM dsps WHERE status IN ('active','suspended')", [])? {
-                        db.prune_checkpoints(s(&dsp,"id"))?;
-                    }
-                    Ok(())
-                }).await;
-                if let Err(error)=result { super::observability::event("error", "checkpoint_cleanup_failed", json!({"error":error.code})); }
-            },
-            _=timer.tick()=>{
-                state.expire_browsers().await;
-                let revision = state.schedule_revision.load(std::sync::atomic::Ordering::Acquire);
-                if revision != schedule_revision || now()-refreshed >= 60000 {
-                    match state.read(|db| db.schedule_deadlines()).await {
-                        Ok(values) => { deadlines = values.into_iter().collect(); schedule_revision = revision; refreshed = now(); },
-                        Err(error) => super::observability::event("error", "scheduler_refresh_failed", json!({"error":error.code})),
-                    }
-                }
-                let due: Vec<_> = deadlines.iter().filter(|(_,at)| **at <= now()).map(|(id,_)| id.clone()).collect();
-                for id in due {
-                    let dsp = id.clone();
-                    match state.run(move |db| db.schedule_due(&dsp)).await {
-                        Ok(Some(next)) => { deadlines.insert(id,next); },
-                        Ok(None) => { deadlines.remove(&id); },
-                        Err(error) => { deadlines.insert(id,now()+5000); super::observability::event("error", "scheduler_tick_failed", json!({"error":error.code})); },
-                    }
-                }
-                // Poll indexed queue/lease state without a write lock. Recovery
-                // still runs on the first tick after expiry, including quiet DSPs.
-                let ready = match state.read(|db| db.jobs.one("SELECT EXISTS(SELECT 1 FROM jobs WHERE status='queued' AND available_at<=?1) queued,EXISTS(SELECT 1 FROM jobs WHERE status IN ('running','waiting_verification') AND lease_until<?1) expired",[now()])).await {
-                    Ok(Some(value)) => value,
-                    Ok(None) => continue,
-                    Err(error) => { super::observability::event("error", "job_poll_failed", json!({"error":error.code})); continue; },
-                };
-                if flag(&ready,"expired") && let Err(error) = state.run(|db| db.recover_jobs(false)).await { super::observability::event("error", "job_recovery_failed", json!({"error":error.code})); }
-                if !flag(&ready,"queued") && !flag(&ready,"expired") { continue; }
-                while tasks.len()<state.config.browser_capacity {
-                    let pool=state.clone();let claim_owner=owner.clone();
-                    let running=running_dsps.clone();
-                    let job=state.run(move|db| {
-                        let memory_ready = (pool.config.fixture && pool.config.fixture_url.is_none()) || pool.browsers.admission().can_start;
-                        let message = if memory_ready {"Waiting for a browser"} else {"Waiting for available memory"};
-                        db.jobs.exec("UPDATE jobs SET message=?1 WHERE status='queued' AND available_at<=?2 AND message<>?1", params![message,now()])?;
-                        db.claim(&claim_owner,|id,provider|!running.contains(id) && pool.browsers.get_for(id,provider).map(|s|!s.busy()&&!s.closed()).unwrap_or_else(||memory_ready && pool.browsers.active()<pool.config.browser_capacity))
-                    }).await;
-                    match job {Ok(Some(job))=>{let state=state.clone();let owner=owner.clone();let dsp=s(&job,"dsp_id").to_owned();running_dsps.insert(dsp.clone());tasks.spawn(async move{execute(state,job,owner).await;dsp});},Ok(None)=>break,Err(error)=>{super::observability::event("error", "job_claim_failed", json!({"error":error.code}));break;}}
-                }
-            }
-        }
-    }
-    state.browsers.close().await;
-    while tasks.join_next().await.is_some() {}
-    Ok(())
-}
-async fn execute(state: Arc<State>, job: Value, owner: String) {
-    let id = s(&job, "id").to_owned();
-    let dsp = s(&job, "dsp_id").to_owned();
-    let metrics = Recorder::new(&job);
-    let provider = Provider::from_job_kind(s(&job, "kind")).expect("registered job kind");
-    let task = async {
-        let jid = id.clone();
-        let worker = owner.clone();
-        state.run(move |db| db.guard_job(&jid, &worker)).await?;
-        metrics.phase(Phase::Authentication);
-        let session = state.ensure_provider_browser(&dsp, false, provider).await?;
-        if session.challenge() {
-            metrics.phase(Phase::Verification);
-            let jid = id.clone();
-            let worker = owner.clone();
-            state
-                .run(move |db| {
-                    db.progress(
-                        &jid,
-                        &worker,
-                        5,
-                        "Waiting for owner verification",
-                        ActiveJobStatus::WaitingVerification,
-                    )
-                })
-                .await?;
-            while !session.ready() {
-                ensure(!session.closed(), "verification_expired", 409)?;
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-        let jid = id.clone();
-        let worker = owner.clone();
-        state
-            .run(move |db| {
-                db.guard_job(&jid, &worker)?;
-                db.progress(
-                    &jid,
-                    &worker,
-                    10,
-                    if provider == Provider::Cortex {
-                        "Collecting meal breaks"
-                    } else {
-                        "Collecting workforce"
-                    },
-                    ActiveJobStatus::Running,
-                )
-            })
-            .await?;
-        metrics.phase(Phase::Collection);
-        let request: Value = serde_json::from_str(s(&job, "request"))?;
-        let (data, scope) = session
-            .collect(&state, &id, &owner, &metrics, &request)
-            .await?;
-        metrics.counts(&data);
-        metrics.phase(Phase::Publication);
-        let jid = id.clone();
-        let worker = owner.clone();
-        let tenant = dsp.clone();
-        let completed_metrics = metrics.clone();
-        state
-            .run(move |db| {
-                db.guard_job(&jid, &worker)?;
-                match provider {
-                    Provider::Paycom => db.publish(&tenant, &data)?,
-                    Provider::Cortex => db.publish_meals(
-                        &tenant,
-                        &jid,
-                        &serde_json::from_value(data)?,
-                        &scope.ok_or_else(|| Error::new("invalid_cortex_scope", 502))?,
-                    )?,
-                };
-                completed_metrics.finish("succeeded", None);
-                db.jobs.transaction(|| {
-                    db.save_metrics(&jid, &worker, &completed_metrics.snapshot())?;
-                    db.finish(&jid, &worker, None)
-                })
-            })
-            .await
-    };
-    let mut task = Box::pin(task);
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
-    let mut sample = tokio::time::interval(Duration::from_secs(1));
-    sample.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let result = loop {
-        tokio::select! {
-            result=&mut task=>break result,
-            _=sample.tick()=>{
-                if let Some(pid)=state.browsers.get_for(&dsp,provider).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
-                    && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
-                    if let Some(session) = state.browsers.get_for(&dsp,provider) { session.observe_memory(&memory); }
-                    metrics.observe(memory);
-                }
-                let jid=id.clone(); let worker=owner.clone(); let snapshot=metrics.snapshot();
-                let _=state.run(move|db|db.save_metrics(&jid,&worker,&snapshot)).await;
-            },
-            _=heartbeat.tick()=>{
-                let jid=id.clone();let worker=owner.clone();
-                let guard=state.run(move|db|{db.guard_job(&jid,&worker)?;db.jobs.exec("UPDATE jobs SET lease_until=? WHERE id=? AND lease_owner=?",params![now()+120000,jid,worker])?;Ok(())}).await;
-                if let Err(error)=guard{break Err(error);}
-            }
-        }
-    };
-    drop(task);
-    // A settings-page browser or another just-claimed job may win admission.
-    // Put this job back without consuming a provider attempt or retry history.
-    if result.as_ref().err().is_some_and(|e| {
-        ["browser_memory_busy", "browser_capacity_busy"].contains(&e.code.as_str())
-    }) {
-        let jid = id.clone();
-        let worker = owner.clone();
-        let attempt = n(&job, "attempt");
-        let deferred=state.run(move |db| db.jobs.transaction(|| {
-            let changed=db.jobs.exec("UPDATE jobs SET status='queued',attempt=attempt-1,started_at=NULL,lease_owner=NULL,lease_until=NULL,available_at=?,message='Waiting for browser resources' WHERE id=? AND lease_owner=? AND status='running'",params![now()+5000,jid,worker])?;
-            if changed==1 { db.jobs.exec("DELETE FROM job_metrics WHERE job_id=? AND attempt=? AND owner=?",params![jid,attempt,worker])?; }
-            Ok(changed==1)
-        })).await;
-        if matches!(deferred, Ok(true)) {
-            return;
-        }
-    }
-    if let Err(error) = &result {
-        let jid = id.clone();
-        let cancelled = state
-            .run(move |db| Ok(s(&db.job(&jid, None)?, "status") == "cancelled"))
-            .await
-            .unwrap_or(false);
-        metrics.finish(
-            if cancelled
-                || [
-                    "job_cancelled",
-                    "permission_denied",
-                    "connection_changed",
-                    "dsp_unavailable",
-                ]
-                .contains(&error.code.as_str())
-            {
-                "cancelled"
-            } else {
-                "failed"
-            },
-            Some(if cancelled {
-                "job_cancelled"
-            } else {
-                &error.code
-            }),
-        );
-    }
-    state
-        .browsers
-        .revoke_provider_revision(&dsp, n(&job, "connection_revision"), provider)
-        .await;
-    let error = result.err().map(|e| e.code);
-    let actor = job["actor_id"].as_str().map(str::to_owned);
-    let snapshot = metrics.snapshot();
-    // Request logs cannot explain a failed sync; record each attempt's outcome.
-    super::observability::event(
-        if error.is_some() { "warn" } else { "info" },
-        "job.finished",
-        json!({"jobId":id,"dspId":dsp,"kind":s(&job,"kind"),"attempt":n(&job,"attempt"),"error":error,"metrics":job_metrics::summary(&snapshot)}),
-    );
-    let changed_dsp = dsp.clone();
-    let _ = state
-        .run(move |db| {
-            if let Some(ref error) = error {
-                db.jobs.transaction(|| {
-                    db.save_metrics(&id, &owner, &snapshot)?;
-                    db.finish(&id, &owner, Some(error))
-                })?;
-            }
-            // Cancelling is recorded by whoever cancelled; it is not a failure.
-            if error.as_deref() == Some("job_cancelled") {
-                return Ok(());
-            }
-            let (schedule, facts) = db.outcome_facts(&dsp, &job);
-            // An attempt that will run again is not yet the collection's outcome.
-            let retrying = s(&db.job(&id, None)?, "status") == "queued";
-            db.audit_ref(
-                actor.as_deref(),
-                Some(&dsp),
-                if retrying {
-                    "collection.retrying"
-                } else if error.is_some() {
-                    "collection.failed"
-                } else {
-                    "collection.completed"
-                },
-                error.as_deref().unwrap_or(""),
-                schedule.as_deref(),
-                &facts,
-                Some(("job", &id)),
-            )
-        })
-        .await;
-    state.updates.notify(&changed_dsp);
 }
 
 #[cfg(test)]
