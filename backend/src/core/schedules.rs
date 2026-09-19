@@ -99,6 +99,27 @@ fn same_timing(row: &Value, value: &Value) -> bool {
         && row["interval_minutes"] == value["intervalMinutes"]
         && row["local_time"] == value["localTime"]
 }
+// The fields a member can edit, compared for the audit log.
+pub fn schedule_changes(before: &Value, after: &Value) -> Vec<super::db::AuditChange> {
+    const FIELDS: [(&str, &str); 6] = [
+        ("name", "name"),
+        ("collection", "collection"),
+        ("cadence", "cadence"),
+        ("intervalMinutes", "interval"),
+        ("localTime", "time"),
+        ("enabled", "enabled"),
+    ];
+    let text = |value: &Value| match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        other => Some(other.to_string()),
+    };
+    FIELDS
+        .iter()
+        .filter(|(key, _)| before[key] != after[key])
+        .map(|(key, field)| (*field, text(&before[key]), text(&after[key])))
+        .collect()
+}
 fn public(row: &Value) -> Value {
     json!({"id":row["id"],"name":row["name"],"collection":row["collection"],
         "cadence":row["cadence"],"intervalMinutes":row["interval_minutes"],
@@ -166,6 +187,9 @@ impl Store {
         Ok(
             json!({"timezone":dsp["timezone"],"dspName":dsp["name"],"schedules":rows.iter().map(public).collect::<Vec<_>>()}),
         )
+    }
+    pub fn collection_schedule(&self, id: &str, schedule: &str) -> Result<Value> {
+        Ok(public(&self.schedule_row(id, schedule)?))
     }
     fn schedule_row(&self, id: &str, schedule: &str) -> Result<Value> {
         self.dsp(id)?

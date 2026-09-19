@@ -648,7 +648,9 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
             Ok(Reply::status(out, 201))
         }
         ("GET", "/api/platform/jobs") => Ok(Reply::json(db.list_jobs(None)?)),
-        ("GET", "/api/platform/audit") => Ok(Reply::json(db.audits(None, 200)?)),
+        ("GET", "/api/platform/audit") => {
+            Ok(Reply::json(db.audit_page(&audit_query(&i.query, None)?)?))
+        }
         ("GET", "/api/platform/health") => {
             let counts: HashMap<String, Value> = db
                 .jobs
@@ -759,9 +761,9 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/overview")=>{let jobs=if c.can("collections.run"){db.recent_jobs(Some(id),8)?}else{json!([])};let workforce=if c.can("timecard.view"){db.employees(id,"",0,5,false)?}else{Value::Null};let audit=if c.can("audit.view"){db.audits(Some(id),10)?}else{json!([])};Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":workforce,"audit":audit})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
-        ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,&date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested","")?;Ok(Reply::status(job,202))},
+        ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=&request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested",request.date.as_deref().unwrap_or(""))?;Ok(Reply::status(job,202))},
         ("GET","/api/dsp/jobs/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_sync_status(id,v::text(&i.query,"date",10,10)?)?))},
-        ("POST","/api/dsp/jobs/meal-breaks")=>{let request=CollectionRequest::parse(b,true)?;let result=db.enqueue_meal_sync(id,actor,&request.request_id,request.date.as_deref().ok_or_else(||Error::new("invalid_input",400))?)?;db.audit(Some(actor),Some(id),"meal_breaks.sync_requested","")?;Ok(Reply::status(result,202))},
+        ("POST","/api/dsp/jobs/meal-breaks")=>{let request=CollectionRequest::parse(b,true)?;let result=db.enqueue_meal_sync(id,actor,&request.request_id,request.date.as_deref().ok_or_else(||Error::new("invalid_input",400))?)?;db.audit(Some(actor),Some(id),"meal_breaks.sync_requested",request.date.as_deref().unwrap_or(""))?;Ok(Reply::status(result,202))},
         ("POST","/api/dsp/cortex/meal-breaks/collect")=>{let scope=super::meals::Scope::request(b,s(&c.dsp,"timezone"))?;let job=db.enqueue_meals(id,Some(actor),v::text(b,"requestId",1,128)?,&scope)?;db.audit(Some(actor),Some(id),"cortex.collection.requested","")?;Ok(Reply::status(job,202))},
         ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
         ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
@@ -771,7 +773,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
-            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit(Some(actor),Some(id),"dsp.profile_completed","")?;Ok(Reply::ok())
+            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("abbreviation",None,Some(abbreviation.to_owned())),("station",None,Some(station.to_uppercase()))])?;Ok(Reply::ok())
         },
         ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !c.can("timecard.manage"){value["history"]=json!([]);}Ok(Reply::json(value))},
         ("GET","/api/dsp/paycom/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_comparison(id,v::text(&i.query,"date",10,10)?,s(&c.dsp,"timezone"))?))},
@@ -788,14 +790,14 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/roles")=>{let (name,permissions)=role_input(b)?;Ok(Reply::status(db.create_role(&c,&name,&permissions)?,201))},
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
         ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
-        ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audits(Some(id),200)?)),
+        ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audit_page(&audit_query(&i.query,Some(id))?)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
             if write && endpoint=="schedules" {
                 let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;
-                if parts.len()==4 { let result=db.save_collection_schedule(id,Some(key),b)?;db.audit(Some(actor),Some(id),"schedule.updated",s(&result,"name"))?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="enabled" { let result=db.enable_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.toggled",key)?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="remove" { db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",key)?;return Ok(Reply::ok()); }
+                if parts.len()==4 { let before=db.collection_schedule(id,key)?;let result=db.save_collection_schedule(id,Some(key),b)?;db.audit_with(Some(actor),Some(id),"schedule.updated",s(&result,"name"),Some(s(&before,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="enabled" { let before=db.collection_schedule(id,key)?;let result=db.enable_collection_schedule(id,key,b)?;db.audit_with(Some(actor),Some(id),"schedule.toggled",s(&result,"name"),Some(s(&result,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="remove" { let before=db.collection_schedule(id,key)?;db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",s(&before,"name"))?;return Ok(Reply::ok()); }
             }
             if !write&&endpoint=="employees"&&parts.len()==4{return Ok(Reply::json(db.employee(id,parts[3])?));}
             if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::text(b,"role",1,100)?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
@@ -824,6 +826,42 @@ fn direction(q: &Value) -> Result<bool> {
         .transpose()?
         .unwrap_or("asc")
         == "desc")
+}
+fn audit_query<'a>(q: &'a Value, dsp: Option<&'a str>) -> Result<super::db::AuditQuery<'a>> {
+    v::fields(q, &["area", "actor", "q", "from", "before", "limit"])?;
+    let text = |key, max| {
+        q.get(key)
+            .map(|_| v::text(q, key, 0, max))
+            .transpose()
+            .map(Option::unwrap_or_default)
+    };
+    let area = text("area", 20)?;
+    ensure(
+        [
+            "",
+            "team",
+            "roles",
+            "collections",
+            "schedules",
+            "connections",
+            "access",
+            "dsps",
+            "settings",
+            "failures",
+        ]
+        .contains(&area),
+        "invalid_input",
+        400,
+    )?;
+    Ok(super::db::AuditQuery {
+        dsp,
+        area,
+        actor: text("actor", 200)?,
+        q: text("q", 100)?,
+        from: text("from", 40)?,
+        before: query_number(q, "before", 0, 0, usize::MAX >> 1)? as i64,
+        limit: query_number(q, "limit", 50, 1, 5000)? as i64,
+    })
 }
 fn query_number(q: &Value, key: &str, default: usize, min: usize, max: usize) -> Result<usize> {
     let n = if let Some(v) = q.get(key) {

@@ -279,6 +279,10 @@ fn migrate_audit(db: &Db) -> Result<()> {
     if !columns.iter().any(|c| s(c, "name") == "actor_name") {
         db.0.execute_batch("ALTER TABLE audit ADD COLUMN actor_name TEXT")?;
     }
+    // Who or what an event touched, and the values it changed, as JSON.
+    if !columns.iter().any(|c| s(c, "name") == "data") {
+        db.0.execute_batch("ALTER TABLE audit ADD COLUMN data TEXT")?;
+    }
     Ok(())
 }
 impl Store {
@@ -396,15 +400,119 @@ impl Store {
         action: &str,
         detail: &str,
     ) -> Result<()> {
+        self.audit_with(actor, dsp, action, detail, None, &[])
+    }
+    // Names are stored as text so the event still reads after its subject is deleted.
+    pub fn audit_with(
+        &self,
+        actor: Option<&str>,
+        dsp: Option<&str>,
+        action: &str,
+        detail: &str,
+        target: Option<&str>,
+        changes: &[AuditChange],
+    ) -> Result<()> {
+        let data = (target.is_some() || !changes.is_empty()).then(|| {
+            json!({"target":target,"changes":changes.iter().map(|(field,from,to)|json!({"field":field,"from":from,"to":to})).collect::<Vec<_>>()}).to_string()
+        });
         self.platform.exec(
-            "INSERT INTO audit(at,actor_id,dsp_id,action,detail) VALUES (?,?,?,?,?)",
-            rusqlite::params![iso(), actor, dsp, action, detail],
+            "INSERT INTO audit(at,actor_id,dsp_id,action,detail,data) VALUES (?,?,?,?,?,?)",
+            rusqlite::params![iso(), actor, dsp, action, detail, data],
         )?;
         Ok(())
     }
-    // A DSP's log lists its members' and the system's actions, never a platform owner's.
     pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        Ok(json!(self.platform.all("SELECT a.id,a.at,a.actor_id actorId,COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System') actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (? IS NULL OR (a.dsp_id=? AND COALESCE(u.platform_owner,0)=0)) ORDER BY a.id DESC LIMIT ?",rusqlite::params![dsp,dsp,limit])?))
+        let mut page = self.audit_page(&AuditQuery {
+            dsp,
+            limit,
+            ..AuditQuery::default()
+        })?;
+        Ok(page["events"].take())
+    }
+    // A DSP's log lists its members' and the system's actions, never a platform owner's.
+    pub fn audit_page(&self, query: &AuditQuery) -> Result<Value> {
+        const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps d ON d.id=a.dsp_id WHERE (?1 IS NULL OR (a.dsp_id=?1 AND COALESCE(u.platform_owner,0)=0))";
+        const NAME: &str = "COALESCE(u.first_name||' '||u.last_name,a.actor_name,'System')";
+        const ACTOR: &str = "COALESCE(a.actor_id,CASE WHEN a.actor_name IS NULL THEN 'system' ELSE 'name:'||a.actor_name END)";
+        const AREA: &str = "CASE WHEN a.action LIKE 'member.%' OR a.action LIKE 'invitation.%' THEN 'team' WHEN a.action LIKE 'role.%' THEN 'roles' WHEN a.action LIKE 'collection.%' OR a.action LIKE 'cortex.collection.%' OR a.action LIKE 'meal_breaks.%' THEN 'collections' WHEN a.action LIKE 'schedule.%' THEN 'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action LIKE 'account.%' OR a.action IN ('dsp.view_opened','dsp.owner_view_opened') THEN 'access' WHEN a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
+        const FAILED: &str = "a.action LIKE '%.failed'";
+        let filters = format!(
+            "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {ACTOR}=?3) AND (?4='' OR a.action LIKE ?4 ESCAPE '\\' OR a.detail LIKE ?4 ESCAPE '\\' OR COALESCE(a.data,'') LIKE ?4 ESCAPE '\\' OR {NAME} LIKE ?4 ESCAPE '\\' OR COALESCE(d.name,'') LIKE ?4 ESCAPE '\\')"
+        );
+        let area = format!("(?5='' OR (?5='failures' AND {FAILED}) OR {AREA}=?5)");
+        let search = if query.q.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "%{}%",
+                query
+                    .q
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            )
+        };
+        let mut events = self.platform.all(&format!("SELECT a.id,a.at,a.actor_id actorId,{NAME} actorName,a.dsp_id dspId,d.name dspName,a.action,a.detail,a.data,{AREA} area {filters} AND {area} AND (?6=0 OR a.id<?6) ORDER BY a.id DESC LIMIT ?7"),rusqlite::params![query.dsp,query.from,query.actor,search,query.area,query.before,query.limit])?;
+        for event in &mut events {
+            let data = event["data"]
+                .as_str()
+                .and_then(|data| serde_json::from_str::<Value>(data).ok())
+                .unwrap_or(Value::Null);
+            event["target"] = data["target"].clone();
+            event["changes"] = if data["changes"].is_array() {
+                data["changes"].clone()
+            } else {
+                json!([])
+            };
+            event.as_object_mut().unwrap().remove("data");
+        }
+        let total = self.platform.one(
+            &format!("SELECT count(*) count {filters} AND {area}"),
+            rusqlite::params![query.dsp, query.from, query.actor, search, query.area],
+        )?;
+        let mut counts = serde_json::Map::new();
+        let mut failures = 0;
+        for row in self.platform.all(
+            &format!(
+                "SELECT {AREA} area,count(*) count,sum({FAILED}) failures {filters} GROUP BY 1"
+            ),
+            rusqlite::params![query.dsp, query.from, query.actor, search],
+        )? {
+            counts.insert(s(&row, "area").to_owned(), json!(n(&row, "count")));
+            failures += n(&row, "failures");
+        }
+        counts.insert("failures".into(), json!(failures));
+        let actors = self.platform.all(
+            &format!("SELECT DISTINCT {ACTOR} id,{NAME} name {FROM} ORDER BY 2"),
+            rusqlite::params![query.dsp],
+        )?;
+        Ok(
+            json!({"events":events,"total":n(&total.unwrap(),"count"),"counts":counts,"actors":actors}),
+        )
+    }
+}
+// A changed field with its previous and new value; either side may be absent.
+pub type AuditChange = (&'static str, Option<String>, Option<String>);
+pub struct AuditQuery<'a> {
+    pub dsp: Option<&'a str>,
+    pub area: &'a str,
+    pub actor: &'a str,
+    pub q: &'a str,
+    pub from: &'a str,
+    pub before: i64,
+    pub limit: i64,
+}
+impl Default for AuditQuery<'_> {
+    fn default() -> Self {
+        Self {
+            dsp: None,
+            area: "",
+            actor: "",
+            q: "",
+            from: "",
+            before: 0,
+            limit: 50,
+        }
     }
 }
 

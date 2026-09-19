@@ -19,13 +19,19 @@ const COLUMNS: [&str; 6] = [
     "condition",
 ];
 pub fn defaults() -> Value {
-    json!({"automatic_sync":true,"sync_interval_seconds":3600,"opening_page":"timecards","rows_per_page":100,"name_order":"first_last","default_sort":"employeeName","department":null,"station":null,"columns":COLUMNS,"driver_departments":null})
+    json!({"automatic_sync":true,"sync_interval_seconds":3600,"opening_page":"timecards","rows_per_page":100,"name_order":"first_last","default_sort":"employeeName","department":null,"station":null,"columns":COLUMNS,"driver_departments":null,"late_da_time":"10:01","late_da_departments":[]})
 }
 fn preferences(db: &Db) -> Result<Value> {
     let mut stored = db.setting(
         "paycom.preferences",
         json!({"revision":0,"values":defaults(),"history":[]}),
     )?;
+    // Preferences saved before a key existed take that key's default.
+    for (key, value) in defaults().as_object().unwrap() {
+        if stored["values"].get(key).is_none() {
+            stored["values"][key] = value.clone();
+        }
+    }
     stored["values"]["automatic_sync"] = json!(
         db.one("SELECT enabled FROM schedules WHERE provider='paycom'", [])?
             .is_some_and(|r| flag(&r, "enabled"))
@@ -46,6 +52,8 @@ fn validate_preferences(value: &Value) -> Result<()> {
             "station",
             "columns",
             "driver_departments",
+            "late_da_time",
+            "late_da_departments",
         ],
     )?;
     v::boolean(value, "automatic_sync")?;
@@ -92,9 +100,13 @@ fn validate_preferences(value: &Value) -> Result<()> {
         "invalid_input",
         400,
     )?;
-    if !value["driver_departments"].is_null() {
+    for key in ["driver_departments", "late_da_departments"] {
+        // Only the Timecard filter distinguishes "all" (null) from "none" (empty).
+        if key == "driver_departments" && value[key].is_null() {
+            continue;
+        }
         ensure(
-            value["driver_departments"].as_array().is_some_and(|a| {
+            value[key].as_array().is_some_and(|a| {
                 a.len() <= 500
                     && a.iter()
                         .all(|x| x.as_str().is_some_and(|s| s.chars().count() <= 200))
@@ -103,6 +115,15 @@ fn validate_preferences(value: &Value) -> Result<()> {
             400,
         )?;
     }
+    let time = v::text(value, "late_da_time", 5, 5)?.as_bytes();
+    ensure(
+        time[2] == b':'
+            && [0, 1, 3, 4].iter().all(|i| time[*i].is_ascii_digit())
+            && (time[0], time[1]) <= (b'2', b'3')
+            && time[3] <= b'5',
+        "invalid_input",
+        400,
+    )?;
     Ok(())
 }
 pub(crate) fn display_name(name: &str, order: &str) -> String {

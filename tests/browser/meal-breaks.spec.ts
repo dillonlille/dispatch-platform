@@ -182,6 +182,9 @@ test('approved comparison table, filters, details, links, date errors and mobile
     path: test.info().outputPath('dispatch-meal-breaks-desktop.png'),
     fullPage: true,
   });
+  await page.getByRole('button', { name: 'Late DAs 1', exact: true }).click();
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
+  await expect(page.locator('.meal-table tbody > tr')).toContainText('Sam Patel');
   await page.getByRole('button', { name: 'Different times 1', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Missing data 3', exact: true }).click();
@@ -656,20 +659,28 @@ test.describe('DSP calendar dates', () => {
   test('activity times follow the DSP clock, with no personal timezone setting', async ({
     page,
   }) => {
-    await page.route('**/api/dsp/audit', (route) =>
+    await page.route(/\/api\/dsp\/audit\?/, (route) =>
       route.fulfill({
-        json: [
-          {
-            id: 1,
-            at: '2026-09-17T04:10:00Z',
-            actorId: null,
-            actorName: 'Avery Morgan',
-            dspId: null,
-            dspName: null,
-            action: 'member.invited',
-            detail: '',
-          },
-        ],
+        json: {
+          events: [
+            {
+              id: 1,
+              at: '2026-09-17T04:10:00Z',
+              actorId: null,
+              actorName: 'Avery Morgan',
+              dspId: null,
+              dspName: null,
+              action: 'member.invited',
+              detail: '',
+              area: 'team',
+              target: null,
+              changes: [],
+            },
+          ],
+          total: 1,
+          counts: { team: 1 },
+          actors: [],
+        },
       }),
     );
     await open(page, false, null);
@@ -678,8 +689,9 @@ test.describe('DSP calendar dates', () => {
     await expect(page.getByLabel('Display timezone')).toHaveCount(0);
     await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
     // 12:10 AM on 9/17 in New York is 11:10 PM on 9/16 for the DSP.
-    await expect(page.getByRole('row').filter({ hasText: 'Avery Morgan' })).toContainText(
-      'Sep 16, 11:10 PM',
+    await expect(page.getByRole('heading', { name: /Sep 16/ })).toBeVisible();
+    await expect(page.getByRole('listitem').filter({ hasText: 'Avery Morgan' })).toContainText(
+      '11:10 PM',
     );
   });
 });

@@ -111,6 +111,8 @@ test('a platform owner looks through any DSP role with exactly that role’s acc
   const log = await owner.get('/api/dsp/audit');
   assert.equal(log.status, 200);
   assert(!JSON.stringify(log.value).includes('owner_view_opened'));
+  assert(Array.isArray(log.value.events) && typeof log.value.total === 'number');
+  assert.equal((await owner.get('/api/dsp/audit?area=nowhere')).status, 400);
 
   // The previewed role is part of the signed view and cannot be traded up.
   const manager = opened.roles.find((role: { name: string }) => role.name === 'Manager');

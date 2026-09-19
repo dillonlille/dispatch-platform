@@ -258,6 +258,57 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
     );
 }
 #[test]
+fn late_da_settings_default_for_older_preferences_and_validate() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsp = db
+        .platform
+        .one("SELECT id FROM dsps WHERE permanent=1", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&dsp, "id");
+    let actor = db
+        .platform
+        .one("SELECT id FROM users WHERE platform_owner=1", [])
+        .unwrap()
+        .unwrap();
+    // Preferences stored before the Late DA keys existed.
+    let mut older = workforce::defaults();
+    for key in ["late_da_time", "late_da_departments"] {
+        older.as_object_mut().unwrap().remove(key);
+    }
+    db.collector(id, Provider::Paycom)
+        .unwrap()
+        .set(
+            "paycom.preferences",
+            &json!({"revision":0,"values":older,"history":[]}),
+        )
+        .unwrap();
+    let mut values = db.preferences(id).unwrap()["values"].clone();
+    assert_eq!(values["late_da_time"], "10:01");
+    assert_eq!(values["late_da_departments"], json!([]));
+    for time in ["24:00", "10:60", "9:30", "10-01", "ab:cd", "10:011"] {
+        values["late_da_time"] = json!(time);
+        assert!(
+            db.save_preferences(id, s(&actor, "id"), 0, &values)
+                .is_err(),
+            "{time}"
+        );
+    }
+    values["late_da_time"] = json!("09:45");
+    values["late_da_departments"] = Value::Null;
+    assert!(
+        db.save_preferences(id, s(&actor, "id"), 0, &values)
+            .is_err()
+    );
+    values["late_da_departments"] = json!(["Delivery"]);
+    let saved = db
+        .save_preferences(id, s(&actor, "id"), 0, &values)
+        .unwrap();
+    assert_eq!(saved["values"]["late_da_time"], "09:45");
+    assert_eq!(saved["values"]["late_da_departments"], json!(["Delivery"]));
+}
+#[test]
 fn schedule_handles_dst_gaps_and_repeated_minutes() {
     let parse = |s: &str| {
         chrono::DateTime::parse_from_rfc3339(s)
@@ -646,6 +697,142 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     assert!(platform.contains(&"collection.requested".to_owned()));
     assert!(platform.contains(&"development.fixtures_loaded".to_owned()));
 }
+#[test]
+fn audit_log_filters_pages_and_counts_by_area() {
+    use dispatch_backend::core::db::AuditQuery;
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let one = |sql: &str| db.platform.one(sql, []).unwrap().unwrap();
+    let tenant = one("SELECT id FROM dsps WHERE name='Northline Logistics'");
+    let dsp = s(&tenant, "id");
+    let member = one("SELECT id FROM users WHERE platform_owner=0 LIMIT 1");
+    let member = s(&member, "id");
+    db.audit(Some(member), Some(dsp), "schedule.created", "Morning 100%")
+        .unwrap();
+    db.audit(
+        None,
+        Some(dsp),
+        "collection.failed",
+        "paycom_verification_required",
+    )
+    .unwrap();
+    db.audit(None, Some(dsp), "collection.completed", "")
+        .unwrap();
+    db.audit_with(
+        Some(member),
+        Some(dsp),
+        "member.role_changed",
+        "Manager",
+        Some("Sam Rivera"),
+        &[("role", Some("Dispatcher".into()), Some("Manager".into()))],
+    )
+    .unwrap();
+    let page = |query: AuditQuery| {
+        db.audit_page(&AuditQuery {
+            dsp: Some(dsp),
+            ..query
+        })
+        .unwrap()
+    };
+    let actions = |page: &serde_json::Value| -> Vec<String> {
+        page["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| s(event, "action").to_owned())
+            .collect()
+    };
+    let all = page(AuditQuery::default());
+    assert_eq!(all["total"], 4);
+    assert_eq!(
+        all["counts"],
+        json!({"team":1,"collections":2,"schedules":1,"failures":1})
+    );
+    assert_eq!(all["events"][0]["target"], "Sam Rivera");
+    assert_eq!(
+        all["events"][0]["changes"],
+        json!([{"field":"role","from":"Dispatcher","to":"Manager"}])
+    );
+    assert_eq!(all["events"][0]["area"], "team");
+    assert_eq!(all["events"][1]["changes"], json!([]));
+    assert!(all["events"][1]["target"].is_null());
+    assert!(all["events"][0].get("data").is_none());
+
+    let failures = page(AuditQuery {
+        area: "failures",
+        ..AuditQuery::default()
+    });
+    assert_eq!(actions(&failures), ["collection.failed"]);
+    // Area counts ignore the selected area so every chip keeps its number.
+    assert_eq!(failures["counts"], all["counts"]);
+    let system = page(AuditQuery {
+        actor: "system",
+        ..AuditQuery::default()
+    });
+    assert_eq!(
+        actions(&system),
+        ["collection.completed", "collection.failed"]
+    );
+    let by_member = page(AuditQuery {
+        actor: member,
+        ..AuditQuery::default()
+    });
+    assert_eq!(
+        actions(&by_member),
+        ["member.role_changed", "schedule.created"]
+    );
+    // Search reads the recorded subject, and treats LIKE wildcards literally.
+    assert_eq!(
+        actions(&page(AuditQuery {
+            q: "rivera",
+            ..AuditQuery::default()
+        })),
+        ["member.role_changed"]
+    );
+    assert_eq!(
+        actions(&page(AuditQuery {
+            q: "100%",
+            ..AuditQuery::default()
+        })),
+        ["schedule.created"]
+    );
+    assert_eq!(
+        page(AuditQuery {
+            q: "1_0",
+            ..AuditQuery::default()
+        })["total"],
+        0
+    );
+    assert_eq!(
+        page(AuditQuery {
+            from: "2999-01-01",
+            ..AuditQuery::default()
+        })["total"],
+        0
+    );
+
+    let first = page(AuditQuery {
+        limit: 3,
+        ..AuditQuery::default()
+    });
+    assert_eq!(first["events"].as_array().unwrap().len(), 3);
+    assert_eq!(first["total"], 4);
+    let before = first["events"][2]["id"].as_i64().unwrap();
+    assert_eq!(
+        actions(&page(AuditQuery {
+            before,
+            ..AuditQuery::default()
+        })),
+        ["schedule.created"]
+    );
+    let actors: Vec<_> = all["actors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|actor| s(actor, "id").to_owned())
+        .collect();
+    assert!(actors.contains(&"system".to_owned()) && actors.contains(&member.to_owned()));
+}
 #[tokio::test]
 async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log() {
     use dispatch_backend::core::{State, accounts::Auth};
@@ -706,6 +893,16 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         .unwrap();
     assert_eq!(s(event, "actorName"), "Jordan Ellis");
     assert!(event["actorId"].is_null());
+    let platform = db.audits(None, 200).unwrap();
+    let removal = platform
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| s(row, "action") == "member.removed")
+        .unwrap();
+    assert_eq!(s(removal, "target"), "Jordan Ellis");
+    assert_eq!(removal["changes"][0]["field"], "role");
+    assert!(removal["changes"][0]["to"].is_null());
     assert!(one("SELECT 1 FROM users WHERE platform_owner=1").is_some());
 
     let raw = invite("member@dispatch.test", s(&owner, "id"));

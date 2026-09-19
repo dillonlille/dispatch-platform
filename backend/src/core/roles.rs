@@ -32,6 +32,16 @@ const DEFAULTS: &[(&str, &str, &[&str])] = &[
 pub fn all() -> Vec<String> {
     PERMISSIONS.iter().map(|p| (*p).to_owned()).collect()
 }
+// Granted permissions have no previous value; revoked ones have no new value.
+fn permission_changes(before: &[String], after: &[String]) -> Vec<super::db::AuditChange> {
+    let missing = |from: &[String], p: &String| !from.contains(p);
+    let added = after.iter().filter(|p| missing(before, p));
+    let removed = before.iter().filter(|p| missing(after, p));
+    added
+        .map(|p| ("permission", None, Some(p.clone())))
+        .chain(removed.map(|p| ("permission", Some(p.clone()), None)))
+        .collect()
+}
 fn stored(row: &Value) -> Vec<String> {
     if flag(row, "system") {
         return all();
@@ -256,11 +266,13 @@ impl Store {
                 "INSERT INTO roles(id,dsp_id,name,permissions,created_at) VALUES (?,?,?,?,?)",
                 params![id, dsp, name, json!(permissions).to_string(), iso()],
             )?;
-            self.audit(
+            self.audit_with(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 "role.created",
                 &name,
+                None,
+                &permission_changes(&[], &permissions),
             )?;
             Ok(public(&self.role(dsp, &id)?))
         })
@@ -295,11 +307,24 @@ impl Store {
             // Open views sign the DSP revision, so members pick up the change.
             self.platform
                 .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
-            self.audit(
+            let mut changes = permission_changes(&stored(&role), &permissions);
+            if s(&role, "name") != name {
+                changes.insert(
+                    0,
+                    (
+                        "name",
+                        Some(s(&role, "name").to_owned()),
+                        Some(name.clone()),
+                    ),
+                );
+            }
+            self.audit_with(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 "role.updated",
                 &name,
+                Some(s(&role, "name")),
+                &changes,
             )?;
             Ok(public(&self.role(dsp, id)?))
         })

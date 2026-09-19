@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { DspView, SessionView, AuditEvent } from '../../shared/contracts/index.js';
-import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, time, can, deviceTimezone } from './ui.js';
+import type { DspView, SessionView } from '../../shared/contracts/index.js';
+import { api } from './api.js';
+import { Header, Tabs, ErrorBox, can } from './ui.js';
+import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
 import { type Perform } from './platform.js';
 import { ThemeSection } from './theme.js';
@@ -180,40 +181,7 @@ export function SettingsPage({
         </div>
       )}
       {tab === 'theme' && <ThemeSection userId={session.user.id} />}
-      {tab === 'audit' && <SettingsAudit view={view} />}
-    </>
-  );
-}
-
-function SettingsAudit({ view }: { view?: DspView }) {
-  const { data, error } = useData<AuditEvent[]>(
-    view ? '/api/dsp/audit' : '/api/platform/audit',
-    10000,
-  );
-  return (
-    <>
-      <ErrorBox message={error} />
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th>Actor</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.map((event) => (
-              <tr key={event.id}>
-                <td>{event.action.replaceAll('.', ' ')}</td>
-                <td>{event.actorName}</td>
-                <td>{time(event.at, view?.dsp.timezone ?? deviceTimezone())}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {data?.length === 0 && <p className="muted">No activity yet.</p>}
+      {tab === 'audit' && view && <AuditLog view={view} />}
     </>
   );
 }

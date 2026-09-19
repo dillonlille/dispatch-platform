@@ -548,39 +548,6 @@ td small {
   gap: 12px;
   padding: 24px;
 }
-.activity {
-  padding: 0 24px;
-}
-.activity > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 0;
-}
-.activity > div + div {
-  border-top: 1px solid var(--border);
-}
-.activity strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.activity small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  margin-top: 3px;
-}
-.activity time {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.activity-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--primary);
-  border-radius: 50%;
-}
 .settings-form {
   padding: 24px;
   max-width: 680px;
