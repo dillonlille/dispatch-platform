@@ -67,6 +67,10 @@ const events: AuditEvent[] = [
       { field: 'permission', from: 'members.invite', to: null },
     ],
   }),
+  event('2026-09-15T17:05:00Z', 'dsp.settings_updated', 'settings', {
+    ...support,
+    changes: [{ field: 'timezone', from: 'America/Chicago', to: 'America/Denver' }],
+  }),
   event('2026-09-15T17:02:00Z', 'dsp.owner_view_opened', 'team', support),
   event('2026-09-15T16:40:00Z', 'dsp.owner_view_opened', 'team', support),
   event('2026-09-15T16:01:00Z', 'dsp.owner_view_opened', 'team', support),
@@ -148,7 +152,7 @@ async function open(page: Page) {
     return route.fulfill({
       json: {
         // The first page is short so the log has more to load.
-        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 12),
+        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 13),
         total: matching.length,
         counts,
         actors: [
@@ -216,6 +220,11 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(item(page, 'updated the role Dispatcher')).toContainText('+ Manage Timecard');
   await expect(item(page, 'updated the role Dispatcher')).toContainText('− Invite Members');
 
+  // Whatever Platform support did is outlined like its visits; members' events are filled.
+  await expect(
+    item(page, 'Platform support updated DSP settings').locator('.audit-icon'),
+  ).toHaveCSS('border-top-style', 'dashed');
+  await expect(role.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
   const visits = item(page, 'Platform support opened this DSP 3 times');
   await expect(visits).toHaveCount(1);
   await expect(visits).toContainText('11:01 AM – 12:02 PM');
@@ -233,7 +242,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await page.screenshot({ path: test.info().outputPath('audit-log-dark.png'), fullPage: true });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
 
-  await expect(page.getByText('Showing 12 of 22')).toBeVisible();
+  await expect(page.getByText('Showing 13 of 23')).toBeVisible();
   await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect.poll(() => requests.at(-1)?.get('limit')).toBe('100');
   // Older events fall back to the wording their data supports.

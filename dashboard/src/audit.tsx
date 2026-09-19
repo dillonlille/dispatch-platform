@@ -703,7 +703,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                         onClick={() => toggle(entry.key)}
                       >
                         <span
-                          className={`audit-icon${retrying ? '' : failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}`}
+                          className={`audit-icon${retrying ? '' : failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}${support(event) ? ' support' : ''}`}
                         >
                           <Icon size={16} aria-hidden />
                         </span>
