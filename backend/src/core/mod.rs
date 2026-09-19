@@ -18,6 +18,7 @@ pub mod meal_sync;
 pub mod meals;
 pub mod observability;
 pub mod operations;
+pub mod presence;
 pub mod proxy;
 pub mod roles;
 pub mod schedules;
@@ -43,6 +44,7 @@ pub struct State {
     pub mail_transport: Mutex<mail::TransportHealth>,
     pub browsers: browsers::Manager,
     pub updates: live_collection::Updates,
+    pub presence: presence::Presence,
 }
 impl State {
     pub fn new(config: config::Config) -> Result<Arc<Self>> {
@@ -68,6 +70,7 @@ impl State {
             mail_transport: Mutex::new(mail::TransportHealth::default()),
             browsers: browsers::Manager::default(),
             updates: live_collection::Updates::new()?,
+            presence: presence::Presence::default(),
         }))
     }
     pub async fn run<T: Send + 'static>(

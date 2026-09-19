@@ -138,6 +138,55 @@ class ProductionUpdaterTests(unittest.TestCase):
                 self.instance.update()
             service.assert_not_called()
 
+    def test_settled_check_skips_the_api_until_the_tag_runtime_or_age_changes(self):
+        current = self.release | {"tag_name": "v0.0.3"}
+        with patch.object(production, "github", return_value=current) as api, \
+                patch.object(production, "latest_tag", return_value="v0.0.3") as hint, \
+                patch.object(self.instance, "healthy", return_value=True):
+            self.instance.update()
+            hint.assert_not_called()
+            self.instance.update()
+            self.assertEqual(api.call_count, 1)
+            for tag in ("v0.0.4", None):
+                hint.return_value = tag
+                self.instance.update()
+            self.assertEqual(api.call_count, 3)
+            hint.return_value = "v0.0.3"
+            check = json.loads(self.instance.check_file.read_text())
+            for change in ({"checkedAt": check["checkedAt"] - production.FULL_CHECK_SECONDS},
+                           {"checkedAt": check["checkedAt"] + 3600}, {"digest": "0" * 64}, {"tag": None}):
+                production.write_json(self.instance.check_file, check | change)
+                self.instance.update()
+            self.assertEqual(api.call_count, 7)
+            self.instance.check_file.write_text("damaged")
+            self.instance.update()
+            self.assertEqual(api.call_count, 8)
+
+    def test_hint_never_installs_and_an_unfinished_update_is_checked_again(self):
+        with patch.object(production, "github", return_value=self.release), \
+                patch.object(production, "release_commit", return_value="b" * 40), \
+                patch.object(production, "download_asset", side_effect=OSError("offline")), \
+                patch.object(production, "latest_tag", return_value="v0.0.4") as hint:
+            for _ in range(2):
+                with self.assertRaises(OSError):
+                    self.instance.update()
+            hint.assert_not_called()
+        self.assertFalse(self.instance.check_file.exists())
+
+    def test_latest_tag_reads_only_the_expected_public_redirect(self):
+        def response(code, location):
+            headers = {"Location": location} if location else {}
+            return production.urllib.error.HTTPError(production.RELEASES + "latest", code, "", headers, None)
+        opener = production.urllib.request.build_opener
+        for error, expected in [(response(302, production.RELEASES + "tag/v0.0.4"), "v0.0.4"),
+                                (response(302, "https://example.invalid/releases/tag/v9.9.9"), None),
+                                (response(404, production.RELEASES + "tag/v0.0.4"), None),
+                                (response(302, None), None), (OSError("offline"), None)]:
+            with self.subTest(error=error), patch.object(production.urllib.request, "build_opener") as build:
+                build.return_value.open.side_effect = error
+                self.assertEqual(production.latest_tag(), expected)
+        self.assertIs(production.urllib.request.build_opener, opener)
+
     def test_failed_release_is_not_retried_every_timer_tick(self):
         production.write_json(self.instance.status_file, {"status": "rolled_back", "failedReleaseId": 123})
         with patch.object(production, "github", return_value=self.release), \

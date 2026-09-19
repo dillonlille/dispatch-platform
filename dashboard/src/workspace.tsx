@@ -342,6 +342,7 @@ export function TeamPage({
   const [search, setSearch] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
+  const [removing, setRemoving] = useState(false);
   const [revoking, setRevoking] = useState<Invitation>();
   const members =
     data?.filter((member) =>
@@ -400,7 +401,7 @@ export function TeamPage({
                   <tr>
                     <th style={{ width: '45%' }}>Member</th>
                     <th>Role</th>
-                    <th>Access</th>
+                    <th>Status</th>
                     <th>
                       <span className="sr-only">Actions</span>
                     </th>
@@ -426,14 +427,17 @@ export function TeamPage({
                       </td>
                       <td>{member.role}</td>
                       <td>
-                        <Badge value="active">Active</Badge>
+                        <Badge value={member.status} />
                       </td>
                       <td>
                         {canManage && grantable.some((role) => role.id === member.roleId) && (
                           <button
                             className="icon-button"
                             aria-label={`Edit ${member.name}`}
-                            onClick={() => setEditing(member)}
+                            onClick={() => {
+                              setRemoving(false);
+                              setEditing(member);
+                            }}
                           >
                             <Ellipsis size={18} />
                           </button>
@@ -619,23 +623,35 @@ export function TeamPage({
                 ))}
               </select>
             </label>
-            <div className="form-actions">
-              <button
-                type="button"
-                className="danger"
-                onClick={() =>
-                  void perform(async () => {
-                    await api(`/api/dsp/members/${editing.id}`, { role: null });
-                    setEditing(undefined);
-                    await reopen();
-                    refresh();
-                  }, 'Member removed')
-                }
-              >
-                Remove member
-              </button>
-              <button className="primary">Save role</button>
-            </div>
+            {removing ? (
+              <div className="form-actions" role="group" aria-label="Remove member confirmation">
+                <span>Remove {editing.name} and delete their account?</span>
+                <button type="button" onClick={() => setRemoving(false)}>
+                  Keep member
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() =>
+                    void perform(async () => {
+                      await api(`/api/dsp/members/${editing.id}`, { role: null });
+                      setEditing(undefined);
+                      await reopen();
+                      refresh();
+                    }, 'Member removed')
+                  }
+                >
+                  Remove member
+                </button>
+              </div>
+            ) : (
+              <div className="form-actions">
+                <button type="button" className="danger" onClick={() => setRemoving(true)}>
+                  Remove member
+                </button>
+                <button className="primary">Save role</button>
+              </div>
+            )}
           </form>
         </Modal>
       )}

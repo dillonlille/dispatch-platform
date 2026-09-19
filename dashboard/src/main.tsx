@@ -26,6 +26,7 @@ import { PaycomPage, HomePage, TeamPage } from './workspace.js';
 type Session = SessionView;
 import { readAppearance, applyAppearance } from './appearance.js';
 import { initializePreferences } from './preferences.js';
+import { leavePresence, usePresence } from './presence.js';
 function App() {
   const [, setPreferencesRevision] = useState(0);
   const [session, setSession] = useState<Session | null>(),
@@ -84,6 +85,8 @@ function App() {
   const dspId = route.startsWith('dsp/') ? route.split('/')[1] : undefined,
     page = (dspId ? route.split('/')[2] || 'overview' : route).split('?')[0]!;
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
+  // A platform owner looking into a DSP is never shown to its team.
+  usePresence(session?.user.platformOwner ? undefined : view?.token);
   const reopen = useCallback(async () => {
     if (!session || !dspId) return;
     const next = await api<DspView>('/api/session/dsp', { dspId });
@@ -192,6 +195,7 @@ function App() {
           : []),
       ];
   async function logout() {
+    await leavePresence();
     await api('/api/auth/logout', {});
     credentials('');
     setSession(null);

@@ -73,6 +73,7 @@ export interface Membership {
   role: string;
   roleId: string | null;
   owner: boolean;
+  status: 'active' | 'idle' | 'offline';
 }
 export interface SessionView {
   user: User;

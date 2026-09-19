@@ -238,8 +238,38 @@ impl Store {
                     "member.removed"
                 },
                 next.as_ref().map_or("", |next| s(next, "name")),
-            )
+            )?;
+            if next.is_none() {
+                self.delete_account(s(&row, "user_id"), s(&c.auth.user, "id"))?;
+            }
+            Ok(())
         })
+    }
+    // A removed member's account goes with their last membership, freeing the
+    // email for a fresh invitation. Their name stays on the activity they left.
+    fn delete_account(&self, user: &str, actor: &str) -> Result<()> {
+        let Some(row) = self.platform.one("SELECT first_name||' '||last_name name FROM users u WHERE id=? AND platform_owner=0 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=u.id)",[user])? else {
+            return Ok(());
+        };
+        self.platform
+            .exec("DELETE FROM sessions WHERE user_id=?", [user])?;
+        self.platform
+            .exec("DELETE FROM resets WHERE user_id=?", [user])?;
+        if actor == user {
+            self.platform
+                .exec("DELETE FROM invitations WHERE created_by=?", [user])?;
+        } else {
+            self.platform.exec(
+                "UPDATE invitations SET created_by=? WHERE created_by=?",
+                [actor, user],
+            )?;
+        }
+        self.platform.exec(
+            "UPDATE audit SET actor_name=?,actor_id=NULL WHERE actor_id=?",
+            [s(&row, "name"), user],
+        )?;
+        self.platform.exec("DELETE FROM users WHERE id=?", [user])?;
+        Ok(())
     }
 }
 pub fn profile_default() -> Value {

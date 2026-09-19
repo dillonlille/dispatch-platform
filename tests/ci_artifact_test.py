@@ -78,8 +78,17 @@ class ArtifactPromotionTests(unittest.TestCase):
             self.restore()
         self.assertFalse(self.destination.exists())
 
-    def test_non_dev_or_unvalidated_runs_and_existing_output_are_rejected(self):
-        for override in [{"GITHUB_EVENT_NAME": "pull_request"}, {"GITHUB_REF": "refs/heads/main"},
+    def test_release_merge_promotes_with_a_main_bound_validation(self):
+        self.env["GITHUB_REF"] = "refs/heads/main"
+        with patch.dict(promote.os.environ, self.env), \
+                patch.object(promote.ci, "validated_receipt", return_value=self.verified) as validated:
+            promote.require_validation(self.context)
+            validated.assert_called_once_with(self.context, "main")
+        self.restore()
+        promote.runtime.verify_artifact(self.destination, self.new)
+
+    def test_untrusted_or_unvalidated_runs_and_existing_output_are_rejected(self):
+        for override in [{"GITHUB_EVENT_NAME": "pull_request"}, {"GITHUB_REF": "refs/heads/release/v1.0.0"},
                          {"GITHUB_SHA": "f" * 40}]:
             original = self.env.copy()
             self.env.update(override)

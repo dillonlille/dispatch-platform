@@ -13,6 +13,8 @@ import zipfile
 
 REPOSITORY = "dillonlille/dispatch-platform"
 WORKFLOW = ".github/workflows/checks.yml"
+# Branches whose merged PR validation may be promoted instead of repeated.
+TRUSTED = {"refs/heads/dev": "dev", "refs/heads/main": "main"}
 
 
 def git(*args):
@@ -86,9 +88,9 @@ def read_receipt(archive, digest):
         return receipt
 
 
-def matches(receipt, run, context, expected_scope):
+def matches(receipt, run, context, expected_scope, base_ref="dev"):
     return (receipt.get("format") == 1 and receipt.get("repository") == REPOSITORY
-            and receipt.get("workflow") == WORKFLOW and receipt.get("baseRef") == "dev"
+            and receipt.get("workflow") == WORKFLOW and receipt.get("baseRef") == base_ref
             and receipt.get("runId") == run["id"]
             and receipt.get("attempt") == run.get("run_attempt", 1)
             and receipt.get("base") == context["base"]
@@ -97,7 +99,7 @@ def matches(receipt, run, context, expected_scope):
             and receipt.get("scope") in {"full", expected_scope})
 
 
-def validated_receipt(context):
+def validated_receipt(context, base_ref="dev"):
     runs = github(f"actions/workflows/checks.yml/runs?event=pull_request&head_sha={context['head']}&per_page=5")["workflow_runs"]
     # Never revive an older green run after a newer failed/pending rerun.
     if not runs:
@@ -113,28 +115,32 @@ def validated_receipt(context):
     artifact = candidates[0]
     archive = github(f"actions/artifacts/{artifact['id']}/zip", binary=True)
     receipt = read_receipt(archive, artifact.get("digest"))
-    if matches(receipt, run, context, scope(changes(context["base"]))):
+    # Release PRs always run every suite, so main never accepts a narrower receipt.
+    expected = scope(changes(context["base"])) if base_ref == "dev" else "full"
+    if matches(receipt, run, context, expected, base_ref):
         return run, receipt
     return None
 
 
-def validated_run(context):
-    verified = validated_receipt(context)
+def validated_run(context, base_ref="dev"):
+    verified = validated_receipt(context, base_ref)
     return verified[0]["id"] if verified else None
 
 
 def plan(event_name, ref, event):
     if event_name == "pull_request" and event["pull_request"].get("draft"):
         return "draft", "Draft PR: expensive checks start when marked ready for review"
-    if event_name == "push" and ref == "refs/heads/dev":
+    if event_name == "push" and ref in TRUSTED:
         context = merge_context()
         if context:
             try:
-                run = validated_run(context)
+                run = validated_run(context, TRUSTED[ref])
                 if run:
                     return "reuse", f"Identical base, head and source tree validated by PR run {run}"
             except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
                 print("Validation receipt unavailable; running checks normally.")
+        if ref != "refs/heads/dev":
+            return "full", "Full validation for a release without a reusable PR validation"
         base = event.get("before")
     elif event_name == "pull_request" and event["pull_request"]["base"]["ref"] == "dev":
         base = event["pull_request"]["base"]["sha"]
@@ -150,7 +156,9 @@ def plan(event_name, ref, event):
 def receipt(event, selected):
     context = merge_context()
     pr = event["pull_request"]
-    if (not context or pr.get("draft") or selected not in ("dashboard", "full") or pr["base"]["ref"] != "dev"
+    base_ref = pr["base"]["ref"]
+    if (not context or pr.get("draft") or selected not in ("dashboard", "full")
+            or base_ref not in TRUSTED.values() or (base_ref != "dev" and selected != "full")
             or pr["base"]["repo"]["full_name"] != REPOSITORY
             or (pr["head"]["repo"] or {}).get("full_name") != REPOSITORY
             or context["commit"] != os.environ["GITHUB_SHA"]
@@ -158,7 +166,7 @@ def receipt(event, selected):
         raise ValueError("Validation receipt requires the actual same-repository PR merge")
     if selected != "full" and selected != scope(changes(context["base"])):
         raise ValueError("Insufficient validation scope")
-    value = {"format": 1, "repository": REPOSITORY, "workflow": WORKFLOW, "baseRef": "dev",
+    value = {"format": 1, "repository": REPOSITORY, "workflow": WORKFLOW, "baseRef": base_ref,
              "runId": int(os.environ["GITHUB_RUN_ID"]), "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
              "scope": selected, **context}
     rust_key = os.environ.get("CI_RUST_KEY", "")

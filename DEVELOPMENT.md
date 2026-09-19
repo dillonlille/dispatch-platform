@@ -34,6 +34,9 @@ and runs a smoke check before publishing the Dev artifact. Missing/expired build
 artifacts fall back to a normal build; missing or mismatched validation falls back
 to the appropriate checks. A newer failed or pending run cannot reuse older success.
 
+Release PRs targeting `main` are promoted the same way. Their receipt is bound to
+`main` and must record the full suite; a release merge without it runs every check.
+
 CI release binaries are cached by Rust inputs, compiler, build flags and runner
 image. Only trusted `dev`/`main` runs save the cache; PRs restore exact keys. A
 promoted PR binary can warm that cache only when its recorded input key matches
