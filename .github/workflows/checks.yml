@@ -85,9 +85,6 @@ jobs:
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 2
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   core:
     needs: plan
     if: needs.plan.outputs.mode == 'full'
@@ -103,9 +100,6 @@ jobs:
           profile: debug
       - name: Backend, API, dependency and Python checks
         run: npm run check:ci -- core
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   collectors:
     needs: plan
     if: needs.plan.outputs.mode == 'full'
@@ -126,9 +120,6 @@ jobs:
       - uses: ./.github/actions/setup-browseros
       - name: Native collector verification
         run: npm run test:browseros -- --shard ${{ matrix.shard }}
-      - name: Remove temporary verification data
-        if: always()
-        run: node tooling/clean-test-output.mjs
   # Keep one stable required check. No receipt or deployable artifact is published
   # until every required job has succeeded, including every collector shard.
   platform:

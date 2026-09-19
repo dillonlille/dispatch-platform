@@ -2,11 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
 const mode = process.argv[2] ?? 'full';
-if (
-  !['full', 'dashboard', 'reuse', 'build-full', 'build-dashboard', 'build-reuse', 'core'].includes(
-    mode,
-  )
-)
+if (!['full', 'build-full', 'build-dashboard', 'build-reuse', 'core'].includes(mode))
   throw new Error('Unknown validation mode');
 const started = Date.now();
 const failures: string[] = [];
