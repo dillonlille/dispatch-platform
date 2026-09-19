@@ -248,6 +248,11 @@ test('meal API requires DSP context, exposes the punch union to members, restric
     const response = await owner.get(`/api/dsp/paycom/meal-breaks?date=${date}`);
     assert.equal(response.status, 200);
     assert.equal(response.value.rows.length, 12);
+    // The Late DAs filter reads each card's department.
+    assert.deepEqual(
+      [...new Set(response.value.rows.map((r: MealEmployee) => r.paycom?.department))].sort(),
+      ['Delivery', 'Operations'],
+    );
     assert.equal(response.value.links.revision, 0);
     assert.equal((await owner.get('/api/dsp/paycom/meal-breaks?date=invalid')).status, 400);
     const member = await f.client('member@dispatch.test');
