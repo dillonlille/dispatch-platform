@@ -31,7 +31,7 @@ import { DataState, Empty, ErrorBox, SearchInput } from '../../ui/index.js';
 import { deviceTimezone, timeOfDay, title } from '../../lib/format.js';
 import { useAction } from '../../app/useAction.js';
 import { dspHash } from '../../app/navigation.js';
-import { routeLabel, type DspRouteId } from '../../app/routes.js';
+import { routeLabel, type DspRouteId } from '../../app/route-meta.js';
 import {
   changeText,
   changeValue,

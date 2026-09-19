@@ -20,8 +20,8 @@ test('ui components know nothing about the product', () => {
 });
 
 test('every route is declared once and every parent is a route', () => {
-  const text = fs.readFileSync(path.join(source, 'app/routes.tsx'), 'utf8');
-  const table = text.slice(text.indexOf('export const routes = ['), text.indexOf('] as const'));
+  const text = fs.readFileSync(path.join(source, 'app/route-meta.ts'), 'utf8');
+  const table = text.slice(text.indexOf('export const routeMeta = ['), text.indexOf('] as const'));
   const entries = table
     .split(/\n {2}\{\n/)
     .slice(1)

@@ -4,7 +4,7 @@ import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { Brand } from '../app/Brand.js';
 import { Popover, useFocusTrap } from '../ui/index.js';
 import { dspHash, platformHash } from '../app/navigation.js';
-import type { DspRouteId, PlatformRouteId } from '../app/routes.js';
+import type { DspRouteId, PlatformRouteId } from '../app/route-meta.js';
 import { ViewRoleMenu } from './ViewRoleMenu.js';
 
 export function Shell({
