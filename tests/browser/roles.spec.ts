@@ -45,10 +45,17 @@ test('owner creates a role and the member’s interface follows its permissions'
   await page.getByRole('dialog').getByLabel('Role').selectOption({ label: 'Payroll Admin' });
   await page.getByRole('button', { name: 'Save role', exact: true }).click();
   await expect(page.getByRole('row', { name: /Jordan Ellis/ })).toContainText('Payroll Admin');
+  await expect(page.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Jordan Ellis/ })).toContainText('Offline');
 
   const context = await browser.newContext();
   const member = await context.newPage();
   await login(member, 'member@dispatch.test');
+  // The member's open dashboard reaches the owner's list on its next refresh.
+  await expect(page.getByRole('row', { name: /Jordan Ellis/ })).toContainText('Active', {
+    timeout: 15000,
+  });
+  await page.screenshot({ path: test.info().outputPath('members-tab.png') });
   await member.getByRole('link', { name: 'Timecard', exact: true }).click();
   await expect(member.getByRole('button', { name: 'Sync now', exact: true })).toBeVisible();
   await expect(member.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
