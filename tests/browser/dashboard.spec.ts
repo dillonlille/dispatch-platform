@@ -288,9 +288,10 @@ test('the account menu closes on a press outside it and on Escape', async ({ pag
 test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  const identity = page.locator('.settings-identity');
-  await expect(identity).toContainText('Platform Owner');
-  await expect(identity).toContainText(demo.email);
+  await expect(page.getByRole('tab', { name: 'Profile', exact: true })).toBeVisible();
+  const badge = page.locator('.profile-badge');
+  await expect(badge.getByRole('heading', { name: 'Platform Owner' })).toBeVisible();
+  await expect(badge).toContainText(demo.email);
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

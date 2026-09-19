@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import type { DspView, SessionView } from '../../../../shared/contracts/index.js';
 import { api } from '../../app/api.js';
-import { Badge, DetailList, ErrorBox, Header, Tabs } from '../../ui/index.js';
-import { timezoneName } from '../../lib/format.js';
+import { ErrorBox, Header, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
 import { AuditLog } from '../audit/index.js';
 import { ConnectionsPage } from '../connections/index.js';
@@ -10,6 +9,7 @@ import { useAction } from '../../app/useAction.js';
 import { ThemeSection } from './ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from '../../app/navigation.js';
 import { SupportVisibility } from './SupportVisibility.js';
+import { ProfileBadge } from './ProfileBadge.js';
 
 export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
   const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
@@ -25,7 +25,8 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
   const busy = changePassword.busy;
   const connections = can(view, 'connections.manage');
   const tabs = [
-    ['general', 'General'],
+    // The id stays `general` so existing links to the tab keep working.
+    ['general', 'Profile'],
     ['security', 'Security'],
     ...(connections ? [['connections', 'Connections']] : []),
     ['theme', 'Theme'],
@@ -33,7 +34,6 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
     ...(!view && session.user.platformOwner ? [['support', 'Platform support']] : []),
   ];
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
-  const role = session.user.platformOwner ? 'Platform owner' : (view?.role.name ?? 'Team member');
   return (
     <>
       <Header title="Settings" />
@@ -46,44 +46,7 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
         items={tabs}
         label="Settings"
       />
-      {tab === 'general' && (
-        <>
-          <div className="settings-identity">
-            <span className="avatar">
-              {session.user.firstName[0]}
-              {session.user.lastName[0]}
-            </span>
-            <div>
-              <strong>
-                {session.user.firstName} {session.user.lastName}
-                <span className="role-badge">{role}</span>
-              </strong>
-              <small>{session.user.email}</small>
-            </div>
-          </div>
-          {view && (
-            <section className="settings-section">
-              <div>
-                <h2>Workspace</h2>
-              </div>
-              <DetailList
-                className="field-grid"
-                items={[
-                  ['DSP', view.dsp.name],
-                  ['Station', view.profile?.stationCode || '—'],
-                  [
-                    'Business timezone',
-                    <>
-                      {timezoneName(view.dsp.timezone)} <small>{view.dsp.timezone}</small>
-                    </>,
-                  ],
-                  ['Status', <Badge value={view.dsp.status} />],
-                ]}
-              />
-            </section>
-          )}
-        </>
-      )}
+      {tab === 'general' && <ProfileBadge session={session} view={view} />}
       {tab === 'security' && (
         <section className="settings-section">
           <div>

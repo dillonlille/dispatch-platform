@@ -332,38 +332,144 @@
   overflow-wrap: anywhere;
 }
 
-/* Settings general tab: identity header and label-over-value fields */
-.settings-identity {
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-  gap: 16px;
+/* Settings profile tab: an ID badge hanging from a lanyard */
+/* Registered as angles so that the hover tilt can ease while the sway is written every frame. */
+@property --tilt-x {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --tilt-y {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+/* A swung badge must not give the page a horizontal scrollbar. */
+.page-container:has(.profile-stage) {
+  overflow-x: clip;
+}
+.profile-stage {
+  justify-content: center;
   max-width: 900px;
-  padding: 24px 0 28px;
+  margin-top: -8px;
+  padding-bottom: 72px;
+  /* Hide only what swings above the tab rule. */
+  clip-path: inset(0 -100vw -100vh -100vw);
   display: flex;
+  perspective: 1200px;
 }
-.settings-identity .avatar {
-  width: 56px;
-  height: 56px;
-  font-size: 17px;
-}
-.settings-identity strong {
-  flex-wrap: wrap;
+.profile-rig,
+.profile-hang {
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  font-size: 17px;
-  font-weight: 600;
   display: flex;
 }
-.settings-identity small {
-  color: var(--muted-foreground);
-  margin-top: 4px;
-  font-size: 13px;
+.profile-hang {
+  transform-origin: 50% 0;
+  margin-top: -8px;
+}
+.profile-straps,
+.profile-clip {
+  filter: drop-shadow(0 3px 3px var(--shadow-color));
   display: block;
+  overflow: visible;
+}
+.profile-clip {
+  z-index: 2;
+  margin-bottom: -13px;
+  position: relative;
+}
+.profile-badge {
+  --identity-surface: var(--muted);
+  border: 1px solid var(--border);
+  background: linear-gradient(170deg, var(--identity-surface), var(--card) 55%);
+  width: 340px;
+  min-height: 540px;
+  transform-origin: 50% 0;
+  transform: rotate(var(--sway, 0rad)) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition:
+    --tilt-x 0.25s ease-out,
+    --tilt-y 0.25s ease-out;
+  cursor: grab;
+  touch-action: pan-y;
+  box-shadow:
+    inset 0 1px 0 #ffffff14,
+    0 1px 2px var(--shadow-color),
+    0 14px 28px -10px var(--shadow-color),
+    0 40px 60px -30px var(--shadow-color);
+  border-radius: 20px;
+  flex-direction: column;
+  padding: 64px 28px 28px;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+/* The sheen of the plastic sleeve; it slides with the tilt. */
+.profile-badge::after {
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent 32%,
+    #ffffff0d 46%,
+    #ffffff03 54%,
+    transparent 66%
+  );
+  transform: translateX(var(--sheen, 0%));
+  position: absolute;
+  inset: 0;
+}
+.profile-badge.held {
+  cursor: grabbing;
+  user-select: none;
+}
+.profile-badge.tone-1 {
+  --identity-surface: var(--sage-surface);
+}
+.profile-badge.tone-2 {
+  --identity-surface: var(--violet-surface);
+}
+.profile-badge.tone-0,
+.profile-badge.tone-3 {
+  --identity-surface: var(--slate-surface);
+}
+.profile-badge.tone-4 {
+  --identity-surface: var(--steel-surface);
+}
+.profile-punch {
+  background: var(--background);
+  width: 58px;
+  height: 12px;
+  box-shadow:
+    inset 0 2px 3px #0008,
+    0 1px 0 #ffffff12;
+  border-radius: 7px;
+  margin-left: -29px;
+  position: absolute;
+  top: 11px;
+  left: 50%;
+}
+.profile-badge h2 {
+  letter-spacing: -1.8px;
+  overflow-wrap: anywhere;
+  font-size: 40px;
+  font-weight: 650;
+  line-height: 1.02;
+}
+.profile-badge h2 span {
+  display: block;
+}
+.profile-email {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  margin: 16px 0;
+  font-size: 13px;
 }
 .role-badge {
   background: var(--selection);
   color: var(--primary);
   border-radius: 999px;
+  align-self: flex-start;
   align-items: center;
   height: 22px;
   padding: 0 9px;
@@ -371,36 +477,61 @@
   font-weight: 500;
   display: inline-flex;
 }
-.settings-identity:last-child,
-.settings-section:last-child {
-  border-bottom: 0;
-}
-.field-grid {
+.profile-facts {
+  border-top: 1px solid var(--border);
   grid-template-columns: 1fr 1fr;
-  gap: 24px 40px;
-  font-size: 13.5px;
+  gap: 24px 18px;
+  margin-top: 32px;
+  padding-top: 26px;
+  font-size: 14px;
   display: grid;
 }
-.field-grid dt {
+.profile-facts dt {
   color: var(--muted-foreground);
   margin-bottom: 6px;
   font-size: 12px;
 }
-.field-grid dd {
-  overflow-wrap: anywhere;
-}
-.field-grid dd small {
+.profile-facts dd small {
   color: var(--muted-foreground);
-  margin-left: 4px;
+  margin-top: 3px;
   font-size: 12px;
+  display: block;
 }
-.field-grid .status-indicator {
+.profile-facts .profile-station {
+  letter-spacing: -0.5px;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+.profile-facts .status-indicator {
   font-size: inherit;
 }
+.profile-org {
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 32px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+}
+.profile-org .dsp-avatar {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+}
+.settings-section:last-child {
+  border-bottom: 0;
+}
 @media (max-width: 700px) {
-  .field-grid {
-    grid-template-columns: 1fr;
-    gap: 18px;
+  .profile-badge {
+    width: min(340px, 100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-badge {
+    cursor: auto;
   }
 }
 
