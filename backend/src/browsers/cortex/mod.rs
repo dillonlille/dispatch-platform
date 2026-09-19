@@ -1,7 +1,12 @@
 //! Cortex authentication and structured meal evidence from Amazon Logistics.
 mod collection;
 mod discovery;
-use super::{attempt::Attempts, browseros, page::Page};
+use super::{
+    attempt::Attempts,
+    browseros,
+    driver::{Collected, Driver as Drives, Pending, Run},
+    page::{Page, call},
+};
 use crate::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
@@ -10,16 +15,6 @@ const ORIGIN: &str = "https://logistics.amazon.com";
 const ORIGINS: &[&str] = &[ORIGIN, "https://www.amazon.com", "https://amazon.com"];
 const LANDING: &str = "/dspconsolev2";
 const AUTH: &str = include_str!("auth.js");
-pub(super) fn preflight(profile: &Path, retry: bool) -> Result<()> {
-    Attempts::open(
-        &profile
-            .parent()
-            .ok_or_else(|| Error::new("unsafe_storage_path", 500))?
-            .join("cortex-attempt.json"),
-    )?
-    .check(retry)?;
-    Ok(())
-}
 pub struct Driver {
     pub browser: browseros::Session,
     page: Page,
@@ -47,12 +42,7 @@ impl Driver {
             browser,
             origin,
             origins,
-            attempts: Attempts::open(
-                &profile
-                    .parent()
-                    .ok_or_else(|| Error::new("unsafe_storage_path", 500))?
-                    .join("cortex-attempt.json"),
-            )?,
+            attempts: Attempts::beside(profile, "cortex")?,
             credentials: Value::Null,
             username_submitted: false,
             password_submitted: false,
@@ -62,41 +52,13 @@ impl Driver {
         self.page = Page::open(self.browser.clone(), self.origin.clone()).await?;
         self.page
             .allow_origins(&self.origins.iter().map(String::as_str).collect::<Vec<_>>());
-        let window = self
-            .browser
-            .command(
-                "Browser.getWindowForTarget",
-                json!({"targetId":self.page.target}),
-                None,
-            )
-            .await?;
-        self.browser.command("Browser.setWindowBounds",json!({"windowId":window["windowId"],"bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),None).await?;
-        self.page.command("Page.bringToFront", json!({})).await?;
-        let targets = self
-            .browser
-            .command("Target.getTargets", json!({}), None)
-            .await?;
-        if let Some(targets) = targets["targetInfos"].as_array() {
-            for target in targets {
-                if s(target, "type") == "page" && s(target, "targetId") != self.page.target {
-                    self.browser
-                        .command(
-                            "Target.closeTarget",
-                            json!({"targetId":target["targetId"]}),
-                            None,
-                        )
-                        .await?;
-                }
-            }
-        }
-        Ok(())
+        self.page.size_window().await?;
+        self.page.front_alone().await
     }
     async fn script(&self, mut input: Value) -> Result<Value> {
         input["origins"] = json!(self.origins);
         input["applicationOrigin"] = json!(self.origin);
-        self.page
-            .evaluate(&format!("({})({input})", AUTH.trim().trim_end_matches(';')))
-            .await
+        self.page.evaluate(&call(AUTH, &input)).await
     }
     async fn observe(&self, previous: &str, seconds: u64) -> Result<Value> {
         let deadline = Instant::now() + Duration::from_secs(seconds);
@@ -206,23 +168,8 @@ impl Driver {
                     let value = self.observe("challenge", 15).await?;
                     self.advance(value).await
                 }
-                "screenshot" => {
-                    ensure(
-                        self.page.trusted(s(&self.page.frame().await?, "url")),
-                        "verification_expired",
-                        409,
-                    )?;
-                    let value = self
-                        .page
-                        .command("Page.captureScreenshot", json!({"format":"png"}))
-                        .await?;
-                    Ok(json!({"type":"screenshot","image":value["data"]}))
-                }
-                "assist" => self
-                    .page
-                    .assist(&command["input"])
-                    .await
-                    .map(|_| json!({"type":"assisted"})),
+                "screenshot" => self.page.screenshot().await,
+                "assist" => self.page.assisted(&command["input"]).await,
                 _ => Err(Error::new("verification_expired", 409)),
             }
         }
@@ -235,5 +182,32 @@ impl Driver {
         }
         // Deliberately no provider page text, URL, username, password or OTP in logs.
         result
+    }
+}
+impl Drives for Driver {
+    fn request(&mut self, command: Value) -> Pending<'_, Value> {
+        Box::pin(Driver::request(self, command))
+    }
+    fn collect<'a>(&'a mut self, run: &'a Run<'a>) -> Pending<'a, Collected> {
+        Box::pin(async move {
+            let scope = self
+                .resolve_scope(&serde_json::from_value(run.request.clone())?, run.metrics)
+                .await?;
+            let data = Driver::collect(
+                self,
+                &scope,
+                run.metrics,
+                &crate::live_collection::Writer::new(run.state.clone(), run.job, run.owner),
+                |progress, message| run.progress(progress, message),
+            )
+            .await?;
+            Ok(Collected {
+                data,
+                scope: Some(scope),
+            })
+        })
+    }
+    fn browser(&self) -> Option<&browseros::Session> {
+        Some(&self.browser)
     }
 }

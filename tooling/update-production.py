@@ -3,13 +3,11 @@
 
 import argparse
 from datetime import datetime, timezone
-import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import sys
 import tempfile
 import time
@@ -17,7 +15,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import (MAX_BYTES, REPOSITORY, STABLE, command, private_directory,
+from runtime_artifact import (MAX_BYTES, REPOSITORY, STABLE, RuntimeUpdater, private_directory,
                               require, unpack, verify_artifact, write_json)
 
 API = f"https://api.github.com/repos/{REPOSITORY}/"
@@ -106,7 +104,11 @@ def download_asset(release, name, target):
             "GitHub asset digest mismatch")
 
 
-class ProductionUpdater:
+class ProductionUpdater(RuntimeUpdater):
+    SERVICE = "dispatch-production.service"
+    HEALTH = {"environment": "production", "runtime": "rust"}
+    LOCK = "production-update.lock"
+
     def __init__(self, root):
         self.root = Path(root).absolute()
         require(self.root.name == "public" and self.root.resolve() == self.root,
@@ -120,27 +122,8 @@ class ProductionUpdater:
         self.receipt = self.platform / "production-activation.json"
         self.status_file = self.platform / "production-update.json"
         self.check_file = self.platform / "production-release-check.json"
-        self.config = json.loads((self.root / "config/updater.json").read_text())
-        require(self.config["service"] == "dispatch-production.service", "Production service required")
-        require(re.fullmatch(r"http://127\.0\.0\.1:\d+/api/health", self.config["healthUrl"]),
-                "Loopback health endpoint required")
-
-    def service(self, action):
-        command("systemctl", "--user", action, self.config["service"], timeout=90)
-
-    def healthy(self, digest, timeout=40):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(self.config["healthUrl"], timeout=2) as response:
-                    data = json.load(response)
-                if (data.get("status") == "ready" and data.get("environment") == "production"
-                        and data.get("release") == digest and data.get("runtime") == "rust"):
-                    return True
-            except (OSError, ValueError):
-                pass
-            time.sleep(1)
-        return False
+        self.load_config(self.root / "config/updater.json", "Production service required",
+                         "Loopback health endpoint required")
 
     def status(self, state, manifest, **extra):
         write_json(self.status_file, {"status": state, "version": manifest["version"],
@@ -152,20 +135,16 @@ class ProductionUpdater:
             return
         receipt = json.loads(self.receipt.read_text())
         require(re.fullmatch(r"[a-f0-9]{64}", receipt["oldDigest"]), "Invalid activation receipt")
-        self.service("stop")
-        if self.previous.exists():
-            old = verify_artifact(self.previous)
-            require(old["digest"] == receipt["oldDigest"], "Rollback inventory differs")
-            if self.live.exists():
-                require(self.live.resolve() == self.live, "Unsafe runtime path")
-                shutil.rmtree(self.live)
-            self.previous.rename(self.live)
-        else:
-            old = verify_artifact(self.live)
-            require(old["digest"] == receipt["oldDigest"], "Previous runtime unavailable")
-        (self.live / "services/rust/dispatch-backend").chmod(0o700)
-        self.service("start")
-        require(self.healthy(old["digest"]), "Previous Production runtime failed health check")
+
+        def previous_runtime(runtime):
+            old = verify_artifact(runtime)
+            require(old["digest"] == receipt["oldDigest"],
+                    "Rollback inventory differs" if runtime == self.previous else "Previous runtime unavailable")
+            return old
+
+        old = self.roll_back(self.live, previous_runtime, receipt["oldDigest"], "Unsafe runtime path",
+                             "Previous Production runtime failed health check",
+                             restored=lambda _old: (self.live / "services/rust/dispatch-backend").chmod(0o700))
         self.status("rolled_back", old, failedDigest=receipt["newDigest"])
         self.receipt.unlink()
 
@@ -175,21 +154,9 @@ class ProductionUpdater:
         require(version(manifest["version"]) > version(old["version"]), "Release downgrade/replacement denied")
         require(manifest["schema"] == old["schema"], "Schema change requires an explicit migration plan")
         (candidate / "services/rust/dispatch-backend").chmod(0o700)
-        if self.previous.exists():
-            require(self.previous.resolve() == self.previous, "Unsafe rollback path")
-            shutil.rmtree(self.previous)
-        write_json(self.receipt, {"oldDigest": old["digest"], "newDigest": manifest["digest"]})
-        try:
-            self.service("stop")
-            self.live.rename(self.previous)
-            candidate.rename(self.live)
-            self.service("start")
-            require(self.healthy(manifest["digest"]), "New Production runtime failed health check")
-            self.status("ready", manifest, commit=commit)
-            self.receipt.unlink()
-        except BaseException:
-            self.recover()
-            raise
+        self.switch(candidate, self.live, {"oldDigest": old["digest"], "newDigest": manifest["digest"]},
+                    manifest["digest"], "New Production runtime failed health check",
+                    ready=lambda: self.status("ready", manifest, commit=commit))
 
     def settled(self, current):
         """Whether a recent full check already finished for the release GitHub still reports."""
@@ -267,12 +234,7 @@ def main():
         version(manifest["version"])
         (updater.live / "services/rust/dispatch-backend").chmod(0o700)
         return
-    with (updater.platform / "production-update.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return
-        updater.update()
+    updater.run_locked()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 
 export const credentials = {
   clientCode: 'fixture-client',

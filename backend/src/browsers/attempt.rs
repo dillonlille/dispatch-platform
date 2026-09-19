@@ -15,7 +15,21 @@ pub(super) struct Attempts {
     path: PathBuf,
     record: Record,
 }
+/// Refuses to start a browser for a provider that is cooling down.
+pub(super) fn preflight(profile: &Path, provider: &str, retry: bool) -> Result<()> {
+    Attempts::beside(profile, provider)?.check(retry)?;
+    Ok(())
+}
 impl Attempts {
+    /// A provider's attempt record lives beside its browser profile.
+    pub fn beside(profile: &Path, provider: &str) -> Result<Self> {
+        Self::open(
+            &profile
+                .parent()
+                .ok_or_else(|| Error::new("unsafe_storage_path", 500))?
+                .join(format!("{provider}-attempt.json")),
+        )
+    }
     pub fn open(path: &Path) -> Result<Self> {
         db::private_file(path, false)?;
         let mut record: Record = if path.exists() {

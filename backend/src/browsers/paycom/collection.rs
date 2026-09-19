@@ -280,11 +280,12 @@ impl Driver {
         } else {
             API.into()
         };
-        self.command(
-            "Fetch.enable",
-            json!({"patterns":[{"urlPattern":api,"requestStage":"Request"}]}),
-        )
-        .await?;
+        self.page
+            .command(
+                "Fetch.enable",
+                json!({"patterns":[{"urlPattern":api,"requestStage":"Request"}]}),
+            )
+            .await?;
         self.navigate(SEARCH).await?;
         let deadline = Instant::now() + Duration::from_secs(60);
         let observed = loop {
@@ -293,16 +294,17 @@ impl Driver {
             if event.is_null() {
                 continue;
             }
-            self.command(
-                "Fetch.continueRequest",
-                json!({"requestId":event["requestId"]}),
-            )
-            .await?;
+            self.page
+                .command(
+                    "Fetch.continueRequest",
+                    json!({"requestId":event["requestId"]}),
+                )
+                .await?;
             if event["request"]["url"] == api && event["request"]["method"] == "POST" {
                 break event["request"].clone();
             }
         };
-        self.command("Fetch.disable", json!({})).await?;
+        self.page.command("Fetch.disable", json!({})).await?;
         let zone: chrono_tz::Tz = timezone
             .parse()
             .map_err(|_| Error::new("invalid_timezone", 400))?;
@@ -332,7 +334,7 @@ impl Driver {
         let input = json!({"url":api,"body":body.to_string(),"headers":headers});
         // Start a bounded fetch in the isolated world, then poll. No command holds
         // the browser transport for a network-length timeout.
-        self.evaluate(&format!(r#"(()=>{{globalThis.dispatchRoster=null;(async input=>{{try{{
+        self.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchRoster=null;(async input=>{{try{{
             const response=await fetch(input.url,{{method:'POST',credentials:'include',redirect:'error',cache:'no-store',headers:input.headers,body:input.body,signal:AbortSignal.timeout(55000)}});
             if(response.status!==200||!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
             const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let size=0,text='';
@@ -342,14 +344,16 @@ impl Driver {
         let deadline = Instant::now() + Duration::from_secs(60);
         let raw = loop {
             ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-            let value = self.evaluate("globalThis.dispatchRoster").await?;
+            let value = self.page.evaluate("globalThis.dispatchRoster").await?;
             if !value.is_null() {
                 ensure(value["ok"] == true, "provider_unavailable", 502)?;
                 break value["value"].clone();
             }
             sleep(Duration::from_millis(200)).await;
         };
-        self.evaluate("delete globalThis.dispatchRoster").await?;
+        self.page
+            .evaluate("delete globalThis.dispatchRoster")
+            .await?;
         let employees = employees(&raw, &codes)?;
         let resume = if let Some(checkpoint) = checkpoint {
             Some(checkpoint.prepare(&period, &employees, timezone).await?)
@@ -826,10 +830,7 @@ async fn extract(
 ) -> Result<Vec<Value>> {
     let config = json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
     let record = page
-        .evaluate(&format!(
-            "({})({config})",
-            include_str!("timecard.js").trim().trim_end_matches(';')
-        ))
+        .evaluate(&call(include_str!("timecard.js"), &config))
         .await
         .map_err(|error| {
             if error.code == "browser_script_failed" {

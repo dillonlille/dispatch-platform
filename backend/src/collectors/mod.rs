@@ -1,7 +1,14 @@
-//! Collector-owned databases. Provider identities and paths are compiled code,
-//! never user-controlled paths.
+//! Data providers. Each is described once, by a `Collector` in its own module, and
+//! reached through `Provider`. Provider identities and paths are compiled code,
+//! never user-controlled paths. See "Adding a data provider" in DEVELOPMENT.md.
+mod cortex;
+mod paycom;
 use super::{
     Result,
+    browsers::{
+        Collected, Driver, Pending,
+        browseros::{self, NetworkPolicy},
+    },
     db::{self, Db, DspLease, Kind, Store, s},
     ensure,
 };
@@ -10,13 +17,90 @@ use std::path::{Path, PathBuf};
 
 const LAYOUT: &str = "storage.collectors";
 
+/// The closed, typed identity of a provider. What a provider is lives in its `Collector`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Provider {
     Paycom,
     Cortex,
 }
+/// Everything the platform needs to know about one provider. Storage, credentials,
+/// the browser and the job queue ask here instead of matching on the provider.
+pub(crate) trait Collector: Sync {
+    /// Names its connection row, its files, its secrets and its API path.
+    fn id(&self) -> &'static str;
+    /// The kind of job that runs it.
+    fn job_kind(&self) -> &'static str;
+    /// Its database, and with it the migration list in `db::schema`.
+    fn database(&self) -> Kind;
+    /// Written into a new database with its schema. Must identify the storage.
+    fn seed(&self, dsp: &str) -> String;
+    /// The DSP setting recording that this storage was added to an existing DSP.
+    /// `None` only for Paycom, whose storage every DSP was created with.
+    fn marker(&self) -> Option<&'static str>;
+    /// Fails closed when initialized storage lost what it must hold.
+    fn verify(&self, _: &Db) -> Result<()> {
+        Ok(())
+    }
+    /// After every collector of a DSP opened at startup.
+    fn opened(&self, _: &Store, _dsp: &str) -> Result<()> {
+        Ok(())
+    }
+    /// What a credential change removes from `state/browsers`.
+    fn browser_entries(&self) -> &'static [&'static str];
+    /// The hosts its browser may reach. The lists themselves stay in `browsers::egress`.
+    fn network(&self) -> NetworkPolicy;
+    fn validate_credentials(&self, value: &Value) -> Result<()>;
+    /// Shown beside the connection. Never a secret.
+    fn account_label<'a>(&self, _credentials: &'a Value) -> &'a str {
+        ""
+    }
+    /// Its driver, on a browser already running under `network`. `fixture` is the
+    /// origin of a local stand-in for the provider's site.
+    fn driver<'a>(
+        &self,
+        browser: browseros::Session,
+        profile: &'a Path,
+        fixture: Option<&'a str>,
+    ) -> Pending<'a, Box<dyn Driver>>;
+    /// What a collection returns in fixture mode, where no browser runs.
+    fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected>;
+    /// The job's message while it collects.
+    fn progress(&self) -> &'static str;
+    /// Stores a finished collection. Runs while the job is still this worker's.
+    fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()>;
+    /// Drops what an unfinished job kept to resume from. `None` means every job.
+    fn discard(&self, _: &Store, _dsp: &str, _job: Option<&str>) -> Result<()> {
+        Ok(())
+    }
+    /// When `date` was last collected, as a row with `collected_at`.
+    fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>>;
+    /// The schedule `collection` that runs this collector alone, and the error a
+    /// schedule answers while it is not connected. `both` runs every one of them.
+    fn schedule(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
+    /// What else a schedule needs before it can run this collector.
+    fn schedule_ready(&self, _: &Store, _dsp: &str) -> Result<()> {
+        Ok(())
+    }
+    /// The jobs one scheduled run queues: an idempotency key suffix and a request each.
+    fn scheduled(&self, _: &Store, _dsp: &str) -> Result<Vec<(String, Value)>> {
+        Ok(vec![])
+    }
+    /// Runs with the connection's own disable, in its transaction.
+    fn disabled(&self, _: &Db) -> Result<()> {
+        Ok(())
+    }
+}
 impl Provider {
     pub const ALL: &[Self] = &[Self::Paycom, Self::Cortex];
+    /// The registry: the one place that matches on the provider.
+    pub(crate) fn collector(self) -> &'static dyn Collector {
+        match self {
+            Self::Paycom => &paycom::Paycom,
+            Self::Cortex => &cortex::Cortex,
+        }
+    }
     pub fn parse(value: &str) -> Result<Self> {
         Self::ALL
             .iter()
@@ -28,16 +112,10 @@ impl Provider {
         format!("{dsp}:{}", self.id())
     }
     pub fn id(self) -> &'static str {
-        match self {
-            Self::Paycom => "paycom",
-            Self::Cortex => "cortex",
-        }
+        self.collector().id()
     }
     pub fn job_kind(self) -> &'static str {
-        match self {
-            Self::Paycom => "paycom.collect",
-            Self::Cortex => "cortex.meal_breaks.collect",
-        }
+        self.collector().job_kind()
     }
     pub fn from_job_kind(kind: &str) -> Result<Self> {
         Self::ALL
@@ -46,30 +124,17 @@ impl Provider {
             .find(|p| p.job_kind() == kind)
             .ok_or_else(|| super::Error::new("unsupported_collector", 409))
     }
+    pub fn validate_credentials(self, value: &Value) -> Result<()> {
+        self.collector().validate_credentials(value)
+    }
     fn database(self) -> Kind {
-        match self {
-            Self::Paycom => Kind::Paycom,
-            Self::Cortex => Kind::Cortex,
-        }
+        self.collector().database()
+    }
+    fn marker(self) -> Option<&'static str> {
+        self.collector().marker()
     }
     fn relative_path(self) -> PathBuf {
         Path::new(self.id()).join(format!("{}.sqlite", self.id()))
-    }
-    fn browser_entries(self) -> &'static [&'static str] {
-        match self {
-            Self::Paycom => &[
-                "paycom", // Retired profile retained on existing hosts.
-                "paycom-browseros",
-                "paycom-attempt.json",
-                "paycom-diagnostics.json",
-                ".paycom-browseros.browseros.lock",
-            ],
-            Self::Cortex => &[
-                "cortex-browseros",
-                "cortex-attempt.json",
-                ".cortex-browseros.browseros.lock",
-            ],
-        }
     }
 }
 
@@ -100,7 +165,7 @@ impl Store {
             return Ok(());
         }
         db::private_dir(&browsers)?;
-        for entry in provider.browser_entries() {
+        for entry in provider.collector().browser_entries() {
             let path = browsers.join(entry);
             match std::fs::symlink_metadata(&path) {
                 Ok(stat) if stat.is_dir() => {
@@ -125,18 +190,13 @@ impl Store {
     }
 
     pub(crate) fn initialize_collectors(&self, id: &str) -> Result<()> {
-        let provider = Provider::Paycom;
-        let data = self.area(id, "data")?;
-        db::private_dir(&data.join(provider.id()))?;
-        // Validated random DSP IDs and compiled provider IDs are safe SQL literals.
-        let target = Db::create(
-            &data.join(provider.relative_path()),
-            provider.database(),
-            &format!("INSERT INTO storage_identity VALUES ('{id}','paycom','paycom-v1');"),
-        )?;
-        identity(&target, id, provider)?;
+        for provider in Provider::ALL.iter().filter(|p| p.marker().is_none()) {
+            self.create_collector(id, *provider)?;
+        }
         self.dsp(id)?.set(LAYOUT, &json!(1))?;
-        self.initialize_cortex(id)?;
+        for provider in Provider::ALL.iter().filter(|p| p.marker().is_some()) {
+            self.initialize_added(id, *provider)?;
+        }
         self.reset_live(id)
     }
     // Called during startup under the platform lock, before serving requests.
@@ -147,10 +207,18 @@ impl Store {
             "unsupported_storage_layout",
             503,
         )?;
-        db::migrate(&*self.collector(id, Provider::Paycom)?, Kind::Paycom)?;
-        self.initialize_cortex(id)?;
+        for provider in Provider::ALL {
+            if provider.marker().is_some() {
+                self.initialize_added(id, *provider)?;
+            } else {
+                db::migrate(&*self.collector(id, *provider)?, provider.database())?;
+            }
+        }
         self.reset_live(id)?;
-        self.prune_checkpoints(id)
+        for provider in Provider::ALL {
+            provider.collector().opened(self, id)?;
+        }
+        Ok(())
     }
 
     fn reset_live(&self, id: &str) -> Result<()> {
@@ -160,63 +228,44 @@ impl Store {
         Ok(())
     }
 
-    // New provider storage is additive and initialized before serving traffic.
-    // A core marker distinguishes first installation from missing/lost state.
-    fn initialize_cortex(&self, id: &str) -> Result<()> {
-        let core = self.dsp(id)?;
-        let marker = core.setting("storage.cortex", Value::Null)?;
-        if marker == json!(1) {
-            db::migrate(&*self.collector(id, Provider::Cortex)?, Kind::Cortex)?;
-            return self.verify_cortex_meals(id);
-        }
-        ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
-        let provider = Provider::Cortex;
+    // Validated random DSP IDs and compiled provider IDs are safe SQL literals.
+    fn create_collector(&self, id: &str, provider: Provider) -> Result<Db> {
         let data = self.area(id, "data")?;
         db::private_dir(&data.join(provider.id()))?;
         let target = Db::create(
             &data.join(provider.relative_path()),
             provider.database(),
-            &format!(
-                "INSERT INTO storage_identity VALUES ('{id}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');",
-                db::iso()
-            ),
+            &provider.collector().seed(id),
         )?;
         identity(&target, id, provider)?;
+        Ok(target)
+    }
+
+    // New provider storage is additive and initialized before serving traffic.
+    // A core marker distinguishes first installation from missing/lost state.
+    fn initialize_added(&self, id: &str, provider: Provider) -> Result<()> {
+        let collector = provider.collector();
+        let key = collector.marker().expect("added collector");
+        let core = self.dsp(id)?;
+        let marker = core.setting(key, Value::Null)?;
+        if marker == json!(1) {
+            db::migrate(&*self.collector(id, provider)?, provider.database())?;
+            return collector.verify(&*self.collector(id, provider)?);
+        }
+        ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
+        let target = self.create_collector(id, provider)?;
         ensure(
             target
                 .one(
-                    "SELECT provider FROM connections WHERE provider='cortex'",
-                    [],
+                    "SELECT provider FROM connections WHERE provider=?",
+                    [provider.id()],
                 )?
                 .is_some(),
             "collector_storage_invalid",
             503,
         )?;
-        core.set("storage.cortex", &json!(1))?;
-        self.verify_cortex_meals(id)
-    }
-
-    fn verify_cortex_meals(&self, id: &str) -> Result<()> {
-        let db = self.collector(id, Provider::Cortex)?;
-        ensure(
-            db.all("SELECT version FROM meal_schema", [])? == vec![json!({"version":1})],
-            "unsupported_cortex_schema",
-            503,
-        )?;
-        // Missing initialized feature tables fail closed, rather than recreating lost data.
-        // meal_delivery_events, meal_breaks and their trigger hold nothing and are not
-        // required here. The baseline still creates them because v0.0.9 refuses to start
-        // without them.
-        for table in ["meal_publications", "meal_itineraries"] {
-            db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
-        }
-        ensure(
-            db.all("SELECT version FROM meal_record_schema", [])? == vec![json!({"version":1})],
-            "unsupported_cortex_schema",
-            503,
-        )?;
-        db.one("SELECT count(*) FROM meal_records WHERE 0", [])?;
-        Ok(())
+        core.set(key, &json!(1))?;
+        collector.verify(&*self.collector(id, provider)?)
     }
 }
 
@@ -283,6 +332,39 @@ mod tests {
             .unwrap()
         );
         out
+    }
+    #[test]
+    fn the_registry_names_each_provider_job_kind_database_and_schedule_once() {
+        let unique = |values: Vec<&str>| {
+            values
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == values.len()
+        };
+        let all = || Provider::ALL.iter().map(|p| p.collector());
+        assert!(unique(all().map(|c| c.id()).collect()));
+        assert!(unique(all().map(|c| c.job_kind()).collect()));
+        assert!(unique(all().filter_map(|c| c.marker()).collect()));
+        assert!(unique(
+            all().filter_map(|c| c.schedule()).map(|s| s.0).collect()
+        ));
+        for provider in Provider::ALL {
+            let collector = provider.collector();
+            assert_eq!(Provider::parse(collector.id()).unwrap(), *provider);
+            assert_eq!(
+                Provider::from_job_kind(collector.job_kind()).unwrap(),
+                *provider
+            );
+            // Storage, secrets and profiles are all named after the id.
+            assert_eq!(collector.database().name(), collector.id());
+            assert!(collector.seed("dsp_test").contains(collector.id()));
+            assert!(
+                collector
+                    .browser_entries()
+                    .contains(&format!("{}-attempt.json", collector.id()).as_str())
+            );
+        }
     }
     #[test]
     fn provider_records_stay_apart_from_core_settings_and_survive_reopening() {

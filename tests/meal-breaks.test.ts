@@ -8,7 +8,7 @@ import {
   paycomDay,
   type MealEmployee,
 } from '../shared/meal-breaks.js';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 
 function employee(): MealEmployee {
   return {

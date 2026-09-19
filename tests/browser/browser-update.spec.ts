@@ -1,12 +1,9 @@
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login } from './fixtures.js';
 import type { Page } from '@playwright/test';
 
-async function login(page: Page) {
+async function loginWithClock(page: Page) {
   await page.clock.install();
-  await page.goto('/');
-  await page.getByLabel('Email address').fill('owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await login(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
 }
 
@@ -24,7 +21,7 @@ test('completed update waits for two idle seconds, restores filters, and reloads
     checks++;
     return route.fulfill({ json: { build: 'a'.repeat(64), ready } });
   });
-  await login(page);
+  await loginWithClock(page);
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.getByLabel('Search DSPs').fill('Summit');
   const initialLoads = loads;
@@ -67,7 +64,7 @@ test('the audit log keeps its filters through an automatic update', async ({ pag
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ json: { build: 'c'.repeat(64), ready } }),
   );
-  await login(page);
+  await loginWithClock(page);
   await page.getByRole('link', { name: 'Audit log', exact: true }).click();
   await page.getByRole('button', { name: /^DSPs/ }).click();
   await page.getByLabel('Search activity').fill('Northline');
@@ -97,7 +94,7 @@ test('open editing dialog protects input until it closes', async ({ page }) => {
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ json: { build: 'b'.repeat(64), ready } }),
   );
-  await login(page);
+  await loginWithClock(page);
   await page.getByRole('button', { name: 'Create new DSP' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
@@ -129,12 +126,12 @@ test('unavailable update check does not refresh or interrupt sign in', async ({ 
   );
   await page.clock.install();
   await page.goto('/');
-  await page.getByLabel('Email address').fill('owner@dispatch.test');
+  await page.getByLabel('Email address').fill(demo.email);
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.clock.runFor(10000);
   expect(loads).toBe(1);
-  await expect(page.getByLabel('Email address')).toHaveValue('owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
+  await expect(page.getByLabel('Email address')).toHaveValue(demo.email);
+  await page.getByLabel('Password', { exact: true }).fill(demo.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
   await page.clock.runFor(15000);
@@ -154,7 +151,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ json: { build: 'c'.repeat(64), ready } }),
   );
-  await login(page);
+  await loginWithClock(page);
   await page.evaluate((id) => {
     location.hash = `dsp/${id}/paycom`;
   }, dsp.id);

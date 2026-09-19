@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 
 test('collection notifications require a current DSP view, wake on collection, and isolate tenants', async (t) => {
   const f = await fixture();

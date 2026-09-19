@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login } from './fixtures.js';
 import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 
@@ -89,12 +89,7 @@ function sample(): MealComparison {
   };
 }
 async function open(page: Page, member = false, selectedDate: string | null = date) {
-  await page.goto('/');
-  await page
-    .getByLabel('Email address')
-    .fill(member ? 'member@dispatch.test' : 'owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await login(page, member ? demo.member : demo.email);
   if (!member) {
     await page
       .getByRole('row')

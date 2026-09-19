@@ -2,6 +2,10 @@
 use super::browseros;
 use crate::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
+/// A provider page script applied to its input, as one expression to evaluate.
+pub(super) fn call(script: &str, input: &Value) -> String {
+    format!("({})({input})", script.trim().trim_end_matches(';'))
+}
 pub(super) struct Page {
     pub id: String,
     pub target: String,
@@ -47,6 +51,41 @@ impl Page {
         page.target = target;
         page.command("Page.enable", json!({})).await?;
         Ok(page)
+    }
+    /// Gives the tab's window the size every provider script was written against.
+    pub async fn size_window(&self) -> Result<()> {
+        let window = self
+            .browser
+            .command(
+                "Browser.getWindowForTarget",
+                json!({"targetId":self.target}),
+                None,
+            )
+            .await?;
+        self.browser.command("Browser.setWindowBounds",json!({"windowId":window["windowId"],"bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),None).await?;
+        Ok(())
+    }
+    /// Brings the tab forward and closes every other one.
+    pub async fn front_alone(&self) -> Result<()> {
+        self.command("Page.bringToFront", json!({})).await?;
+        let targets = self
+            .browser
+            .command("Target.getTargets", json!({}), None)
+            .await?;
+        if let Some(targets) = targets["targetInfos"].as_array() {
+            for target in targets {
+                if s(target, "type") == "page" && s(target, "targetId") != self.target {
+                    self.browser
+                        .command(
+                            "Target.closeTarget",
+                            json!({"targetId":target["targetId"]}),
+                            None,
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok(())
     }
     pub(super) async fn command(&self, method: &str, params: Value) -> Result<Value> {
         let result = self.browser.command(method, params, Some(&self.id)).await;
@@ -195,6 +234,21 @@ impl Page {
             Err(error) => return Err(error),
         }
         Ok(s(&current, "loaderId").to_owned())
+    }
+    /// What a member assisting a verification sees.
+    pub async fn screenshot(&self) -> Result<Value> {
+        ensure(
+            self.trusted(s(&self.frame().await?, "url")),
+            "verification_expired",
+            409,
+        )?;
+        let value = self
+            .command("Page.captureScreenshot", json!({"format":"png"}))
+            .await?;
+        Ok(json!({"type":"screenshot","image":value["data"]}))
+    }
+    pub async fn assisted(&self, input: &Value) -> Result<Value> {
+        self.assist(input).await.map(|_| json!({"type":"assisted"}))
     }
     pub async fn assist(&self, input: &Value) -> Result<()> {
         ensure(

@@ -1,0 +1,13 @@
+{
+  "dashboard": [
+    "tests/collection-history.test.ts",
+    "tests/dashboard-format.test.ts",
+    "tests/dashboard-structure.test.ts",
+    "tests/meal-breaks.test.ts"
+  ],
+  "native": {
+    "paycom": ["tests/paycom-worker.test.ts", "tests/native-browser.test.ts"],
+    "cortex": ["tests/cortex-worker.test.ts", "tests/cortex-meals-worker.test.ts"],
+    "capacity": ["tests/multi-dsp-browser.test.ts", "tests/collection-throughput.test.ts"]
+  }
+}
