@@ -17,7 +17,7 @@ use axum::{
     extract::{Request, State as AxumState},
     http::Method,
     response::Response,
-    routing::{MethodFilter, MethodRouter},
+    routing::{MethodFilter, MethodRouter, any},
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -39,17 +39,20 @@ pub fn router(state: Arc<State>) -> Router {
             .map(|part| if part.starts_with('{') { "" } else { part })
             .collect::<Vec<_>>()
             .join("/");
-        for path in BTreeMap::from([(route.path.to_owned(), ()), (empty, ())]).into_keys() {
+        let mut served = vec![route.path.to_owned()];
+        if empty != route.path {
+            served.push(empty);
+        }
+        for path in served {
             let route = route.clone();
             let handler = move |AxumState(state): AxumState<Arc<State>>, request: Request| {
                 let route = route.clone();
                 async move { route.serve(state, request).await }
             };
-            // Another method on a known path is as unknown as any other path, HEAD included.
+            // Another method on a known path is as unknown as any other path: HEAD never
+            // falls through to GET, and `any` keeps axum from naming the methods in `Allow`.
             let methods = paths.remove(&path).unwrap_or_else(|| {
-                MethodRouter::new()
-                    .on(MethodFilter::HEAD, unmatched::unmatched)
-                    .fallback(unmatched::unmatched)
+                any(unmatched::unmatched).on(MethodFilter::HEAD, unmatched::unmatched)
             });
             paths.insert(path, methods.on(filter, handler));
         }

@@ -267,6 +267,8 @@ async fn unmatched_paths_and_methods_answer_as_they_always_have() {
     server
         .expect(Call::new("HEAD", "/api/health"), 404, "")
         .await;
+    let wrong = server.send(Call::post("/api/session", json!({}))).await;
+    assert_eq!((wrong.status, wrong.header("allow")), (404, ""));
     let call = Call::new("PUT", "/api/session").raw("{}".into());
     server.expect(call, 404, "not_found").await;
     let call = Call::new("DELETE", "/api/session").raw("{}".into());
