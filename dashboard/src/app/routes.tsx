@@ -13,7 +13,7 @@ import {
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../features/platform/index.js';
 import { AuditPage } from '../features/audit/index.js';
-import { SettingsPage } from '../settings.js';
+import { SettingsPage } from '../features/settings/index.js';
 import { ErrorBox } from '../ui/index.js';
 import { title } from '../lib/format.js';
 import { can } from './permissions.js';
