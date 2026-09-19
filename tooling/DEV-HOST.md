@@ -24,8 +24,13 @@ update's source back never changes the updater performing the recovery.
 The updater keeps that copy identical to `tooling/` of the live checkout: at the
 start of every run and after each successful activation it installs the files of
 the clean, activated checkout, once they start on this host. A copy installed by
-hand from anywhere else is replaced on the next run. `--verify` fails when the
-installed copy differs from the checkout.
+hand from anywhere else is replaced on the next run.
+
+`dispatch-dev.service` runs `--verify` before every start, including the start in
+the middle of an activation or its rollback, when the checkout already differs from
+the installed updater. There `--verify` only warns about the difference, so starting
+the service never depends on it. `--verify-management` fails on a difference; run it
+by hand and never from a unit.
 
 An installed updater older than this behaviour does not refresh itself. Install
 the current one once from the live checkout on dispatch-dev; the same command
@@ -40,6 +45,7 @@ Verify the checkout and installed runtime with:
 
 ```bash
 python3 /home/thepickle/dispatch-platform/dev/.runtime/management/update-dev.py --root /home/thepickle/dispatch-platform/dev --verify
+python3 /home/thepickle/dispatch-platform/dev/.runtime/management/update-dev.py --root /home/thepickle/dispatch-platform/dev --verify-management
 systemctl --user status dispatch-dev.service dispatch-dev-update.timer
 curl --fail https://dispatchdev.dillonlille.com/api/health
 ```

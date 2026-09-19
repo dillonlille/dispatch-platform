@@ -219,6 +219,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--verify-management", action="store_true",
+                        help="Fail when the installed host updater differs from the checkout; no unit runs this")
     parser.add_argument("--install-management", action="store_true",
                         help="Install reviewed host updater outside tracked source")
     args = parser.parse_args()
@@ -232,6 +234,15 @@ def main():
         updater.clean_checkout()
         verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
         (updater.live / ".build/services/rust/dispatch-backend").chmod(0o700)
+        # The service runs this before every start, also in the middle of an activation
+        # and its rollback, where the checkout is already ahead of or behind the installed
+        # updater. Starting never depends on that difference; the next update run removes it.
+        drift = management_drift(updater.live)
+        if drift:
+            print(f"Installed host updater differs from the checkout ({', '.join(drift)}); "
+                  "the next update run installs the checkout's copy", file=sys.stderr)
+        return
+    if args.verify_management:
         drift = management_drift(updater.live)
         require(not drift, f"Installed host updater differs from the checkout ({', '.join(drift)}); "
                 "run tooling/update-dev.py --install-management from the checkout")

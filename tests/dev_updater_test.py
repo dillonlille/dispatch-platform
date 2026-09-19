@@ -305,28 +305,106 @@ class DevUpdaterTests(unittest.TestCase):
             self.instance.update()
         self.assertEqual(self.installed(), working)
 
-    def test_verify_reports_an_installed_updater_that_differs_from_the_checkout(self):
-        self.track_updater()
-        artifact(self.live / ".build.next", self.git("rev-parse", "HEAD"), "current")
+    def activate_build(self, commit):
+        artifact(self.live / ".build.next", commit, "current")
         shutil.rmtree(self.live / ".build")
         (self.live / ".build.next").rename(self.live / ".build")
-        # As in the service unit, running the checkout's script leaves no bytecode in the checkout.
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        verify = lambda script: subprocess.run(["python3", str(script), "--root", str(self.root), "--verify"],
-                                               capture_output=True, text=True, env=env)
-        missing = verify(self.live / "tooling/update-dev.py")
-        self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("runtime_artifact.py, update-dev.py", missing.stderr)
+
+    def unit(self, flag="--verify", script=None):
+        """The check exactly as dispatch-dev.service runs it before every start."""
+        script = script or self.live / ".runtime/management/update-dev.py"
+        return subprocess.run(["python3", str(script), "--root", str(self.root), flag], capture_output=True,
+                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+
+    def start_like_the_unit(self, starts):
+        def service(action):
+            if action == "start":
+                starts.append(self.unit())
+                if starts[-1].returncode:
+                    raise RuntimeError("ExecStartPre failed; the service did not start")
+        return service
+
+    def test_commit_that_changes_the_updater_still_starts_the_service_and_deploys(self):
+        current = self.track_updater()
+        self.activate_build(current)
+        self.instance.refresh_management()
+        self.assertEqual(self.unit("--verify-management").returncode, 0)
+        latest = self.track_updater("\n# Reviewed change\n")
+        self.git("update-ref", "refs/remotes/origin/dev", latest)
+        self.git("reset", "--hard", current)
+        candidate = self.instance.runtime / "latest"
+        manifest = artifact(candidate, latest)
+        run = {"id": 1, "head_sha": latest, "head_branch": "dev", "event": "push", "status": "completed",
+               "conclusion": "success", "head_repository": {"full_name": updater.REPOSITORY}}
+        starts = []
+        with patch.object(self.instance, "git", side_effect=lambda *args: "" if args[0] == "fetch" else self.git(*args)), \
+                patch.object(self.instance, "service", side_effect=self.start_like_the_unit(starts)), \
+                patch.object(self.instance, "healthy", return_value=True), \
+                patch.object(updater, "github", side_effect=[{"workflow_runs": [run]}, {"artifacts": [
+                    {"name": f"dispatch-dev-{latest}", "expired": False}]}]), \
+                patch.object(updater, "download_run_artifact", return_value=(candidate, manifest)):
+            self.instance.update()
+        # The start inside the activation saw the new checkout beside the previous installed updater.
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0].returncode, 0, starts[0].stderr)
+        self.assertIn("differs from the checkout (runtime_artifact.py, update-dev.py)", starts[0].stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), latest)
+        self.assertEqual(json.loads(self.instance.status_file.read_text())["status"], "ready")
+        for name in updater.MANAGEMENT:
+            self.assertEqual(self.installed(name), (self.live / "tooling" / name).read_text())
+        self.assertTrue(self.installed().endswith("# Reviewed change\n"))
+        self.assertEqual(self.unit("--verify-management").returncode, 0)
+
+    def test_rollback_starts_the_service_whether_the_installed_updater_is_newer_or_older(self):
+        current = self.track_updater()
+        self.activate_build(current)
+        latest = self.track_updater("\n# Change that fails its health check\n")
+        self.git("update-ref", "refs/remotes/origin/dev", latest)
+        self.git("reset", "--hard", current)
+        for number, installed in enumerate(["\n# Newer copy installed by hand\n", "", None]):
+            with self.subTest(installed=installed):
+                updater.install_management(self.live, TOOLING)
+                script = self.live / ".runtime/management/update-dev.py"
+                if installed is None:
+                    # An updater from before the shared module was installed beside it.
+                    (self.live / ".runtime/management/runtime_artifact.py").write_text(
+                        (TOOLING / "runtime_artifact.py").read_text() + "\n# Older installed copy\n")
+                else:
+                    script.write_text((TOOLING / "update-dev.py").read_text() + installed)
+                before = self.installed()
+                candidate = self.instance.runtime / f"failing-{number}"
+                artifact(candidate, latest)
+                starts = []
+                with patch.object(self.instance, "service", side_effect=self.start_like_the_unit(starts)), \
+                        patch.object(self.instance, "healthy", side_effect=[False, True]), \
+                        self.assertRaisesRegex(RuntimeError, "New Dev build"):
+                    self.instance.activate(candidate, latest)
+                self.assertEqual([start.returncode for start in starts], [0, 0], [s.stderr for s in starts])
+                self.assertEqual(self.git("rev-parse", "HEAD"), current)
+                self.assertEqual(json.loads(self.instance.status_file.read_text())["status"], "rolled_back")
+                self.assertEqual(self.installed(), before, "A failed activation never replaces the updater")
+
+    def test_only_the_explicit_management_check_fails_on_a_differing_installed_updater(self):
+        self.track_updater()
+        self.activate_build(self.git("rev-parse", "HEAD"))
+        checkout = self.live / "tooling/update-dev.py"
+        for flag, code in [("--verify", 0), ("--verify-management", 1)]:
+            missing = self.unit(flag, checkout)
+            self.assertEqual(missing.returncode, code, missing.stderr)
+            self.assertIn("runtime_artifact.py, update-dev.py", missing.stderr)
         self.assertIn("--install-management", missing.stderr)
-        subprocess.run(["python3", str(self.live / "tooling/update-dev.py"), "--root", str(self.root),
-                        "--install-management"], check=True, capture_output=True, env=env)
-        script = self.live / ".runtime/management/update-dev.py"
-        self.assertEqual(verify(script).returncode, 0)
+        self.assertEqual(self.unit("--install-management", checkout).returncode, 0)
+        for flag in ["--verify", "--verify-management"]:
+            matching = self.unit(flag)
+            self.assertEqual((matching.returncode, matching.stderr), (0, ""))
         (self.live / ".runtime/management/runtime_artifact.py").write_text(
             (TOOLING / "runtime_artifact.py").read_text() + "\n# Older installed copy\n")
-        drifted = verify(script)
-        self.assertNotEqual(drifted.returncode, 0)
-        self.assertIn("differs from the checkout (runtime_artifact.py)", drifted.stderr)
+        for flag, code in [("--verify", 0), ("--verify-management", 1)]:
+            drifted = self.unit(flag)
+            self.assertEqual(drifted.returncode, code, drifted.stderr)
+            self.assertIn("differs from the checkout (runtime_artifact.py)", drifted.stderr)
+        for name in ["dispatch-dev.service", "dispatch-dev-update.service", "dispatch-dev-checks.service"]:
+            self.assertNotIn("--verify-management", (TOOLING / "systemd" / name).read_text(), name)
 
 
 if __name__ == "__main__":
