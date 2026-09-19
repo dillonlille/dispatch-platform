@@ -1,4 +1,4 @@
-use dispatch_backend::core::{config::Config, http::browser_update_ready};
+use dispatch_backend::{config::Config, http::browser_update_ready};
 use serde_json::json;
 
 #[test]

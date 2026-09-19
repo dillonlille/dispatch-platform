@@ -1,4 +1,4 @@
-use dispatch_backend::core::{
+use dispatch_backend::{
     collectors::Provider,
     config::Config,
     db::{Store, now, s},
@@ -110,7 +110,7 @@ fn itinerary_page_links_are_stored_returned_and_bound_to_the_route() {
     let scope = scope();
     let mut c = meals::fixture(&scope);
     db.publish_meals(&id, "job-unlinked", &c, &scope).unwrap();
-    let meal = |db: &dispatch_backend::core::db::Store| {
+    let meal = |db: &dispatch_backend::db::Store| {
         db.meal_comparison(&id, &scope.date, &scope.timezone)
             .unwrap()["rows"][0]["cortex"][0]
             .clone()
@@ -232,7 +232,7 @@ fn provider_jobs_bind_request_identity_and_connection_revision() {
 fn migration_minimizes_all_history_and_legacy_runtime_publications() {
     let db = rusqlite::Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    db.execute_batch(include_str!("../src/core/collectors/cortexMeals.sql"))
+    db.execute_batch(include_str!("../src/collectors/cortexMeals.sql"))
         .unwrap();
     let legacy_publish = |id: &str| {
         db.execute("INSERT INTO meal_publications VALUES (?1,?1,'2026-01-10','DOT4','area','provider','UTC','2026-01-10T20:00:00.000Z','2026-01-10T20:00:00.000Z',0,1,1,1,2)",[id]).unwrap();
@@ -257,7 +257,7 @@ fn migration_minimizes_all_history_and_legacy_runtime_publications() {
         [],
     )
     .unwrap();
-    db.execute_batch(include_str!("../src/core/collectors/cortexMealRecords.sql"))
+    db.execute_batch(include_str!("../src/collectors/cortexMealRecords.sql"))
         .unwrap();
     legacy_publish("rollback-runtime");
     db.execute("UPDATE meal_publications SET active=0", [])

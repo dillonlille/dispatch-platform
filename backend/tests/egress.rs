@@ -1,4 +1,4 @@
-use dispatch_backend::core::browsers::egress::Egress;
+use dispatch_backend::browsers::egress::Egress;
 use std::{
     os::{fd::AsRawFd, unix::fs::PermissionsExt},
     sync::Arc,
@@ -12,7 +12,7 @@ async fn long_socket_paths_proxy_concurrent_fixture_requests_and_close_cleanly()
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let directory = root.path().join("long-private-platform-path-".repeat(5));
-    dispatch_backend::core::db::private_dir(&directory).unwrap();
+    dispatch_backend::db::private_dir(&directory).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {

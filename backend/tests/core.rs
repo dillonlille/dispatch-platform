@@ -1,4 +1,4 @@
-use dispatch_backend::core::{
+use dispatch_backend::{
     browsers::egress,
     collectors::Provider,
     config::Config,
@@ -20,7 +20,7 @@ fn store() -> (tempfile::TempDir, Store) {
     let store = Store::initialize(config).unwrap();
     (root, store)
 }
-fn audits(db: &Store, dsp: Option<&str>) -> dispatch_backend::core::Result<Value> {
+fn audits(db: &Store, dsp: Option<&str>) -> dispatch_backend::Result<Value> {
     let mut page = db.audit_page(&db::AuditQuery {
         dsp,
         limit: 200,
@@ -216,7 +216,7 @@ fn queue_limits_and_authority_are_checked_again_before_publication() {
     db.platform
         .exec("UPDATE users SET status='active' WHERE id=?", [actor])
         .unwrap();
-    db.collector(id, dispatch_backend::core::collectors::Provider::Paycom)
+    db.collector(id, dispatch_backend::collectors::Provider::Paycom)
         .unwrap()
         .exec("UPDATE connections SET revision=revision+1", [])
         .unwrap();
@@ -466,7 +466,7 @@ fn legacy_account_database_is_rejected_without_changing_its_schema() {
 
 #[tokio::test]
 async fn essential_background_failure_stops_readiness_and_normal_shutdown_is_clean() {
-    use dispatch_backend::core::{Error, supervise};
+    use dispatch_backend::{Error, supervise};
     let (stop, receiver) = tokio::sync::watch::channel(false);
     assert!(
         supervise(async { Err(Error::new("scheduler_failed", 500)) }, stop)
@@ -487,7 +487,7 @@ async fn essential_background_failure_stops_readiness_and_normal_shutdown_is_cle
 
 #[test]
 fn cortex_network_policy_keeps_provider_hosts_separate() {
-    use dispatch_backend::core::browsers::egress;
+    use dispatch_backend::browsers::egress;
     for host in [
         "logistics.amazon.com",
         "www.amazon.com",
@@ -511,7 +511,7 @@ fn cortex_network_policy_keeps_provider_hosts_separate() {
 
 #[test]
 fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
-    use dispatch_backend::core::collectors::Provider;
+    use dispatch_backend::collectors::Provider;
     let (_root, db) = store();
     let boot = operations::bootstrap(
         &db,
@@ -666,7 +666,7 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
 
 #[tokio::test]
 async fn concurrent_password_resets_cannot_reuse_a_consumed_token() {
-    use dispatch_backend::core::State;
+    use dispatch_backend::State;
     let (_root, db) = store();
     operations::bootstrap(
         &db,
@@ -776,7 +776,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     assert!(log[0]["actorId"].is_null());
     assert!(!log.to_string().contains(owner_id));
     let page = db
-        .audit_page(&dispatch_backend::core::db::AuditQuery {
+        .audit_page(&dispatch_backend::db::AuditQuery {
             dsp: Some(id),
             actor: "support",
             ..Default::default()
@@ -819,7 +819,7 @@ fn collection_outcomes_record_their_schedule_provider_date_and_duration() {
 }
 #[test]
 fn audit_log_filters_pages_and_counts_by_area() {
-    use dispatch_backend::core::db::AuditQuery;
+    use dispatch_backend::db::AuditQuery;
     let (_root, db) = store();
     operations::seed(&db).unwrap();
     let one = |sql: &str| db.platform.one(sql, []).unwrap().unwrap();
@@ -1069,7 +1069,7 @@ fn audit_log_filters_pages_and_counts_by_area() {
 }
 #[tokio::test]
 async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log() {
-    use dispatch_backend::core::{State, accounts::Auth};
+    use dispatch_backend::{State, accounts::Auth};
     let (_root, db) = store();
     operations::seed(&db).unwrap();
     let one = |sql: &str| db.platform.one(sql, []).unwrap();
