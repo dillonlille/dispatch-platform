@@ -9,7 +9,7 @@ import { DspAvatar } from './app/Brand.js';
 import { JobPerformance } from './features/platform/JobPerformance.js';
 import { CollectionHistory } from './features/platform/CollectionHistory.js';
 import { providerName } from './features/platform/collection-history.js';
-import { AuditLog } from './audit.js';
+import { AuditLog } from './features/audit/index.js';
 import {
   Badge,
   ConfirmDialog,
