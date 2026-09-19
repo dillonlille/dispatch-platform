@@ -7,7 +7,7 @@ mod sandbox;
 mod worker;
 
 use super::egress::Egress;
-use crate::core::{Error, Result, crypto, db, ensure};
+use crate::{Error, Result, crypto, db, ensure};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

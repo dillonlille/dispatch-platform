@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const script = fs.readFileSync('backend/src/core/browsers/cortex/meal.js', 'utf8');
+const script = fs.readFileSync('backend/src/browsers/cortex/meal.js', 'utf8');
 const origin = 'https://logistics.amazon.com';
 const scope = {
   date: '2026-09-15',

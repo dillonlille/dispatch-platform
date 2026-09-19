@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{
+use crate::{
     db::now,
     job_metrics::Recorder,
     meals::{Capture, Itinerary, Scope},
@@ -148,7 +148,7 @@ impl Driver {
         &mut self,
         scope: &Scope,
         metrics: &Recorder,
-        live: &crate::core::live_collection::Writer,
+        live: &crate::live_collection::Writer,
         progress: F,
     ) -> Result<Value>
     where

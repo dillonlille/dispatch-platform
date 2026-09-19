@@ -1,5 +1,5 @@
 //! Native input on the worker's private Xvfb display. No host display or helper process.
-use crate::core::{Error, Result, ensure};
+use crate::{Error, Result, ensure};
 use serde_json::{Value, json};
 use std::{
     ffi::{CStr, c_int, c_uint, c_ulong, c_void},

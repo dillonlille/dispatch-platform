@@ -1,6 +1,6 @@
 //! Per-tab state. Tabs share a bounded BrowserOS session, not execution contexts.
 use super::browseros;
-use crate::core::{Error, Result, db::s, ensure};
+use crate::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
 pub(super) struct Page {
     pub id: String,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const script = fs.readFileSync('backend/src/core/browsers/cortex/discovery.js', 'utf8');
+const script = fs.readFileSync('backend/src/browsers/cortex/discovery.js', 'utf8');
 const origin = 'https://logistics.amazon.com';
 const request = {
   date: '2026-01-10',

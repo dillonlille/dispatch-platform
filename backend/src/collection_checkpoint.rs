@@ -195,7 +195,7 @@ fn validate_page(employee: &Value, period: &Value, records: &[Value]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{config::Config, operations};
+    use crate::{config::Config, operations};
     use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]

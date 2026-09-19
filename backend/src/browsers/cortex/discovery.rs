@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{
+use crate::{
     job_metrics::Recorder,
     meals::{CollectionRequest, Scope},
 };

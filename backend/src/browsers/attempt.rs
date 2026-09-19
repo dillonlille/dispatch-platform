@@ -1,4 +1,4 @@
-use crate::core::{Error, Result, db, ensure};
+use crate::{Error, Result, db, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

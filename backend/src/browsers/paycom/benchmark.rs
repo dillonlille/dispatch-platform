@@ -106,13 +106,13 @@ async fn measure_live_collection() -> Result<()> {
     });
     let result = async {
         let secrets = dsp.join("secrets");
-        let credentials = crate::core::crypto::decrypt(&db::key_file(&secrets.join("vault.key"))?, &format!("{}:paycom:2",dsp.file_name().unwrap().to_str().unwrap()), &std::fs::read_to_string(secrets.join("paycom.enc"))?)?;
+        let credentials = crate::crypto::decrypt(&db::key_file(&secrets.join("vault.key"))?, &format!("{}:paycom:2",dsp.file_name().unwrap().to_str().unwrap()), &std::fs::read_to_string(secrets.join("paycom.enc"))?)?;
         let auth=driver.authenticate(credentials,false).await?;
         ensure(auth["type"]=="ready","benchmark_verification_required",409)?;
         driver.credentials=Value::Null;
         let timezone=std::env::var("DISPATCH_BENCHMARK_TIMEZONE").map_err(|_|Error::new("benchmark_configuration_required",400))?;
         let started=Instant::now();
-        let recorder=crate::core::job_metrics::Recorder::new(&json!({}));
+        let recorder=crate::job_metrics::Recorder::new(&json!({}));
         let data=driver.collect(&timezone, None, &recorder, None, |progress,_| async move {
             if progress % 10 == 0 { eprintln!("BENCH {}",json!({"progress":progress})); }
             Ok(())
@@ -121,7 +121,7 @@ async fn measure_live_collection() -> Result<()> {
         let reads=serde_json::to_value(recorder.snapshot())?["pageReads"].clone();
         eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],"spotChecked":reads["spotChecked"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
         let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
-        let database=rusqlite::Connection::open_with_flags(crate::core::collectors::database_path(&dsp, crate::core::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let database=rusqlite::Connection::open_with_flags(crate::collectors::database_path(&dsp, crate::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();
         let mut statement=database.prepare("SELECT employee_code,date,hours,status,punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1)")?;
         for value in statement.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,f64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {

@@ -1,4 +1,4 @@
-use dispatch_backend::core::{
+use dispatch_backend::{
     collectors::Provider,
     config::Config,
     db::{Store, s},

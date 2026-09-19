@@ -1,5 +1,5 @@
 use super::browseros::NetworkPolicy;
-use crate::core::{Error, Result, ensure};
+use crate::{Error, Result, ensure};
 use std::{net::IpAddr, os::fd::AsRawFd, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -81,7 +81,7 @@ impl Egress {
         Self::start_with_policy(run, policy)
     }
     pub fn start_with_policy(run: &Path, policy: NetworkPolicy) -> Result<Self> {
-        crate::core::db::private_dir(run)?;
+        crate::db::private_dir(run)?;
         let directory = std::fs::File::open(run)?;
         let listener = UnixListener::bind(format!(
             "/proc/self/fd/{}/egress.sock",

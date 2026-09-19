@@ -5,7 +5,7 @@ use super::{attempt, page::Page};
 #[cfg(test)]
 mod benchmark;
 use super::browseros;
-use crate::core::{
+use crate::{
     Error, Result,
     db::{self, s},
     ensure,

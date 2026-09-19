@@ -274,7 +274,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{config::Config, operations, workforce};
+    use crate::{config::Config, operations, workforce};
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     fn platform() -> (tempfile::TempDir, Store) {
@@ -286,7 +286,7 @@ mod tests {
         (root, store)
     }
     fn pending(store: &Store) -> String {
-        let id = crate::core::crypto::id("dsp").unwrap();
+        let id = crate::crypto::id("dsp").unwrap();
         store.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES (?,'Collectors','preview','provisioning','UTC',?)", [&id, &db::iso()]).unwrap();
         id
     }

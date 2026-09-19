@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{collection_checkpoint::Checkpoint, job_metrics::Recorder};
+use crate::{collection_checkpoint::Checkpoint, job_metrics::Recorder};
 use chrono::{Datelike, NaiveDate};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},

@@ -1,5 +1,5 @@
-use dispatch_backend::core::{
-    self, Error, Result,
+use dispatch_backend::{
+    Error, Result,
     config::Config,
     db::Store,
     ensure,
@@ -13,7 +13,7 @@ async fn main() {
         libc::umask(0o077);
     }
     if let Err(error) = run().await {
-        core::observability::event(
+        dispatch_backend::observability::event(
             "error",
             "core.failed",
             serde_json::json!({"error":error.code}),
@@ -26,7 +26,7 @@ async fn run() -> Result<()> {
     let command = args.first().map(String::as_str).unwrap_or("serve");
     if command == "browseros-worker" {
         ensure(args.len() == 2, "invalid_browser_worker_arguments", 400)?;
-        return core::browsers::browseros::worker_main(&args[1]).await;
+        return dispatch_backend::browsers::browseros::worker_main(&args[1]).await;
     }
     if command == "restore" {
         ensure(args.len() == 3, "usage_restore_backup_empty_target", 400)?;
@@ -49,7 +49,7 @@ async fn run() -> Result<()> {
                 "run_bootstrap_before_starting",
                 503,
             )?;
-            let state = core::State::new(config.clone())?;
+            let state = dispatch_backend::State::new(config.clone())?;
             state.run(|db|ensure(db.platform.one("SELECT id FROM users WHERE platform_owner=1 AND status='active' LIMIT 1",[])?.is_some(),"run_bootstrap_before_starting",503)).await?;
             state
                 .run(|db| {
@@ -60,19 +60,19 @@ async fn run() -> Result<()> {
             let listener =
                 tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, config.port)).await?;
             let (stop, receiver) = tokio::sync::watch::channel(false);
-            let jobs = tokio::spawn(core::supervise(
-                core::jobs::start(state.clone(), receiver.clone()),
+            let jobs = tokio::spawn(dispatch_backend::supervise(
+                dispatch_backend::jobs::start(state.clone(), receiver.clone()),
                 stop.clone(),
             ));
             let mail_state = state.clone();
-            let mail = tokio::spawn(core::supervise(
+            let mail = tokio::spawn(dispatch_backend::supervise(
                 async move {
                     operations::mailer(mail_state, receiver).await;
                     Ok(())
                 },
                 stop.clone(),
             ));
-            core::observability::event(
+            dispatch_backend::observability::event(
                 "info",
                 "core.started",
                 serde_json::json!({"environment":config.environment,"port":config.port,"release":config.release}),
@@ -83,12 +83,12 @@ async fn run() -> Result<()> {
                 let mut term =
                     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                         .expect("SIGTERM handler");
-                tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{},_=core::cancelled(&mut shutdown_receiver)=>{}};
+                tokio::select! {_=tokio::signal::ctrl_c()=>{},_=term.recv()=>{},_=dispatch_backend::cancelled(&mut shutdown_receiver)=>{}};
                 sender.send_replace(true);
             };
             let server = axum::serve(
                 listener,
-                core::http::router(state.clone())
+                dispatch_backend::http::router(state.clone())
                     .into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
             .with_graceful_shutdown(shutdown);

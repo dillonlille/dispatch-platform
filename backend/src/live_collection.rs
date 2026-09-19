@@ -193,7 +193,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{collection_checkpoint::Checkpoint, config::Config, operations, workforce};
+    use crate::{collection_checkpoint::Checkpoint, config::Config, operations, workforce};
     use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
@@ -340,7 +340,7 @@ mod tests {
                 Ok(s(&job, "id").to_owned())
             })
             .await?;
-        let mut capture = crate::core::meals::fixture(&scope);
+        let mut capture = crate::meals::fixture(&scope);
         capture.itineraries[0].driver = s(&employee, "name").into();
         let writer = Writer::new(state.clone(), &flex_job, "flex-owner");
         writer

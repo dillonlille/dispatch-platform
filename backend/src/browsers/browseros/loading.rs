@@ -1,5 +1,5 @@
 //! Bounded loading metadata. Never retain URLs, headers, bodies or credentials.
-use crate::core::{Result, ensure};
+use crate::{Result, ensure};
 use serde_json::{Value, json};
 use std::{collections::HashMap, time::Instant};
 

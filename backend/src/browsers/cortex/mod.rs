@@ -2,7 +2,7 @@
 mod collection;
 mod discovery;
 use super::{attempt::Attempts, browseros, page::Page};
-use crate::core::{Error, Result, db::s, ensure};
+use crate::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 use tokio::time::{Instant, sleep};
