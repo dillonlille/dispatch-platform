@@ -46,10 +46,9 @@ impl Updates {
     }
 }
 
-pub fn initialize(db: &Db) -> Result<()> {
-    db.0.execute_batch("CREATE TABLE IF NOT EXISTS collection_live_runs (job_id TEXT PRIMARY KEY, owner TEXT NOT NULL, metadata TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS collection_live_items (job_id TEXT NOT NULL REFERENCES collection_live_runs(job_id) ON DELETE CASCADE, item_key TEXT NOT NULL, date TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(job_id,date,item_key));
-        DELETE FROM collection_live_runs;")?;
+// No collection survives a restart, so neither do its live rows.
+pub fn reset(db: &Db) -> Result<()> {
+    db.exec("DELETE FROM collection_live_runs", [])?;
     Ok(())
 }
 impl Store {

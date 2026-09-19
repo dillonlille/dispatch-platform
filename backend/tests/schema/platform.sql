@@ -5,6 +5,7 @@ CREATE TABLE memberships (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES 
 CREATE TABLE outbox (id TEXT PRIMARY KEY, encrypted_message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL, sent_at TEXT, created_at INTEGER, last_attempt_at INTEGER, last_error TEXT);
 CREATE TABLE resets (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), user_version INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
 CREATE TABLE roles (id TEXT PRIMARY KEY, dsp_id TEXT NOT NULL REFERENCES dsps(id), name TEXT NOT NULL COLLATE NOCASE, permissions TEXT NOT NULL DEFAULT '[]', system INTEGER NOT NULL DEFAULT 0 CHECK(system IN (0,1)), created_at TEXT NOT NULL, UNIQUE(dsp_id,name));
+CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
 CREATE TABLE sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), user_version INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE throttle (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
 CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, first_name TEXT NOT NULL, last_name TEXT NOT NULL, password TEXT NOT NULL, platform_owner INTEGER NOT NULL DEFAULT 0 CHECK(platform_owner IN (0,1)), status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')), version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);

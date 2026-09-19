@@ -1,4 +1,4 @@
-use super::{Db, identifier, key_file, private_dir, private_file, s};
+use super::{Db, Kind, identifier, key_file, migrate, private_dir, private_file, s};
 use crate::{Result, config::Config, ensure};
 use std::path::{Path, PathBuf};
 pub struct DspLease<'a> {
@@ -40,41 +40,28 @@ impl Store {
         private_dir(&config.environment_root())?;
         private_dir(&config.root.join("dsps"))?;
         let key = key_file(&config.platform().join("platform.key"))?;
-        let jobs = Db::open(
-            &config.environment_root().join("jobs.sqlite"),
-            include_str!("jobSchema.sql"),
-            1,
-            true,
-        )?;
-        // Additive tables retain compatibility with the previous Rust release.
-        jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
         let store = Self {
-            platform: Db::open(
+            platform: Db::create(
                 &config.platform().join("accounts.sqlite"),
-                include_str!("platformSchema.sql"),
-                3,
-                true,
+                Kind::Platform,
+                "",
             )?,
-            jobs,
+            jobs: Db::create(
+                &config.environment_root().join("jobs.sqlite"),
+                Kind::Jobs,
+                "",
+            )?,
             config,
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
-        crate::roles::migrate(&store.platform)?;
-        crate::audit::migrate_audit(&store.platform)?;
-        store
-            .platform
-            .0
-            .execute_batch(include_str!("platformIndexes.sql"))?;
-        store
-            .jobs
-            .0
-            .execute_batch("CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created_at DESC)")?;
+        crate::roles::backfill(&store.platform)?;
         for row in store.platform.all(
             "SELECT id FROM dsps WHERE status IN ('active','suspended')",
             [],
         )? {
             let id = s(&row, "id");
+            migrate(&*store.dsp(id)?, Kind::Dsp)?;
             store.open_collectors(id)?;
             store.initialize_schedules(id)?;
         }
@@ -82,8 +69,8 @@ impl Store {
     }
     pub fn open(config: Config, key: Vec<u8>) -> Result<Self> {
         Ok(Self {
-            platform: Db::open(&config.platform().join("accounts.sqlite"), "", 3, false)?,
-            jobs: Db::open(&config.environment_root().join("jobs.sqlite"), "", 1, false)?,
+            platform: Db::open(&config.platform().join("accounts.sqlite"), Kind::Platform)?,
+            jobs: Db::open(&config.environment_root().join("jobs.sqlite"), Kind::Jobs)?,
             config,
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
@@ -102,9 +89,9 @@ impl Store {
     }
     pub fn dsp(&self, id: &str) -> Result<DspLease<'_>> {
         let path = self.area(id, "data")?.join("dispatch.sqlite");
-        self.cached_database(&path, 1)
+        self.cached_database(&path, Kind::Dsp)
     }
-    pub(crate) fn cached_database(&self, path: &Path, version: i64) -> Result<DspLease<'_>> {
+    pub(crate) fn cached_database(&self, path: &Path, kind: Kind) -> Result<DspLease<'_>> {
         private_file(path, false)?;
         ensure(path.is_file(), "storage_file_missing", 503)?;
         let id = path.to_string_lossy();
@@ -117,7 +104,7 @@ impl Store {
         };
         let db = match cached {
             Some(db) => db,
-            None => Db::open(path, "", version, false)?,
+            None => Db::open(path, kind)?,
         };
         Ok(DspLease {
             id: id.into_owned(),
@@ -125,16 +112,14 @@ impl Store {
             cache: &self.dsp_cache,
         })
     }
-    // Core settings are separate from provider-owned data from initial provisioning.
     pub fn initialize_dsp(&self, id: &str) -> Result<Db> {
         for area in ["data", "config", "state", "secrets"] {
             self.area(id, area)?;
         }
-        Db::open(
+        Db::create(
             &self.area(id, "data")?.join("dispatch.sqlite"),
-            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-            1,
-            true,
+            Kind::Dsp,
+            "",
         )
     }
 }

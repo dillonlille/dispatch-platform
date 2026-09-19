@@ -2,7 +2,7 @@
 //! never user-controlled paths.
 use super::{
     Result,
-    db::{self, Db, DspLease, Store, s},
+    db::{self, Db, DspLease, Kind, Store, s},
     ensure,
 };
 use serde_json::{Value, json};
@@ -46,15 +46,10 @@ impl Provider {
             .find(|p| p.job_kind() == kind)
             .ok_or_else(|| super::Error::new("unsupported_collector", 409))
     }
-    fn schema(self) -> &'static str {
+    fn database(self) -> Kind {
         match self {
-            Self::Paycom => include_str!("paycom.sql"),
-            Self::Cortex => include_str!("cortex.sql"),
-        }
-    }
-    fn version(self) -> i64 {
-        match self {
-            Self::Paycom | Self::Cortex => 1,
+            Self::Paycom => Kind::Paycom,
+            Self::Cortex => Kind::Cortex,
         }
     }
     fn relative_path(self) -> PathBuf {
@@ -124,7 +119,7 @@ impl Store {
     }
     pub fn collector(&self, id: &str, provider: Provider) -> Result<DspLease<'_>> {
         let path = self.area(id, "data")?.join(provider.relative_path());
-        let db = self.cached_database(&path, provider.version())?;
+        let db = self.cached_database(&path, provider.database())?;
         identity(&db, id, provider)?;
         Ok(db)
     }
@@ -133,52 +128,34 @@ impl Store {
         let provider = Provider::Paycom;
         let data = self.area(id, "data")?;
         db::private_dir(&data.join(provider.id()))?;
-        let schema = format!(
-            "{}\nINSERT INTO storage_identity VALUES ('{}','paycom','paycom-v1');",
-            provider.schema(),
-            id
-        );
-        let target = Db::open(
+        // Validated random DSP IDs and compiled provider IDs are safe SQL literals.
+        let target = Db::create(
             &data.join(provider.relative_path()),
-            &schema,
-            provider.version(),
-            true,
+            provider.database(),
+            &format!("INSERT INTO storage_identity VALUES ('{id}','paycom','paycom-v1');"),
         )?;
         identity(&target, id, provider)?;
         self.dsp(id)?.set(LAYOUT, &json!(1))?;
         self.initialize_cortex(id)?;
-        self.initialize_sources(id)?;
-        self.initialize_live(id)
+        self.reset_live(id)
     }
     // Called during startup under the platform lock, before serving requests.
-    // Provider databases are verified, and gain tables added since they were made.
+    // Provider databases are verified, and gain the migrations they lack.
     pub(crate) fn open_collectors(&self, id: &str) -> Result<()> {
         ensure(
             self.dsp(id)?.setting(LAYOUT, Value::Null)? == json!(1),
             "unsupported_storage_layout",
             503,
         )?;
-        self.collector(id, Provider::Paycom)?;
+        db::migrate(&*self.collector(id, Provider::Paycom)?, Kind::Paycom)?;
         self.initialize_cortex(id)?;
-        self.initialize_sources(id)?;
-        self.initialize_live(id)?;
+        self.reset_live(id)?;
         self.prune_checkpoints(id)
     }
 
-    // Additive, so the previous runtime still opens these databases on rollback.
-    fn initialize_sources(&self, id: &str) -> Result<()> {
-        self.collector(id, Provider::Paycom)?.0.execute_batch(
-            "CREATE TABLE IF NOT EXISTS timecard_sources (publication_id TEXT NOT NULL, employee_code TEXT NOT NULL, period_key TEXT NOT NULL, url TEXT NOT NULL, PRIMARY KEY(publication_id,employee_code), FOREIGN KEY(publication_id,employee_code) REFERENCES employees(publication_id,code) ON DELETE CASCADE);",
-        )?;
-        self.collector(id, Provider::Cortex)?.0.execute_batch(
-            "CREATE TABLE IF NOT EXISTS meal_sources (publication_id TEXT NOT NULL, itinerary_id TEXT NOT NULL, url TEXT NOT NULL, PRIMARY KEY(publication_id,itinerary_id), FOREIGN KEY(publication_id,itinerary_id) REFERENCES meal_itineraries(publication_id,itinerary_id) ON DELETE CASCADE);",
-        )?;
-        Ok(())
-    }
-
-    fn initialize_live(&self, id: &str) -> Result<()> {
+    fn reset_live(&self, id: &str) -> Result<()> {
         for provider in Provider::ALL {
-            super::live_collection::initialize(&*self.collector(id, *provider)?)?;
+            super::live_collection::reset(&*self.collector(id, *provider)?)?;
         }
         Ok(())
     }
@@ -189,24 +166,20 @@ impl Store {
         let core = self.dsp(id)?;
         let marker = core.setting("storage.cortex", Value::Null)?;
         if marker == json!(1) {
-            self.collector(id, Provider::Cortex)?;
-            return self.initialize_cortex_meals(id);
+            db::migrate(&*self.collector(id, Provider::Cortex)?, Kind::Cortex)?;
+            return self.verify_cortex_meals(id);
         }
         ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
         let provider = Provider::Cortex;
         let data = self.area(id, "data")?;
         db::private_dir(&data.join(provider.id()))?;
-        let schema = format!(
-            "{}\nINSERT INTO storage_identity VALUES ('{}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');",
-            provider.schema(),
-            id,
-            db::iso()
-        );
-        let target = Db::open(
+        let target = Db::create(
             &data.join(provider.relative_path()),
-            &schema,
-            provider.version(),
-            true,
+            provider.database(),
+            &format!(
+                "INSERT INTO storage_identity VALUES ('{id}','cortex','cortex-v1');\nINSERT INTO connections(provider,updated_at) VALUES ('cortex','{}');",
+                db::iso()
+            ),
         )?;
         identity(&target, id, provider)?;
         ensure(
@@ -220,23 +193,11 @@ impl Store {
             503,
         )?;
         core.set("storage.cortex", &json!(1))?;
-        self.initialize_cortex_meals(id)
+        self.verify_cortex_meals(id)
     }
 
-    fn initialize_cortex_meals(&self, id: &str) -> Result<()> {
+    fn verify_cortex_meals(&self, id: &str) -> Result<()> {
         let db = self.collector(id, Provider::Cortex)?;
-        if db
-            .one(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_schema'",
-                [],
-            )?
-            .is_none()
-        {
-            db.transaction(|| {
-                db.0.execute_batch(include_str!("cortexMeals.sql"))?;
-                Ok(())
-            })?;
-        }
         ensure(
             db.all("SELECT version FROM meal_schema", [])? == vec![json!({"version":1})],
             "unsupported_cortex_schema",
@@ -244,22 +205,10 @@ impl Store {
         )?;
         // Missing initialized feature tables fail closed, rather than recreating lost data.
         // meal_delivery_events, meal_breaks and their trigger hold nothing and are not
-        // required here. They are still created because v0.0.9 refuses to start without
-        // them; stop creating them once a release without that check has shipped.
+        // required here. The baseline still creates them because v0.0.9 refuses to start
+        // without them.
         for table in ["meal_publications", "meal_itineraries"] {
             db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
-        }
-        if db
-            .one(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='meal_record_schema'",
-                [],
-            )?
-            .is_none()
-        {
-            db.transaction(|| {
-                db.0.execute_batch(include_str!("cortexMealRecords.sql"))?;
-                Ok(())
-            })?;
         }
         ensure(
             db.all("SELECT version FROM meal_record_schema", [])? == vec![json!({"version":1})],
@@ -360,16 +309,17 @@ mod tests {
             provider.setting("dsp.profile", Value::Null).unwrap(),
             Value::Null
         );
-        // A database from before links were retained gains the tables on startup.
+        // A database an older binary made, from before links were retained and
+        // before migrations were recorded, gains the tables on startup.
         provider
             .0
-            .execute_batch("DROP TABLE timecard_sources")
+            .execute_batch("DROP TABLE timecard_sources; DROP TABLE schema_migrations;")
             .unwrap();
         store
             .collector(&id, Provider::Cortex)
             .unwrap()
             .0
-            .execute_batch("DROP TABLE meal_sources")
+            .execute_batch("DROP TABLE meal_sources; DROP TABLE schema_migrations;")
             .unwrap();
         drop(provider);
         drop(core);
@@ -431,7 +381,7 @@ mod tests {
             "unsupported_storage_layout"
         );
         let path = database_path(&config.root.join("dsps").join(&id), Provider::Paycom).unwrap();
-        let provider = Db::open(&path, "", 1, false).unwrap();
+        let provider = Db::open(&path, Kind::Paycom).unwrap();
         assert_eq!(snapshot(&provider), before);
     }
     #[test]
@@ -487,7 +437,7 @@ mod tests {
             .collector(&id, Provider::Paycom)
             .unwrap()
             .0
-            .execute_batch("DROP TABLE timecard_sources")
+            .execute_batch("DROP TABLE timecard_sources; DROP TABLE schema_migrations;")
             .unwrap();
         let external = tempfile::tempdir().unwrap();
         let backup = external.path().join("backup");
