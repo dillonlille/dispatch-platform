@@ -1,16 +1,9 @@
 import { useState } from 'react';
 import type { JobMetrics } from '../../shared/contracts/index.js';
-import { title } from './lib/format.js';
+import { bytes, duration, title } from './lib/format.js';
 
-export function duration(ms: number | null) {
-  if (ms === null) return '—';
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-}
-export function memory(bytes: number | null) {
-  return bytes === null ? 'Not sampled' : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-}
+export const memory = (value: number | null) =>
+  value === null ? 'Not sampled' : bytes(value, 'MiB', 1);
 export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
   const [expanded, setExpanded] = useState(false);
   const latest = metrics.at(-1);

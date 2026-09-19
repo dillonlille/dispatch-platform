@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { Job } from '../../shared/contracts/index.js';
 import { collectionHistory } from './collection-history.js';
-import { duration, memory } from './job-performance.js';
+import { memory } from './job-performance.js';
 import { Badge, DetailList } from './ui/index.js';
-import { time, deviceTimezone } from './lib/format.js';
+import { deviceTimezone, duration, time } from './lib/format.js';
 
 export function CollectionHistory({ jobs }: { jobs: Job[] }) {
   const groups = useMemo(() => collectionHistory(jobs), [jobs]);

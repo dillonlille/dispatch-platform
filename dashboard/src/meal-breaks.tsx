@@ -21,7 +21,7 @@ import {
   SortHeader,
   usePagination,
 } from './ui/index.js';
-import { time } from './lib/format.js';
+import { personName, time } from './lib/format.js';
 import {
   clockLabel,
   cortexClock,
@@ -440,15 +440,7 @@ export function MealBreaksPage({
   const data = current ?? request.stale;
   const shownDate = data?.date ?? date;
   const zone = data?.timezone ?? timezone;
-  const name = (row: MealEmployee) => {
-    const value = fullName(row.name);
-    const parts = value.split(' ');
-    return preferences.name_order === 'last_first' && parts.length > 1
-      ? row.name.includes(',')
-        ? row.name
-        : `${parts.at(-1)}, ${parts.slice(0, -1).join(' ')}`
-      : value;
-  };
+  const name = (row: MealEmployee) => personName(row.name, preferences.name_order);
   const lateTime = preferences.late_da_time,
     lateDepartments = preferences.late_da_departments;
   const rows = useMemo(

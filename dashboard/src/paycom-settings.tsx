@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
 import { api, ApiError, useData } from './api.js';
 import { DataState, ErrorBox, Header, Modal } from './ui/index.js';
-import { dateFormatter } from '../../shared/date-format.js';
+import { time } from './lib/format.js';
 import {
   scheduleIssues,
   type CollectionSchedule,
@@ -33,17 +33,8 @@ function repeat(schedule: ScheduleInput) {
     ? `Every ${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`
     : `Every ${minutes} minutes`;
 }
-function nextCollection(value: string | null, timezone: string) {
-  return value
-    ? dateFormatter('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        timeZone: timezone,
-      }).format(new Date(value))
-    : 'Not scheduled';
-}
+const nextCollection = (value: string | null, timezone: string) =>
+  time(value, timezone, 'Not scheduled');
 function CollectionLabels({ collection }: Pick<ScheduleInput, 'collection'>) {
   return (
     <div className="schedule-collections">

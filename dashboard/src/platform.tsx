@@ -24,7 +24,7 @@ import {
   SearchInput,
   Tabs,
 } from './ui/index.js';
-import { time, deviceTimezone, title } from './lib/format.js';
+import { bytes, deviceTimezone, time, title } from './lib/format.js';
 const open = (dsp: { id: string }) => navigate(dspHash(dsp.id));
 const runtime = (dsp: DspSummary) =>
   dsp.profile.removed ? 'Stopped' : dsp.status === 'active' ? 'Running' : title(dsp.status);
@@ -441,12 +441,12 @@ export function DiagnosticsPage() {
             <section aria-label="Runtime health" className="archived-card diagnostics-health">
               <h2>Runtime health</h2>
               <p className="muted">
-                Available storage: {(data.storageAvailableBytes / 1024 ** 3).toFixed(1)} GiB
+                Available storage: {bytes(data.storageAvailableBytes, 'GiB', 1)}
               </p>
               <div className="runtime-row">
                 <span>{data.runtime.name}</span>
                 <span>
-                  {data.runtime.status} · {Math.round(data.runtime.memoryBytes / 1024 ** 2)} MiB ·{' '}
+                  {data.runtime.status} · {bytes(data.runtime.memoryBytes, 'MiB')} ·{' '}
                   {data.runtime.browsers} active browsers
                 </span>
               </div>
@@ -629,6 +629,6 @@ function browserMemoryStatus(memory: PlatformHealth['browsers']['memory']) {
   const available =
     memory.availableBytes === null
       ? 'Available memory unknown'
-      : `${(memory.availableBytes / 1024 ** 2).toFixed(0)} MiB available`;
-  return `${status} · ${available} · ${(memory.requiredBytes / 1024 ** 2).toFixed(0)} MiB needed`;
+      : `${bytes(memory.availableBytes, 'MiB')} available`;
+  return `${status} · ${available} · ${bytes(memory.requiredBytes, 'MiB')} needed`;
 }

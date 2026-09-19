@@ -1,4 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { onActivity } from './lib/activity.js';
 
 const storageKey = 'dispatch:browser-update:v1';
 const values = new Map<string, unknown>();
@@ -62,18 +63,7 @@ export function useBrowserUpdate(enabled: boolean) {
     const activity = () => {
       lastActivity = performance.now();
     };
-    const events = [
-      'pointermove',
-      'pointerdown',
-      'keydown',
-      'input',
-      'wheel',
-      'touchstart',
-      'scroll',
-      'focusin',
-    ];
-    for (const name of events)
-      window.addEventListener(name, activity, { capture: true, passive: true });
+    const unwatch = onActivity(activity);
     const blocked = () =>
       document.hidden ||
       writes > 0 ||
@@ -148,7 +138,7 @@ export function useBrowserUpdate(enabled: boolean) {
       controller.abort();
       clearInterval(polling);
       clearInterval(idle);
-      for (const name of events) window.removeEventListener(name, activity, true);
+      unwatch();
       document.removeEventListener('visibilitychange', visible);
     };
   }, [enabled]);

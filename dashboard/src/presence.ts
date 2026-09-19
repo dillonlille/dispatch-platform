@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { csrf } from './api.js';
+import { onActivity } from './lib/activity.js';
 
 const BEAT = 30_000;
 const IDLE = 120_000;
@@ -40,18 +41,7 @@ export function usePresence(token: string | undefined) {
       lastActivity = performance.now();
       if (sent !== 'active') void send('active');
     };
-    const events = [
-      'pointermove',
-      'pointerdown',
-      'keydown',
-      'input',
-      'wheel',
-      'touchstart',
-      'scroll',
-      'focusin',
-    ];
-    for (const name of events)
-      window.addEventListener(name, activity, { capture: true, passive: true });
+    const unwatch = onActivity(activity);
     // Returning to the dashboard counts as using it; a background tab goes idle on its own.
     const visible = () => {
       if (!document.hidden) activity();
@@ -77,7 +67,7 @@ export function usePresence(token: string | undefined) {
     return () => {
       leave = undefined;
       clearInterval(timer);
-      for (const name of events) window.removeEventListener(name, activity, true);
+      unwatch();
       document.removeEventListener('visibilitychange', visible);
       window.removeEventListener('pagehide', gone);
       window.removeEventListener('pageshow', shown);

@@ -24,7 +24,7 @@ import {
   SearchInput,
   Tabs,
 } from './ui/index.js';
-import { title, time } from './lib/format.js';
+import { time, timeOfDay, title } from './lib/format.js';
 import { can } from './app/permissions.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
@@ -86,11 +86,7 @@ function SourceSyncStatus({
       collectedAt && localDate(timezone, new Date(collectedAt)) === localDate(timezone);
     const timestamp = collectedAt
       ? collectedToday
-        ? new Intl.DateTimeFormat('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZone: timezone,
-          }).format(new Date(collectedAt))
+        ? timeOfDay(collectedAt, timezone)
         : time(collectedAt, timezone)
       : null;
     return (

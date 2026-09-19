@@ -2,6 +2,7 @@ import { beginBrowserWrite } from './browser-update.js';
 import { scheduleIssues } from '../../shared/schedules.js';
 import { useEffect, useState, useCallback } from 'react';
 import { parseApiResponse } from '../../shared/contracts/runtime.js';
+import { backoff } from './lib/backoff.js';
 export let csrf = '',
   view = '';
 export function credentials(nextCsrf: string, nextView = '') {
@@ -137,10 +138,7 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null, da
           // A missed table response must recover even when no further driver arrives.
           if (!(error instanceof ApiError) || error.status >= 500 || error.status === 429) {
             if (retry) clearTimeout(retry);
-            retry = setTimeout(
-              () => void read(),
-              Math.min(15000, 1000 * 2 ** Math.min(failures++, 4)),
-            );
+            retry = setTimeout(() => void read(), backoff(failures++));
           }
         }
       } finally {

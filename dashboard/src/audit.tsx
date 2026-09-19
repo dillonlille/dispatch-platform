@@ -29,7 +29,7 @@ import type {
 } from '../../shared/contracts/index.js';
 import { api, errorLabel, useData } from './api.js';
 import { DataState, Empty, ErrorBox, SearchInput } from './ui/index.js';
-import { deviceTimezone, title } from './lib/format.js';
+import { deviceTimezone, elapsed, timeOfDay, title } from './lib/format.js';
 import { permissionLabels } from './roles.js';
 import { useAction } from './lib/useAction.js';
 import { dspHash } from './app/navigation.js';
@@ -183,10 +183,6 @@ function outcome(event: AuditEvent): Part[] {
     result,
   ];
 }
-function duration(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  return minutes ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
-}
 const failures: Record<string, (provider: string) => string> = {
   manual_verification_required: (p) => `${p} needs verification — sign-in was challenged`,
   verification_expired: () => 'Verification expired before it was completed',
@@ -259,10 +255,7 @@ const fields: Record<string, string> = {
   'paycom.late_da_time': 'Late DA time',
   'paycom.late_da_departments': 'Late DA departments',
 };
-const clockTime = (value: string) =>
-  dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
-    new Date(`2000-01-01T${value}:00Z`),
-  );
+const clockTime = (value: string) => timeOfDay(`2000-01-01T${value}:00Z`, 'UTC');
 const paycomValues: Record<string, string> = {
   true: 'On',
   false: 'Off',
@@ -295,10 +288,7 @@ function changeValue(field: string, value: string) {
       .map((column) => paycomColumns.find(([key]) => key === column)?.[1] ?? column)
       .join(', ');
   if (field.startsWith('paycom.')) return paycomValues[value] ?? value;
-  if (field === 'time' && /^\d{2}:\d{2}$/.test(value))
-    return dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
-      new Date(`2000-01-01T${value}:00Z`),
-    );
+  if (field === 'time' && /^\d{2}:\d{2}$/.test(value)) return clockTime(value);
   return value;
 }
 function changeText(change: AuditChange) {
@@ -341,7 +331,7 @@ function notes(event: AuditEvent, platform: boolean): string[] {
       : []),
     ...(outcomes[event.action] && !system(event) ? [`Requested by ${event.actorName}`] : []),
     ...(event.action === 'collection.completed' && fact(event, 'duration')
-      ? [duration(Number(fact(event, 'duration')))]
+      ? [elapsed(Number(fact(event, 'duration')))]
       : []),
     ...(event.action === 'audit.exported' && Number(event.detail)
       ? [
@@ -443,7 +433,7 @@ export function AuditLog({ view }: { view?: DspView }) {
   const { data, stale, error } = useData<AuditPage>(`${base}?${query}&limit=${limit}`, 10000);
   const page = data ?? stale;
 
-  const clock = dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone });
+  const clock = (at: string) => timeOfDay(at, timeZone);
   const dayKey = dateFormatter('en-CA', { timeZone });
   const exact = dateFormatter('en-US', {
     weekday: 'short',
@@ -725,8 +715,8 @@ export function AuditLog({ view }: { view?: DspView }) {
                             </span>
                             <time dateTime={event.at}>
                               {run
-                                ? `${clock.format(new Date(entry.events.at(-1)!.at))} – ${clock.format(new Date(event.at))}`
-                                : clock.format(new Date(event.at))}
+                                ? `${clock(entry.events.at(-1)!.at)} – ${clock(event.at)}`
+                                : clock(event.at)}
                               {run && (
                                 <ChevronDown size={16} className="audit-chevron" aria-hidden />
                               )}
@@ -736,9 +726,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                             <dl className="audit-detail">
                               {run ? (
                                 <Row label="Times">
-                                  {entry.events
-                                    .map((visit) => clock.format(new Date(visit.at)))
-                                    .join(', ')}
+                                  {entry.events.map((visit) => clock(visit.at)).join(', ')}
                                 </Row>
                               ) : (
                                 <Row label="Exact time">{exact.format(new Date(event.at))}</Row>
