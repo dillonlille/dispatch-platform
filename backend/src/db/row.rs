@@ -38,8 +38,8 @@ impl<A: FromSql, B: FromSql> FromRow for (A, B) {
 #[macro_export]
 macro_rules! text_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident => $text:literal,)* }) => {
-        $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        $(#[$meta])*
         $vis enum $name { $(#[serde(rename = $text)] $variant,)* }
         impl $name {
             pub const fn as_str(self) -> &'static str {

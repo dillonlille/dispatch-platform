@@ -33,7 +33,7 @@ export function RoleSheet({
   const [chosen, setChosen] = useState<Permission[]>(role?.permissions ?? []);
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
-  const inUse = role ? role.members + role.invitations > 0 : false;
+  const inUse = role ? (role.members ?? 0) + (role.invitations ?? 0) > 0 : false;
   const save = useAction(
     async () => {
       await api(role ? `/api/dsp/roles/${role.id}` : '/api/dsp/roles', {

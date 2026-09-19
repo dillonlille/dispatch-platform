@@ -18,7 +18,8 @@ fn invalid_record() -> Error {
 }
 
 text_enum! {
-    pub enum Environment {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum Environment {
         Preview => "preview",
         Production => "production",
     }
@@ -32,13 +33,15 @@ impl Environment {
     }
 }
 text_enum! {
-    pub enum ProviderMode {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum ProviderMode {
         Fixture => "fixture",
         Native => "native",
     }
 }
 text_enum! {
-    pub enum DspStatus {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum DspStatus {
         Provisioning => "provisioning",
         Active => "active",
         Suspended => "suspended",
@@ -52,7 +55,8 @@ text_enum! {
     }
 }
 text_enum! {
-    pub enum ConnectionStatus {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum ConnectionStatus {
         NotConnected => "not_connected",
         Ready => "ready",
         SigningIn => "signing_in",
@@ -61,7 +65,8 @@ text_enum! {
     }
 }
 text_enum! {
-    pub enum OwnerStatus {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum OwnerStatus {
         Active => "active",
         Invited => "invited",
         Missing => "missing",
@@ -69,20 +74,23 @@ text_enum! {
 }
 text_enum! {
     /// What a schedule collects: one provider's data, or every scheduled provider's.
-    pub enum ScheduleCollection {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum ScheduleCollection {
         Paycom => "paycom",
         MealBreak => "meal_break",
         Both => "both",
     }
 }
 text_enum! {
-    pub enum Cadence {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum Cadence {
         Interval => "interval",
         Daily => "daily",
     }
 }
 text_enum! {
-    pub enum Presence {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum Presence {
         Active => "active",
         Idle => "idle",
         Offline => "offline",
@@ -165,6 +173,7 @@ impl CollectionRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PublicUser {
     pub id: String,
@@ -191,6 +200,7 @@ impl FromRow for PublicUser {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Dsp {
     pub id: String,
@@ -199,6 +209,7 @@ pub struct Dsp {
     pub status: DspStatus,
     pub timezone: String,
     pub permanent: bool,
+    #[cfg_attr(test, ts(type = "number"))]
     pub revision: i64,
     pub created_at: String,
 }
@@ -218,10 +229,12 @@ impl FromRow for Dsp {
 }
 /// A DSP as the session lists it: who owns it, the caller's role, and its collection state.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DspSummary {
     #[serde(flatten)]
     pub dsp: Dsp,
+    #[cfg_attr(test, ts(type = "unknown"))]
     pub profile: Value,
     pub owner_email: Option<String>,
     pub owner_status: OwnerStatus,
@@ -231,6 +244,7 @@ pub struct DspSummary {
     /// The query's own columns, which earlier releases sent along. No dashboard reads
     /// them; they stay until a release has shipped without a reader that could.
     #[serde(flatten)]
+    #[cfg_attr(test, ts(skip))]
     pub legacy: DspSummaryLegacy,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -241,6 +255,7 @@ pub struct DspSummaryLegacy {
     pub invite_email: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
     pub id: String,
@@ -255,16 +270,20 @@ pub struct Member {
 }
 /// A role as the team pages list it. The counts are only known to the list.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Role {
     pub id: String,
     pub name: String,
     pub owner: bool,
     pub permissions: Vec<String>,
+    #[cfg_attr(test, ts(type = "number | null"))]
     pub members: Option<i64>,
+    #[cfg_attr(test, ts(type = "number | null"))]
     pub invitations: Option<i64>,
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RoleSummary {
     pub id: String,
     pub name: String,
@@ -272,17 +291,21 @@ pub struct RoleSummary {
 }
 /// What opening a DSP answers with: the signed view token and what the role may do.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct DspView {
     pub dsp: Dsp,
     pub role: RoleSummary,
     pub permissions: Vec<String>,
     pub token: String,
+    #[cfg_attr(test, ts(type = "unknown"))]
     pub profile: Value,
     /// Every role of the DSP, sent only to a platform owner so they can look through one.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub roles: Option<Vec<RoleSummary>>,
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
     pub provider: String,
@@ -294,6 +317,7 @@ pub struct Connection {
     pub account_label: Option<String>,
     /// The browser session a member can take over, while one waits for them.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub verification_session_id: Option<String>,
 }
 impl FromRow for Connection {
@@ -311,20 +335,24 @@ impl FromRow for Connection {
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSchedule {
     pub id: String,
     pub name: String,
     pub collection: ScheduleCollection,
     pub cadence: Cadence,
+    #[cfg_attr(test, ts(type = "number | null"))]
     pub interval_minutes: Option<i64>,
     pub local_time: String,
     pub enabled: bool,
     pub next_run: Option<String>,
+    #[cfg_attr(test, ts(type = "number"))]
     pub revision: i64,
     pub last_error: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSchedules {
     pub timezone: String,
@@ -332,11 +360,13 @@ pub struct CollectionSchedules {
     pub schedules: Vec<CollectionSchedule>,
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SchedulePreview {
     pub next_run: String,
 }
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionResponse {
     pub user: PublicUser,
@@ -349,7 +379,8 @@ pub struct SessionResponse {
 }
 
 text_enum! {
-    pub enum JobStatus {
+    #[cfg_attr(test, derive(ts_rs::TS))]
+        pub enum JobStatus {
         Queued => "queued",
         Running => "running",
         WaitingVerification => "waiting_verification",
@@ -488,12 +519,14 @@ impl JobRow {
     }
 }
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PublicJob {
     pub id: String,
     pub dsp_id: String,
     pub dsp_name: String,
     pub environment: Environment,
+    #[cfg_attr(test, ts(type = "\"paycom.collect\" | \"cortex.meal_breaks.collect\""))]
     pub kind: JobKind,
     pub status: JobStatus,
     pub progress: u8,
@@ -507,6 +540,7 @@ pub struct PublicJob {
     pub error: Option<String>,
     pub release: String,
     pub actor_id: Option<String>,
+    #[cfg_attr(test, ts(type = "Array<unknown>"))]
     pub metrics: Vec<Value>,
 }
 impl PublicJob {
@@ -568,5 +602,87 @@ mod tests {
         assert_eq!(crate::job_statuses!(active), list(JobStatus::ACTIVE));
         assert_eq!(crate::job_statuses!(leased), list(JobStatus::LEASED));
         assert!(serde_json::from_value::<JobStatus>(json!("finished")).is_err());
+    }
+}
+
+/// The TypeScript the dashboard compiles against, written from the types above into
+/// `shared/contracts/generated`. `npm run contracts:generate` rewrites the files; every
+/// other test run fails when they no longer match, so the two sides cannot drift.
+#[cfg(test)]
+mod generated {
+    use super::*;
+    use std::{collections::BTreeMap, path::PathBuf};
+    use ts_rs::TS;
+
+    macro_rules! exported {
+        ($cfg:expr, $($ty:ty),* $(,)?) => {
+            BTreeMap::from([$((
+                <$ty>::output_path().expect("named type"),
+                <$ty>::export_to_string($cfg).expect("exportable type"),
+            )),*])
+        };
+    }
+    fn bindings() -> BTreeMap<PathBuf, String> {
+        let cfg = ts_rs::Config::new();
+        exported!(
+            &cfg,
+            Cadence,
+            CollectionSchedule,
+            CollectionSchedules,
+            Connection,
+            ConnectionStatus,
+            Dsp,
+            DspStatus,
+            DspSummary,
+            DspView,
+            Environment,
+            JobStatus,
+            Member,
+            OwnerStatus,
+            Presence,
+            ProviderMode,
+            PublicJob,
+            PublicUser,
+            Role,
+            RoleSummary,
+            ScheduleCollection,
+            SchedulePreview,
+            SessionResponse,
+        )
+    }
+    #[test]
+    fn typescript_contracts_match_the_rust_types() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../shared/contracts/generated");
+        let bindings = bindings();
+        if std::env::var_os("DISPATCH_UPDATE_CONTRACTS").is_some() {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            for (file, text) in &bindings {
+                std::fs::write(dir.join(file), text).unwrap();
+            }
+        }
+        let mut stored = BTreeMap::new();
+        for entry in std::fs::read_dir(&dir).expect("shared/contracts/generated") {
+            let path = entry.unwrap().path();
+            let name = PathBuf::from(path.file_name().unwrap());
+            stored.insert(name, std::fs::read_to_string(&path).unwrap());
+        }
+        assert!(
+            stored == bindings,
+            "shared/contracts/generated is out of date: run `npm run contracts:generate`"
+        );
+    }
+    #[test]
+    fn the_job_kinds_written_for_typescript_are_the_registered_ones() {
+        let kinds: Vec<_> = Provider::ALL
+            .iter()
+            .map(|p| format!("{:?}", p.job_kind()))
+            .collect();
+        let cfg = ts_rs::Config::new();
+        assert!(
+            PublicJob::export_to_string(&cfg)
+                .unwrap()
+                .contains(&kinds.join(" | "))
+        );
     }
 }
