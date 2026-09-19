@@ -27,6 +27,7 @@
     "contracts:generate": "DISPATCH_UPDATE_CONTRACTS=1 cargo test --locked --lib contracts::generated"
   },
   "dependencies": {
+    "@tanstack/react-table": "^9.2.4",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

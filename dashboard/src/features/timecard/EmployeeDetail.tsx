@@ -1,13 +1,37 @@
 import { ArrowLeft } from 'lucide-react';
 import type { Employee, Timecard } from '../../../../shared/contracts/index.js';
 import { useData } from '../../app/api.js';
-import { Badge, DataState, DetailList } from '../../ui/index.js';
-import { PunchCells } from './PunchCells.js';
+import {
+  Badge,
+  DataState,
+  DataTable,
+  DetailList,
+  useDataTable,
+  type TableColumn,
+} from '../../ui/index.js';
+import { punchColumns } from './punchColumns.js';
+
+const none: Timecard[] = [];
+const columns: TableColumn<Timecard>[] = [
+  {
+    id: 'date',
+    header: 'Date',
+    hideable: false,
+    value: (card) => card.date,
+    cell: (card) => card.date,
+  },
+  ...punchColumns<Timecard>(false),
+];
 
 export function EmployeeDetail({ code, close }: { code: string; close: () => void }) {
   const { data, error } = useData<{ employee: Employee; timecards: Timecard[] }>(
     `/api/dsp/employees/${encodeURIComponent(code)}`,
   );
+  const table = useDataTable({
+    columns,
+    rows: data?.timecards ?? none,
+    rowId: (card) => card.date,
+  });
   return (
     <div className="paycom-data-view">
       <button className="text-button" onClick={close}>
@@ -35,31 +59,11 @@ export function EmployeeDetail({ code, close }: { code: string; close: () => voi
             <h2>Employee timecard</h2>
             <div className="paycom-data-table">
               <div className="table-wrap">
-                <table className="paycom-day-table" aria-label="Employee period timecard">
-                  <thead>
-                    <tr>
-                      {[
-                        'Date',
-                        'Clock in',
-                        'Lunch out',
-                        'Lunch in',
-                        'Clock out',
-                        'Hours',
-                        'Punch status',
-                      ].map((label) => (
-                        <th key={label}>{label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.timecards.map((card) => (
-                      <tr key={card.date}>
-                        <td>{card.date}</td>
-                        <PunchCells card={card} />
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  table={table}
+                  className="paycom-day-table"
+                  label="Employee period timecard"
+                />
               </div>
             </div>
             <p className="paycom-source-note">

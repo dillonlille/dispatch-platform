@@ -1,5 +1,5 @@
 import { useUpdateState } from '../../app/browser-update.js';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Ellipsis, Plus, RefreshCw, Eye } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
 import { useAction } from '../../app/useAction.js';
@@ -9,6 +9,7 @@ import {
   Badge,
   ConfirmDialog,
   DataState,
+  DataTable,
   DetailList,
   Empty,
   ErrorBox,
@@ -17,6 +18,8 @@ import {
   Popover,
   SearchInput,
   Tabs,
+  useDataTable,
+  type TableColumn,
 } from '../../ui/index.js';
 import { title } from '../../lib/format.js';
 import { open } from './open.js';
@@ -32,6 +35,7 @@ const onboarding = (dsp: DspSummary) =>
     : dsp.ownerStatus === 'invited'
       ? 'Invitation pending'
       : 'Invite needed';
+const none: DspSummary[] = [];
 export function DspList() {
   const { data, error, refresh } = usePlatformDsps(10000);
   const [query, setQuery] = useUpdateState('dsp-query', ''),
@@ -40,18 +44,22 @@ export function DspList() {
     [suspending, setSuspending] = useState<DspSummary>(),
     [removing, setRemoving] = useState<DspSummary>(),
     [detail, setDetail] = useState<DspSummary>();
-  const dsps = data ?? [],
-    visible = dsps.filter(
-      (d) =>
-        `${d.name} ${d.ownerEmail ?? ''}`.toLowerCase().includes(query.toLowerCase()) &&
-        (filter === 'removed'
-          ? d.profile.removed
-          : !d.profile.removed &&
-            (filter === 'all' ||
-              (filter === 'running' && d.status === 'active') ||
-              (filter === 'onboarding' &&
-                (d.ownerStatus !== 'active' || d.profile.setupRequired)))),
-    );
+  const dsps = data ?? none;
+  const visible = useMemo(
+    () =>
+      dsps.filter(
+        (d) =>
+          `${d.name} ${d.ownerEmail ?? ''}`.toLowerCase().includes(query.toLowerCase()) &&
+          (filter === 'removed'
+            ? d.profile.removed
+            : !d.profile.removed &&
+              (filter === 'all' ||
+                (filter === 'running' && d.status === 'active') ||
+                (filter === 'onboarding' &&
+                  (d.ownerStatus !== 'active' || d.profile.setupRequired)))),
+      ),
+    [dsps, query, filter],
+  );
   const create = useAction(
     async (ownerEmail: FormDataEntryValue | null) => {
       await api('/api/platform/dsps', { ownerEmail });
@@ -93,6 +101,86 @@ export function DspList() {
     { success: 'DSP suspended' },
   );
   const busy = create.busy;
+  const columns: TableColumn<DspSummary>[] = [
+    {
+      id: 'dsp',
+      header: 'DSP',
+      headerClassName: 'fleet-dsp-column',
+      hideable: false,
+      value: (dsp) => dsp.name,
+      cell: (dsp) => (
+        <button className="identity-button" onClick={() => setDetail(dsp)}>
+          <DspAvatar name={dsp.name} />
+          <span className="dsp-identity-copy">
+            <strong>{dsp.name}</strong>
+            <span>{dsp.profile.abbreviation || (dsp.permanent ? 'DEV' : '')}</span>
+          </span>
+        </button>
+      ),
+    },
+    {
+      id: 'owner',
+      header: 'Owner',
+      className: 'muted',
+      value: (dsp) => dsp.ownerEmail,
+      cell: (dsp) => dsp.ownerEmail ?? 'No owner assigned',
+    },
+    {
+      id: 'runtime',
+      header: 'Runtime',
+      value: runtime,
+      cell: (dsp) => <Badge value={dsp.status}>{runtime(dsp)}</Badge>,
+    },
+    {
+      id: 'onboarding',
+      header: 'Onboarding',
+      value: onboarding,
+      cell: (dsp) => (
+        <Badge value={dsp.ownerStatus === 'active' ? 'neutral' : 'pending'}>
+          {onboarding(dsp)}
+        </Badge>
+      ),
+    },
+    {
+      id: 'actions',
+      header: <span className="sr-only">Actions</span>,
+      name: 'Actions',
+      hideable: false,
+      className: 'cell-end',
+      cell: (dsp) => (
+        <Popover
+          className="row-menu"
+          label={`Actions for ${dsp.name}`}
+          trigger={<Ellipsis size={18} />}
+          anchored
+        >
+          {dsp.profile.removed ? (
+            <button onClick={() => void restore.run(dsp)}>Restore DSP</button>
+          ) : dsp.status === 'active' ? (
+            <button onClick={() => open(dsp)}>
+              <Eye size={16} />
+              View
+            </button>
+          ) : (
+            <button onClick={() => void resume.run(dsp)}>
+              {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
+            </button>
+          )}
+          {!dsp.permanent &&
+            !dsp.profile.removed &&
+            ['active', 'suspended'].includes(dsp.status) && (
+              <button onClick={() => setRemoving(dsp)}>Remove DSP</button>
+            )}
+          {dsp.status === 'active' && !dsp.permanent && (
+            <button className="danger" onClick={() => setSuspending(dsp)}>
+              Suspend DSP
+            </button>
+          )}
+        </Popover>
+      ),
+    },
+  ];
+  const table = useDataTable({ columns, rows: visible, rowId: (dsp) => dsp.id });
   return (
     <>
       <Header title="DSPs">
@@ -146,74 +234,7 @@ export function DspList() {
       <DataState data={data}>
         {() => (
           <div className="table-wrap">
-            <table className="fleet-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '28%' }}>DSP</th>
-                  <th>Owner</th>
-                  <th>Runtime</th>
-                  <th>Onboarding</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((dsp) => (
-                  <tr key={dsp.id}>
-                    <td>
-                      <button className="identity-button" onClick={() => setDetail(dsp)}>
-                        <DspAvatar name={dsp.name} />
-                        <span className="dsp-identity-copy">
-                          <strong>{dsp.name}</strong>
-                          <span>{dsp.profile.abbreviation || (dsp.permanent ? 'DEV' : '')}</span>
-                        </span>
-                      </button>
-                    </td>
-                    <td className="muted">{dsp.ownerEmail ?? 'No owner assigned'}</td>
-                    <td>
-                      <Badge value={dsp.status}>{runtime(dsp)}</Badge>
-                    </td>
-                    <td>
-                      <Badge value={dsp.ownerStatus === 'active' ? 'neutral' : 'pending'}>
-                        {onboarding(dsp)}
-                      </Badge>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <Popover
-                        className="row-menu"
-                        label={`Actions for ${dsp.name}`}
-                        trigger={<Ellipsis size={18} />}
-                        anchored
-                      >
-                        {dsp.profile.removed ? (
-                          <button onClick={() => void restore.run(dsp)}>Restore DSP</button>
-                        ) : dsp.status === 'active' ? (
-                          <button onClick={() => open(dsp)}>
-                            <Eye size={16} />
-                            View
-                          </button>
-                        ) : (
-                          <button onClick={() => void resume.run(dsp)}>
-                            {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
-                          </button>
-                        )}
-                        {!dsp.permanent &&
-                          !dsp.profile.removed &&
-                          ['active', 'suspended'].includes(dsp.status) && (
-                            <button onClick={() => setRemoving(dsp)}>Remove DSP</button>
-                          )}
-                        {dsp.status === 'active' && !dsp.permanent && (
-                          <button className="danger" onClick={() => setSuspending(dsp)}>
-                            Suspend DSP
-                          </button>
-                        )}
-                      </Popover>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable table={table} className="fleet-table" />
             {!visible.length && (
               <Empty title="No DSPs found">Try another search or create your first DSP.</Empty>
             )}

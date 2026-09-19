@@ -7,6 +7,7 @@ export function SortHeader({
   onSort,
   scope,
   className = 'table-sort',
+  headerClassName,
   indicator = <ArrowUpDown size={14} />,
 }: {
   children: ReactNode;
@@ -15,11 +16,13 @@ export function SortHeader({
   onSort: () => void;
   scope?: 'col';
   className?: string;
+  headerClassName?: string;
   indicator?: ReactNode;
 }) {
   return (
     <th
       scope={scope}
+      className={headerClassName}
       aria-sort={direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'}
     >
       <button className={className} onClick={onSort}>

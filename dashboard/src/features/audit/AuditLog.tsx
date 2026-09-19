@@ -28,6 +28,7 @@ import type {
 } from '../../../../shared/contracts/index.js';
 import { api, useData } from '../../app/api.js';
 import { DataState, Empty, ErrorBox, SearchInput } from '../../ui/index.js';
+import { downloadCsv } from '../../lib/csv.js';
 import { deviceTimezone, timeOfDay, title } from '../../lib/format.js';
 import { useAction } from '../../app/useAction.js';
 import { dspHash } from '../../app/navigation.js';
@@ -217,31 +218,26 @@ export function AuditLog({ view }: { view?: DspView }) {
         setTruncated(
           `Exported the newest ${all.events.length.toLocaleString('en-US')} of ${all.total.toLocaleString('en-US')} events.`,
         );
-      const cell = (value: string) => `"${value.replaceAll('"', '""')}"`;
-      const rows = all.events.map((event) =>
+      const rows = all.events.map((event) => [
+        exact.format(new Date(event.at)),
+        event.actorName,
+        ...(view ? [] : [event.dspName ?? '']),
+        areas.find(([id]) => id === event.area)?.[1] ?? '',
+        plain(sentence(event)),
         [
-          exact.format(new Date(event.at)),
-          event.actorName,
-          ...(view ? [] : [event.dspName ?? '']),
-          areas.find(([id]) => id === event.area)?.[1] ?? '',
-          plain(sentence(event)),
-          [
-            ...notes(event, false),
-            ...event.changes.filter((change) => !facts.has(change.field)).map(changeText),
-            ...(event.changes.some((change) => !facts.has(change.field)) ||
-            spoken.has(event.action) ||
-            !event.detail
-              ? []
-              : [event.detail]),
-            failure(event),
-          ]
-            .filter(Boolean)
-            .join('; '),
-          event.action,
+          ...notes(event, false),
+          ...event.changes.filter((change) => !facts.has(change.field)).map(changeText),
+          ...(event.changes.some((change) => !facts.has(change.field)) ||
+          spoken.has(event.action) ||
+          !event.detail
+            ? []
+            : [event.detail]),
+          failure(event),
         ]
-          .map(cell)
-          .join(','),
-      );
+          .filter(Boolean)
+          .join('; '),
+        event.action,
+      ]);
       const header = [
         'Time',
         'Person',
@@ -251,13 +247,7 @@ export function AuditLog({ view }: { view?: DspView }) {
         'Details',
         'Action',
       ];
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(
-        new Blob([`﻿${[header.join(','), ...rows].join('\r\n')}`], { type: 'text/csv' }),
-      );
-      link.download = `audit-log-${dayKey.format(new Date())}.csv`;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      downloadCsv(`audit-log-${dayKey.format(new Date())}.csv`, header, rows);
     },
     { inline: true },
   );

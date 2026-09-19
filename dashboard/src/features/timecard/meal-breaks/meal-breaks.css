@@ -395,11 +395,6 @@
   }
   .meal-table tbody th:first-child,
   .meal-table thead th:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--background);
-    border-right: 1px solid var(--border);
     min-width: 155px;
     max-width: 175px;
   }

@@ -53,7 +53,7 @@ export function LunchCell({
   difference?: number | null;
 }) {
   return (
-    <td className="meal-lunch">
+    <>
       <div>
         <Source name="Paycom" />
         <Clock value={paycom} />
@@ -62,7 +62,7 @@ export function LunchCell({
         <Source name="Flex" />
         <Clock value={cortex} difference={difference} />
       </div>
-    </td>
+    </>
   );
 }
 export function GapBadge({ gap, side }: { gap: DeliveryGap | null; side: 'before' | 'after' }) {
