@@ -23,11 +23,6 @@ const FAILED_STATION: &str = "SELECT * FROM jobs WHERE dsp_id=? AND kind=? \
     ORDER BY CASE status WHEN 'failed' THEN 0 ELSE 1 END,created_at DESC LIMIT 1";
 const BATCH: &str = "SELECT * FROM jobs WHERE dsp_id=? AND substr(idempotency_key,1,?)=? \
     ORDER BY CASE kind WHEN 'paycom.collect' THEN 0 ELSE 1 END,idempotency_key";
-const ACTIVE_JOB: &str = concat!(
-    "SELECT id FROM jobs WHERE dsp_id=? AND status IN ",
-    job_statuses!(active),
-    " LIMIT 1"
-);
 // Reuse the selected day's proven scopes. For an uncollected day, use the
 // most recently collected day's scopes, never another DSP or ALL_DSPS.
 const SCOPES: &str = "SELECT station,service_area_id,provider,timezone FROM meal_publications \
@@ -84,10 +79,16 @@ impl Store {
         let collected = provider
             .collector()
             .collected_at(&*self.collector(id, provider)?, date)?;
+        let job = active.or(latest);
+        let request = job
+            .as_ref()
+            .map(|row| serde_json::from_str::<Value>(&row.request))
+            .transpose()?;
         Ok(json!({
             "enabled":self.connection_for(id,provider)?.enabled,
-            "active":active.is_some(),
-            "job":active.or(latest).map(|row|self.public_job(row)).transpose()?,
+            "active":job.as_ref().is_some_and(|row|row.status.is_active()),
+            "jobDate":request.as_ref().and_then(|request|request.get("date")).and_then(Value::as_str),
+            "job":job.map(|row|self.public_job(row)).transpose()?,
             "collectedAt":collected.map(|row|row["collected_at"].clone()),
         }))
     }
@@ -172,11 +173,6 @@ impl Store {
                 serde_json::to_value(scope)?,
             ));
         }
-        ensure(
-            self.jobs.one(ACTIVE_JOB, [id])?.is_none(),
-            "sync_in_progress",
-            409,
-        )?;
         let jobs = self.enqueue_batch(id, Some(actor), &requests)?;
         Ok(json!({"date":date,"jobs":jobs}))
     }

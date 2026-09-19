@@ -1,4 +1,5 @@
 import { useUpdateState } from '../../app/browser-update.js';
+import { useState } from 'react';
 import { ArrowRight, RefreshCw, Settings } from 'lucide-react';
 import type { Connection, DspView } from '../../../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
@@ -19,6 +20,7 @@ export function PaycomPage({ view }: { view: DspView }) {
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
   const tab = selectedTab ?? 'timecards';
+  const [syncRevision, setSyncRevision] = useState(0);
   const overview = useData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
@@ -28,16 +30,16 @@ export function PaycomPage({ view }: { view: DspView }) {
     scopeAvailable: boolean;
     paycom: SyncSource;
     flex: SyncSource;
-  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000);
+  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000, undefined, String(syncRevision));
   // The last known state stays up while another date loads so the page does not shift.
-  const sourceState = syncState.data;
-  const sourceCurrent = sourceState?.date === date;
+  const sourceState = syncState.data ?? syncState.stale;
+  const sourceCurrent = syncState.data?.date === date;
   const { error, refresh } = overview;
   const data = overview.data?.connection;
   const meals = tab === 'meal-breaks';
   const timecards = tab === 'timecards';
   const daily = timecards || meals;
-  const activeSync = sourceState?.paycom.active || (daily && sourceState?.flex.active);
+  const activeSync = sourceState?.paycom.active || sourceState?.flex.active;
   const collectedAt = overview.data?.workforce.collectedAt;
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
   const syncUnavailable = daily
@@ -56,12 +58,16 @@ export function PaycomPage({ view }: { view: DspView }) {
   const canConnect = can(view, 'connections.manage');
   const sync = useAction(
     async () => {
-      await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-        requestId: crypto.randomUUID(),
-        ...(tab !== 'employees' ? { date } : {}),
-      });
-      refresh();
-      syncState.refresh();
+      try {
+        await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
+          requestId: crypto.randomUUID(),
+          ...(tab !== 'employees' ? { date } : {}),
+        });
+      } finally {
+        refresh();
+        // Keep every Sync Now disabled until status read after this request arrives.
+        setSyncRevision((value) => value + 1);
+      }
     },
     { success: () => (daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued') },
   );
@@ -69,6 +75,7 @@ export function PaycomPage({ view }: { view: DspView }) {
     <button
       disabled={
         !!syncUnavailable ||
+        !syncState.data ||
         !!syncState.error ||
         sync.busy ||
         !!activeSync ||
@@ -76,6 +83,7 @@ export function PaycomPage({ view }: { view: DspView }) {
       }
       title={
         syncUnavailable ||
+        (activeSync && 'A collection is in progress for this DSP.') ||
         (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
       }
       onClick={() => void sync.run()}
@@ -133,6 +141,13 @@ export function PaycomPage({ view }: { view: DspView }) {
                 source={sourceState?.paycom}
                 timezone={view.dsp.timezone}
               />
+              {sourceState?.flex.active && (
+                <SourceSyncStatus
+                  name="Flex"
+                  source={sourceState.flex}
+                  timezone={view.dsp.timezone}
+                />
+              )}
               {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
             </div>
           )}

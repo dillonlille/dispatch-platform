@@ -261,3 +261,66 @@ fn status_reads_allow_a_viewer_date_ahead_of_the_dsp_but_collection_does_not() {
         "invalid_date"
     );
 }
+
+#[test]
+fn manual_sync_lock_and_original_date_follow_the_entire_batch() {
+    let (_root, db, id, actor) = fixture();
+    enable(&db, &id, Provider::Paycom);
+    enable(&db, &id, Provider::Cortex);
+    seed(&db, &id, "2026-01-10", 1);
+    let original = db
+        .enqueue_meal_sync(&id, &actor, "original", "2026-01-11")
+        .unwrap();
+    let paycom = s(&original["jobs"][0], "id");
+    let flex = s(&original["jobs"][1], "id");
+    db.jobs
+        .exec("UPDATE jobs SET status='succeeded' WHERE id=?", [paycom])
+        .unwrap();
+    let scope = Scope {
+        date: "2026-01-12".into(),
+        station: "DEM1".into(),
+        service_area_id: "area-1".into(),
+        provider: "provider-demo".into(),
+        timezone: "America/Los_Angeles".into(),
+    };
+    for status in ["queued", "running", "waiting_verification"] {
+        db.jobs
+            .exec("UPDATE jobs SET status=? WHERE id=?", [status, flex])
+            .unwrap();
+        let viewed = db.meal_sync_status(&id, "2026-01-12").unwrap();
+        assert_eq!(viewed["date"], "2026-01-12");
+        assert_eq!(viewed["flex"]["jobDate"], "2026-01-11");
+        assert_eq!(viewed["flex"]["active"], true);
+        assert_eq!(viewed["paycom"]["active"], false);
+        assert_eq!(viewed["flex"]["collectedAt"], Value::Null);
+        for rejected in [
+            db.enqueue(&id, Some(&actor), "employees"),
+            db.enqueue_paycom_date(&id, Some(&actor), "timecard", "2026-01-12"),
+            db.enqueue_meals(&id, Some(&actor), "flex-only", &scope),
+            db.enqueue_meal_sync(&id, &actor, "other-day", "2026-01-12"),
+        ] {
+            assert_eq!(rejected.unwrap_err().code, "sync_in_progress");
+        }
+        // Retrying an accepted request returns its jobs without starting another sync.
+        let replay = db
+            .enqueue_meal_sync(&id, &actor, "original", "2026-01-11")
+            .unwrap();
+        assert_eq!(replay["jobs"][0]["id"], paycom);
+        assert_eq!(replay["jobs"][1]["id"], flex);
+        assert_eq!(jobs(&db, &id).len(), 2);
+    }
+    for status in ["succeeded", "failed", "cancelled"] {
+        db.jobs
+            .exec("UPDATE jobs SET status=? WHERE id=?", [status, flex])
+            .unwrap();
+        assert_eq!(
+            db.meal_sync_status(&id, "2026-01-12").unwrap()["flex"]["active"],
+            false
+        );
+        let next = db
+            .enqueue(&id, Some(&actor), &format!("after-{status}"))
+            .unwrap();
+        assert_eq!(next["status"], "queued");
+        db.cancel_job(s(&next, "id"), &id).unwrap();
+    }
+}
