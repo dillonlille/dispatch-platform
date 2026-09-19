@@ -1,7 +1,6 @@
 node_modules/
 .build/
 package-lock.json
-dashboard/src/base.css
 
 dashboard/src/paycom-workforce.css
 target/

@@ -1,0 +1,129 @@
+/*
+ * Design tokens. Unlayered, and imported before every other stylesheet.
+ *
+ * app/appearance.ts sets data-theme="light" | "dark" on <html>; "system" is resolved to one of the two
+ * in JavaScript, so no prefers-color-scheme query is needed here. The light values are the default.
+ * ThemeSection.tsx renders <span class="theme-preview-scope" data-theme="…"> so that the previews in the
+ * theme picker show a given theme whatever the page is using.
+ */
+:root,
+.theme-preview-scope {
+  color-scheme: light;
+
+  /* Fonts */
+  --font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+
+  /* Surfaces */
+  --background: #fff;
+  --card: #fff;
+  --popover: #fff;
+  --sidebar: #f7f8fa;
+  --surface: #f8f9fc;
+  --muted: #edf0f4;
+  --accent: #f0f3f8; /* hover */
+  --selection: #edf1fd; /* current navigation item, selected rows */
+  --overlay: #10182755; /* behind dialogs and the mobile drawer */
+
+  /* Text */
+  --foreground: #171b25;
+  --muted-foreground: #626b7a;
+  --popover-foreground: var(--foreground);
+
+  /* Brand and actions */
+  --primary: #2055ed;
+  --primary-hover: #1745cd;
+  --primary-foreground: #fff;
+  --ring: #3765e8; /* focus outline */
+
+  /* Borders */
+  --border: #e3e7ee;
+  --input: #ced5e0; /* form control borders */
+
+  /* Status */
+  --destructive: #b42332;
+  --success: #16814b;
+  --warning: #956009;
+  --warning-surface: #fff8eb;
+  --warning-border: #eed5a7;
+
+  /* Identity tones for DSP avatars (DspAvatar.tsx): ink on surface */
+  --violet: #6553aa;
+  --violet-surface: #f0edf9;
+  --sage: #36765e;
+  --sage-surface: #eaf4ee;
+  --slate: #51647d;
+  --slate-surface: #eaf0f7;
+  --steel: #427380;
+  --steel-surface: #e9f3f5;
+
+  /* Shadows: used as `box-shadow: <offsets> var(--shadow-color)` */
+  --shadow-color: #10182726;
+
+  /* Radius */
+  --radius: 0.5rem;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --page-gutter: 36px;
+
+  /* Type and control sizes */
+  --heading-size: 32px;
+  --body-size: 14px;
+  --control-height: 40px;
+  --table-row-padding: 15px;
+
+  /* Motion */
+  --motion-duration: 0.16s;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --background: #11151d;
+  --card: #171c26;
+  --popover: #1b2230;
+  --sidebar: #171c26;
+  --surface: #1b2230;
+  --muted: #252e3d;
+  --accent: #242d3d;
+  --selection: #253251;
+  --overlay: #0009;
+
+  /* Text */
+  --foreground: #edf1f7;
+  --muted-foreground: #a6b1c2;
+
+  /* Brand and actions */
+  --primary: #8eaaff;
+  --primary-hover: #adc1ff;
+  --primary-foreground: #111827;
+  --ring: #8eaaff;
+
+  /* Borders */
+  --border: #303949;
+  --input: #465269;
+
+  /* Status */
+  --destructive: #f49aaa;
+  --success: #6ed39a;
+  --warning: #e9b963;
+  --warning-surface: #32291c;
+  --warning-border: #65512f;
+
+  /* Identity tones */
+  --violet: #b5a5ec;
+  --violet-surface: #302a43;
+  --sage: #94cdb3;
+  --sage-surface: #24392f;
+  --slate: #b2c4de;
+  --slate-surface: #29374b;
+  --steel: #9ecad4;
+  --steel-surface: #243c44;
+
+  /* Shadows */
+  --shadow-color: #0006;
+}
