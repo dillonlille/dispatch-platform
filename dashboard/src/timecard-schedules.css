@@ -311,6 +311,83 @@
   gap: 12px;
   font-size: 13px;
 }
+.late-das {
+  margin-top: 36px;
+}
+.late-das .schedule-section-heading {
+  min-height: 36px;
+  margin-bottom: 12px;
+}
+.late-das-actions {
+  display: flex;
+  gap: 8px;
+}
+.late-das-actions button {
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.late-das-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.late-das-field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 18px 16px;
+  border: 0;
+}
+.late-das-field + .late-das-field {
+  border-left: 1px solid var(--border);
+}
+.late-das-field > :is(span, legend) {
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+.late-das-field > legend {
+  float: left;
+  width: 100%;
+}
+.late-das-field input[type='time'] {
+  width: 140px;
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.late-das-departments {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 20px;
+  clear: both;
+}
+.late-das-departments label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.late-das-departments small,
+.late-das-field p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.late-das-field p {
+  margin: 0;
+  clear: both;
+}
 @media (max-width: 1100px) {
   .schedule-table :is(th, td) {
     padding-inline: 12px;
@@ -319,6 +396,13 @@
 @media (max-width: 800px) {
   .schedule-section-heading {
     align-items: flex-start;
+  }
+  .late-das-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .late-das-field + .late-das-field {
+    border-left: 0;
+    border-top: 1px solid var(--border);
   }
   .schedule-table,
   .schedule-table tbody {

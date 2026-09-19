@@ -18,6 +18,8 @@ export interface PaycomPreferences {
   station: string | null;
   columns: PaycomColumn[];
   driver_departments: string[] | null;
+  late_da_time: string;
+  late_da_departments: string[];
 }
 export const paycomDefaults: PaycomPreferences = {
   automatic_sync: true,
@@ -30,6 +32,8 @@ export const paycomDefaults: PaycomPreferences = {
   station: null,
   columns: paycomColumns.map(([key]) => key),
   driver_departments: null,
+  late_da_time: '10:01',
+  late_da_departments: [],
 };
 export interface PaycomSettings {
   revision: number;

@@ -14,6 +14,7 @@ import {
 import { api, useData } from './api.js';
 import { Empty, ErrorBox, Loading, Modal, time } from './ui.js';
 import {
+  clockLabel,
   cortexClock,
   fullName,
   mealPairs,
@@ -447,12 +448,19 @@ export function MealBreaksPage({
         : `${parts.at(-1)}, ${parts.slice(0, -1).join(' ')}`
       : value;
   };
+  const lateTime = preferences.late_da_time,
+    lateDepartments = preferences.late_da_departments;
   const rows = useMemo(
-    () => (data?.rows ?? []).map((row) => ({ row, summary: mealPairs(row, shownDate) })),
-    [data, shownDate],
+    () =>
+      (data?.rows ?? []).map((row) => ({
+        row,
+        summary: mealPairs(row, shownDate, { time: lateTime, departments: lateDepartments }),
+      })),
+    [data, shownDate, lateTime, lateDepartments],
   );
   const counts = {
     all: rows.length,
+    late: rows.filter((r) => r.summary.lateIn).length,
     different: rows.filter((r) => r.summary.different).length,
     missing: rows.filter((r) => r.summary.missing).length,
     gaps: rows.filter((r) => r.summary.longGap).length,
@@ -461,11 +469,13 @@ export function MealBreaksPage({
     .filter(
       ({ row, summary }) =>
         (filter === 'all' ||
-          (filter === 'different'
-            ? summary.different
-            : filter === 'gaps'
-              ? summary.longGap
-              : summary.missing)) &&
+          (filter === 'late'
+            ? summary.lateIn
+            : filter === 'different'
+              ? summary.different
+              : filter === 'gaps'
+                ? summary.longGap
+                : summary.missing)) &&
         `${name(row)} ${row.paycom?.employeeCode ?? ''} ${row.cortex.map((m) => m.driverName).join(' ')}`
           .toLowerCase()
           .includes(query.toLowerCase()),
@@ -520,6 +530,7 @@ export function MealBreaksPage({
           {(
             [
               ['all', 'All'],
+              ['late', 'Late DAs'],
               ['different', 'Different times'],
               ['missing', 'Missing data'],
               ['gaps', 'Gaps > 5 min'],
@@ -719,6 +730,12 @@ export function MealBreaksPage({
               <br />
               Delivery gaps use Flex only: last delivery → OUT LUNCH, and IN LUNCH → first delivery.
               Only gaps over 5 minutes are flagged.
+              <br />
+              <br />
+              Late DAs have a Paycom IN DAY punch at or after {clockLabel(lateTime)}
+              {lateDepartments.length > 0 &&
+                ` in ${lateDepartments.map((d) => d || 'No department').join(', ')}`}
+              .
             </p>
           </details>
         </div>

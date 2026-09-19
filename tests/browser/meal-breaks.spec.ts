@@ -182,6 +182,9 @@ test('approved comparison table, filters, details, links, date errors and mobile
     path: test.info().outputPath('dispatch-meal-breaks-desktop.png'),
     fullPage: true,
   });
+  await page.getByRole('button', { name: 'Late DAs 1', exact: true }).click();
+  await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
+  await expect(page.locator('.meal-table tbody > tr')).toContainText('Sam Patel');
   await page.getByRole('button', { name: 'Different times 1', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Missing data 3', exact: true }).click();
