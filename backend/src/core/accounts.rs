@@ -442,7 +442,8 @@ impl super::State {
             // A platform owner's name never reaches a DSP's log.
             let inviter = db.platform.one("SELECT u.first_name||' '||u.last_name name,u.platform_owner FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?",[crypto::sha(&raw)])?;
             let invited_by = inviter.and_then(|u| if !flag(&u,"platform_owner") { Some(s(&u,"name").to_owned()) } else if db.support_visible(s(&invite,"dspId")) { Some("Platform support".to_owned()) } else { None });
-            db.audit_with(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"),None,&invited_by.map(|name| ("invitedBy",None,Some(name))).into_iter().collect::<Vec<_>>())?;
+            let name = format!("{first} {last}");
+            db.audit_ref(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"),Some(&name),&invited_by.map(|name| ("invitedBy",None,Some(name))).into_iter().collect::<Vec<_>>(),Some(("member",&id)))?;
             Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
         })).await
     }

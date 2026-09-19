@@ -16,6 +16,7 @@ const event = (at: string, action: string, area: AuditEvent['area'], rest: Parti
     detail: '',
     area,
     target: null,
+    ref: null,
     changes: [],
     ...rest,
   }) satisfies AuditEvent;
@@ -46,6 +47,7 @@ const events: AuditEvent[] = [
   event('2026-09-15T20:50:00Z', 'member.role_changed', 'team', {
     detail: 'Manager',
     target: 'Jordan Pike',
+    ref: { kind: 'member', id: 'usr_jordan' },
     changes: [{ field: 'role', from: 'Dispatcher', to: 'Manager' }],
   }),
   event('2026-09-15T20:12:00Z', 'member.invited', 'team', {
@@ -84,6 +86,40 @@ const events: AuditEvent[] = [
   event('2026-09-15T13:40:00Z', 'employees.links_updated', 'settings', {
     detail: 'Revision 3; 2 changes',
   }),
+  event('2026-09-15T13:38:00Z', 'employees.links_updated', 'settings', {
+    detail: 'Revision 4; 3 changes',
+    changes: [
+      { field: 'linked', from: null, to: '2' },
+      { field: 'separated', from: null, to: '1' },
+    ],
+  }),
+  event('2026-09-15T13:36:00Z', 'paycom.settings_updated', 'settings', {
+    detail: 'Revision 5',
+    changes: [
+      { field: 'paycom.automatic_sync', from: 'true', to: 'false' },
+      { field: 'paycom.late_da_time', from: '10:01', to: '09:45' },
+      { field: 'paycom.department', from: 'All', to: 'Drivers' },
+    ],
+  }),
+  // A retried attempt is not the collection's outcome, so it is not a failure.
+  event('2026-09-15T13:34:00Z', 'collection.retrying', 'collections', {
+    ...system,
+    detail: 'provider_timeout',
+    ref: { kind: 'job', id: 'job_1' },
+    changes: [
+      { field: 'provider', from: null, to: 'cortex' },
+      { field: 'attempt', from: null, to: '1 of 3' },
+    ],
+  }),
+  event('2026-09-15T13:32:00Z', 'collection.failed', 'collections', {
+    ...system,
+    detail: 'provider_timeout',
+    ref: { kind: 'job', id: 'job_1' },
+    changes: [
+      { field: 'provider', from: null, to: 'cortex' },
+      { field: 'attempt', from: null, to: '3 of 3' },
+    ],
+  }),
   // An event this build has no wording for still reads, with its detail.
   event('2026-09-15T13:30:00Z', 'vehicle.inspection_logged', 'settings', { detail: 'Van 12' }),
 ];
@@ -94,9 +130,11 @@ async function open(page: Page) {
     const query = new URL(route.request().url()).searchParams;
     requests.push(query);
     const area = query.get('area');
+    const subject = query.get('subject');
     const matching = events.filter(
       (item) =>
-        !area || (area === 'failures' ? item.action.endsWith('.failed') : item.area === area),
+        (!area || (area === 'failures' ? item.action.endsWith('.failed') : item.area === area)) &&
+        (!subject || (item.ref && `${item.ref.kind}:${item.ref.id}` === subject)),
     );
     const counts: AuditPage['counts'] = { failures: 1 };
     for (const item of events) counts[item.area] = (counts[item.area] ?? 0) + 1;
@@ -110,6 +148,7 @@ async function open(page: Page) {
           { id: 'usr_maria', name: 'Maria Lopez' },
           { id: 'system', name: 'System' },
         ],
+        dsps: [],
       } satisfies AuditPage,
     });
   });
@@ -185,7 +224,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await page.screenshot({ path: test.info().outputPath('audit-log-dark.png'), fullPage: true });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
 
-  await expect(page.getByText('Showing 12 of 18')).toBeVisible();
+  await expect(page.getByText('Showing 12 of 22')).toBeVisible();
   await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect.poll(() => requests.at(-1)?.get('limit')).toBe('100');
   // Older events fall back to the wording their data supports.
@@ -193,16 +232,36 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(item(page, 'Collection completed')).toBeVisible();
   await expect(item(page, 'deleted a schedule')).toBeVisible();
   await expect(item(page, 'Maria Lopez disconnected Cortex')).toBeVisible();
-  await expect(item(page, 'updated employee links')).toContainText('2 links changed');
+  await expect(item(page, 'updated employee links').first()).toContainText('2 links changed');
+  await expect(item(page, 'updated employee links').last()).toContainText(
+    '2 linked·1 kept separate',
+  );
+  const paycom = item(page, 'updated Paycom settings');
+  await expect(paycom).toContainText('Automatic syncOnOff');
+  await expect(paycom).toContainText('Late DA time10:01 AM9:45 AM');
+  await expect(paycom).toContainText('DepartmentAllDrivers');
+  await expect(item(page, 'Meal break collection attempt 1 of 3 failed')).toContainText(
+    'Cortex took too long to respond·Retrying',
+  );
+  await expect(item(page, /^Meal break collection failed/)).toContainText('After 3 attempts');
   await expect(item(page, 'Maria Lopez vehicle inspection logged')).toContainText('Van 12');
   await expect(page.getByText('schedule_0123', { exact: false })).toHaveCount(0);
+
+  // From one event to everything about its subject, and back.
+  await role.getByRole('button', { name: 'All activity involving Jordan Pike' }).click();
+  await expect.poll(() => requests.at(-1)?.get('subject')).toBe('member:usr_jordan');
+  expect(requests.at(-1)?.get('named')).toBe('Jordan Pike');
+  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Stop showing only Jordan Pike' }).click();
+  await expect.poll(() => requests.at(-1)?.has('subject')).toBe(false);
+  await expect(item(page, 'Platform support opened this DSP')).toBeVisible();
 
   await page.getByRole('button', { name: /^Failures/ }).click();
   await expect(page.getByRole('button', { name: /^Failures/ })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByRole('listitem')).toHaveCount(2);
   expect(requests.at(-1)?.get('area')).toBe('failures');
   await page.getByRole('button', { name: /^All/ }).click();
 
@@ -268,4 +327,25 @@ test('a DSP lists Platform support only once the platform owner shows it there',
   await expect(row).not.toContainText('times');
   await expect(page.getByRole('list').filter({ hasText: 'Platform Owner' })).toHaveCount(0);
   await expect(page.getByLabel('Person')).toContainText('Platform support');
+
+  // The platform's own log is in the sidebar, names its owner and narrows to a DSP.
+  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await page.getByRole('link', { name: 'Audit log', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Audit log', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'showed Platform support to Northline' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'created Summit Delivery' }),
+  ).toHaveCount(1);
+  await page.getByLabel('DSP', { exact: true }).selectOption({ label: 'Northline Logistics' });
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'created Summit Delivery' }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('listitem')
+      .filter({ hasText: 'Platform Owner opened Northline Logistics' })
+      .first(),
+  ).toBeVisible();
 });

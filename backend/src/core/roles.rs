@@ -266,13 +266,14 @@ impl Store {
                 "INSERT INTO roles(id,dsp_id,name,permissions,created_at) VALUES (?,?,?,?,?)",
                 params![id, dsp, name, json!(permissions).to_string(), iso()],
             )?;
-            self.audit_with(
+            self.audit_ref(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 "role.created",
                 &name,
-                None,
+                Some(&name),
                 &permission_changes(&[], &permissions),
+                Some(("role", &id)),
             )?;
             Ok(public(&self.role(dsp, &id)?))
         })
@@ -318,13 +319,14 @@ impl Store {
                     ),
                 );
             }
-            self.audit_with(
+            self.audit_ref(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 "role.updated",
                 &name,
                 Some(s(&role, "name")),
                 &changes,
+                Some(("role", id)),
             )?;
             Ok(public(&self.role(dsp, id)?))
         })
@@ -342,11 +344,14 @@ impl Store {
                 [id],
             )?;
             self.platform.exec("DELETE FROM roles WHERE id=?", [id])?;
-            self.audit(
+            self.audit_ref(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 "role.deleted",
                 s(&role, "name"),
+                Some(s(&role, "name")),
+                &[],
+                Some(("role", id)),
             )
         })
     }

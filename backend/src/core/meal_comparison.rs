@@ -234,11 +234,33 @@ impl Store {
             db.set(LINKS,&value)?;
             Ok(value)
         })?;
-        self.audit(
+        // How many drivers were linked, kept apart from Paycom, or handed back to
+        // automatic matching.
+        let count = |kind: fn(&Value) -> bool| {
+            Some(changes.iter().filter(|c| kind(c)).count())
+                .filter(|count| *count > 0)
+                .map(|count| count.to_string())
+        };
+        let automatic = |c: &Value| c["automatic"] == json!(true);
+        let facts = [
+            ("linked", count(|c| !c["paycomCode"].is_null())),
+            (
+                "separated",
+                count(|c| c["paycomCode"].is_null() && c["automatic"] != json!(true)),
+            ),
+            ("automatic", count(automatic)),
+        ]
+        .into_iter()
+        .filter(|(_, count)| count.is_some())
+        .map(|(field, count)| (field, None, count))
+        .collect::<Vec<_>>();
+        self.audit_with(
             Some(actor),
             Some(id),
             "employees.links_updated",
             &format!("Revision {}; {} changes", revision + 1, changes.len()),
+            None,
+            &facts,
         )?;
         Ok(result)
     }

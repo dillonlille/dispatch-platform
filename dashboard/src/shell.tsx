@@ -85,7 +85,6 @@ export function Shell({
       timecards: 'Timecard',
       connections: 'Settings',
       account: 'Settings',
-      audit: 'Settings',
       jobs: 'Diagnostics',
     }[page] ||
       title(page));

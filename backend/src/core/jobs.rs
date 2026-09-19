@@ -325,6 +325,17 @@ impl Store {
             "cortex"
         };
         let mut facts = vec![("provider", None, Some(provider.to_owned()))];
+        if n(job, "attempt") > 1 || n(job, "max_attempts") > 1 {
+            facts.push((
+                "attempt",
+                None,
+                Some(format!(
+                    "{} of {}",
+                    n(job, "attempt"),
+                    n(job, "max_attempts")
+                )),
+            ));
+        }
         let request = serde_json::from_str::<Value>(s(job, "request")).unwrap_or_default();
         if let Some(date) = request["date"].as_str() {
             facts.push(("date", None, Some(date.to_owned())));
@@ -393,6 +404,7 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                         db.platform.exec("DELETE FROM resets WHERE expires_at<?", [now()])?;
                         db.platform.exec("DELETE FROM invitations WHERE expires_at<?", [now()])?;
                         db.platform.exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
+                        db.prune_audit()?;
                         Ok(())
                     })?;
                     for dsp in db.platform.all("SELECT id FROM dsps WHERE status IN ('active','suspended')", [])? {
@@ -617,11 +629,19 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                     db.finish(&id, &owner, Some(error))
                 })?;
             }
+            // Cancelling is recorded by whoever cancelled; it is not a failure.
+            if error.as_deref() == Some("job_cancelled") {
+                return Ok(());
+            }
             let (schedule, facts) = db.outcome_facts(&dsp, &job);
-            db.audit_with(
+            // An attempt that will run again is not yet the collection's outcome.
+            let retrying = s(&db.job(&id, None)?, "status") == "queued";
+            db.audit_ref(
                 actor.as_deref(),
                 Some(&dsp),
-                if error.is_some() {
+                if retrying {
+                    "collection.retrying"
+                } else if error.is_some() {
                     "collection.failed"
                 } else {
                     "collection.completed"
@@ -629,6 +649,7 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                 error.as_deref().unwrap_or(""),
                 schedule.as_deref(),
                 &facts,
+                Some(("job", &id)),
             )
         })
         .await;

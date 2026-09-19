@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useUpdateState } from './browser-update.js';
 import {
   ArrowRight,
   Building2,
@@ -12,8 +13,10 @@ import {
   Search,
   Settings,
   Shield,
+  RotateCw,
   TriangleAlert,
   Users,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { dateFormatter } from '../../shared/date-format.js';
@@ -28,6 +31,7 @@ import type {
 import { api, errorLabel, useData } from './api.js';
 import { Empty, ErrorBox, Loading, deviceTimezone, title } from './ui.js';
 import { permissionLabels } from './roles.js';
+import { paycomColumns } from '../../shared/paycom.js';
 import './audit.css';
 
 const PAGE = 50;
@@ -145,14 +149,27 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
 const outcomes: Record<string, string> = {
   'collection.completed': 'completed',
   'collection.failed': 'failed',
+  'collection.retrying': 'failed',
 };
 // Outcomes and joins carry facts rather than edits; their sentences spell them out.
-const facts = new Set(['provider', 'date', 'duration', 'invitedBy']);
+const facts = new Set([
+  'provider',
+  'date',
+  'duration',
+  'attempt',
+  'invitedBy',
+  'linked',
+  'separated',
+  'automatic',
+]);
 const fact = (event: AuditEvent, field: string) =>
   event.changes.find((change) => change.field === field)?.to ?? '';
 const collected: Record<string, string> = { paycom: 'Paycom', cortex: 'Meal break' };
 function outcome(event: AuditEvent): Part[] {
-  const result = ` ${outcomes[event.action]}`;
+  const attempt = event.action === 'collection.retrying' && fact(event, 'attempt');
+  const result = attempt
+    ? ` attempt ${attempt} ${outcomes[event.action]}`
+    : ` ${outcomes[event.action]}`;
   if (event.target) return ['Scheduled collection ', strong(event.target), result];
   const provider = collected[fact(event, 'provider')];
   const date = fact(event, 'date');
@@ -187,6 +204,7 @@ const spoken = new Set([
   'role.deleted',
   'collection.requested',
   'collection.failed',
+  'collection.retrying',
   'meal_breaks.sync_requested',
   'schedule.created',
   'schedule.updated',
@@ -223,6 +241,34 @@ const fields: Record<string, string> = {
   enabled: 'Status',
   abbreviation: 'Abbreviation',
   station: 'Station',
+  'paycom.automatic_sync': 'Automatic sync',
+  'paycom.sync_interval_seconds': 'Sync every',
+  'paycom.opening_page': 'Opening page',
+  'paycom.rows_per_page': 'Rows per page',
+  'paycom.name_order': 'Name order',
+  'paycom.default_sort': 'Default sort',
+  'paycom.department': 'Department',
+  'paycom.station': 'Station',
+  'paycom.columns': 'Columns',
+  'paycom.driver_departments': 'Driver departments',
+  'paycom.late_da_time': 'Late DA time',
+  'paycom.late_da_departments': 'Late DA departments',
+};
+const clockTime = (value: string) =>
+  dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
+    new Date(`2000-01-01T${value}:00Z`),
+  );
+const paycomValues: Record<string, string> = {
+  true: 'On',
+  false: 'Off',
+  timecards: 'Timecards',
+  'meal-breaks': 'Meal Breaks',
+  employees: 'Employees',
+  first_last: 'First Last',
+  last_first: 'Last, First',
+  employeeName: 'Name',
+  condition: 'Punch status',
+  inDay: 'Clock in',
 };
 const collections: Record<string, string> = {
   paycom: 'Paycom',
@@ -235,6 +281,15 @@ function changeValue(field: string, value: string) {
   if (field === 'collection') return collections[value] ?? title(value);
   if (field === 'cadence') return title(value);
   if (field === 'interval') return `${value} min`;
+  if (field === 'paycom.sync_interval_seconds' && Number(value))
+    return `${Math.round(Number(value) / 60)} min`;
+  if (field === 'paycom.late_da_time' && /^\d{2}:\d{2}$/.test(value)) return clockTime(value);
+  if (field === 'paycom.columns')
+    return value
+      .split(', ')
+      .map((column) => paycomColumns.find(([key]) => key === column)?.[1] ?? column)
+      .join(', ');
+  if (field.startsWith('paycom.')) return paycomValues[value] ?? value;
   if (field === 'time' && /^\d{2}:\d{2}$/.test(value))
     return dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
       new Date(`2000-01-01T${value}:00Z`),
@@ -268,7 +323,7 @@ function Change({ change }: { change: AuditChange }) {
   );
 }
 const failure = (event: AuditEvent) =>
-  event.action.endsWith('.failed')
+  event.action.endsWith('.failed') || event.action === 'collection.retrying'
     ? (failures[event.detail]?.(providers[fact(event, 'provider')] ?? 'The provider') ??
       errorLabel(event.detail) ??
       (event.detail ? title(event.detail) : ''))
@@ -283,16 +338,36 @@ function notes(event: AuditEvent, platform: boolean): string[] {
     ...(event.action === 'collection.completed' && fact(event, 'duration')
       ? [duration(Number(fact(event, 'duration')))]
       : []),
+    ...(event.action === 'collection.retrying' ? ['Retrying'] : []),
+    ...(event.action === 'collection.failed' && Number.parseInt(fact(event, 'attempt')) > 1
+      ? [`After ${Number.parseInt(fact(event, 'attempt'))} attempts`]
+      : []),
     ...(fact(event, 'invitedBy') ? [`Invited by ${fact(event, 'invitedBy')}`] : []),
-    ...(event.action === 'employees.links_updated' ? linked(event.detail) : []),
+    ...(event.action === 'employees.links_updated' ? linked(event) : []),
   ];
 }
 
-// Link saves record "Revision 3; 2 changes"; the count is what a reader wants.
-function linked(detail: string) {
-  const count = Number(/(\d+) changes?$/.exec(detail)?.[1]);
+// Link saves say how many drivers were linked, kept apart or handed back to
+// automatic matching. Earlier ones kept only "Revision 3; 2 changes".
+function linked(event: AuditEvent) {
+  const parts = [
+    [fact(event, 'linked'), 'linked'],
+    [fact(event, 'separated'), 'kept separate'],
+    [fact(event, 'automatic'), 'set to automatic'],
+  ].flatMap(([count, label]) => (count ? [`${count} ${label}`] : []));
+  if (parts.length) return parts;
+  const count = Number(/(\d+) changes?$/.exec(event.detail)?.[1]);
   return count ? [`${count} ${count === 1 ? 'link' : 'links'} changed`] : [];
 }
+
+// Everything about one record: by reference, and by the name older events kept.
+type Subject = { key: string; name: string };
+const pages: Record<string, [string, string]> = {
+  member: ['team', 'Team & Roles'],
+  role: ['team', 'Team & Roles'],
+  schedule: ['paycom', 'Timecard'],
+  job: ['paycom', 'Timecard'],
+};
 
 type Entry = { key: string; events: AuditEvent[] };
 // Repeated visits by one person collapse into a single quiet line.
@@ -316,12 +391,15 @@ function entries(events: AuditEvent[]): Entry[] {
 
 export function AuditLog({ view }: { view?: DspView }) {
   const timeZone = view?.dsp.timezone ?? deviceTimezone();
-  const [area, setArea] = useState('');
-  const [actor, setActor] = useState('');
-  const [range, setRange] = useState('30');
-  const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
-  const [limit, setLimit] = useState(PAGE);
+  // Filters survive the page's automatic refresh, like the app's other tables.
+  const [area, setArea] = useUpdateState('audit-area', '');
+  const [actor, setActor] = useUpdateState('audit-actor', '');
+  const [range, setRange] = useUpdateState('audit-range', '30');
+  const [search, setSearch] = useUpdateState('audit-search', '');
+  const [within, setWithin] = useUpdateState('audit-dsp', '');
+  const [subject, setSubject] = useUpdateState<Subject | null>('audit-subject', null);
+  const [q, setQ] = useState(search.trim());
+  const [limit, setLimit] = useUpdateState('audit-limit', PAGE);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
@@ -329,12 +407,21 @@ export function AuditLog({ view }: { view?: DspView }) {
     const timer = setTimeout(() => setQ(search.trim()), 250);
     return () => clearTimeout(timer);
   }, [search]);
-  useEffect(() => setLimit(PAGE), [area, actor, range, q]);
+  // A new filter starts from the first page; a restored one keeps its place.
+  const filters = [area, actor, range, q, within, subject?.key, subject?.name].join('\n');
+  const applied = useRef(filters);
+  useEffect(() => {
+    if (applied.current !== filters) setLimit(PAGE);
+    applied.current = filters;
+  }, [filters, setLimit]);
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (area) params.set('area', area);
     if (actor) params.set('actor', actor);
     if (q) params.set('q', q);
+    if (within && !view) params.set('dsp', within);
+    if (subject?.key) params.set('subject', subject.key);
+    if (subject?.name) params.set('named', subject.name);
     if (range !== 'all') {
       // Whole hours keep the address stable between polls.
       const from = new Date(Date.now() - Number(range) * 86_400_000);
@@ -342,7 +429,7 @@ export function AuditLog({ view }: { view?: DspView }) {
       params.set('from', from.toISOString());
     }
     return params;
-  }, [area, actor, q, range]);
+  }, [area, actor, q, range, within, subject, view]);
   const base = view ? '/api/dsp/audit' : '/api/platform/audit';
   const { data, stale, error } = useData<AuditPage>(`${base}?${query}&limit=${limit}`, 10000);
   const page = data ?? stale;
@@ -441,7 +528,7 @@ export function AuditLog({ view }: { view?: DspView }) {
 
   const counts = page?.counts ?? {};
   const everything = areas.reduce((sum, [id]) => sum + (counts[id] ?? 0), 0);
-  const filtered = Boolean(area || actor || q || range !== 'all');
+  const filtered = Boolean(area || actor || q || within || subject || range !== 'all');
   return (
     <div className="audit-log" aria-busy={!data && Boolean(stale)}>
       <ErrorBox message={error || exportError} />
@@ -456,6 +543,20 @@ export function AuditLog({ view }: { view?: DspView }) {
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
+        {!view && (
+          <label className="audit-select">
+            <span>DSP</span>
+            <select aria-label="DSP" value={within} onChange={(e) => setWithin(e.target.value)}>
+              <option value="">All DSPs</option>
+              {page?.dsps.map((dsp) => (
+                <option key={dsp.id} value={dsp.id}>
+                  {dsp.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} aria-hidden />
+          </label>
+        )}
         <label className="audit-select">
           <span>Person</span>
           <select aria-label="Person" value={actor} onChange={(e) => setActor(e.target.value)}>
@@ -509,6 +610,15 @@ export function AuditLog({ view }: { view?: DspView }) {
             Failures <i>{counts.failures ?? 0}</i>
           </button>
         )}
+        {subject && (
+          <button
+            className="audit-chip subject"
+            aria-label={`Stop showing only ${subject.name}`}
+            onClick={() => setSubject(null)}
+          >
+            Involving {subject.name} <X size={13} aria-hidden />
+          </button>
+        )}
       </div>
       {!page ? (
         !error && <Loading />
@@ -524,14 +634,18 @@ export function AuditLog({ view }: { view?: DspView }) {
                   const event = entry.events[0]!;
                   const run = entry.events.length > 1;
                   const expanded = open.has(entry.key);
-                  const failed = failure(event);
-                  const Icon = failed
-                    ? TriangleAlert
-                    : event.action === 'collection.completed'
-                      ? Check
-                      : views.has(event.action)
-                        ? Eye
-                        : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
+                  const reason = failure(event);
+                  const failed = event.action.endsWith('.failed') && reason;
+                  const retrying = event.action === 'collection.retrying';
+                  const Icon = retrying
+                    ? RotateCw
+                    : failed
+                      ? TriangleAlert
+                      : event.action === 'collection.completed'
+                        ? Check
+                        : views.has(event.action)
+                          ? Eye
+                          : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
                   const text = run
                     ? [...sentence(event), ` ${entry.events.length} times`]
                     : sentence(event);
@@ -542,7 +656,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                   const second: ReactNode[] = run
                     ? []
                     : [
-                        failed && <span className="audit-failure">{failed}</span>,
+                        failed ? <span className="audit-failure">{failed}</span> : reason,
                         ...notes(event, !view),
                         detail && <span className="audit-pill">{detail}</span>,
                         ...edits
@@ -557,14 +671,17 @@ export function AuditLog({ view }: { view?: DspView }) {
                         ),
                       ].filter(Boolean);
                   return (
-                    <li key={entry.key} className={views.has(event.action) ? 'quiet' : undefined}>
+                    <li
+                      key={entry.key}
+                      className={views.has(event.action) || retrying ? 'quiet' : undefined}
+                    >
                       <button
                         className="audit-row"
                         aria-expanded={expanded}
                         onClick={() => toggle(entry.key)}
                       >
                         <span
-                          className={`audit-icon${failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}`}
+                          className={`audit-icon${retrying ? '' : failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}`}
                         >
                           <Icon size={16} aria-hidden />
                         </span>
@@ -616,6 +733,29 @@ export function AuditLog({ view }: { view?: DspView }) {
                               {event.action} · #{event.id}
                             </code>
                           </Row>
+                          {!run && (event.target || event.ref) && (
+                            <div className="audit-links">
+                              {event.target && event.ref?.kind !== 'job' && (
+                                <button
+                                  className="text-button"
+                                  onClick={() => {
+                                    setSubject({
+                                      key: event.ref ? `${event.ref.kind}:${event.ref.id}` : '',
+                                      name: event.target!,
+                                    });
+                                    window.scrollTo({ top: 0 });
+                                  }}
+                                >
+                                  All activity involving {event.target}
+                                </button>
+                              )}
+                              {view && event.ref && pages[event.ref.kind] && (
+                                <a href={`#dsp/${view.dsp.id}/${pages[event.ref.kind]![0]}`}>
+                                  Open {pages[event.ref.kind]![1]}
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </dl>
                       )}
                     </li>

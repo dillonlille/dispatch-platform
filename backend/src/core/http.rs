@@ -556,9 +556,9 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
                 a.preview = Some(v::text(b, "roleId", 1, 100)?.to_owned());
             }
             let c = db.context(&a, v::text(b, "dspId", 1, 100)?, roles::ACCESS)?;
-            db.audit(
-                Some(s(&a.user, "id")),
-                Some(s(&c.dsp, "id")),
+            db.audit_visit(
+                s(&a.user, "id"),
+                s(&c.dsp, "id"),
                 if platform {
                     "dsp.owner_view_opened"
                 } else {
@@ -768,9 +768,9 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
         ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
         ("POST","/api/dsp/schedules/preview")=>Ok(Reply::json(db.preview_schedule(id,b)?)),
-        ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit(Some(actor),Some(id),"schedule.created",s(&result,"name"))?;Ok(Reply::status(result,201))},
+        ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit_ref(Some(actor),Some(id),"schedule.created",s(&result,"name"),Some(s(&result,"name")),&[],Some(("schedule",s(&result,"id"))))?;Ok(Reply::status(result,201))},
         ("GET","/api/dsp/schedule")=>Ok(Reply::json(db.schedule(id)?)),
-        ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
+        ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let before=db.schedule(id)?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit_with(Some(actor),Some(id),"schedule.updated","",None,&super::schedules::schedule_changes(&before,&result))?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
             db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("station",None,Some(station.to_uppercase())),("abbreviation",None,Some(abbreviation.to_owned()))])?;Ok(Reply::ok())
@@ -795,9 +795,9 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         _=>{
             if write && endpoint=="schedules" {
                 let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;
-                if parts.len()==4 { let before=db.collection_schedule(id,key)?;let result=db.save_collection_schedule(id,Some(key),b)?;db.audit_with(Some(actor),Some(id),"schedule.updated",s(&result,"name"),Some(s(&before,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="enabled" { let before=db.collection_schedule(id,key)?;let result=db.enable_collection_schedule(id,key,b)?;db.audit_with(Some(actor),Some(id),"schedule.toggled",s(&result,"name"),Some(s(&result,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="remove" { let before=db.collection_schedule(id,key)?;db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",s(&before,"name"))?;return Ok(Reply::ok()); }
+                if parts.len()==4 { let before=db.collection_schedule(id,key)?;let result=db.save_collection_schedule(id,Some(key),b)?;db.audit_ref(Some(actor),Some(id),"schedule.updated",s(&result,"name"),Some(s(&before,"name")),&super::schedules::schedule_changes(&before,&result),Some(("schedule",key)))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="enabled" { let before=db.collection_schedule(id,key)?;let result=db.enable_collection_schedule(id,key,b)?;db.audit_ref(Some(actor),Some(id),"schedule.toggled",s(&result,"name"),Some(s(&result,"name")),&super::schedules::schedule_changes(&before,&result),Some(("schedule",key)))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="remove" { let before=db.collection_schedule(id,key)?;db.delete_collection_schedule(id,key,b)?;db.audit_ref(Some(actor),Some(id),"schedule.deleted",s(&before,"name"),Some(s(&before,"name")),&[],Some(("schedule",key)))?;return Ok(Reply::ok()); }
             }
             if !write&&endpoint=="employees"&&parts.len()==4{return Ok(Reply::json(db.employee(id,parts[3])?));}
             if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::text(b,"role",1,100)?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
@@ -828,7 +828,12 @@ fn direction(q: &Value) -> Result<bool> {
         == "desc")
 }
 fn audit_query<'a>(q: &'a Value, dsp: Option<&'a str>) -> Result<super::db::AuditQuery<'a>> {
-    v::fields(q, &["area", "actor", "q", "from", "before", "limit"])?;
+    v::fields(
+        q,
+        &[
+            "area", "actor", "q", "from", "before", "limit", "dsp", "subject", "named",
+        ],
+    )?;
     let text = |key, max| {
         q.get(key)
             .map(|_| v::text(q, key, 0, max))
@@ -861,6 +866,10 @@ fn audit_query<'a>(q: &'a Value, dsp: Option<&'a str>) -> Result<super::db::Audi
         from: text("from", 40)?,
         before: query_number(q, "before", 0, 0, usize::MAX >> 1)? as i64,
         limit: query_number(q, "limit", 50, 1, 5000)? as i64,
+        // A DSP's own log is already one DSP's; only the platform narrows further.
+        within: if dsp.is_none() { text("dsp", 100)? } else { "" },
+        subject: text("subject", 200)?,
+        named: text("named", 200)?,
     })
 }
 fn query_number(q: &Value, key: &str, default: usize, min: usize, max: usize) -> Result<usize> {

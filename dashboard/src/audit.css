@@ -93,6 +93,11 @@ button.audit-chip[aria-pressed='true'] {
   color: var(--background);
   font-weight: 500;
 }
+button.audit-chip.subject {
+  margin-left: auto;
+  border-color: var(--primary);
+  color: var(--primary);
+}
 button.audit-chip.failures[aria-pressed='true'] {
   background: var(--destructive);
   border-color: var(--destructive);
@@ -259,6 +264,17 @@ button.audit-row[aria-expanded='true'] {
 .audit-detail code {
   color: var(--muted-foreground);
   font: 12px var(--font-mono, ui-monospace, monospace);
+}
+.audit-links {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.audit-links a {
+  color: var(--primary);
 }
 .audit-more {
   display: flex;

@@ -887,6 +887,100 @@ fn audit_log_filters_pages_and_counts_by_area() {
         })),
         ["schedule.created"]
     );
+    // A subject gathers its events by reference, and older ones by the name they kept.
+    db.audit_ref(
+        Some(member),
+        Some(dsp),
+        "role.updated",
+        "Leads",
+        Some("Dispatcher"),
+        &[],
+        Some(("role", "role_1")),
+    )
+    .unwrap();
+    db.audit_with(
+        Some(member),
+        Some(dsp),
+        "role.deleted",
+        "Leads",
+        Some("Leads"),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        actions(&page(AuditQuery {
+            subject: "role:role_1",
+            named: "Leads",
+            ..AuditQuery::default()
+        })),
+        ["role.deleted", "role.updated"]
+    );
+    assert_eq!(
+        actions(&page(AuditQuery {
+            subject: "role:role_1",
+            ..AuditQuery::default()
+        })),
+        ["role.updated"]
+    );
+    let referenced = page(AuditQuery {
+        subject: "role:role_1",
+        ..AuditQuery::default()
+    });
+    assert_eq!(
+        referenced["events"][0]["ref"],
+        json!({"kind":"role","id":"role_1"})
+    );
+    // The platform's log narrows to one DSP; a DSP's own log ignores the filter.
+    let everywhere = db.audit_page(&AuditQuery::default()).unwrap();
+    let narrowed = db
+        .audit_page(&AuditQuery {
+            within: dsp,
+            ..AuditQuery::default()
+        })
+        .unwrap();
+    assert!(narrowed["total"].as_i64() < everywhere["total"].as_i64());
+    assert!(
+        narrowed["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| s(e, "dspId") == dsp)
+    );
+    assert!(
+        everywhere["dsps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| s(d, "id") == dsp)
+    );
+
+    // Reopening a DSP within half an hour adds nothing; a year-old event is pruned.
+    let visits = || {
+        page(AuditQuery {
+            q: "view_opened",
+            ..AuditQuery::default()
+        })["total"]
+            .clone()
+    };
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    assert_eq!(visits(), 1);
+    db.platform
+        .exec(
+            "UPDATE audit SET at=? WHERE action='dsp.view_opened'",
+            [db::at(db::now() - 31 * 60 * 1000)],
+        )
+        .unwrap();
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    assert_eq!(visits(), 2);
+    db.platform
+        .exec(
+            "UPDATE audit SET at=? WHERE action='schedule.created'",
+            [db::at(db::now() - 366 * 24 * 60 * 60 * 1000)],
+        )
+        .unwrap();
+    assert_eq!(db.prune_audit().unwrap(), 1);
+
     let actors: Vec<_> = all["actors"]
         .as_array()
         .unwrap()

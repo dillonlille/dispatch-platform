@@ -12,7 +12,7 @@ test('every audit action the backend records has wording in the audit log', () =
     .map((file) => fs.readFileSync(path.join('backend/src', file), 'utf8'))
     .join('\n');
   const recorded = new Set<string>();
-  for (const call of sources.matchAll(/\.audit(?:_with)?\(/g))
+  for (const call of sources.matchAll(/\.audit(?:_with|_ref|_visit)?\(/g))
     for (const [, action] of sources
       .slice(call.index, call.index + 420)
       .matchAll(/"([a-z_]+(?:\.[a-z_]+)+)"/g))

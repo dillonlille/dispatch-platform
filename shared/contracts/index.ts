@@ -224,6 +224,8 @@ export interface AuditEvent {
   detail: string;
   area: AuditArea;
   target: string | null;
+  // The record the event is about, when it has one that outlives a rename.
+  ref: { kind: 'member' | 'role' | 'schedule' | 'job'; id: string } | null;
   changes: AuditChange[];
 }
 export type AuditArea =
@@ -246,6 +248,8 @@ export interface AuditPage {
   total: number;
   counts: Partial<Record<AuditArea | 'failures', number>>;
   actors: { id: string; name: string }[];
+  // DSPs with activity, for narrowing the platform's log; empty inside a DSP.
+  dsps: { id: string; name: string }[];
 }
 export interface PlatformHealth {
   environment: Environment;
