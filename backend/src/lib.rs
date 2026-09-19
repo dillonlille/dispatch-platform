@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod browsers;
+pub mod cli;
 pub mod collection_checkpoint;
 pub mod collectors;
 pub mod config;
