@@ -245,7 +245,6 @@
 .meal-status.attention {
   border-color: #f3cc83;
 }
-.meal-employee,
 .meal-sort {
   padding: 0;
   min-height: 32px;
@@ -257,9 +256,25 @@
   justify-content: flex-start;
 }
 .meal-employee {
-  gap: 10px;
-  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  font-weight: 600;
   font-size: 14px;
+}
+/* The 6px overhang keeps the chevron where the name's 26px indent expects it. */
+.meal-expand {
+  flex: none;
+  width: 28px;
+  min-height: 28px;
+  margin-left: -6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.meal-expand:hover {
+  background: var(--accent);
 }
 .meal-employee span {
   white-space: normal;

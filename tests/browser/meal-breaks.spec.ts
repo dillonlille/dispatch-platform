@@ -191,6 +191,8 @@ test('approved comparison table, filters, details, links, date errors and mobile
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
   await page.getByRole('button', { name: 'All 5', exact: true }).click();
   await page.getByLabel('Search meal break employees').fill('Alex');
+  await page.locator('.meal-employee > span').click();
+  await expect(page.locator('.meal-detail')).toHaveCount(0);
   await page.getByRole('button', { name: 'Details for Alex Morgan', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Paycom punches', exact: true })).toBeVisible();
   await expect(page.locator('.meal-detail')).toContainText('America/Los_Angeles');
@@ -303,9 +305,9 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
   });
   await page.getByRole('button', { name: 'Gaps > 5 min 3', exact: true }).click();
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(3);
-  await expect(
-    page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }),
-  ).toContainText('Gap over 5m on another meal');
+  await expect(page.getByRole('row').filter({ hasText: 'Casey Brooks' })).toContainText(
+    'Gap over 5m on another meal',
+  );
   await page.getByRole('button', { name: 'Details for Casey Brooks', exact: true }).click();
   await expect(page.locator('.meal-extra .meal-gap.over-limit')).toHaveText([
     '8m before lunch',

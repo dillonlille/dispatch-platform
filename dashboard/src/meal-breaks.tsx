@@ -132,13 +132,15 @@ function EmployeeRows({
         <tr key={index} className={index ? 'meal-extra' : ''}>
           <th scope="row">
             {index === 0 ? (
-              <button
-                className="meal-employee"
-                aria-expanded={expanded}
-                aria-label={`Details for ${name}`}
-                onClick={toggle}
-              >
-                {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              <div className="meal-employee">
+                <button
+                  className="meal-expand"
+                  aria-expanded={expanded}
+                  aria-label={`Details for ${name}`}
+                  onClick={toggle}
+                >
+                  {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </button>
                 <span>
                   {name}
                   {summary.pairs.length > 1 && <small>{summary.pairs.length} meals</small>}
@@ -146,7 +148,7 @@ function EmployeeRows({
                     <small className="meal-other-gap">Gap over 5m on another meal</small>
                   )}
                 </span>
-              </button>
+              </div>
             ) : (
               <span className="meal-extra-label">Meal {index + 1}</span>
             )}
