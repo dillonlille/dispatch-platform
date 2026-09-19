@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
+import { coreTests, dashboardTests } from './test-plan.js';
 
 const mode = process.argv[2] ?? 'full';
 if (!['full', 'build-full', 'build-dashboard', 'build-reuse', 'core'].includes(mode))
@@ -45,13 +45,7 @@ async function build(scope: string) {
         run(
           'dashboard logic',
           process.execPath,
-          [
-            'node_modules/tsx/dist/cli.mjs',
-            '--test',
-            '--test-concurrency=1',
-            'tests/meal-breaks.test.ts',
-            'tests/collection-history.test.ts',
-          ],
+          ['node_modules/tsx/dist/cli.mjs', '--test', '--test-concurrency=1', ...dashboardTests],
           { ...process.env, DISPATCH_TEST_BINARY: '.build/services/rust/dispatch-backend' },
         ),
       ]);
@@ -91,11 +85,8 @@ async function core() {
         'node_modules/tsx/dist/cli.mjs',
         '--test',
         '--test-concurrency=1',
-        ...fs
-          .readdirSync('tests')
-          .filter((name) => name.endsWith('.test.ts'))
-          .sort()
-          .map((name) => `tests/${name}`),
+        // The build check owns the dashboard logic tests, in dashboard-only mode too.
+        ...coreTests(),
       ]),
     ]);
   }

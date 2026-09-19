@@ -20,6 +20,46 @@ Do not repeat the full local CI suite just to duplicate a successful GitHub run.
 Rerun affected checks after fixes, new changes, or failures. All required GitHub
 checks must pass for the final PR head. Keep its branch and worktree until merged.
 
+## Adding a test
+
+- **API tests** drive the compiled binary: `tests/api-<area>.test.ts` (auth, members,
+  collection, workforce, operations, hardening) or `tests/<feature>.test.ts`. Helpers:
+  `fixture()`, `until()` and `demo` from `tests/support.ts`, `capturedMail` from
+  `tests/mail-support.ts`. One test:
+  `python3 tooling/cargo-build.py && npx tsx --test --test-name-pattern 'password recovery' tests/api-auth.test.ts`
+- **Dashboard logic tests** need no server: `tests/<name>.test.ts`, listed under
+  `dashboard` in `tooling/test-plan.json`. One file: `npx tsx --test tests/dashboard-format.test.ts`
+- **Browser specs**: `tests/browser/<flow>.spec.ts`. Helpers: `test`, `expect`, `login`,
+  `signIn`, `openDsp` and `demo` from `tests/browser/fixtures.ts`. One test, after
+  `npm run build`: `npm run test:ui -- roles.spec.ts --grep 'owner creates'`
+- **Rust integration tests**: `backend/tests/<area>.rs` (storage, network_policy, workforce,
+  jobs, audit, accounts and the HTTP, meal and egress files). Helpers: `store()`,
+  `bootstrapped()`, `seeded()` and `audits()` from `backend/tests/common/mod.rs`. One test:
+  `cargo test --locked --test jobs listed_jobs`
+- **Python tooling tests**: `tests/<tool>_test.py`; `artifact()` from
+  `tests/dev_updater_test.py` builds a runtime. One test:
+  `python3 -m unittest discover -s tests -p 'release_test.py' -k prepared`
+
+Shared pieces:
+
+- `fixture()` lives in `tooling/fixture-server.ts` and is the only code that starts a
+  private server: temporary state, a free port, the fixture environment, `seed` (or
+  `bootstrap` with `seed: false`), `serve`, the health wait and `client()` to sign in.
+  Pass `env` to change the environment. The smoke check and `npm run dev` start their
+  servers through it; the benchmark takes its `prepare()` half and times its own start.
+- A browser test asks for `dispatch` to reach its own server (`dispatch.root`,
+  `dispatch.client()`, `dispatch.database()`); `page` already points at it. A spec that
+  needs another environment sets `test.use({ dispatchOptions: { seed: false, env } })`,
+  or overrides `dispatchOptions` in `test.extend` when the value comes from another
+  fixture, as `mail-diagnostics.spec.ts` does. A spec that needs no server imports
+  `test` from `@playwright/test`.
+- A new `tests/*.test.ts` file runs in the core check. One that only exercises dashboard
+  code belongs in the `dashboard` list of `tooling/test-plan.json`, so dashboard-only
+  changes still run it; a native collector suite belongs in a `native` shard there.
+  `tests/test-plan.test.ts` fails when a test file is run by no check or by two.
+- Rust test files are separate crates; `mod common;` gives each the shared store. It is
+  the one place that calls `Config::load()`, which reads the process environment.
+
 ## Adding an endpoint
 
 1. Write the handler in `backend/src/http/routes/<area>.rs`. A database handler is
@@ -163,7 +203,7 @@ this runner. Missing, corrupt, unsupported or changed inputs compile normally.
 Local worktrees continue sharing the existing private binary cache.
 
 Browser checks use four workers with separate seeded servers, ports, databases and
-mail state per test. Specialized mail tests own their fixtures too. Use
+mail state per test. Specialized mail tests configure the same fixture. Use
 `npm run test:ui -- --workers=1` when comparing sequential timing. Screenshots and
 traces use test-specific output paths. Build once before comparing runs.
 

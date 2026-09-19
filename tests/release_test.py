@@ -69,6 +69,67 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, "github", return_value={"workflow_runs": [self.run]}), patch.object(release, "say"):
             self.assertEqual(release.wait_for_checks("a" * 40, "push", "main")["id"], 5)
 
+    def test_prepared_assets_come_only_from_the_checked_main_artifact_and_are_never_overwritten(self):
+        commit, output = "a" * 40, self.root / "releases/v1.0.0"
+        artifact = {"id": 31, "name": f"dispatch-main-{commit}", "expired": False, "digest": "sha256:" + "1" * 64}
+        manifest = {"version": "1.0.0", "digest": "2" * 64}
+
+        def api(endpoint, comparison="ahead", runs=(self.run,), artifacts=(artifact,)):
+            if endpoint.startswith("compare/"):
+                return {"status": comparison}
+            return {"workflow_runs": list(runs)} if "/runs?" in endpoint else {"artifacts": list(artifacts)}
+
+        def download(found, temporary, source, package):
+            self.assertEqual((found, source), (artifact, commit))
+            self.assertEqual(Path(temporary).parent, package.parent)
+            package.write_bytes(b"runtime archive")
+            candidate = Path(temporary) / "candidate"
+            candidate.mkdir()
+            (candidate / "release.json").write_text(json.dumps(manifest))
+            return candidate, manifest
+
+        refused = {
+            "Source must be merged": {"comparison": "diverged"},
+            "No main validation run": {"runs": ()},
+            "Main checks have not passed": {"runs": ({**self.run, "id": 6, "conclusion": "failure"}, self.run)},
+            "Verified main artifact unavailable": {"artifacts": (artifact | {"expired": True},)},
+        }
+        for problem, answers in refused.items():
+            with self.subTest(problem=problem), patch.object(release, "say"), \
+                    patch.object(release, "github", side_effect=lambda endpoint: api(endpoint, **answers)), \
+                    patch.object(release, "download_run_artifact") as downloaded, \
+                    self.assertRaisesRegex(RuntimeError, problem):
+                release.prepare_assets(commit, "1.0.0", output)
+            downloaded.assert_not_called()
+            self.assertFalse(output.exists())
+        for arguments in [("a" * 39, "1.0.0"), (commit, "1.0.0-dev.0")]:
+            with self.subTest(arguments=arguments), patch.object(release, "github") as github, \
+                    self.assertRaises(RuntimeError):
+                release.prepare_assets(*arguments, output)
+            github.assert_not_called()
+        with patch.object(release, "say"), patch.object(release, "github", side_effect=api), \
+                patch.object(release, "download_run_artifact", side_effect=download):
+            with self.assertRaisesRegex(RuntimeError, "another version"):
+                release.prepare_assets(commit, "1.0.1", self.root / "releases/v1.0.1")
+            release.prepare_assets(commit, "1.0.0", output)
+            with self.assertRaisesRegex(RuntimeError, "never overwrite"):
+                release.prepare_assets(commit, "1.0.0", output)
+        names = ["dispatch-platform-1.0.0.tar.gz", "release.json", "provenance.json"]
+        self.assertEqual(sorted(path.name for path in output.iterdir()), sorted([*names, "SHA256SUMS"]))
+        self.assertEqual(json.loads((output / "provenance.json").read_text()), {
+            "repository": release.REPOSITORY, "commit": commit, "version": "1.0.0", "workflowRun": 5,
+            "workflowAttempt": 1, "artifactId": 31, "artifactDigest": artifact["digest"],
+            "runtimeDigest": manifest["digest"],
+            "archiveSha256": hashlib.sha256(b"runtime archive").hexdigest()})
+        self.assertEqual((output / "SHA256SUMS").read_text(), "".join(
+            f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in names))
+        self.assertEqual(output.stat().st_mode & 0o777, 0o700)
+        # The release continues from what it prepared instead of preparing again.
+        item = release.Release("1.0.0", "origin/dev", None, self.root / "releases")
+        with patch.object(release, "prepare_assets") as again:
+            self.assertEqual(item.prepare(commit)["artifactId"], 31)
+        again.assert_not_called()
+
     def test_draft_assets_must_match_the_prepared_bytes_exactly(self):
         names = ("dispatch-platform-1.0.0.tar.gz", *release.ASSETS)
         assets = []

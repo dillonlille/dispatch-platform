@@ -1,16 +1,12 @@
-import { test, expect } from './fixtures.js';
+import { test, expect, login, openDsp } from './fixtures.js';
 
 test('Cortex credentials, verification, retest and disconnect stay scoped to its card', async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
-  await page.getByLabel('Email address').fill('owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByRole('button', { name: /Northline Logistics/ }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
   const settings = page.getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toHaveAttribute('href', /^#dsp\/dsp_[a-f0-9]{32}\/settings$/);
   await settings.click();

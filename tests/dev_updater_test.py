@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import importlib.util
 import io
@@ -104,6 +105,47 @@ class DevUpdaterTests(unittest.TestCase):
             self.instance.recover()
         runtime.verify_artifact(self.live / ".build", self.old)
         self.assertFalse(self.instance.receipt.exists())
+
+    def test_service_health_and_lock_are_the_dev_ones(self):
+        with patch.object(runtime, "command") as command:
+            self.instance.service("restart")
+        command.assert_called_once_with("systemctl", "--user", "restart", "dispatch-dev.service", timeout=90)
+        ready = {"status": "ready", "environment": "preview", "release": "digest"}
+        for answer, healthy in [(ready, True), (ready | {"runtime": "rust"}, True),
+                                (ready | {"environment": "production"}, False),
+                                (ready | {"status": "starting"}, False), (ready | {"release": "other"}, False)]:
+            with self.subTest(answer=answer), patch.object(runtime.time, "sleep"), \
+                    patch.object(runtime.urllib.request, "urlopen",
+                                 side_effect=lambda *_args, **_kwargs: io.BytesIO(json.dumps(answer).encode())) as opened:
+                self.assertEqual(self.instance.healthy("digest", timeout=0.05), healthy)
+                self.assertEqual(opened.call_args.args[0], "http://127.0.0.1:5180/api/health")
+        with patch.object(runtime.time, "sleep"), \
+                patch.object(runtime.urllib.request, "urlopen", side_effect=OSError("refused")):
+            self.assertFalse(self.instance.healthy("digest", timeout=0.05))
+        for change in [{"service": "dispatch-production.service"}, {"healthUrl": "http://example.test/api/health"}]:
+            (self.root / "config/updater.json").write_text(json.dumps(self.instance.config | change))
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                updater.DevUpdater(self.root)
+
+    def test_a_second_update_run_does_nothing_while_one_holds_the_lock(self):
+        with patch.object(self.instance, "update") as update:
+            with (self.instance.platform / "dev-update.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self.instance.run_locked()
+                update.assert_not_called()
+            self.instance.run_locked()
+        update.assert_called_once_with()
+
+    def test_activation_and_rollback_keep_their_order(self):
+        steps = []
+        git = self.instance.git
+        record = lambda *args: (steps.append(" ".join(args[:2])) if args[0] in ("merge", "reset") else None, git(*args))[1]
+        with patch.object(self.instance, "service", side_effect=steps.append), \
+                patch.object(self.instance, "git", side_effect=record), \
+                patch.object(self.instance, "healthy", side_effect=lambda digest: steps.append("health") or len(steps) > 5):
+            with self.assertRaisesRegex(RuntimeError, "New Dev build"):
+                self.instance.activate(self.candidate, self.new)
+        self.assertEqual(steps, ["stop", "merge --ff-only", "start", "health", "stop", "reset --hard", "start", "health"])
 
     def test_dirty_checkout_is_never_overwritten(self):
         (self.live / "source.txt").write_text("unfinished")

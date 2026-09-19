@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
-import { until } from './rust-support.js';
+import { until } from './support.js';
 
 const native = { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 };
 test(

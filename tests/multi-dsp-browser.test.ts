@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
-import { until } from './rust-support.js';
+import { until } from './support.js';
 import { processMemory } from './process-memory.js';
 import type { Job } from '../shared/contracts/index.js';
 

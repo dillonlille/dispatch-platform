@@ -1,12 +1,12 @@
 import { collectorDatabase } from './collector-storage.js';
+import { demo, prepare } from './fixture-server.js';
 import { checkBenchmark, type Failure, type Measurement } from './benchmark-budget.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
 import { parseArgs } from 'node:util';
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
@@ -19,7 +19,6 @@ const { values } = parseArgs({
     check: { type: 'boolean', default: false },
   },
 });
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-core-benchmark-'));
 const employees = 3000,
   days = 30,
   requests = 240;
@@ -80,32 +79,8 @@ function dataset(root: string) {
   }
   return { readers, writer: tenants.find((d) => d.name === 'Summit Delivery')! };
 }
-async function run() {
-  const root = path.join(temporary, 'rust');
-  fs.mkdirSync(root, { mode: 0o700 });
-  const listener = net.createServer();
-  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
-  const port = (listener.address() as net.AddressInfo).port;
-  await new Promise<void>((resolve) => listener.close(() => resolve()));
-  const origin = `http://127.0.0.1:${port}`;
-  const executable = path.resolve(values.binary!);
-  const artifact = path.resolve(path.dirname(executable), '../..');
-  const env = {
-    ...process.env,
-    NODE_ENV: 'development',
-    DISPATCH_STANDALONE: '1',
-    DISPATCH_ENVIRONMENT: 'preview',
-    DISPATCH_STATE_ROOT: root,
-    DISPATCH_PROVIDER_MODE: 'fixture',
-    DISPATCH_TRUSTED_PROXY: 'none',
-    DISPATCH_DEV_MAIL_MODE: 'disabled',
-    DISPATCH_ARTIFACT_ROOT: fs.existsSync(path.join(artifact, 'release.json'))
-      ? artifact
-      : process.cwd(),
-    DISPATCH_ORIGIN: origin,
-    PORT: String(port),
-  };
-  execFileSync(executable, ['seed'], { env, stdio: 'pipe' });
+async function run(app: Awaited<ReturnType<typeof prepare>>) {
+  const { root, env, address: origin, binary: executable } = app;
   const tenants = dataset(root);
   let server: ChildProcess | undefined, timer: ReturnType<typeof setInterval> | undefined;
   let peak = 0,
@@ -147,10 +122,7 @@ async function run() {
       assert(response.ok, `${route} returned ${response.status}`);
       return response.json();
     }
-    const login = await request('/api/auth/login', {
-      email: 'owner@dispatch.test',
-      password: 'Dispatch-demo-2026!',
-    });
+    const login = await request('/api/auth/login', { email: demo.email, password: demo.password });
     assert.equal(login.status, 200);
     headers.cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     const session = sessionSchema.parse(await json('/api/session'));
@@ -333,13 +305,27 @@ async function run() {
       });
   }
 }
+// The shared fixture prepares the state, environment and seeded data. This file keeps the
+// spawn, the health wait and its own requests, because those are what it measures.
+const executable = path.resolve(values.binary!);
+const artifact = path.resolve(path.dirname(executable), '../..');
+const app = await prepare({
+  binary: executable,
+  env: {
+    DISPATCH_TRUSTED_PROXY: 'none',
+    DISPATCH_DEV_MAIL_MODE: 'disabled',
+    DISPATCH_ARTIFACT_ROOT: fs.existsSync(path.join(artifact, 'release.json'))
+      ? artifact
+      : process.cwd(),
+  },
+});
 try {
-  const report = await run();
+  const report = await run(app);
   const output = JSON.stringify(report, null, 2) + '\n';
   if (values.output) fs.writeFileSync(values.output, output);
   process.stdout.write(output);
   // Correctness is mandatory in every mode; --check also enforces broad CI budgets.
   checkBenchmark(report, values.check);
 } finally {
-  fs.rmSync(temporary, { recursive: true, force: true });
+  fs.rmSync(app.root, { recursive: true, force: true });
 }

@@ -2,16 +2,13 @@
 """Isolated native suites; the capacity shard gets its own otherwise idle runner."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
 
-SHARDS = {
-    "paycom": ["tests/paycom-worker.test.ts", "tests/native-browser.test.ts"],
-    "cortex": ["tests/cortex-worker.test.ts", "tests/cortex-meals-worker.test.ts"],
-    "capacity": ["tests/multi-dsp-browser.test.ts", "tests/collection-throughput.test.ts"],
-}
-
+# The one list of native suites, shared with the check that no test file is left out.
+SHARDS = json.loads((Path(__file__).resolve().parent / "test-plan.json").read_text())["native"]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

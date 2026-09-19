@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
 
 test(
