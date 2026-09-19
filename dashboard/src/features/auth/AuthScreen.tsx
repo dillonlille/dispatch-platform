@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { Brand } from './brand.js';
-import { api, useData } from './api.js';
-import { ErrorBox } from './ui/index.js';
-import { messageOf } from './lib/errors.js';
-import { dspHash, hashQuery, navigate, platformHash, signInHash } from './app/navigation.js';
+import { Brand } from '../../app/Brand.js';
+import { api, useData } from '../../app/api.js';
+import { ErrorBox } from '../../ui/index.js';
+import { messageOf } from '../../lib/errors.js';
+import { dspHash, hashQuery, navigate, platformHash, signInHash } from '../../app/navigation.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const hash = window.location.hash.slice(1),
     token = hashQuery().get('token');

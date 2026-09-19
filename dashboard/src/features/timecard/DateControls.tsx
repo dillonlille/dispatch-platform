@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { localDate, shiftDate } from '../../shared/meal-breaks.js';
+import { localDate, shiftDate } from '../../../../shared/meal-breaks.js';
 
 function validDay(value: string, today: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '2000-01-01' || value > today) return false;

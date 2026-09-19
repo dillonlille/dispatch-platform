@@ -1,7 +1,7 @@
-import { Brand } from './brand.js';
-import { api } from './api.js';
-import { ErrorBox } from './ui/index.js';
-import { useAction } from './lib/useAction.js';
+import { Brand } from '../../app/Brand.js';
+import { api } from '../../app/api.js';
+import { ErrorBox } from '../../ui/index.js';
+import { useAction } from '../../app/useAction.js';
 export function DspOnboarding({ complete }: { complete: () => Promise<void> }) {
   const save = useAction(
     (profile: Record<string, FormDataEntryValue>) =>

@@ -1,13 +1,13 @@
-import { useUpdateState } from './browser-update.js';
-import { useCollectionUpdates } from './live-collection.js';
-import { BrowserVerification } from './browser-verification.js';
-import { PaycomDateControls } from './paycom-day-controls.js';
+import { useUpdateState } from './app/browser-update.js';
+import { useCollectionUpdates } from './app/live-collection.js';
+import { BrowserVerification } from './features/connections/BrowserVerification.js';
+import { PaycomDateControls } from './features/timecard/DateControls.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
 import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
 import { paycomColumns, type PaycomPreferences, type PaycomColumn } from '../../shared/paycom.js';
-import { api, useData } from './api.js';
+import { api, useData } from './app/api.js';
 import {
   Badge,
   ConfirmDialog,
@@ -22,7 +22,7 @@ import {
 } from './ui/index.js';
 import { time, title } from './lib/format.js';
 import { messageOf } from './lib/errors.js';
-import { useAction } from './lib/useAction.js';
+import { useAction } from './app/useAction.js';
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
 type Daily = {
   rows: (Timecard & { name: string })[];

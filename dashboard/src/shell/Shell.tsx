@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, X, Check, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
-import type { DspView, SessionView } from '../../shared/contracts/index.js';
-import { Brand } from './brand.js';
-import { Popover, useFocusTrap } from './ui/index.js';
-import { dspHash, platformHash } from './app/navigation.js';
-import type { DspRouteId, PlatformRouteId } from './app/routes.js';
+import type { DspView, SessionView } from '../../../shared/contracts/index.js';
+import { Brand } from '../app/Brand.js';
+import { Popover, useFocusTrap } from '../ui/index.js';
+import { dspHash, platformHash } from '../app/navigation.js';
+import type { DspRouteId, PlatformRouteId } from '../app/routes.js';
 
 // Lets a platform owner look through any role the DSP has, custom ones included.
 function ViewRoleMenu({ view, viewAs }: { view: DspView; viewAs: (roleId?: string) => void }) {

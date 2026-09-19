@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
-import { api, ApiError, useData } from './api.js';
+import { api, ApiError, useData } from './app/api.js';
 import { DataState, ErrorBox, Header, Modal } from './ui/index.js';
 import { time } from './lib/format.js';
 import {
@@ -12,7 +12,7 @@ import {
 import type { PaycomSettings } from '../../shared/paycom.js';
 import { dspHash } from './app/navigation.js';
 import { messageOf } from './lib/errors.js';
-import './timecard-schedules.css';
+import './features/timecard/settings/timecard-schedules.css';
 
 const newSchedule = (): ScheduleInput => ({
   name: '',

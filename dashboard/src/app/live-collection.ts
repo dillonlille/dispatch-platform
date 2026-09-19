@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, view } from './api.js';
-import { backoff } from './lib/backoff.js';
+import { backoff } from '../lib/backoff.js';
 
 /** One bounded, sleeping request per visible table. Driver events carry no records. */
 export function useCollectionUpdates(date: string) {

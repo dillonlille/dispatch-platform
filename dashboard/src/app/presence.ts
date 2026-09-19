@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { csrf } from './api.js';
-import { onActivity } from './lib/activity.js';
+import { onActivity } from '../lib/activity.js';
 
 const BEAT = 30_000;
 const IDLE = 120_000;

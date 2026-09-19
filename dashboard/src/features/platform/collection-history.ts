@@ -1,4 +1,4 @@
-import type { Job } from '../../shared/contracts/index.js';
+import type { Job } from '../../../../shared/contracts/index.js';
 
 export const providerName = (kind: Job['kind']) =>
   kind === 'paycom.collect' ? 'Paycom' : 'Cortex';

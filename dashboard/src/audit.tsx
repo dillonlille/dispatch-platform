@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useUpdateState } from './browser-update.js';
+import { useUpdateState } from './app/browser-update.js';
 import {
   ArrowRight,
   Building2,
@@ -27,15 +27,15 @@ import type {
   DspView,
   Permission,
 } from '../../shared/contracts/index.js';
-import { api, errorLabel, useData } from './api.js';
+import { api, errorLabel, useData } from './app/api.js';
 import { DataState, Empty, ErrorBox, SearchInput } from './ui/index.js';
 import { deviceTimezone, elapsed, timeOfDay, title } from './lib/format.js';
 import { permissionLabels } from './roles.js';
-import { useAction } from './lib/useAction.js';
+import { useAction } from './app/useAction.js';
 import { dspHash } from './app/navigation.js';
 import { routeLabel, type DspRouteId } from './app/routes.js';
 import { paycomColumns } from '../../shared/paycom.js';
-import './audit.css';
+import './features/audit/audit.css';
 
 const PAGE = 50;
 const LOAD_LIMIT = 5000;

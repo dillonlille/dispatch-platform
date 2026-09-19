@@ -1,4 +1,4 @@
-import { useUpdateState } from './browser-update.js';
+import { useUpdateState } from './app/browser-update.js';
 import { useState } from 'react';
 import {
   Wrench,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { Connection, DspView, Membership, Job, Role } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
-import { api, useData } from './api.js';
+import { api, useData } from './app/api.js';
 import {
   Badge,
   ConfirmDialog,
@@ -28,9 +28,9 @@ import { time, timeOfDay, title } from './lib/format.js';
 import { can } from './app/permissions.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
-import { usePaycomDate } from './paycom-day-controls.js';
+import { usePaycomDate } from './features/timecard/DateControls.js';
 import { localDate } from '../../shared/meal-breaks.js';
-import { useAction } from './lib/useAction.js';
+import { useAction } from './app/useAction.js';
 import { dspHash, navigate } from './app/navigation.js';
 import { RoleSheet, RolesTab, assignable } from './roles.js';
 

@@ -1,14 +1,14 @@
-import { useUpdateState } from './browser-update.js';
+import { useUpdateState } from './app/browser-update.js';
 import { useState } from 'react';
 import { Building2, Ellipsis, Plus, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type { DspSummary, Job, PlatformHealth, SessionView } from '../../shared/contracts/index.js';
 import { dspHash, navigate, platformHash } from './app/navigation.js';
-import { useAction } from './lib/useAction.js';
-import { api, errorLabel, useData } from './api.js';
-import { DspAvatar } from './brand.js';
-import { JobPerformance } from './job-performance.js';
-import { CollectionHistory } from './collection-history-view.js';
-import { providerName } from './collection-history.js';
+import { useAction } from './app/useAction.js';
+import { api, errorLabel, useData } from './app/api.js';
+import { DspAvatar } from './app/Brand.js';
+import { JobPerformance } from './features/platform/JobPerformance.js';
+import { CollectionHistory } from './features/platform/CollectionHistory.js';
+import { providerName } from './features/platform/collection-history.js';
 import { AuditLog } from './audit.js';
 import {
   Badge,

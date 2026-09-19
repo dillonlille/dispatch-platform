@@ -6,10 +6,10 @@ import {
   type Permission,
   type Role,
 } from '../../shared/contracts/index.js';
-import { api } from './api.js';
+import { api } from './app/api.js';
 import { DataState, Empty, Modal } from './ui/index.js';
 import { can } from './app/permissions.js';
-import { useAction } from './lib/useAction.js';
+import { useAction } from './app/useAction.js';
 
 export const permissionLabels: Record<Permission, string> = {
   'timecard.view': 'View Timecard',

@@ -1,21 +1,21 @@
-import { useBrowserUpdate } from './browser-update.js';
+import { useBrowserUpdate } from './app/browser-update.js';
 import { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
-import { api, credentials, ApiError } from './api.js';
+import { api, credentials, ApiError } from './app/api.js';
 import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
 import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
 import { Page, findRoute, navigation, routeLabel } from './app/routes.js';
-import { AuthScreen } from './auth.js';
+import { AuthScreen } from './features/auth/AuthScreen.js';
 import { messageOf } from './lib/errors.js';
 import { Loading } from './ui/index.js';
 import { can } from './app/permissions.js';
 import './styles.css';
-import { DspOnboarding } from './onboarding.js';
-import { Shell } from './shell.js';
+import { DspOnboarding } from './features/auth/Onboarding.js';
+import { Shell } from './shell/Shell.js';
 type Session = SessionView;
-import { readAppearance, applyAppearance } from './appearance.js';
-import { leavePresence, usePresence } from './presence.js';
+import { readAppearance, applyAppearance } from './app/appearance.js';
+import { leavePresence, usePresence } from './app/presence.js';
 // The role a platform owner looks through survives a reload of this tab and is
 // forgotten once they leave the DSP.
 const VIEW_ROLE = 'dispatch-view-role';

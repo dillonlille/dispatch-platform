@@ -1,8 +1,8 @@
 import { beginBrowserWrite } from './browser-update.js';
-import { scheduleIssues } from '../../shared/schedules.js';
+import { scheduleIssues } from '../../../shared/schedules.js';
 import { useEffect, useState, useCallback } from 'react';
-import { parseApiResponse } from '../../shared/contracts/runtime.js';
-import { backoff } from './lib/backoff.js';
+import { parseApiResponse } from '../../../shared/contracts/runtime.js';
+import { backoff } from '../lib/backoff.js';
 export let csrf = '',
   view = '';
 export function credentials(nextCsrf: string, nextView = '') {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useFeedback } from '../app/feedback.js';
-import { messageOf } from './errors.js';
+import { useFeedback } from './feedback.js';
+import { messageOf } from '../lib/errors.js';
 
 /**
  * A mutation with its busy and error state. Failures show at the top of the page

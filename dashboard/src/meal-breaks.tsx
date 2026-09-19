@@ -1,5 +1,5 @@
-import { useUpdateState } from './browser-update.js';
-import { useCollectionUpdates } from './live-collection.js';
+import { useUpdateState } from './app/browser-update.js';
+import { useCollectionUpdates } from './app/live-collection.js';
 import { Fragment, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -10,7 +10,7 @@ import {
   Link2,
   RefreshCw,
 } from 'lucide-react';
-import { api, useData } from './api.js';
+import { api, useData } from './app/api.js';
 import {
   DataState,
   Empty,
@@ -33,9 +33,9 @@ import {
   type MealEmployee,
 } from '../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../shared/paycom.js';
-import { PaycomDateControls } from './paycom-day-controls.js';
-import { useAction } from './lib/useAction.js';
-import './meal-breaks.css';
+import { PaycomDateControls } from './features/timecard/DateControls.js';
+import { useAction } from './app/useAction.js';
+import './features/timecard/meal-breaks/meal-breaks.css';
 
 function Source({ name }: { name: 'Paycom' | 'Flex' }) {
   return (

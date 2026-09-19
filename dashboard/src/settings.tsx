@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
-import { api, useData } from './api.js';
+import { api, useData } from './app/api.js';
 import { DataState, DetailList, Empty, ErrorBox, Header, Tabs } from './ui/index.js';
 import { can } from './app/permissions.js';
 import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
-import { useAction } from './lib/useAction.js';
-import { ThemeSection } from './theme.js';
+import { useAction } from './app/useAction.js';
+import { ThemeSection } from './features/settings/ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from './app/navigation.js';
 
 export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {

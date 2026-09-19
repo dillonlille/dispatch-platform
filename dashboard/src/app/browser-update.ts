@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { onActivity } from './lib/activity.js';
+import { onActivity } from '../lib/activity.js';
 
 const storageKey = 'dispatch:browser-update:v1';
 const values = new Map<string, unknown>();
