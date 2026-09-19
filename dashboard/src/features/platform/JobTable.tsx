@@ -9,7 +9,6 @@ const columns: TableColumn<Job>[] = [
   {
     id: 'collection',
     header: 'Collection',
-    hideable: false,
     value: (job) => job.dspName,
     cell: (job) => (
       <>

@@ -5,7 +5,6 @@ import { AlertTriangle, Download, Globe, Info, Link2, RefreshCw } from 'lucide-r
 import { useData } from '../../../app/api.js';
 import { useTableState } from '../../../app/useTableState.js';
 import {
-  ColumnMenu,
   DataState,
   DataTable,
   downloadTable,
@@ -137,17 +136,14 @@ export function MealBreaksPage({
             setLinking(false);
           }}
         />
-        <div className="table-tools">
-          <ColumnMenu table={table} />
-          <button
-            className="icon-button"
-            aria-label="Export meal breaks"
-            disabled={!filtered.length}
-            onClick={() => downloadTable(table, `meal-breaks-${shownDate}.csv`)}
-          >
-            <Download size={16} />
-          </button>
-        </div>
+        <button
+          className="icon-button"
+          aria-label="Export meal breaks"
+          disabled={!filtered.length}
+          onClick={() => downloadTable(table, `meal-breaks-${shownDate}.csv`)}
+        >
+          <Download size={16} />
+        </button>
       </header>
       <div className="meal-toolbar">
         <SearchInput

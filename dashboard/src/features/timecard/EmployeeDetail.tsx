@@ -16,7 +16,6 @@ const columns: TableColumn<Timecard>[] = [
   {
     id: 'date',
     header: 'Date',
-    hideable: false,
     value: (card) => card.date,
     cell: (card) => card.date,
   },

@@ -10,7 +10,6 @@ const columns: TableColumn<Run>[] = [
   {
     id: 'finished',
     header: 'Finished',
-    hideable: false,
     value: (run) => run.job.completedAt ?? run.job.createdAt,
     cell: (run) => time(run.job.completedAt ?? run.job.createdAt, deviceTimezone()),
   },

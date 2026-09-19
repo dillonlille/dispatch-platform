@@ -85,7 +85,6 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
       header: 'Schedule',
       scope: 'col',
       rowHeader: true,
-      hideable: false,
       value: (schedule) => schedule.name,
       cell: (schedule) => schedule.name,
     },
@@ -146,9 +145,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
     {
       id: 'actions',
       header: <span className="sr-only">Actions</span>,
-      name: 'Actions',
       scope: 'col',
-      hideable: false,
       className: 'schedule-row-actions',
       cell: (schedule) => (
         <button

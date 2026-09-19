@@ -53,7 +53,7 @@ export function DataTable<T>({
   renderDetail?: (row: T) => ReactNode;
   detailClassName?: string;
 }) {
-  const columns = table.visibleColumns;
+  const columns = table.columns;
   const cellClass = (column: TableColumn<T>, row: T, context: RowContext) =>
     classes(
       typeof column.className === 'function' ? column.className(row, context) : column.className,

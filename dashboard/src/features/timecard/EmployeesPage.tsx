@@ -29,7 +29,6 @@ export function EmployeesPage() {
         id: 'name',
         header: 'Employee',
         sortable: true,
-        hideable: false,
         value: (person) => person.name,
         cell: (person) => (
           <button className="employee-link" onClick={() => setEmployee(person.code)}>

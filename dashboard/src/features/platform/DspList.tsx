@@ -106,7 +106,6 @@ export function DspList() {
       id: 'dsp',
       header: 'DSP',
       headerClassName: 'fleet-dsp-column',
-      hideable: false,
       value: (dsp) => dsp.name,
       cell: (dsp) => (
         <button className="identity-button" onClick={() => setDetail(dsp)}>
@@ -144,8 +143,6 @@ export function DspList() {
     {
       id: 'actions',
       header: <span className="sr-only">Actions</span>,
-      name: 'Actions',
-      hideable: false,
       className: 'cell-end',
       cell: (dsp) => (
         <Popover

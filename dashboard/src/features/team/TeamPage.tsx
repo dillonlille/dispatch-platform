@@ -80,7 +80,6 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
       id: 'member',
       header: 'Member',
       headerClassName: 'team-member-column',
-      hideable: false,
       value: (member) => member.name,
       cell: (member) => (
         <div className="member-identity">
@@ -108,8 +107,6 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     {
       id: 'actions',
       header: actions,
-      name: 'Actions',
-      hideable: false,
       cell: (member) =>
         canManage &&
         grantable.some((role) => role.id === member.roleId) && (
@@ -142,7 +139,6 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     {
       id: 'email',
       header: 'Email address',
-      hideable: false,
       value: (invitation) => invitation.email,
       cell: (invitation) => invitation.email,
     },
@@ -161,8 +157,6 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     {
       id: 'actions',
       header: actions,
-      name: 'Actions',
-      hideable: false,
       cell: (invitation) => (
         <button
           className="text-button"

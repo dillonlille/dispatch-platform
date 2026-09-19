@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  columnVisibilityFeature,
   createExpandedRowModel,
   createPaginatedRowModel,
   createSortedRowModel,
@@ -18,7 +17,6 @@ import {
 // The only module that knows the table engine. Pages describe columns and rows in the
 // terms below, so a capability added here reaches every table without touching a page.
 const features = tableFeatures({
-  columnVisibilityFeature,
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   rowExpandingFeature,
@@ -36,8 +34,6 @@ export interface TableStateStore {
   setSort: (sort: TableSort) => void;
   page: number;
   setPage: (page: number) => void;
-  hidden: string[];
-  setHidden: (hidden: string[]) => void;
 }
 
 /** What a cell or row renderer can know about the row beyond its data. */
@@ -51,7 +47,7 @@ export interface RowContext {
 export interface TableColumn<T> {
   id: string;
   header: ReactNode;
-  /** Plain name for the column menu and exports. Defaults to `header` when that is text. */
+  /** Plain name for exports. Defaults to `header` when that is text. */
   name?: string;
   cell: (row: T, context: RowContext) => ReactNode;
   /** A comparable value read from the row alone. Required for client sorting; used by exports. */
@@ -59,8 +55,6 @@ export interface TableColumn<T> {
   sortable?: boolean;
   /** Replaces the sort button's class and arrow. */
   sortHeader?: { className?: string; indicator?: (direction: 'asc' | 'desc') => ReactNode };
-  /** Columns that identify the row cannot be hidden. */
-  hideable?: boolean;
   /** Renders the cell as `<th scope="row">`. */
   rowHeader?: boolean;
   scope?: 'col';
@@ -91,7 +85,6 @@ export interface DataTableOptions<T> {
 
 export interface DataTable<T> {
   columns: TableColumn<T>[];
-  visibleColumns: TableColumn<T>[];
   /** The rows to draw, sub-rows of expanded rows included. */
   rows: { id: string; data: T; context: RowContext }[];
   /** Every row in display order, ignoring pages. One server page when `total` is set. */
@@ -102,8 +95,6 @@ export interface DataTable<T> {
   pageSize: number;
   total: number;
   setPage: (page: number) => void;
-  isHidden: (id: string) => boolean;
-  toggleColumn: (id: string) => void;
   collapseAll: () => void;
 }
 
@@ -116,8 +107,7 @@ const everything = Number.MAX_SAFE_INTEGER;
 function useLocalState(): TableStateStore {
   const [sort, setSort] = useState<TableSort | null>(null);
   const [page, setPage] = useState(0);
-  const [hidden, setHidden] = useState<string[]>([]);
-  return { sort, setSort, page, setPage, hidden, setHidden };
+  return { sort, setSort, page, setPage };
 }
 
 export function useDataTable<T extends RowData>({
@@ -137,9 +127,7 @@ export function useDataTable<T extends RowData>({
   // a column's identity or abilities change, and reads values through the latest columns.
   const latest = useRef(columns);
   latest.current = columns;
-  const shape = columns
-    .map((column) => `${column.id}:${Boolean(column.sortable)}:${column.hideable !== false}`)
-    .join('|');
+  const shape = columns.map((column) => `${column.id}:${Boolean(column.sortable)}`).join('|');
   const defs = useMemo(
     () =>
       latest.current.map(
@@ -147,7 +135,6 @@ export function useDataTable<T extends RowData>({
           id: column.id,
           accessorFn: (row) => latest.current[index]?.value?.(row) ?? null,
           enableSorting: Boolean(column.sortable),
-          enableHiding: column.hideable !== false,
           sortFn: (a: Row<Features, T>, b: Row<Features, T>, id: string) =>
             compare(a.getValue(id), b.getValue(id)),
         }),
@@ -175,16 +162,13 @@ export function useDataTable<T extends RowData>({
     state: {
       sorting: state.sort ? [state.sort] : [],
       pagination: { pageIndex: page, pageSize },
-      columnVisibility: Object.fromEntries(state.hidden.map((id) => [id, false])),
       expanded,
     },
     onExpandedChange: (next) =>
       setExpanded((current) => (typeof next === 'function' ? next(current) : next)),
   });
-  const visible = new Set(table.getVisibleLeafColumns().map((column) => column.id));
   return {
     columns,
-    visibleColumns: columns.filter((column) => visible.has(column.id)),
     rows: table.getRowModel().rows.map((row) => ({
       id: row.id,
       data: row.original,
@@ -204,13 +188,6 @@ export function useDataTable<T extends RowData>({
     pageSize,
     total: count,
     setPage: state.setPage,
-    isHidden: (id) => !visible.has(id),
-    toggleColumn: (id) =>
-      state.setHidden(
-        state.hidden.includes(id)
-          ? state.hidden.filter((hidden) => hidden !== id)
-          : [...state.hidden, id],
-      ),
     collapseAll: () => setExpanded({}),
   };
 }
