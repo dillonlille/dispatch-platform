@@ -1,25 +1,8 @@
 use crate::{
     Result,
-    db::{Db, Store, at, flag, iso, n, now, s},
+    db::{Store, at, flag, iso, n, now, s},
 };
 use serde_json::{Value, json};
-// A nullable, additive column keeps the version 3 platform schema readable by
-// the previous Rust release. It names the actor once their account is deleted.
-pub(crate) fn migrate_audit(db: &Db) -> Result<()> {
-    let columns = db.all("PRAGMA table_info(audit)", [])?;
-    if !columns.iter().any(|c| s(c, "name") == "actor_name") {
-        db.0.execute_batch("ALTER TABLE audit ADD COLUMN actor_name TEXT")?;
-    }
-    // Who or what an event touched, and the values it changed, as JSON.
-    if !columns.iter().any(|c| s(c, "name") == "data") {
-        db.0.execute_batch("ALTER TABLE audit ADD COLUMN data TEXT")?;
-    }
-    // Set when a platform owner acted in a DSP that shows Platform support.
-    if !columns.iter().any(|c| s(c, "name") == "shown") {
-        db.0.execute_batch("ALTER TABLE audit ADD COLUMN shown INTEGER")?;
-    }
-    Ok(())
-}
 const EXPORT_LIMIT: i64 = 50_000;
 const VISIT_WINDOW: i64 = 30 * 60 * 1000;
 // Activity older than a year is removed by the collector's periodic cleanup.

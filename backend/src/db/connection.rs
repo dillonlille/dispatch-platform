@@ -1,4 +1,4 @@
-use super::private_file;
+use super::{Kind, migrations, private_file};
 use crate::{Result, ensure};
 use rusqlite::{Connection, Params, types::ValueRef};
 use serde_json::{Value, json};
@@ -22,8 +22,33 @@ fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 pub struct Db(pub Connection);
 impl Db {
-    pub(crate) fn open(file: &Path, schema: &str, version: i64, initialize: bool) -> Result<Self> {
-        private_file(file, initialize)?;
+    /// Opens an existing database. Its schema is left alone: requests take this path.
+    pub(crate) fn open(file: &Path, kind: Kind) -> Result<Self> {
+        Self::connect(file, kind, false)
+    }
+    /// Startup and provisioning: creates the database when it is missing, then
+    /// applies the migrations it lacks. `seed` holds the rows a new database needs
+    /// and commits together with its schema, so no reader sees one without them.
+    pub(crate) fn create(file: &Path, kind: Kind, seed: &str) -> Result<Self> {
+        let db = Self::connect(file, kind, true)?;
+        if db.version()? == 0 {
+            let tx = migrations::immediate(&db)?;
+            // Another connection may have created it while this one waited.
+            if db.version()? == 0 {
+                migrations::apply(&db, kind.name(), kind.migrations())?;
+                tx.execute_batch(seed)?;
+                tx.pragma_update(None, "user_version", kind.version())?;
+            }
+            tx.commit()?;
+        }
+        migrations::migrate(&db, kind)?;
+        Ok(db)
+    }
+    fn version(&self) -> Result<i64> {
+        Ok(self.0.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    }
+    fn connect(file: &Path, kind: Kind, create: bool) -> Result<Self> {
+        private_file(file, create)?;
         for suffix in ["-wal", "-shm", "-journal"] {
             private_file(&PathBuf::from(format!("{}{suffix}", file.display())), false)?;
         }
@@ -46,24 +71,30 @@ impl Db {
         db.busy_timeout(Duration::from_secs(5))?;
         db.set_prepared_statement_cache_capacity(32);
         db.pragma_update(None, "cache_size", -512)?;
-        let current: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let db = Self(db);
+        let current = db.version()?;
         ensure(
-            (current == 0 && initialize) || current == version,
+            (current == 0 && create) || current == kind.version(),
             "incompatible_database",
             503,
         )?;
-        db.execute_batch(
-            "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
-        )?;
-        if current == 0 && initialize {
-            let tx = db.unchecked_transaction()?;
-            tx.execute_batch(schema)?;
-            tx.pragma_update(None, "user_version", version)?;
-            tx.commit()?;
-        } else {
-            ensure(current == version, "incompatible_database", 503)?;
+        db.0.execute_batch("PRAGMA foreign_keys=ON;")?;
+        // Moving a new database to WAL takes a lock that ignores the busy timeout,
+        // so connections racing to create one retry. Afterwards this changes nothing.
+        let began = std::time::Instant::now();
+        loop {
+            match db.0.execute_batch("PRAGMA journal_mode=WAL;") {
+                Err(error)
+                    if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                        && began.elapsed() < Duration::from_secs(5) =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                result => break result?,
+            }
         }
-        Ok(Self(db))
+        db.0.execute_batch("PRAGMA synchronous=FULL;")?;
+        Ok(db)
     }
     pub fn exec(&self, sql: &str, p: impl Params) -> Result<usize> {
         Ok(self.0.prepare_cached(sql)?.execute(p)?)

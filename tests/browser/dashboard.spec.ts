@@ -279,6 +279,20 @@ test('create a DSP and accept its owner invitation while another account is sign
   ).toBeVisible();
 });
 
+test('the account menu closes on a press outside it and on Escape', async ({ page }) => {
+  await login(page);
+  const menu = page.locator('details.account-menu');
+  const trigger = menu.locator('summary');
+  await trigger.click();
+  await expect(menu.locator('.account-popover')).toBeVisible();
+  await page.getByRole('heading', { name: 'DSPs', exact: true }).click();
+  await expect(menu.locator('.account-popover')).toBeHidden();
+  await trigger.click();
+  await expect(menu.locator('.account-popover')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu.locator('.account-popover')).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
 test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();

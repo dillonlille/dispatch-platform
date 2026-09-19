@@ -10,13 +10,6 @@ use chrono::{NaiveTime, TimeZone};
 use rusqlite::params;
 use serde_json::{Value, json};
 
-const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS collection_schedules (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, collection TEXT NOT NULL CHECK(collection IN ('paycom','meal_break','both')),
-    cadence TEXT NOT NULL CHECK(cadence IN ('interval','daily')), interval_minutes INTEGER, local_time TEXT NOT NULL,
-    anchor INTEGER NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), next_run TEXT,
-    revision INTEGER NOT NULL DEFAULT 1, last_error TEXT, created_at TEXT NOT NULL
-);";
-
 fn timezone(tz: &str) -> Result<chrono_tz::Tz> {
     tz.parse().map_err(|_| Error::new("invalid_timezone", 400))
 }
@@ -129,7 +122,6 @@ fn public(row: &Value) -> Value {
 impl Store {
     pub(crate) fn initialize_schedules(&self, id: &str) -> Result<()> {
         let db = self.dsp(id)?;
-        db.0.execute_batch(SCHEMA)?;
         // v0.0.9 imports the DSP's old single schedule unless this is set.
         if db.setting("collectionSchedules.initialized", json!(false))? != json!(true) {
             db.set("collectionSchedules.initialized", &json!(true))?;

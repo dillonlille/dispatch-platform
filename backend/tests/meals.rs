@@ -232,7 +232,11 @@ fn provider_jobs_bind_request_identity_and_connection_revision() {
 fn migration_minimizes_all_history_and_legacy_runtime_publications() {
     let db = rusqlite::Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    db.execute_batch(include_str!("../src/collectors/cortexMeals.sql"))
+    // The baseline is what adopts a database from before meal_records existed. Without
+    // the trigger, the rows below stay where that older runtime left them.
+    let baseline = include_str!("../src/db/schema/cortex/0001_baseline.sql");
+    db.execute_batch(baseline).unwrap();
+    db.execute_batch("DROP TRIGGER minimize_legacy_meal_publication")
         .unwrap();
     let legacy_publish = |id: &str| {
         db.execute("INSERT INTO meal_publications VALUES (?1,?1,'2026-01-10','DOT4','area','provider','UTC','2026-01-10T20:00:00.000Z','2026-01-10T20:00:00.000Z',0,1,1,1,2)",[id]).unwrap();
@@ -257,8 +261,7 @@ fn migration_minimizes_all_history_and_legacy_runtime_publications() {
         [],
     )
     .unwrap();
-    db.execute_batch(include_str!("../src/collectors/cortexMealRecords.sql"))
-        .unwrap();
+    db.execute_batch(baseline).unwrap();
     legacy_publish("rollback-runtime");
     db.execute("UPDATE meal_publications SET active=0", [])
         .unwrap();

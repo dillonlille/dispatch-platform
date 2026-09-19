@@ -12,6 +12,8 @@ test('owner creates a role and the member’s interface follows its permissions'
   page,
   browser,
 }) => {
+  // Two waits of up to 15 s for the open session to follow a permission change.
+  test.slow();
   await login(page);
   await page.getByText('Northline Logistics', { exact: true }).first().click();
   await page.getByRole('button', { name: 'View', exact: true }).click();

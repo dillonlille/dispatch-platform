@@ -68,25 +68,25 @@ fn public(row: &Value) -> Value {
     json!({"id":row["id"],"name":row["name"],"owner":flag(row,"system"),"permissions":stored(row),"members":row["members"],"invitations":row["invitations"]})
 }
 
-// Nullable, additive columns keep the version 3 platform schema readable by
-// the previous Rust release.
-pub fn migrate(db: &Db) -> Result<()> {
+// Seeds every DSP's default roles, and gives a role_id to each membership and
+// invitation that has only the legacy role.
+pub fn backfill(db: &Db) -> Result<()> {
     db.transaction(|| {
-        db.0.execute_batch("CREATE TABLE IF NOT EXISTS roles (id TEXT PRIMARY KEY, dsp_id TEXT NOT NULL REFERENCES dsps(id), name TEXT NOT NULL COLLATE NOCASE, permissions TEXT NOT NULL DEFAULT '[]', system INTEGER NOT NULL DEFAULT 0 CHECK(system IN (0,1)), created_at TEXT NOT NULL, UNIQUE(dsp_id,name)); CREATE UNIQUE INDEX IF NOT EXISTS roles_owner ON roles(dsp_id) WHERE system=1;")?;
-        for (table, kind) in [("memberships", "TEXT REFERENCES roles(id)"), ("invitations", "TEXT")] {
-            let columns = db.all(&format!("PRAGMA table_info({table})"), [])?;
-            if !columns.iter().any(|c| s(c, "name") == "role_id") {
-                db.0.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN role_id {kind}"))?;
-            }
-        }
-        db.0.execute_batch("CREATE INDEX IF NOT EXISTS memberships_role ON memberships(role_id); CREATE INDEX IF NOT EXISTS invitations_role ON invitations(role_id) WHERE used_at IS NULL;")?;
         for dsp in db.all("SELECT id FROM dsps", [])? {
             seed(db, s(&dsp, "id"))?;
         }
         for table in ["memberships", "invitations"] {
-            for row in db.all(&format!("SELECT DISTINCT dsp_id,role FROM {table} WHERE role_id IS NULL"), [])? {
+            for row in db.all(
+                &format!("SELECT DISTINCT dsp_id,role FROM {table} WHERE role_id IS NULL"),
+                [],
+            )? {
                 let id = default_role(db, s(&row, "dsp_id"), s(&row, "role"))?;
-                db.exec(&format!("UPDATE {table} SET role_id=? WHERE role_id IS NULL AND dsp_id=? AND role=?"), [&id, s(&row, "dsp_id"), s(&row, "role")])?;
+                db.exec(
+                    &format!(
+                        "UPDATE {table} SET role_id=? WHERE role_id IS NULL AND dsp_id=? AND role=?"
+                    ),
+                    [&id, s(&row, "dsp_id"), s(&row, "role")],
+                )?;
             }
         }
         Ok(())

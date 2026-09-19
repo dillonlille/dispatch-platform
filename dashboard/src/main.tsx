@@ -1,73 +1,28 @@
-import { useBrowserUpdate } from './browser-update.js';
+import { useBrowserUpdate } from './app/browser-update.js';
 import { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  House,
-  CalendarDays,
-  ArrowUpFromLine,
-  Building2,
-  Settings,
-  Users,
-  X,
-  FlaskConical,
-  ScrollText,
-} from 'lucide-react';
-import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
-import { api, credentials, ApiError } from './api.js';
-import { AuthScreen } from './auth.js';
-import { DspList, AuditPage, ReleasesPage, DiagnosticsPage, type Perform } from './platform.js';
-import { Badge, Header, Loading, ErrorBox, can } from './ui.js';
+import type { DspView, SessionView } from '../../shared/contracts/index.js';
+import { api, credentials, ApiError } from './app/api.js';
+import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
+import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
+import { Page, findRoute, navigation } from './app/routes.js';
+import { routeLabel } from './app/route-meta.js';
+import { AuthScreen, DspOnboarding } from './features/auth/index.js';
+import { messageOf } from './lib/errors.js';
+import { Loading } from './ui/index.js';
+import { can } from './app/permissions.js';
 import './styles.css';
-import { DspOnboarding } from './onboarding.js';
-import { PaycomSettingsPage } from './paycom-settings.js';
-import { Shell } from './shell.js';
-import { SettingsPage } from './settings.js';
-import { PaycomPage, HomePage, TeamPage } from './workspace.js';
+import { Shell } from './shell/Shell.js';
 type Session = SessionView;
-import { readAppearance, applyAppearance } from './appearance.js';
-import { leavePresence, usePresence } from './presence.js';
-// The role a platform owner looks through survives a reload of this tab and is
-// forgotten once they leave the DSP.
-const VIEW_ROLE = 'dispatch-view-role';
-let viewRole: string | null | undefined;
-function savedRole(dspId: string) {
-  if (viewRole === undefined)
-    try {
-      viewRole = sessionStorage.getItem(VIEW_ROLE);
-    } catch {
-      viewRole = null;
-    }
-  const [dsp, role] = viewRole?.split(' ') ?? [];
-  return dsp === dspId ? role : undefined;
-}
-function saveRole(dspId?: string, roleId?: string) {
-  viewRole = dspId && roleId ? `${dspId} ${roleId}` : null;
-  try {
-    if (viewRole) sessionStorage.setItem(VIEW_ROLE, viewRole);
-    else sessionStorage.removeItem(VIEW_ROLE);
-  } catch {
-    /* The role still applies until the page reloads. */
-  }
-}
-async function openView(session: Session, dspId: string) {
-  const roleId = session.user.platformOwner ? savedRole(dspId) : undefined;
-  if (!roleId) return api<DspView>('/api/session/dsp', { dspId });
-  try {
-    return await api<DspView>('/api/session/dsp', { dspId, roleId });
-  } catch (error) {
-    // The DSP deleted the role being looked through; owner access remains.
-    if (!(error instanceof ApiError) || error.code !== 'dsp_view_expired') throw error;
-    saveRole();
-    return api<DspView>('/api/session/dsp', { dspId });
-  }
-}
+import { readAppearance, applyAppearance } from './app/appearance.js';
+import { leavePresence, usePresence } from './app/presence.js';
+import { openView, saveRole } from './app/session.js';
 function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
-    [route, setRoute] = useState(window.location.hash.slice(1) || 'dsps'),
-    [notice, setNotice] = useState(''),
-    [error, setError] = useState(''),
+    [address, setAddress] = useState(() => parseHash(window.location.hash)),
     [switching, setSwitching] = useState(false);
+  const { perform, fail } = useFeedback();
   useEffect(() => {
     const id = session?.user.id ?? 'signed-out';
     const apply = () => applyAppearance(readAppearance(id));
@@ -80,43 +35,45 @@ function App() {
       window.removeEventListener('dispatch-appearance', apply);
     };
   }, [session?.user.id]);
-  const load = useCallback(async (afterLogin = false) => {
-    try {
-      const next = await api<Session>('/api/session');
-      credentials(next.csrf);
-      setSession(next);
-      if (
-        !next.user.platformOwner &&
-        (afterLogin || !/^#(?:invite\?|reset\?|signin)/.test(window.location.hash)) &&
-        !window.location.hash.startsWith('#dsp/') &&
-        next.dsps.length === 1
-      )
-        window.location.hash = `dsp/${next.dsps[0]!.id}/overview`;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        credentials('');
-        setSession(null);
-      } else setError((error as Error).message);
-    }
-  }, []);
+  const load = useCallback(
+    async (afterLogin = false) => {
+      try {
+        const next = await api<Session>('/api/session');
+        credentials(next.csrf);
+        setSession(next);
+        if (
+          !next.user.platformOwner &&
+          (afterLogin || !/^#(?:invite\?|reset\?|signin)/.test(window.location.hash)) &&
+          !window.location.hash.startsWith('#dsp/') &&
+          next.dsps.length === 1
+        )
+          navigate(dspHash(next.dsps[0]!.id));
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          credentials('');
+          setSession(null);
+        } else fail(messageOf(error));
+      }
+    },
+    [fail],
+  );
   useEffect(() => {
     void load();
     const changed = () => {
-      setRoute(window.location.hash.slice(1) || 'dsps');
-      setError('');
+      setAddress(parseHash(window.location.hash));
+      fail('');
     };
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
-  }, [load]);
-  const dspId = route.startsWith('dsp/') ? route.split('/')[1] : undefined,
-    page = (dspId ? route.split('/')[2] || 'overview' : route).split('?')[0]!;
+  }, [load, fail]);
+  const { route, dspId, page } = address;
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
   // A platform owner looking into a DSP is never shown to its team.
   usePresence(session?.user.platformOwner ? undefined : view?.token);
   const reopen = useCallback(async () => {
     if (!session || !dspId) return;
     const next = await openView(session, dspId);
-    if (window.location.hash.split('/')[1] !== dspId) return;
+    if (parseHash(window.location.hash).dspId !== dspId) return;
     credentials(session.csrf, next.token);
     setView(next);
   }, [session, dspId]);
@@ -152,7 +109,7 @@ function App() {
         }
       })
       .catch((error) => {
-        if (active) setError((error as Error).message);
+        if (active) fail(messageOf(error));
       })
       .finally(() => {
         if (active) setSwitching(false);
@@ -160,34 +117,12 @@ function App() {
     return () => {
       active = false;
     };
-  }, [session, dspId]);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), 5000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-  const perform: Perform = async (work, success) => {
-    setError('');
-    try {
-      await work();
-      if (success) setNotice(success);
-      return true;
-    } catch (error) {
-      setError((error as Error).message);
-      return false;
-    }
-  };
-  function open(dsp: DspSummary) {
-    window.location.hash = `dsp/${dsp.id}/overview`;
-  }
-  function platform() {
-    window.location.hash = 'dsps';
-  }
+  }, [session, dspId, fail]);
   if (session === undefined)
     return (
       <>
         <Loading />
-        <ErrorBox message={error} />
+        <FeedbackMessages />
       </>
     );
   if (
@@ -197,38 +132,16 @@ function App() {
     route.startsWith('reset?')
   )
     return <AuthScreen onLogin={() => load(true)} />;
-  const canCollect = can(view, 'collections.run'),
-    // The link stays put while a view loads; the page itself waits for the view.
-    canViewTimecard = !view || can(view, 'timecard.view'),
-    canTeam =
-      can(view, 'members.invite') || can(view, 'members.manage') || can(view, 'roles.manage');
   if (view?.profile?.setupRequired && can(view, 'settings.manage'))
     return <DspOnboarding complete={reopen} />;
-  const nav = dspId
-    ? [
-        { id: 'overview', label: 'Home Page', icon: House },
-        ...(canViewTimecard ? [{ id: 'paycom', label: 'Timecard', icon: CalendarDays }] : []),
-        ...(canTeam ? [{ id: 'team', label: 'Team & Roles', icon: Users }] : []),
-        { id: 'settings', label: 'Settings', icon: Settings },
-      ]
-    : [
-        { id: 'dsps', label: 'DSPs', icon: Building2 },
-        ...(session.user.platformOwner
-          ? [
-              { id: 'releases', label: 'Updates', icon: ArrowUpFromLine },
-              { id: 'jobs', label: 'Diagnostics', icon: FlaskConical },
-              { id: 'audit', label: 'Audit log', icon: ScrollText },
-              { id: 'account', label: 'Settings', icon: Settings },
-            ]
-          : []),
-      ];
+  const scope = dspId ? 'dsp' : 'platform';
   async function logout() {
     await leavePresence();
     await api('/api/auth/logout', {});
     credentials('');
     setSession(null);
     setView(undefined);
-    window.location.hash = '';
+    navigate('');
   }
   return (
     <Shell
@@ -236,77 +149,33 @@ function App() {
       view={view}
       dspId={dspId}
       page={page}
-      navigation={nav}
+      current={findRoute(scope, page)?.parent ?? page}
+      label={routeLabel(scope, page)}
+      navigation={navigation(scope, { session, view })}
       logout={() => void perform(logout)}
-      exitView={platform}
+      exitView={() => navigate(platformHash())}
       viewAs={(roleId) => {
         saveRole(dspId, roleId);
         void perform(reopen);
       }}
     >
-      <ErrorBox message={error} />
-      {notice && (
-        <div className="toast" role="status">
-          {notice}
-          <button aria-label="Dismiss notification" onClick={() => setNotice('')}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
+      <FeedbackMessages />
       {dspId ? (
         switching ? (
           <Loading />
         ) : view ? (
           <div key={`${view.dsp.id}:${view.dsp.revision}:${view.role.id}`}>
-            {page === 'overview' ? (
-              <HomePage />
-            ) : page === 'paycom' && canViewTimecard ? (
-              <PaycomPage view={view} perform={perform} canCollect={canCollect} />
-            ) : page === 'paycom-settings' && can(view, 'timecard.manage') ? (
-              <PaycomSettingsPage dspId={view.dsp.id} />
-            ) : page === 'team' && canTeam ? (
-              <TeamPage view={view} perform={perform} reopen={reopen} />
-            ) : page === 'settings' ? (
-              <SettingsPage session={session} view={view} perform={perform} />
-            ) : (
-              <ErrorBox message="This page is not available for your role." />
-            )}
+            <Page session={session} view={view} page={page} reopen={reopen} />
           </div>
         ) : null
-      ) : page === 'account' ? (
-        <SettingsPage session={session} perform={perform} />
-      ) : session.user.platformOwner ? (
-        page === 'dsps' ? (
-          <DspList open={open} perform={perform} />
-        ) : page === 'jobs' ? (
-          <DiagnosticsPage perform={perform} />
-        ) : page === 'releases' ? (
-          <ReleasesPage />
-        ) : page === 'audit' ? (
-          <AuditPage />
-        ) : (
-          <ErrorBox message="Page not found." />
-        )
       ) : (
-        <>
-          <Header title="Your DSPs" />
-          <div className="workspace-grid">
-            {session.dsps
-              .filter((d) => d.status === 'active')
-              .map((dsp) => (
-                <button className="workspace-card" key={dsp.id} onClick={() => open(dsp)}>
-                  <Building2 />
-                  <strong>{dsp.name}</strong>
-                  <Badge value={dsp.environment} />
-                </button>
-              ))}
-          </div>
-          {!session.dsps.length && (
-            <p>Your account has no DSP memberships. Ask your DSP owner for an invitation.</p>
-          )}
-        </>
+        <Page session={session} page={page} reopen={reopen} />
       )}
     </Shell>
   );
 }
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <FeedbackProvider>
+    <App />
+  </FeedbackProvider>,
+);
