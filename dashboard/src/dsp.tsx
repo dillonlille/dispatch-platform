@@ -16,14 +16,14 @@ type Daily = {
   collectedAt: string | null;
   available: boolean;
 };
-export function EmployeesPage({ preferences }: { preferences: PaycomPreferences }) {
-  const limit = preferences.rows_per_page;
+const pageSize = 100;
+export function EmployeesPage() {
   const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
   const [query, setQuery] = useUpdateState('employee-query', ''),
     [offset, setOffset] = useUpdateState('employee-offset', 0),
     [employee, setEmployee] = useState<string>();
   const { data, error } = useData<Employees>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&direction=${direction}`,
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=${pageSize}&direction=${direction}`,
   );
   if (employee) return <EmployeeDetail code={employee} close={() => setEmployee(undefined)} />;
   return (
@@ -90,17 +90,20 @@ export function EmployeesPage({ preferences }: { preferences: PaycomPreferences 
                 : 'Employees will appear after the first collection finishes.'}
             </Empty>
           )}
-          {(offset > 0 || data.total > limit) && (
+          {(offset > 0 || data.total > pageSize) && (
             <div className="paycom-pagination">
               <span>
-                {offset + 1}–{Math.min(offset + limit, data.total)} of {data.total}
+                {offset + 1}–{Math.min(offset + pageSize, data.total)} of {data.total}
               </span>
-              <button disabled={!offset} onClick={() => setOffset((v) => Math.max(0, v - limit))}>
+              <button
+                disabled={!offset}
+                onClick={() => setOffset((v) => Math.max(0, v - pageSize))}
+              >
                 Previous
               </button>
               <button
-                disabled={offset + limit >= data.total}
-                onClick={() => setOffset((v) => v + limit)}
+                disabled={offset + pageSize >= data.total}
+                onClick={() => setOffset((v) => v + pageSize)}
               >
                 Next
               </button>
@@ -183,13 +186,7 @@ function EmployeeDetail({ code, close }: { code: string; close: () => void }) {
     </div>
   );
 }
-function PunchCells({
-  card,
-  columns = paycomColumns.map(([key]) => key),
-}: {
-  card: Timecard;
-  columns?: PaycomColumn[];
-}) {
+function PunchCells({ card }: { card: Timecard }) {
   const values: Record<PaycomColumn, string> = {
     inDay: card.punches[0]?.in ?? '—',
     outLunch:
@@ -212,7 +209,7 @@ function PunchCells({
   };
   return (
     <>
-      {columns.map((key) => (
+      {paycomColumns.map(([key]) => (
         <td key={key}>
           {key === 'condition' ? (
             <Badge value={card.status.toLowerCase() === 'complete' ? 'ready' : 'pending'}>
@@ -241,10 +238,7 @@ export function TimecardsPage({
 }) {
   const [offset, setOffset] = useUpdateState('timecard-offset', 0);
   const calendarToday = localDate(timezone);
-  const [sort, setSort] = useUpdateState(
-      'timecard-sort',
-      preferences.default_sort === 'employeeName' ? 'name' : preferences.default_sort,
-    ),
+  const [sort, setSort] = useUpdateState('timecard-sort', 'name'),
     [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
     [selectedCode, setSelectedCode] = useState<string>();
   const liveRevision = useCollectionUpdates(date);
@@ -315,7 +309,7 @@ export function TimecardsPage({
                         <ArrowUpDown size={14} />
                       </button>
                     </th>
-                    {preferences.columns.map((key) => (
+                    {paycomColumns.map(([key, label]) => (
                       <th
                         key={key}
                         aria-sort={
@@ -323,7 +317,7 @@ export function TimecardsPage({
                         }
                       >
                         <button className="table-sort" onClick={() => order(key)}>
-                          {paycomColumns.find(([value]) => value === key)![1]}
+                          {label}
                           <ArrowUpDown size={14} />
                         </button>
                       </th>
@@ -331,7 +325,7 @@ export function TimecardsPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.slice(offset, offset + preferences.rows_per_page).map((card) => (
+                  {data.rows.slice(offset, offset + pageSize).map((card) => (
                     <tr key={card.employeeCode}>
                       <td>
                         <button
@@ -342,27 +336,26 @@ export function TimecardsPage({
                           {card.name}
                         </button>
                       </td>
-                      <PunchCells card={card} columns={preferences.columns} />
+                      <PunchCells card={card} />
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {(offset > 0 || data.rows.length > preferences.rows_per_page) && (
+            {(offset > 0 || data.rows.length > pageSize) && (
               <div className="paycom-pagination">
                 <span>
-                  {offset + 1}–{Math.min(offset + preferences.rows_per_page, data.rows.length)} of{' '}
-                  {data.rows.length}
+                  {offset + 1}–{Math.min(offset + pageSize, data.rows.length)} of {data.rows.length}
                 </span>
                 <button
                   disabled={!offset}
-                  onClick={() => setOffset(Math.max(0, offset - preferences.rows_per_page))}
+                  onClick={() => setOffset(Math.max(0, offset - pageSize))}
                 >
                   Previous
                 </button>
                 <button
-                  disabled={offset + preferences.rows_per_page >= data.rows.length}
-                  onClick={() => setOffset(offset + preferences.rows_per_page)}
+                  disabled={offset + pageSize >= data.rows.length}
+                  onClick={() => setOffset(offset + pageSize)}
                 >
                   Next
                 </button>

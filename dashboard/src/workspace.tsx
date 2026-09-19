@@ -145,7 +145,7 @@ export function PaycomPage({
   const [syncing, setSyncing] = useState(false);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
-  const tab = selectedTab ?? preferences.data?.values.opening_page ?? 'timecards';
+  const tab = selectedTab ?? 'timecards';
   const overview = useData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
@@ -303,10 +303,9 @@ export function PaycomPage({
       ) : (
         <div className="embedded-page">
           {tab === 'employees' ? (
-            <EmployeesPage preferences={preferences.data?.values ?? paycomDefaults} />
+            <EmployeesPage />
           ) : (
             <TimecardsPage
-              key={preferences.data?.revision ?? 'loading'}
               date={date}
               onDateChange={selectDate}
               refreshKey={refreshKey}
