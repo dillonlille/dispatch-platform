@@ -225,11 +225,13 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
     item(page, 'Platform support updated DSP settings').locator('.audit-icon'),
   ).toHaveCSS('border-top-style', 'dashed');
   await expect(role.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
-  // A member's visit reads quietly, but it is theirs, so it is filled like the rest of what they do.
-  await expect(item(page, 'Sam Rivera opened this DSP').locator('.audit-icon')).toHaveCSS(
-    'border-top-width',
-    '0px',
-  );
+  // A member's visit is theirs, so it reads like the rest of what they do: filled, and not muted.
+  const visit = item(page, 'Sam Rivera opened this DSP');
+  await expect(visit.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
+  await expect(visit).not.toHaveClass(/quiet/);
+  await expect(visit.locator('strong', { hasText: 'Sam Rivera' })).toBeVisible();
+  // Everything Platform support did is muted, not only its visits.
+  await expect(item(page, 'Platform support updated DSP settings')).toHaveClass(/quiet/);
   const visits = item(page, 'Platform support opened this DSP 3 times');
   await expect(visits).toHaveCount(1);
   await expect(visits).toContainText('11:01 AM – 12:02 PM');
