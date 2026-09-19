@@ -1,18 +1,21 @@
 mod admission;
 mod attempt;
 pub mod browseros;
-mod cortex;
+pub(crate) mod cortex;
+mod driver;
 pub mod egress;
+mod fixture;
 mod page;
-mod paycom;
+pub(crate) mod paycom;
 pub use super::collectors::Provider;
 use super::{
     Error, Result, State,
     accounts::Context,
     crypto,
     db::{self, Store, flag, iso, n, s},
-    ensure, workforce,
+    ensure,
 };
+pub use driver::{Collected, Driver, Pending, Run};
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{
@@ -41,31 +44,14 @@ pub struct Session {
     process_id: std::sync::atomic::AtomicU32,
     observed_pss: std::sync::atomic::AtomicU64,
     status: AtomicU8, // 0 starting, 1 ready, 2 challenge, 3 closed
-    worker: AsyncMutex<Option<Worker>>,
+    worker: AsyncMutex<Option<Box<dyn Driver>>>,
     commands: tokio::sync::Semaphore,
     cancel: watch::Sender<bool>,
+    // No browser runs in fixture mode: nothing to take over, no memory to admit.
     fixture: bool,
     started: std::time::Instant,
     last_used: Mutex<std::time::Instant>,
     collecting: std::sync::atomic::AtomicBool,
-}
-enum Worker {
-    Paycom(paycom::Driver),
-    Cortex(cortex::Driver),
-}
-impl Worker {
-    fn browser(&self) -> &browseros::Session {
-        match self {
-            Self::Paycom(driver) => &driver.browser,
-            Self::Cortex(driver) => &driver.browser,
-        }
-    }
-    async fn request(&mut self, command: Value) -> Result<Value> {
-        match self {
-            Self::Paycom(driver) => driver.request(command).await,
-            Self::Cortex(driver) => driver.request(command).await,
-        }
-    }
 }
 impl Manager {
     fn runtime(&self, config: &super::config::Config) -> Result<Arc<browseros::Runtime>> {
@@ -203,8 +189,10 @@ impl Session {
     async fn close(&self) {
         self.status.store(3, Ordering::SeqCst);
         self.cancel.send_replace(true);
-        if let Some(worker) = self.worker.lock().await.take() {
-            worker.browser().close().await;
+        if let Some(worker) = self.worker.lock().await.take()
+            && let Some(browser) = worker.browser()
+        {
+            browser.close().await;
         }
         let _ = std::fs::remove_dir_all(&self.run);
     }
@@ -239,33 +227,6 @@ impl Session {
             ensure(self.interactive(), "verification_expired", 409)?;
         }
         *self.last_used.lock().expect("browser idle clock") = std::time::Instant::now();
-        if self.fixture {
-            match s(&command, "action") {
-                "start" | "check" => {
-                    let password = s(&command["credentials"], "password");
-                    ensure(password != "invalid-password", "invalid_credentials", 409)?;
-                    self.status.store(
-                        if password == "require-verification" {
-                            2
-                        } else {
-                            1
-                        },
-                        Ordering::SeqCst,
-                    );
-                }
-                "verify" => {
-                    ensure(self.challenge(), "verification_not_requested", 409)?;
-                    ensure(
-                        s(&command, "code") == "123456",
-                        "invalid_verification_code",
-                        409,
-                    )?;
-                    self.status.store(1, Ordering::SeqCst);
-                }
-                _ => return Err(Error::new("verification_expired", 409)),
-            }
-            return Ok(json!({"type":if self.ready(){"ready"}else{"challenge"}}));
-        }
         let worker = worker
             .as_mut()
             .ok_or_else(|| Error::new("browser_unavailable", 409))?;
@@ -296,89 +257,27 @@ impl Session {
         owner: &str,
         metrics: &super::job_metrics::Recorder,
         request: &Value,
-    ) -> Result<(Value, Option<super::meals::Scope>)> {
+    ) -> Result<Collected> {
         ensure(self.ready(), "verification_required", 409)?;
         ensure(
             !self.collecting.swap(true, Ordering::SeqCst),
             "connection_busy",
             409,
         )?;
-        if self.fixture {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            return if self.provider == Provider::Cortex {
-                let scope = match serde_json::from_value(request.clone())? {
-                    super::meals::CollectionRequest::Scoped(scope) => scope,
-                    super::meals::CollectionRequest::Discover(discovery) => {
-                        discovery.scope("area-demo", "provider-demo")?
-                    }
-                };
-                Ok((
-                    serde_json::to_value(super::meals::fixture(&scope))?,
-                    Some(scope),
-                ))
-            } else {
-                workforce::fixture_date(
-                    &self.timezone,
-                    workforce::collection_date(request, &self.timezone)?,
-                )
-                .map(|data| (data, None))
-            };
-        }
         let mut worker = self.worker.lock().await;
         let worker = worker
             .as_mut()
             .ok_or_else(|| Error::new("browser_unavailable", 409))?;
         let mut cancellation = self.cancel.subscribe();
-        let progress = |progress, message: String| {
-            let job = job.to_owned();
-            let owner = owner.to_owned();
-            async move {
-                state
-                    .run(move |db| {
-                        db.guard_job(&job, &owner)?;
-                        db.progress(
-                            &job,
-                            &owner,
-                            progress,
-                            &message,
-                            super::contracts::ActiveJobStatus::Running,
-                        )
-                    })
-                    .await
-            }
+        let run = Run {
+            state,
+            job,
+            owner,
+            timezone: &self.timezone,
+            metrics,
+            request,
         };
-        let response = async {
-            match worker {
-                Worker::Paycom(worker) => worker
-                    .collect(
-                        &self.timezone,
-                        workforce::collection_date(request, &self.timezone)?,
-                        metrics,
-                        Some(&super::collection_checkpoint::Checkpoint::new(
-                            state.clone(),
-                            job,
-                            owner,
-                        )),
-                        progress,
-                    )
-                    .await
-                    .map(|data| (data, None)),
-                Worker::Cortex(worker) => {
-                    let scope = worker
-                        .resolve_scope(&serde_json::from_value(request.clone())?, metrics)
-                        .await?;
-                    let data = worker
-                        .collect(
-                            &scope,
-                            metrics,
-                            &super::live_collection::Writer::new(state.clone(), job, owner),
-                            progress,
-                        )
-                        .await?;
-                    Ok((data, Some(scope)))
-                }
-            }
-        };
+        let response = worker.collect(&run);
         tokio::select! {
             _=cancellation.wait_for(|closed|*closed)=>Err(Error::new("job_cancelled",409)),
             result=tokio::time::timeout(Duration::from_secs(1800),response)=>result.map_err(|_|Error::new("provider_timeout",504))?,
@@ -635,23 +534,20 @@ impl State {
             }).await?;
             ensure(!session.closed(), "verification_expired", 409)?;
             db::private_dir(&run)?;db::private_dir(&profile)?;
-            if !session.fixture {
-                match provider { Provider::Paycom => paycom::preflight(&profile,retry)?, Provider::Cortex => cortex::preflight(&profile,retry)? };
+            if session.fixture {
+                *worker=Some(Box::new(fixture::Driver::new(provider)));
+            } else {
+                attempt::preflight(&profile,provider.id(),retry)?;
                 let policy=if let Some(value)=&self.config.fixture_url {
                     browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
                 } else { provider.collector().network() };
                 let runtime=self.browsers.runtime(&self.config)?;
                 let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
                 session.process_id.store(browser.process_id(),Ordering::Release);
-                let driver = match provider {
-                    Provider::Paycom => paycom::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await.map(Worker::Paycom),
-                    Provider::Cortex => cortex::Driver::new(browser.clone(),&profile,self.config.fixture_url.as_deref()).await.map(Worker::Cortex),
-                };
-                match driver {
+                match provider.collector().driver(browser.clone(),&profile,self.config.fixture_url.as_deref()).await {
                     Ok(driver)=>*worker=Some(driver),
                     Err(error)=>{browser.close().await;return Err(error);},
                 }
-
             }
             drop(worker);
             session.request(json!({"action":"start","credentials":credentials,"timezone":session.timezone,"ownerRetry":retry,"fixtureUrl":self.config.fixture_url}),&["ready","challenge"],180).await

@@ -48,10 +48,7 @@ impl Driver {
         let input = json!({"kind":if candidate.is_some(){"detail"}else{"list"},"scope":scope,"candidate":candidate,"origin":self.origin});
         let result = self
             .browser
-            .evaluate(
-                &self.page.id,
-                &format!("({})({input})", EXTRACT.trim().trim_end_matches(';')),
-            )
+            .evaluate(&self.page.id, &call(EXTRACT, &input))
             .await?;
         if let Some(error) = result["error"].as_str() {
             metrics.detail(s(&result, "reason"));

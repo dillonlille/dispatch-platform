@@ -50,10 +50,7 @@ impl Driver {
                 )?;
                 let input = json!({"origin":self.origin,"request":discovery});
                 self.browser
-                    .evaluate(
-                        &self.page.id,
-                        &format!("({})({input})", DISCOVER.trim().trim_end_matches(';')),
-                    )
+                    .evaluate(&self.page.id, &call(DISCOVER, &input))
                     .await
             }
             .await;

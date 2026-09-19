@@ -2,12 +2,16 @@
 use super::Collector;
 use crate::{
     Error, Result,
-    browsers::browseros::NetworkPolicy,
+    browsers::{
+        Collected, Driver, Pending,
+        browseros::{self, NetworkPolicy},
+        paycom,
+    },
     db::{Db, Kind, Store, s},
-    ensure, validate as v,
+    ensure, validate as v, workforce,
 };
 use serde_json::Value;
-use std::collections::HashSet;
+use std::{collections::HashSet, path::Path};
 
 pub(super) struct Paycom;
 impl Collector for Paycom {
@@ -71,6 +75,21 @@ impl Collector for Paycom {
     }
     fn account_label<'a>(&self, credentials: &'a Value) -> &'a str {
         s(credentials, "clientCode")
+    }
+    fn driver<'a>(
+        &self,
+        browser: browseros::Session,
+        profile: &'a Path,
+        fixture: Option<&'a str>,
+    ) -> Pending<'a, Box<dyn Driver>> {
+        Box::pin(async move {
+            Ok(Box::new(paycom::Driver::new(browser, profile, fixture).await?) as Box<dyn Driver>)
+        })
+    }
+    fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected> {
+        let data =
+            workforce::fixture_date(timezone, workforce::collection_date(request, timezone)?)?;
+        Ok(Collected { data, scope: None })
     }
     // v0.0.9 refuses Paycom settings saves while its old schedule row is on
     // and Paycom is disconnected. Drop this with the table.

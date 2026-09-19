@@ -5,7 +5,10 @@ mod cortex;
 mod paycom;
 use super::{
     Result,
-    browsers::browseros::NetworkPolicy,
+    browsers::{
+        Collected, Driver, Pending,
+        browseros::{self, NetworkPolicy},
+    },
     db::{self, Db, DspLease, Kind, Store, s},
     ensure,
 };
@@ -51,6 +54,16 @@ pub(crate) trait Collector: Sync {
     fn account_label<'a>(&self, _credentials: &'a Value) -> &'a str {
         ""
     }
+    /// Its driver, on a browser already running under `network`. `fixture` is the
+    /// origin of a local stand-in for the provider's site.
+    fn driver<'a>(
+        &self,
+        browser: browseros::Session,
+        profile: &'a Path,
+        fixture: Option<&'a str>,
+    ) -> Pending<'a, Box<dyn Driver>>;
+    /// What a collection returns in fixture mode, where no browser runs.
+    fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected>;
     /// Runs with the connection's own disable, in its transaction.
     fn disabled(&self, _: &Db) -> Result<()> {
         Ok(())

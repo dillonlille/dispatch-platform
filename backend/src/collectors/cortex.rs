@@ -3,11 +3,18 @@
 use super::Collector;
 use crate::{
     Result,
-    browsers::browseros::NetworkPolicy,
+    browsers::{
+        Collected, Driver, Pending,
+        browseros::{self, NetworkPolicy},
+        cortex,
+    },
     db::{self, Db, Kind},
-    ensure, validate as v,
+    ensure,
+    meals::{self, CollectionRequest},
+    validate as v,
 };
 use serde_json::{Value, json};
+use std::path::Path;
 
 pub(super) struct Cortex;
 impl Collector for Cortex {
@@ -65,5 +72,27 @@ impl Collector for Cortex {
         v::name(value, "username", 200)?;
         v::text(value, "password", 1, 256)?;
         Ok(())
+    }
+    fn driver<'a>(
+        &self,
+        browser: browseros::Session,
+        profile: &'a Path,
+        fixture: Option<&'a str>,
+    ) -> Pending<'a, Box<dyn Driver>> {
+        Box::pin(async move {
+            Ok(Box::new(cortex::Driver::new(browser, profile, fixture).await?) as Box<dyn Driver>)
+        })
+    }
+    fn fixture(&self, _: &str, request: &Value) -> Result<Collected> {
+        let scope = match serde_json::from_value(request.clone())? {
+            CollectionRequest::Scoped(scope) => scope,
+            CollectionRequest::Discover(discovery) => {
+                discovery.scope("area-demo", "provider-demo")?
+            }
+        };
+        Ok(Collected {
+            data: serde_json::to_value(meals::fixture(&scope))?,
+            scope: Some(scope),
+        })
     }
 }
