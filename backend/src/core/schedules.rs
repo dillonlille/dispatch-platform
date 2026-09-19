@@ -1,4 +1,4 @@
-//! DSP-owned recurring collections. Provider databases remain rollback-compatible.
+//! DSP-owned recurring collections.
 use super::{
     Error, Result,
     collectors::Provider,
