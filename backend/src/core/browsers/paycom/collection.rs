@@ -404,8 +404,12 @@ impl Driver {
             "roster_not_complete",
             409,
         )?;
+        let sources = employees
+            .iter()
+            .map(|employee| json!({"employeeCode":employee["code"],"periodKey":period["key"],"url":source_url(&self.origin, employee, &period)}))
+            .collect::<Vec<_>>();
         Ok(
-            json!({"employees":employees,"timecards":timecards,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),
+            json!({"employees":employees,"timecards":timecards,"sources":sources,"from":period["start"],"to":period["end"],"collectedAt":db::iso()}),
         )
     }
 }
@@ -653,11 +657,19 @@ async fn read_rendered(
 }
 /// The extractor accepts two forms of a timecard address. The second marks a read
 /// that only checks another read of the same employee and publishes nothing new.
+/// The provider's own timecard page for one employee and pay period. This is the
+/// link retained with a publication; it carries identifiers only, never a session.
+pub(super) fn source_url(origin: &str, employee: &Value, period: &Value) -> String {
+    format!(
+        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY",
+        s(employee, "code"),
+        s(period, "key")
+    )
+}
 fn timecard_url(origin: &str, employee: &Value, period: &Value, verification: bool) -> String {
     format!(
-        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards={}",
-        s(employee, "code"),
-        s(period, "key"),
+        "{}&dispatch_timecards={}",
+        source_url(origin, employee, period),
         if verification { 2 } else { 1 }
     )
 }

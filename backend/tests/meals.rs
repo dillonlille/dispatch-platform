@@ -105,6 +105,49 @@ fn four_timestamps_multiple_meals_midnight_and_unknown_boundaries_survive_round_
     );
 }
 #[test]
+fn itinerary_page_links_are_stored_returned_and_bound_to_the_route() {
+    let (_root, db, id) = store();
+    let scope = scope();
+    let mut c = meals::fixture(&scope);
+    db.publish_meals(&id, "job-unlinked", &c, &scope).unwrap();
+    let meal = |db: &dispatch_backend::core::db::Store| {
+        db.meal_comparison(&id, &scope.date, &scope.timezone)
+            .unwrap()["rows"][0]["cortex"][0]
+            .clone()
+    };
+    // Publications from before links were retained return none.
+    assert_eq!(meal(&db)["sourceUrl"], json!(null));
+    let url = format!(
+        "https://logistics.amazon.com{}",
+        scope.detail_path("fixture-itinerary")
+    );
+    for bad in [
+        format!(
+            "https://logistics.amazon.com{}",
+            scope.detail_path("another-itinerary")
+        ),
+        url.replace("https://", "https://user:secret@"),
+    ] {
+        c.itineraries[0].source_url = Some(bad);
+        assert_eq!(
+            db.publish_meals(&id, "job-bad-link", &c, &scope)
+                .unwrap_err()
+                .code,
+            "invalid_cortex_capture"
+        );
+    }
+    c.itineraries[0].source_url = Some(url.clone());
+    c.finished_at = now();
+    db.publish_meals(&id, "job-linked", &c, &scope).unwrap();
+    assert_eq!(meal(&db)["sourceUrl"], json!(url));
+    let data = db.collector(&id, Provider::Cortex).unwrap();
+    assert_eq!(
+        data.all("SELECT itinerary_id,url FROM meal_sources", [])
+            .unwrap(),
+        vec![json!({"itinerary_id":"fixture-itinerary","url":url})]
+    );
+}
+#[test]
 fn invalid_or_shrinking_refresh_preserves_publication_and_retention_is_bounded() {
     let (_root, db, id) = store();
     let scope = scope();

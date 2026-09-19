@@ -94,6 +94,83 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
     assert_eq!(db.employee(id, "E001").unwrap(), before);
 }
 #[test]
+fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
+    let (_root, db) = store();
+    let bootstrap = operations::bootstrap(
+        &db,
+        "owner@example.test",
+        "Test",
+        "Owner",
+        "test-password-long",
+    )
+    .unwrap();
+    let id = s(&bootstrap["dsp"], "id");
+    let data = workforce::fixture("UTC").unwrap();
+    db.publish(id, &data).unwrap();
+    // Publications from before links were retained return none.
+    assert_eq!(
+        db.employee(id, "E001").unwrap()["timecards"][0]["sourceUrl"],
+        Value::Null
+    );
+    let link = |code: &str| {
+        format!(
+            "https://paycom.example/v4/cl/web.php/timecard/index?firstrefno={code}&perioddates=P1&formtype=SUMMARY"
+        )
+    };
+    let mut linked = data.clone();
+    linked["collectedAt"] = json!("2099-01-01T00:00:00.000Z");
+    linked["sources"] = json!(
+        data["employees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| json!({"employeeCode":e["code"],"periodKey":"P1","url":link(s(e,"code"))}))
+            .collect::<Vec<_>>()
+    );
+    for (field, value, code) in [
+        (
+            "url",
+            json!("https://user:secret@paycom.example/"),
+            "invalid_source_url",
+        ),
+        ("url", json!("javascript:alert(1)"), "invalid_source_url"),
+        ("employeeCode", json!("unowned"), "timecard_source_mismatch"),
+        ("employeeCode", json!("E002"), "timecard_source_mismatch"),
+    ] {
+        let mut bad = linked.clone();
+        bad["sources"][0][field] = value;
+        assert_eq!(db.publish(id, &bad).unwrap_err().code, code);
+    }
+    // Identical hours still publish: the links are part of the change fingerprint.
+    db.publish(id, &linked).unwrap();
+    let paycom = db.collector(id, Provider::Paycom).unwrap();
+    let count = |table: &str| {
+        paycom
+            .one(&format!("SELECT count(*) n FROM {table}"), [])
+            .unwrap()
+            .unwrap()["n"]
+            .clone()
+    };
+    assert_eq!(count("publications"), 2);
+    assert_eq!(count("timecard_sources"), 12);
+    // An identical repeat only refreshes the collection time.
+    linked["collectedAt"] = json!("2099-01-02T00:00:00.000Z");
+    db.publish(id, &linked).unwrap();
+    assert_eq!(count("publications"), 2);
+    for card in db.employee(id, "E003").unwrap()["timecards"]
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(card["sourceUrl"], json!(link("E003")));
+    }
+    let date = s(&data, "to");
+    let (_, _, rows) = db.daily_source(id, date).unwrap();
+    assert_eq!(rows.len(), 12);
+    for row in rows {
+        assert_eq!(row["sourceUrl"], json!(link(s(&row, "employeeCode"))));
+    }
+}
+#[test]
 fn queue_limits_and_authority_are_checked_again_before_publication() {
     let (_root, db) = store();
     operations::seed(&db).unwrap();

@@ -180,6 +180,7 @@ impl Store {
         identity(&target, id, provider)?;
         self.dsp(id)?.set(LAYOUT, &json!(1))?;
         self.initialize_cortex(id)?;
+        self.initialize_sources(id)?;
         self.initialize_live(id)
     }
     // Called only during startup/provisioning under the platform lock, before
@@ -189,6 +190,7 @@ impl Store {
         if split_layout(&core)? {
             self.collector(id, Provider::Paycom)?;
             self.initialize_cortex(id)?;
+            self.initialize_sources(id)?;
             self.initialize_live(id)?;
             return self.prune_checkpoints(id);
         }
@@ -199,8 +201,20 @@ impl Store {
             core.set(LAYOUT, &json!(1))
         })?;
         self.initialize_cortex(id)?;
+        self.initialize_sources(id)?;
         self.initialize_live(id)?;
         self.prune_checkpoints(id)
+    }
+
+    // Additive, so the previous runtime still opens these databases on rollback.
+    fn initialize_sources(&self, id: &str) -> Result<()> {
+        self.collector(id, Provider::Paycom)?.0.execute_batch(
+            "CREATE TABLE IF NOT EXISTS timecard_sources (publication_id TEXT NOT NULL, employee_code TEXT NOT NULL, period_key TEXT NOT NULL, url TEXT NOT NULL, PRIMARY KEY(publication_id,employee_code), FOREIGN KEY(publication_id,employee_code) REFERENCES employees(publication_id,code) ON DELETE CASCADE);",
+        )?;
+        self.collector(id, Provider::Cortex)?.0.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meal_sources (publication_id TEXT NOT NULL, itinerary_id TEXT NOT NULL, url TEXT NOT NULL, PRIMARY KEY(publication_id,itinerary_id), FOREIGN KEY(publication_id,itinerary_id) REFERENCES meal_itineraries(publication_id,itinerary_id) ON DELETE CASCADE);",
+        )?;
+        Ok(())
     }
 
     fn initialize_live(&self, id: &str) -> Result<()> {
@@ -448,9 +462,30 @@ mod tests {
             provider.setting("dsp.profile", Value::Null).unwrap(),
             Value::Null
         );
+        // A database from before links were retained gains the tables on startup.
+        provider
+            .0
+            .execute_batch("DROP TABLE timecard_sources")
+            .unwrap();
+        store
+            .collector(&id, Provider::Cortex)
+            .unwrap()
+            .0
+            .execute_batch("DROP TABLE meal_sources")
+            .unwrap();
         drop(provider);
         drop(core);
         store.migrate_collector_storage(&id).unwrap();
+        for (provider, table) in [
+            (Provider::Paycom, "timecard_sources"),
+            (Provider::Cortex, "meal_sources"),
+        ] {
+            store
+                .collector(&id, provider)
+                .unwrap()
+                .one(&format!("SELECT count(*) FROM {table}"), [])
+                .unwrap();
+        }
         assert_eq!(
             snapshot(&store.collector(&id, Provider::Paycom).unwrap()),
             before

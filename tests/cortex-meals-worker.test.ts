@@ -402,6 +402,21 @@ test(
       );
       assert.equal((db.prepare('SELECT count(*) n FROM meal_delivery_events').get() as any).n, 0);
       assert.equal((db.prepare('SELECT count(*) n FROM meal_breaks').get() as any).n, 0);
+      const links = db
+        .prepare('SELECT itinerary_id id,url FROM meal_sources ORDER BY itinerary_id')
+        .all() as { id: string; url: string }[];
+      assert.deepEqual(
+        links.map((l) => l.id),
+        ['itinerary-1', 'itinerary-2'],
+      );
+      for (const { id, url } of links) {
+        const link = new URL(url);
+        assert.equal(
+          link.pathname,
+          `/operations/execution/itineraries/${id}/documentType/Itinerary`,
+        );
+        assert.equal(link.searchParams.get('selectedDay'), '2026-01-10');
+      }
     });
     mode = 'invalid';
     const failed = await run('bad');

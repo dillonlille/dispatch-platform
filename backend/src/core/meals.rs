@@ -170,6 +170,10 @@ pub struct Itinerary {
     pub route_complete: bool,
     pub delivery_coverage: Coverage,
     pub meals: Vec<Meal>,
+    /// The Cortex page this route was read from. Set by the collector, never by
+    /// page content; captures from before links were retained carry none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -230,6 +234,14 @@ impl Capture {
                 "invalid_cortex_capture",
                 502,
             )?;
+            if let Some(url) = &route.source_url {
+                ensure(
+                    super::validate::source_url(url).is_ok()
+                        && url.ends_with(&expected.detail_path(&route.id)),
+                    "invalid_cortex_capture",
+                    502,
+                )?;
+            }
             let mut meal_ids = HashSet::new();
             let mut ordered = route.meals.iter().collect::<Vec<_>>();
             ordered.sort_by_key(|meal| meal.start);
@@ -341,6 +353,9 @@ impl Store {
             for route in &capture.itineraries {
                 let state=if route.meals.is_empty(){"none_recorded"}else if route.meals.iter().any(|m|m.end.is_none()){"in_progress"}else{"recorded"};
                 db.exec("INSERT INTO meal_itineraries VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,route.transporter_id,route.driver,route.route,at(route.observed_at),route.route_complete,if route.delivery_coverage==Coverage::Complete{"complete"}else{"unavailable"},state])?;
+                if let Some(url)=&route.source_url {
+                    db.exec("INSERT INTO meal_sources VALUES (?,?,?)",params![id,route.id,url])?;
+                }
                 for meal in &route.meals {
                     let b=boundaries(route,meal);
                     db.exec("INSERT INTO meal_records(publication_id,itinerary_id,meal_id,last_delivery_at,started_at,ended_at,first_delivery_at,before_status,after_status) VALUES (?,?,?,?,?,?,?,?,?)",params![id,route.id,meal.id,b.prior.map(at),at(meal.start),meal.end.map(at),b.next.map(at),b.before,b.after])?;
@@ -391,6 +406,7 @@ pub fn fixture(scope: &Scope) -> Capture {
                 last_delivery: Some(start - 300000),
                 first_delivery: Some(start + 2100000),
             }],
+            source_url: None,
         }],
     }
 }
