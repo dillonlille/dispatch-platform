@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fixture, until } from './support.js';
+import { demo, fixture, until } from './support.js';
 import { jobSchema, parseApiResponse, sessionSchema } from '../shared/contracts/runtime.js';
 
 test('trusted tunnel clients have separate IP allowances and retain account throttling', async (t) => {
@@ -16,7 +16,7 @@ test('trusted tunnel clients have separate IP allowances and retain account thro
         .run(createHash('sha256').update(key).digest('hex'), count, Date.now() + 900000),
     );
   full('login:ip:203.0.113.1', 30);
-  const body = { email: 'owner@dispatch.test', password: 'Dispatch-demo-2026!' };
+  const body = { email: 'owner@dispatch.test', password: demo.password };
   const login = (ip: string) => f.request('/api/auth/login', body, { 'cf-connecting-ip': ip });
   assert.equal((await login('203.0.113.1')).status, 429);
   assert.equal((await login('203.0.113.2')).status, 200);
@@ -39,7 +39,7 @@ test('untrusted forwarding headers cannot bypass the peer throttle', async (t) =
   );
   const result = await f.request(
     '/api/auth/login',
-    { email: 'owner@dispatch.test', password: 'Dispatch-demo-2026!' },
+    { email: 'owner@dispatch.test', password: demo.password },
     {
       'cf-connecting-ip': '203.0.113.1',
       'x-forwarded-for': '203.0.113.2',
@@ -160,6 +160,6 @@ test('request IDs correlate sanitized failure logs without logging secrets or in
   assert.equal(event.event, 'http.request');
   assert.equal(event.fields.error, 'invitation_expired');
   assert.equal(event.fields.route, '/api/invitations/:token/*');
-  for (const secret of [token, 'private-query', 'untrusted-request-id', 'Dispatch-demo-2026!'])
+  for (const secret of [token, 'private-query', 'untrusted-request-id', demo.password])
     assert(!f.logs().includes(secret));
 });
