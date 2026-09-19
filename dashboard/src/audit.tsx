@@ -30,7 +30,7 @@ import type {
 import { api, errorLabel, useData } from './app/api.js';
 import { DataState, Empty, ErrorBox, SearchInput } from './ui/index.js';
 import { deviceTimezone, elapsed, timeOfDay, title } from './lib/format.js';
-import { permissionLabels } from './roles.js';
+import { permissionLabels } from './app/permissions.js';
 import { useAction } from './app/useAction.js';
 import { dspHash } from './app/navigation.js';
 import { routeLabel, type DspRouteId } from './app/routes.js';

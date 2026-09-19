@@ -32,7 +32,9 @@ import { usePaycomDate } from './features/timecard/DateControls.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useAction } from './app/useAction.js';
 import { dspHash, navigate } from './app/navigation.js';
-import { RoleSheet, RolesTab, assignable } from './roles.js';
+import { RoleSheet } from './features/team/RoleSheet.js';
+import { RolesTab } from './features/team/RolesTab.js';
+import { assignable } from './features/team/assignable.js';
 
 export function HomePage() {
   return (
