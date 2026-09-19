@@ -152,18 +152,6 @@ function Strap({ side }: { side: -1 | 1 }) {
     <g className="profile-strap" transform={strapTransform(side, 0, 0)}>
       <rect className="profile-strap-cloth" {...CLOTH} />
       <rect {...CLOTH} fill="url(#profile-weave)" />
-      {/* The name reads upward on the right strap, as it does on cloth that loops behind the neck. */}
-      {[48, 112, 176].map((above) => (
-        <text
-          key={above}
-          transform={`rotate(${side * -90})`}
-          x={side * above}
-          y="4"
-          textAnchor={side < 0 ? 'start' : 'end'}
-        >
-          Dispatch
-        </text>
-      ))}
       <rect {...CLOTH} fill="url(#profile-drape)" />
       <path d={`M-13.5 0 V${CLOTH.y} M13.5 0 V${CLOTH.y}`} />
     </g>
