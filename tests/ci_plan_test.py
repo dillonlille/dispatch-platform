@@ -39,6 +39,11 @@ class CiPlanTests(unittest.TestCase):
                       ["dashboard/src/main.tsx"],
                       ["dashboard/src/meal-breaks.tsx", "shared/meal-breaks.ts", "tests/meal-breaks.test.ts"],
                       ["tests/browser/meal-breaks.spec.ts"],
+                      # Browser helpers run only in the browser suite, which this mode runs in full.
+                      ["tests/browser/fixtures.ts"], ["tests/browser/fixtures.ts", "dashboard/src/main.tsx"],
+                      # No code or test reads the documentation.
+                      ["README.md"], ["DEVELOPMENT.md", "tooling/DEV-HOST.md"],
+                      ["RELEASES.md", "dashboard/src/main.tsx"],
                       ["dashboard/src/lib/format.ts", "tests/dashboard-format.test.ts"],
                       ["tests/dashboard-structure.test.ts", "tests/collection-history.test.ts"]]:
             with self.subTest(paths=paths):
@@ -49,10 +54,13 @@ class CiPlanTests(unittest.TestCase):
         self.assertIn("...dashboardTests", (Path(__file__).parents[1] / "tooling/checks.ts").read_text())
         for file in plan["dashboard"]:
             self.assertEqual(ci.scope([file]), "dashboard", file)
-        for paths in [[], ["README.md"], ["styles.css"], ["dashboard/vite.config.ts"],
+        for paths in [[], ["styles.css"], ["dashboard/vite.config.ts"],
+                      # Rust can embed a file, and documentation never excuses another change.
+                      ["backend/README.md"], ["DEVELOPMENT.md", "backend/src/main.rs"],
+                      ["DEVELOPMENT.md", "package.json"], ["tests/browser/notes.txt"],
                       ["shared/contracts/index.ts"], ["shared/paycom.ts"], ["shared/new-helper.ts"],
                       ["tests/support.ts"], ["tests/api-auth.test.ts"], ["backend/src/main.rs"],
-                      ["tooling/test-plan.json"], ["tooling/test-plan.ts"], ["tests/browser/fixtures.ts"],
+                      ["tooling/test-plan.json"], ["tooling/test-plan.ts"],
                       ["tests/test-plan.test.ts", "dashboard/src/main.tsx"],
                       ["dashboard/src/styles.css", "package-lock.json"],
                       ["dashboard/src/styles.css", ".github/workflows/checks.yml"]]:
