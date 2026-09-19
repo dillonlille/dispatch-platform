@@ -3,7 +3,8 @@
     "tests/collection-history.test.ts",
     "tests/dashboard-format.test.ts",
     "tests/dashboard-structure.test.ts",
-    "tests/meal-breaks.test.ts"
+    "tests/meal-breaks.test.ts",
+    "tests/unused-css.test.ts"
   ],
   "native": {
     "paycom": ["tests/paycom-worker.test.ts", "tests/native-browser.test.ts"],
