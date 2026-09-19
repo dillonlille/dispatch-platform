@@ -273,7 +273,10 @@ class Release:
             command("gh", "release", "create", self.tag, "--repo", REPOSITORY, "--draft", "--target", commit,
                     "--title", f"Dispatch {self.version}", "--notes-file", str(self.output / "notes.md"),
                     *(str(self.output / name) for name in names), timeout=600)
-            release = self.published()
+            # GitHub can list a new draft a few seconds after creating it.
+            deadline = time.monotonic() + 60
+            while not (release := self.published()) and time.monotonic() < deadline:
+                time.sleep(3)
         require(release and release["draft"] and release["target_commitish"] == commit,
                 "Draft release is missing or targets another commit")
         problems = asset_problems(release, self.output, names)

@@ -85,6 +85,32 @@ class ReleaseTests(unittest.TestCase):
         extra = [*assets, {**assets[0], "name": "extra.txt"}]
         self.assertEqual(release.asset_problems({"assets": extra}, self.root, names), ["unexpected asset extra.txt"])
 
+    def test_new_draft_is_awaited_verified_and_only_then_published(self):
+        item = release.Release("1.0.0", "origin/dev", None, self.root)
+        item.output.mkdir(parents=True, mode=0o700)
+        item.notes.write_text("Notes\n")
+        names = (item.archive, *release.ASSETS)
+        assets = []
+        for name in names:
+            (item.output / name).write_text(name)
+            assets.append({"name": name, "state": "uploaded", "size": len(name),
+                           "digest": "sha256:" + hashlib.sha256(name.encode()).hexdigest()})
+        draft = {"id": 9, "tag_name": "v1.0.0", "draft": True, "prerelease": False,
+                 "target_commitish": "a" * 40, "assets": assets}
+        # The listing misses the draft at first, as GitHub did for v0.0.7.
+        with patch.object(item, "published", side_effect=[None, None, draft, draft | {"draft": False}]), \
+                patch.object(release, "command") as command, patch.object(release, "github") as api, \
+                patch.object(release.time, "sleep"):
+            self.assertFalse(item.publish("a" * 40)["draft"])
+            self.assertIn("--draft", command.call_args.args)
+            api.assert_called_once()
+        damaged = draft | {"assets": [assets[0] | {"digest": "sha256:" + "0" * 64}, *assets[1:]]}
+        for listed in (damaged, draft | {"target_commitish": "b" * 40}):
+            with patch.object(item, "published", return_value=listed), patch.object(release, "github") as api, \
+                    self.assertRaises(RuntimeError):
+                item.publish("a" * 40)
+            api.assert_not_called()
+
     def test_bare_rerun_continues_the_single_unfinished_release(self):
         def state(pulls, releases):
             return patch.object(release, "command", return_value=json.dumps(pulls)), \
