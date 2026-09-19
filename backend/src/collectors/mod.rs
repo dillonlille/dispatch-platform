@@ -64,6 +64,29 @@ pub(crate) trait Collector: Sync {
     ) -> Pending<'a, Box<dyn Driver>>;
     /// What a collection returns in fixture mode, where no browser runs.
     fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected>;
+    /// The job's message while it collects.
+    fn progress(&self) -> &'static str;
+    /// Stores a finished collection. Runs while the job is still this worker's.
+    fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()>;
+    /// Drops what an unfinished job kept to resume from. `None` means every job.
+    fn discard(&self, _: &Store, _dsp: &str, _job: Option<&str>) -> Result<()> {
+        Ok(())
+    }
+    /// When `date` was last collected, as a row with `collected_at`.
+    fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>>;
+    /// The schedule `collection` that runs this collector alone, and the error a
+    /// schedule answers while it is not connected. `both` runs every one of them.
+    fn schedule(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
+    /// What else a schedule needs before it can run this collector.
+    fn schedule_ready(&self, _: &Store, _dsp: &str) -> Result<()> {
+        Ok(())
+    }
+    /// The jobs one scheduled run queues: an idempotency key suffix and a request each.
+    fn scheduled(&self, _: &Store, _dsp: &str) -> Result<Vec<(String, Value)>> {
+        Ok(vec![])
+    }
     /// Runs with the connection's own disable, in its transaction.
     fn disabled(&self, _: &Db) -> Result<()> {
         Ok(())
@@ -309,6 +332,39 @@ mod tests {
             .unwrap()
         );
         out
+    }
+    #[test]
+    fn the_registry_names_each_provider_job_kind_database_and_schedule_once() {
+        let unique = |values: Vec<&str>| {
+            values
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == values.len()
+        };
+        let all = || Provider::ALL.iter().map(|p| p.collector());
+        assert!(unique(all().map(|c| c.id()).collect()));
+        assert!(unique(all().map(|c| c.job_kind()).collect()));
+        assert!(unique(all().filter_map(|c| c.marker()).collect()));
+        assert!(unique(
+            all().filter_map(|c| c.schedule()).map(|s| s.0).collect()
+        ));
+        for provider in Provider::ALL {
+            let collector = provider.collector();
+            assert_eq!(Provider::parse(collector.id()).unwrap(), *provider);
+            assert_eq!(
+                Provider::from_job_kind(collector.job_kind()).unwrap(),
+                *provider
+            );
+            // Storage, secrets and profiles are all named after the id.
+            assert_eq!(collector.database().name(), collector.id());
+            assert!(collector.seed("dsp_test").contains(collector.id()));
+            assert!(
+                collector
+                    .browser_entries()
+                    .contains(&format!("{}-attempt.json", collector.id()).as_str())
+            );
+        }
     }
     #[test]
     fn provider_records_stay_apart_from_core_settings_and_survive_reopening() {

@@ -10,7 +10,7 @@ use crate::{
     db::{Db, Kind, Store, s},
     ensure, validate as v, workforce,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path};
 
 pub(super) struct Paycom;
@@ -90,6 +90,25 @@ impl Collector for Paycom {
         let data =
             workforce::fixture_date(timezone, workforce::collection_date(request, timezone)?)?;
         Ok(Collected { data, scope: None })
+    }
+    fn progress(&self) -> &'static str {
+        "Collecting workforce"
+    }
+    fn publish(&self, store: &Store, dsp: &str, _: &str, collected: Collected) -> Result<()> {
+        store.publish(dsp, &collected.data)?;
+        Ok(())
+    }
+    fn discard(&self, store: &Store, dsp: &str, job: Option<&str>) -> Result<()> {
+        store.clear_checkpoint(dsp, job)
+    }
+    fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>> {
+        db.one("SELECT collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC,id DESC LIMIT 1",[date,date])
+    }
+    fn schedule(&self) -> Option<(&'static str, &'static str)> {
+        Some(("paycom", "schedule_paycom_required"))
+    }
+    fn scheduled(&self, _: &Store, _: &str) -> Result<Vec<(String, Value)>> {
+        Ok(vec![("paycom".into(), json!({}))])
     }
     // v0.0.9 refuses Paycom settings saves while its old schedule row is on
     // and Paycom is disconnected. Drop this with the table.

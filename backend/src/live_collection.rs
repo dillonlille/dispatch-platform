@@ -175,7 +175,7 @@ impl Writer {
         let dsp=self.state.run(move |db| {
             let dsp=db.guard_job(&job,&owner)?;
             let row=db.job(&job,None)?;
-            ensure(s(&row,"kind")=="cortex.meal_breaks.collect","unsupported_collector",409)?;
+            ensure(s(&row,"kind")==Provider::Cortex.job_kind(),"unsupported_collector",409)?;
             let storage=db.collector(s(&dsp,"id"),Provider::Cortex)?;
             let run=storage.one("SELECT metadata FROM collection_live_runs WHERE job_id=? AND owner=?",[&job,&owner])?.ok_or_else(|| Error::new("invalid_live_capture",502))?;
             let metadata: Value=serde_json::from_str(s(&run,"metadata"))?;

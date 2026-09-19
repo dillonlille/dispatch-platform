@@ -2,13 +2,13 @@
 //! already existed, which is the path every later provider takes.
 use super::Collector;
 use crate::{
-    Result,
+    Error, Result,
     browsers::{
         Collected, Driver, Pending,
         browseros::{self, NetworkPolicy},
         cortex,
     },
-    db::{self, Db, Kind},
+    db::{self, Db, Kind, Store},
     ensure,
     meals::{self, CollectionRequest},
     validate as v,
@@ -94,5 +94,45 @@ impl Collector for Cortex {
             data: serde_json::to_value(meals::fixture(&scope))?,
             scope: Some(scope),
         })
+    }
+    fn progress(&self) -> &'static str {
+        "Collecting meal breaks"
+    }
+    fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()> {
+        store.publish_meals(
+            dsp,
+            job,
+            &serde_json::from_value(collected.data)?,
+            &collected
+                .scope
+                .ok_or_else(|| Error::new("invalid_cortex_scope", 502))?,
+        )?;
+        Ok(())
+    }
+    fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>> {
+        db.one("SELECT MAX(collected_at) collected_at FROM meal_publications WHERE report_date=? AND active=1",[date])
+    }
+    fn schedule(&self) -> Option<(&'static str, &'static str)> {
+        Some(("meal_break", "schedule_meals_required"))
+    }
+    fn schedule_ready(&self, store: &Store, dsp: &str) -> Result<()> {
+        ensure(
+            !store
+                .meal_sync_scopes(dsp, &store.local_date(dsp)?)?
+                .is_empty(),
+            "schedule_scope_required",
+            409,
+        )
+    }
+    fn scheduled(&self, store: &Store, dsp: &str) -> Result<Vec<(String, Value)>> {
+        store
+            .meal_sync_scopes(dsp, &store.local_date(dsp)?)?
+            .iter()
+            .enumerate()
+            .map(|(index, scope)| {
+                scope.validate()?;
+                Ok((format!("flex:{index}"), serde_json::to_value(scope)?))
+            })
+            .collect()
     }
 }

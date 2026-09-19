@@ -33,7 +33,7 @@ impl Store {
                     && n(&row, "created_at") >= db::now() - TTL_MS
                     && live.is_some_and(|job| {
                         s(&job, "dsp_id") == dsp
-                            && s(&job, "kind") == "paycom.collect"
+                            && s(&job, "kind") == Provider::Paycom.job_kind()
                             && ["queued", "running", "waiting_verification"]
                                 .contains(&s(&job, "status"))
                     });
@@ -88,7 +88,7 @@ impl Checkpoint {
         let (dsp, resume) = self.state.run(move |db| {
             let dsp=db.guard_job(&job,&owner)?;
             let row=db.job(&job,None)?;
-            ensure(s(&row,"kind")=="paycom.collect","unsupported_collector",409)?;
+            ensure(s(&row,"kind")==Provider::Paycom.job_kind(),"unsupported_collector",409)?;
             let tenant=s(&dsp,"id");
             db.prune_checkpoints(tenant)?;
             let storage=db.collector(tenant,Provider::Paycom)?;
