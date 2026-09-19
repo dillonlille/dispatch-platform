@@ -51,7 +51,10 @@ test('collection metrics survive restart and an additive upgrade preserves old j
     metrics,
   );
   await f.stop();
-  f.database('data/preview/jobs.sqlite', (db) => db.exec('DROP TABLE job_metrics'));
+  // A database from a release without job_metrics: that release recorded no migrations either.
+  f.database('data/preview/jobs.sqlite', (db) =>
+    db.exec('DROP TABLE job_metrics; DROP TABLE schema_migrations'),
+  );
   await f.start();
   owner = await f.client();
   await owner.select(dsp.id);

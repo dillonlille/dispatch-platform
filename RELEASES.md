@@ -95,6 +95,10 @@ Rollback reaches one release back: each release must open, and leave usable, the
 data of the immediately previous release, and nothing older. Backups from before
 v0.0.6 are never restored. Code kept only so an older release can run, or so its
 data can be converted, may be deleted once two releases have shipped after it.
+Database migrations are therefore additive, and a release tolerates migrations that
+a newer release recorded. Dropping, renaming or rewriting anything takes two releases:
+the first stops using it and ships, and only the next one, whose rollback target no
+longer needs it, removes it.
 
 Verify with `systemctl --user status dispatch-production.service`,
 `journalctl --user -u dispatch-production-update.service`, and

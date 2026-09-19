@@ -89,6 +89,25 @@ features, and no modules import each other in a cycle.
   to render `error` inside a form or dialog instead.
 - Formatting (`time`, `duration`, `bytes`, `title`, names) comes from `dashboard/src/lib/format.ts`.
 
+## Adding a table or column
+
+Each database kind has one numbered migration list in `backend/src/db/schema/mod.rs`:
+`platform` (accounts), `jobs`, `dsp` (a DSP's `dispatch.sqlite`), `paycom` and `cortex`.
+
+1. Pick the kind and add `backend/src/db/schema/<kind>/NNNN_name.sql` with the next number.
+2. Append `Migration { id: NNNN, name: "name", apply: Sql(include_str!("<kind>/NNNN_name.sql")) }`
+   to that kind's list. Use `Code(function)` only when the step must look before it changes.
+3. Additive only: new tables, new nullable or defaulted columns, new indexes. Never edit or
+   renumber a migration that has shipped, and never change `PRAGMA user_version`.
+4. Rewrite the schema snapshots in `backend/tests/schema` and commit them with the change:
+   `DISPATCH_UPDATE_SCHEMA=1 cargo test --locked --lib db::migrations`.
+5. Run the schema tests: `cargo test --locked --lib db::migrations`.
+
+Startup, the operator commands and DSP provisioning apply what a database lacks, each
+migration once, in one transaction. Requests never migrate. The previous release must
+keep working on migrated data, so anything that is not additive follows the
+[rollback rule in RELEASES.md](RELEASES.md#production).
+
 ## Faster builds and deployment
 
 The workflow selects full checks for backend, tooling, dependencies and unknown
