@@ -88,12 +88,14 @@ Activation is serialized, keeps private state in place, stops the app, swaps the
 runtime and requires production health with the expected digest. Failure restores
 the previous runtime. An interrupted activation is recovered before another update.
 A release that failed health is recorded in `data/platform/production-update.json`
-and is not retried every two minutes; investigate and publish a corrected version.
+and is not retried by the 30-second timer; investigate and publish a corrected version.
 The database schema must remain compatible with rollback. Schema changes require
 an explicit migration and recovery plan; this updater refuses incompatible schemas.
+Rollback reaches one release back: each release must open, and leave usable, the
+data of the immediately previous release, and nothing older. Backups from before
+v0.0.6 are never restored. Code kept only so an older release can run, or so its
+data can be converted, may be deleted once two releases have shipped after it.
 
 Verify with `systemctl --user status dispatch-production.service`,
 `journalctl --user -u dispatch-production-update.service`, and
 `curl --fail https://dispatch.dillonlille.com/api/health`.
-Keep private backups and verify development work is preserved on `dispatch-dev`
-before removing retired development files from the Production host.
