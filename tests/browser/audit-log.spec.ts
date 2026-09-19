@@ -50,6 +50,10 @@ const events: AuditEvent[] = [
     ref: { kind: 'member', id: 'usr_jordan' },
     changes: [{ field: 'role', from: 'Dispatcher', to: 'Manager' }],
   }),
+  event('2026-09-15T20:45:00Z', 'dsp.view_opened', 'team', {
+    actorId: 'usr_sam',
+    actorName: 'Sam Rivera',
+  }),
   event('2026-09-15T20:12:00Z', 'member.invited', 'team', {
     detail: 'Dispatcher',
     target: 'sam@northline.test',
@@ -152,7 +156,7 @@ async function open(page: Page) {
     return route.fulfill({
       json: {
         // The first page is short so the log has more to load.
-        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 13),
+        events: Number(query.get('limit')) > 50 ? matching : matching.slice(0, 14),
         total: matching.length,
         counts,
         actors: [
@@ -216,11 +220,16 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(item(page, 'updated the role Dispatcher')).toContainText('+ Manage Timecard');
   await expect(item(page, 'updated the role Dispatcher')).toContainText('− Invite Members');
 
-  // Whatever Platform support did is outlined like its visits; members' events are filled.
+  // Whatever Platform support did is outlined, visits included; members' events are filled.
   await expect(
     item(page, 'Platform support updated DSP settings').locator('.audit-icon'),
   ).toHaveCSS('border-top-style', 'dashed');
   await expect(role.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
+  // A member's visit reads quietly, but it is theirs, so it is filled like the rest of what they do.
+  await expect(item(page, 'Sam Rivera opened this DSP').locator('.audit-icon')).toHaveCSS(
+    'border-top-width',
+    '0px',
+  );
   const visits = item(page, 'Platform support opened this DSP 3 times');
   await expect(visits).toHaveCount(1);
   await expect(visits).toContainText('11:01 AM – 12:02 PM');
@@ -238,7 +247,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await page.screenshot({ path: test.info().outputPath('audit-log-dark.png'), fullPage: true });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
 
-  await expect(page.getByText('Showing 13 of 23')).toBeVisible();
+  await expect(page.getByText('Showing 14 of 24')).toBeVisible();
   await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect.poll(() => requests.at(-1)?.get('limit')).toBe('100');
   // Older events fall back to the wording their data supports.
