@@ -15,10 +15,9 @@ function tilt(event: PointerEvent<HTMLElement>) {
   const y = (event.clientY - box.top) / box.height - 0.5;
   badge.style.setProperty('--tilt-y', `${x * 10}deg`);
   badge.style.setProperty('--tilt-x', `${-y * 8}deg`);
-  badge.style.setProperty('--sheen', `${x * 60}%`);
 }
 function settle(badge: HTMLElement) {
-  for (const name of ['--tilt-x', '--tilt-y', '--sheen']) badge.style.removeProperty(name);
+  for (const name of ['--tilt-x', '--tilt-y']) badge.style.removeProperty(name);
 }
 
 /*
@@ -26,6 +25,8 @@ function settle(badge: HTMLElement) {
  * page, and the badge a second, stiffer one about its hook, pushed the other way by the clip's
  * acceleration so that it lags and then catches up.
  * Dragging the badge pulls the strap toward the pointer; letting go keeps the velocity it had.
+ * The page opens with the lanyard dropping from above the tab rule until its strap snaps taut, which
+ * bounces it and sets it swinging. The reflection on the badge slides only as the badge itself leans.
  * Angles are radians, clockwise positive, written to CSS variables so that nothing re-renders.
  */
 const GRAVITY = 15; // g / length: a swing of about 1.6 seconds
@@ -37,6 +38,9 @@ const HOOK_DAMPING = 7;
 const HOOK_LAG = 0.55;
 const LIMIT = 0.5;
 const REST = 0.0004;
+const FALL = 2800; // pixels per second squared
+const BOUNCE = 0.3; // how much speed the strap gives back when it snaps taut
+const SHEEN = 140; // percent the reflection slides per radian the badge leans
 const STRAP = 92; // from the anchors down to the clip, in the lanyard's own pixels
 const CENTRE = 120;
 const SPREAD = 72; // each strap is anchored this far to the side of the clip's resting place
@@ -62,8 +66,11 @@ function usePendulum() {
     const still = matchMedia(STILL);
     let stop = () => {};
     const start = () => {
-      // It starts held to one side, as if just let go.
-      let swing = 0.13;
+      const rigEl = hangEl.parentElement!;
+      // It starts above the page, a little off true so that landing sets it swinging.
+      let drop = -(rigEl.offsetHeight + 40);
+      let dropSpeed = 0;
+      let swing = 0.04;
       let swingSpeed = 0;
       let sway = 0;
       let swaySpeed = 0;
@@ -77,8 +84,10 @@ function usePendulum() {
         const y = STRAP * Math.cos(swing) - STRAP;
         left!.setAttribute('transform', strapTransform(-1, x, y));
         right!.setAttribute('transform', strapTransform(1, x, y));
+        rigEl.style.transform = drop ? `translateY(${drop}px)` : '';
         hangEl.style.transform = `translate(${x}px, ${y}px) rotate(${swing}rad)`;
         badgeEl.style.setProperty('--sway', `${sway}rad`);
+        badgeEl.style.setProperty('--sheen', `${-(swing + sway) * SHEEN}%`);
       };
       const step = (now: number) => {
         // Fixed small steps keep the integration stable after a slow frame or a background tab.
@@ -97,6 +106,17 @@ function usePendulum() {
             swing = Math.sign(swing) * LIMIT;
             swingSpeed *= -0.3;
           }
+          if (drop < 0 || dropSpeed) {
+            dropSpeed += FALL * dt;
+            drop += dropSpeed * dt;
+            if (drop >= 0) {
+              // The strap snaps taut: the jolt kicks the swing and tips the badge on its hook.
+              swingSpeed += dropSpeed * 0.0009;
+              swaySpeed -= dropSpeed * 0.0022;
+              drop = 0;
+              dropSpeed = dropSpeed > 120 ? -dropSpeed * BOUNCE : 0;
+            }
+          }
           swaySpeed +=
             (-HOOK_STIFFNESS * sway - HOOK_DAMPING * swaySpeed - HOOK_LAG * acceleration) * dt;
           sway += swaySpeed * dt;
@@ -104,7 +124,7 @@ function usePendulum() {
         draw();
         const energy =
           swing * swing + swingSpeed * swingSpeed + sway * sway + swaySpeed * swaySpeed;
-        if (target === null && energy < REST) {
+        if (target === null && !drop && !dropSpeed && energy < REST) {
           frame = 0;
           swing = swingSpeed = sway = swaySpeed = 0;
           draw();
@@ -147,10 +167,11 @@ function usePendulum() {
         grab.current = () => {};
         badgeEl.removeEventListener('pointerup', release);
         badgeEl.removeEventListener('pointercancel', release);
-        swing = sway = 0;
+        swing = sway = drop = 0;
         draw();
         hangEl.style.removeProperty('transform');
         badgeEl.style.removeProperty('--sway');
+        badgeEl.style.removeProperty('--sheen');
         settle(badgeEl);
       };
     };

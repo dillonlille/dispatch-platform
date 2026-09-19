@@ -350,7 +350,6 @@
 }
 .profile-stage {
   justify-content: center;
-  max-width: 900px;
   margin-top: -8px;
   padding-bottom: 72px;
   /* Hide only what swings above the tab rule. */
@@ -419,7 +418,7 @@
   position: relative;
   overflow: hidden;
 }
-/* The sheen of the plastic sleeve; it slides with the tilt. */
+/* The sheen of the plastic sleeve; it slides as the badge swings. */
 .profile-badge::after {
   content: '';
   pointer-events: none;
