@@ -19,7 +19,13 @@ export interface CortexMeal {
 export interface MealEmployee {
   id: string;
   name: string;
-  paycom: { employeeCode: string; name: string; status: string; punches: Punch[] } | null;
+  paycom: {
+    employeeCode: string;
+    name: string;
+    department?: string;
+    status: string;
+    punches: Punch[];
+  } | null;
   cortex: CortexMeal[];
 }
 export interface EmployeeLink {
@@ -51,6 +57,11 @@ export interface ClockTime {
 export interface Lunch {
   out: ClockTime | null;
   in: ClockTime | null;
+}
+// An IN DAY punch at or after `time` (24-hour HH:MM) is late. No departments means everyone.
+export interface LateRule {
+  time: string;
+  departments: string[];
 }
 export interface DeliveryGap {
   milliseconds: number;
@@ -115,6 +126,10 @@ function parseClock(value: string | null) {
   if (m > 59 || (match[3] ? h < 1 || h > 12 : h > 23)) return null;
   if (match[3]) h = (h % 12) + (match[3].toUpperCase() === 'PM' ? 12 : 0);
   return h * 60 + m;
+}
+export function clockLabel(value: string) {
+  const minute = parseClock(value);
+  return minute === null ? value : label(minute);
 }
 export function cortexClock(value: string | null, date: string, zone: string): ClockTime | null {
   if (!value) return null;
@@ -204,8 +219,14 @@ export function paycomDay(source: MealEmployee['paycom']) {
   }
   return { inDay, outDay, lunches, events, review, legacy };
 }
-export function mealPairs(row: MealEmployee, date: string) {
+export function mealPairs(row: MealEmployee, date: string, late?: LateRule) {
   const paycom = paycomDay(row.paycom);
+  const lateFrom = late ? parseClock(late.time) : null;
+  const lateIn =
+    lateFrom !== null &&
+    paycom.inDay !== null &&
+    paycom.inDay.minute >= lateFrom &&
+    (!late!.departments.length || late!.departments.includes(row.paycom?.department ?? ''));
   const comparable = !paycom.review && paycom.lunches.length === row.cortex.length;
   const pairs = Array.from(
     { length: Math.max(paycom.lunches.length, row.cortex.length, 1) },
@@ -264,5 +285,5 @@ export function mealPairs(row: MealEmployee, date: string) {
               : different
                 ? 'Different times'
                 : 'Same times';
-  return { paycom, pairs, different, missing, status, longGap };
+  return { paycom, pairs, different, missing, status, longGap, lateIn };
 }

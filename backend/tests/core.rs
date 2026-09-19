@@ -1,11 +1,12 @@
 use dispatch_backend::core::{
     browsers::egress,
+    collectors::Provider,
     config::Config,
     crypto,
     db::{self, Store, s},
     jobs, operations, workforce,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use std::os::unix::fs::{PermissionsExt, symlink};
 fn store() -> (tempfile::TempDir, Store) {
     let root = tempfile::tempdir().unwrap();
@@ -178,6 +179,57 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         db.save_preferences(id, s(&actor, "id"), 1, &values)
             .is_err()
     );
+}
+#[test]
+fn late_da_settings_default_for_older_preferences_and_validate() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsp = db
+        .platform
+        .one("SELECT id FROM dsps WHERE permanent=1", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&dsp, "id");
+    let actor = db
+        .platform
+        .one("SELECT id FROM users WHERE platform_owner=1", [])
+        .unwrap()
+        .unwrap();
+    // Preferences stored before the Late DA keys existed.
+    let mut older = workforce::defaults();
+    for key in ["late_da_time", "late_da_departments"] {
+        older.as_object_mut().unwrap().remove(key);
+    }
+    db.collector(id, Provider::Paycom)
+        .unwrap()
+        .set(
+            "paycom.preferences",
+            &json!({"revision":0,"values":older,"history":[]}),
+        )
+        .unwrap();
+    let mut values = db.preferences(id).unwrap()["values"].clone();
+    assert_eq!(values["late_da_time"], "10:01");
+    assert_eq!(values["late_da_departments"], json!([]));
+    for time in ["24:00", "10:60", "9:30", "10-01", "ab:cd", "10:011"] {
+        values["late_da_time"] = json!(time);
+        assert!(
+            db.save_preferences(id, s(&actor, "id"), 0, &values)
+                .is_err(),
+            "{time}"
+        );
+    }
+    values["late_da_time"] = json!("09:45");
+    values["late_da_departments"] = Value::Null;
+    assert!(
+        db.save_preferences(id, s(&actor, "id"), 0, &values)
+            .is_err()
+    );
+    values["late_da_departments"] = json!(["Delivery"]);
+    let saved = db
+        .save_preferences(id, s(&actor, "id"), 0, &values)
+        .unwrap();
+    assert_eq!(saved["values"]["late_da_time"], "09:45");
+    assert_eq!(saved["values"]["late_da_departments"], json!(["Delivery"]));
 }
 #[test]
 fn schedule_handles_dst_gaps_and_repeated_minutes() {

@@ -308,6 +308,28 @@ test('Timecard schedules can be created, edited, paused and deleted', async ({ p
   await expect(page.getByRole('heading', { name: 'Timecard Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Workspace view', exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Driver departments', exact: true })).toHaveCount(0);
+  const lateDas = page.getByRole('region', { name: 'Late DAs', exact: true });
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('10:01');
+  await expect(lateDas.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await lateDas.getByLabel('Late at or after').fill('09:45');
+  await lateDas.getByRole('checkbox', { name: /^Delivery/ }).check();
+  await lateDas.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('10:01');
+  await lateDas.getByLabel('Late at or after').fill('09:45');
+  await lateDas.getByRole('checkbox', { name: /^Delivery/ }).check();
+  await lateDas.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Late DAs saved' })).toBeVisible();
+  await expect(lateDas.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(lateDas.getByLabel('Late at or after')).toHaveValue('09:45');
+  await expect(lateDas.getByRole('checkbox', { name: /^Delivery/ })).toBeChecked();
+  await expect(lateDas.getByRole('checkbox', { name: /^Operations/ })).not.toBeChecked();
+  await lateDas.getByRole('checkbox', { name: /^Operations/ }).check();
+  await page.screenshot({
+    path: test.info().outputPath('dispatch-late-das-settings.png'),
+    fullPage: true,
+  });
+  await lateDas.getByRole('button', { name: 'Discard', exact: true }).click();
   await page.getByRole('button', { name: 'New schedule', exact: true }).first().click();
   let dialog = page.getByRole('dialog', { name: 'New schedule', exact: true });
   await dialog.getByLabel('Schedule name').fill('Paycom refresh');
