@@ -19,6 +19,7 @@ import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './paycom-day-controls.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { type Perform } from './platform.js';
+import { dspHash, navigate } from './app/navigation.js';
 import { RoleSheet, RolesTab, assignable } from './roles.js';
 
 export function HomePage() {
@@ -132,15 +133,8 @@ function SourceSyncStatus({
   );
 }
 
-export function PaycomPage({
-  view,
-  perform,
-  canCollect,
-}: {
-  view: DspView;
-  perform: Perform;
-  canCollect: boolean;
-}) {
+export function PaycomPage({ view, perform }: { view: DspView; perform: Perform }) {
+  const canCollect = can(view, 'collections.run');
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const [syncing, setSyncing] = useState(false);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
@@ -238,11 +232,7 @@ export function PaycomPage({
         )}
         {daily && syncButton}
         {can(view, 'timecard.manage') && (
-          <button
-            onClick={() => {
-              location.hash = `dsp/${view.dsp.id}/paycom-settings`;
-            }}
-          >
+          <button onClick={() => navigate(dspHash(view.dsp.id, 'paycom-settings'))}>
             {daily && <Settings size={16} />}
             Settings
           </button>
@@ -293,9 +283,7 @@ export function PaycomPage({
       ) : canConnect && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
         <button
           className="primary paycom-connect"
-          onClick={() => {
-            location.hash = `dsp/${view.dsp.id}/settings?tab=connections`;
-          }}
+          onClick={() => navigate(dspHash(view.dsp.id, 'settings', { tab: 'connections' }))}
         >
           Connect Paycom
           <ArrowRight size={16} />

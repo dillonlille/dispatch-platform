@@ -31,6 +31,8 @@ import type {
 import { api, errorLabel, useData } from './api.js';
 import { Empty, ErrorBox, Loading, deviceTimezone, title } from './ui.js';
 import { permissionLabels } from './roles.js';
+import { dspHash } from './app/navigation.js';
+import { routeLabel, type DspRouteId } from './app/routes.js';
 import { paycomColumns } from '../../shared/paycom.js';
 import './audit.css';
 
@@ -369,11 +371,11 @@ function linked(event: AuditEvent) {
 
 // Everything about one record: by reference, and by the name older events kept.
 type Subject = { key: string; name: string };
-const pages: Record<string, [string, string]> = {
-  member: ['team', 'Team & Roles'],
-  role: ['team', 'Team & Roles'],
-  schedule: ['paycom', 'Timecard'],
-  job: ['paycom', 'Timecard'],
+const pages: Record<string, DspRouteId> = {
+  member: 'team',
+  role: 'team',
+  schedule: 'paycom',
+  job: 'paycom',
 };
 
 type Entry = { key: string; events: AuditEvent[] };
@@ -772,8 +774,8 @@ export function AuditLog({ view }: { view?: DspView }) {
                                 </button>
                               )}
                               {view && event.ref && pages[event.ref.kind] && (
-                                <a href={`#dsp/${view.dsp.id}/${pages[event.ref.kind]![0]}`}>
-                                  Open {pages[event.ref.kind]![1]}
+                                <a href={dspHash(view.dsp.id, pages[event.ref.kind])}>
+                                  Open {routeLabel('dsp', pages[event.ref.kind]!)}
                                 </a>
                               )}
                             </div>

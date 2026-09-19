@@ -10,6 +10,7 @@ import {
   type ScheduleInput,
 } from '../../shared/schedules.js';
 import type { PaycomSettings } from '../../shared/paycom.js';
+import { dspHash } from './app/navigation.js';
 import './timecard-schedules.css';
 
 const newSchedule = (): ScheduleInput => ({
@@ -498,7 +499,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
   }
   return (
     <div className="timecard-schedules">
-      <a className="schedule-back" href={`#dsp/${dspId}/paycom`}>
+      <a className="schedule-back" href={dspHash(dspId, 'paycom')}>
         <ArrowLeft size={14} aria-hidden="true" />
         Back
       </a>

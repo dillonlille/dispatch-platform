@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, X, Check, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { Brand } from './brand.js';
-import { title } from './ui.js';
+import { dspHash, platformHash } from './app/navigation.js';
+import type { DspRouteId, PlatformRouteId } from './app/routes.js';
 
 // Lets a platform owner look through any role the DSP has, custom ones included.
 function ViewRoleMenu({ view, viewAs }: { view: DspView; viewAs: (roleId?: string) => void }) {
@@ -57,6 +58,8 @@ export function Shell({
   view,
   dspId,
   page,
+  current,
+  label,
   navigation,
   logout,
   exitView,
@@ -67,7 +70,10 @@ export function Shell({
   view?: DspView;
   dspId?: string;
   page: string;
-  navigation: { id: string; label: string; icon: LucideIcon }[];
+  /** The navigation item the open page belongs to. */
+  current: string;
+  label: string;
+  navigation: readonly { id: string; label: string; icon?: LucideIcon }[];
   logout: () => void;
   exitView: () => void;
   viewAs: (roleId?: string) => void;
@@ -77,14 +83,6 @@ export function Shell({
   const sidebar = useRef<HTMLElement>(null);
   const name = `${session.user.firstName} ${session.user.lastName}`;
   const workspace = view?.dsp.name ?? (session.user.platformOwner ? 'Platform' : 'Workspace');
-  const label =
-    navigation.find((item) => item.id === page)?.label ??
-    ({
-      'paycom-settings': 'Timecard',
-      account: 'Settings',
-      jobs: 'Diagnostics',
-    }[page] ||
-      title(page));
   useEffect(() => {
     document.title = `${label} · Dispatch`;
   }, [label]);
@@ -164,14 +162,12 @@ export function Shell({
           {navigation.map(({ id, label: itemLabel, icon: Icon }) => (
             <a
               key={id}
-              href={`#${dspId ? `dsp/${dspId}/` : ''}${id}`}
+              href={dspId ? dspHash(dspId, id as DspRouteId) : platformHash(id as PlatformRouteId)}
               className="nav-item"
-              aria-current={
-                page === id || (id === 'paycom' && page === 'paycom-settings') ? 'page' : undefined
-              }
+              aria-current={current === id ? 'page' : undefined}
               onClick={() => setMobile(false)}
             >
-              <Icon aria-hidden="true" />
+              {Icon && <Icon aria-hidden="true" />}
               <span>{itemLabel}</span>
             </a>
           ))}
@@ -202,13 +198,13 @@ export function Shell({
             </summary>
             <div className="account-popover">
               <a
-                href={dspId ? `#dsp/${dspId}/settings` : '#account'}
+                href={dspId ? dspHash(dspId, 'settings') : platformHash('account')}
                 onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}
               >
                 Account settings
               </a>
               {!session.user.platformOwner && session.dsps.length > 1 && (
-                <a href="#dsps">Switch DSP</a>
+                <a href={platformHash()}>Switch DSP</a>
               )}
               <button onClick={logout}>
                 <LogOut size={16} />

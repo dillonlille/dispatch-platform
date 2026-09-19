@@ -1,7 +1,8 @@
 import { useUpdateState } from './browser-update.js';
 import { useState, type FormEvent } from 'react';
-import { Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
-import type { DspSummary, Job, PlatformHealth } from '../../shared/contracts/index.js';
+import { Building2, Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
+import type { DspSummary, Job, PlatformHealth, SessionView } from '../../shared/contracts/index.js';
+import { dspHash, navigate, platformHash } from './app/navigation.js';
 import { api, errorLabel, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
@@ -22,7 +23,8 @@ import {
   Tabs,
 } from './ui.js';
 export type Perform = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
-export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; perform: Perform }) {
+const open = (dsp: { id: string }) => navigate(dspHash(dsp.id));
+export function DspList({ perform }: { perform: Perform }) {
   const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000);
   const [query, setQuery] = useUpdateState('dsp-query', ''),
     [filter, setFilter] = useUpdateState('dsp-filter', 'all'),
@@ -372,6 +374,28 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     </>
   );
 }
+// A member's platform page: the DSPs they belong to.
+export function DspPicker({ session }: { session: SessionView }) {
+  return (
+    <>
+      <Header title="Your DSPs" />
+      <div className="workspace-grid">
+        {session.dsps
+          .filter((d) => d.status === 'active')
+          .map((dsp) => (
+            <button className="workspace-card" key={dsp.id} onClick={() => open(dsp)}>
+              <Building2 />
+              <strong>{dsp.name}</strong>
+              <Badge value={dsp.environment} />
+            </button>
+          ))}
+      </div>
+      {!session.dsps.length && (
+        <p>Your account has no DSP memberships. Ask your DSP owner for an invitation.</p>
+      )}
+    </>
+  );
+}
 function JobTable({ jobs }: { jobs: Job[] }) {
   return jobs.length ? (
     <div className="table-wrap">
@@ -541,7 +565,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
               </div>
             ))}
           </section>
-          <a href="#dsps" className="underlined-link">
+          <a href={platformHash()} className="underlined-link">
             Manage test DSPs in DSPs
           </a>
         </>

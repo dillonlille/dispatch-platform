@@ -6,6 +6,7 @@ import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
 import { type Perform } from './platform.js';
 import { ThemeSection } from './theme.js';
+import { hashQuery, navigate, replaceHashQuery, signInHash } from './app/navigation.js';
 
 export function SettingsPage({
   session,
@@ -16,9 +17,7 @@ export function SettingsPage({
   view?: DspView;
   perform: Perform;
 }) {
-  const [requestedTab, setTab] = useState(
-    new URLSearchParams(location.hash.split('?')[1]).get('tab') || 'general',
-  );
+  const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
   const [passwordError, setPasswordError] = useState('');
   const [busy, setBusy] = useState(false);
   const connections = can(view, 'connections.manage');
@@ -38,11 +37,7 @@ export function SettingsPage({
         value={tab}
         onChange={(value) => {
           setTab(value);
-          history.replaceState(
-            {},
-            '',
-            `${location.pathname}${location.search}${location.hash.split('?')[0]}?tab=${value}`,
-          );
+          replaceHashQuery({ tab: value });
         }}
         items={tabs}
         label="Settings"
@@ -124,7 +119,7 @@ export function SettingsPage({
                   currentPassword: form.get('currentPassword'),
                   password: form.get('password'),
                 });
-                location.hash = 'signin';
+                navigate(signInHash);
                 location.reload();
               }).finally(() => setBusy(false));
             }}

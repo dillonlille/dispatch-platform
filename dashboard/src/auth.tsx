@@ -3,9 +3,10 @@ import { ArrowLeft } from 'lucide-react';
 import { Brand } from './brand.js';
 import { api, useData } from './api.js';
 import { ErrorBox } from './ui.js';
+import { dspHash, hashQuery, navigate, platformHash, signInHash } from './app/navigation.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const hash = window.location.hash.slice(1),
-    token = new URLSearchParams(hash.split('?')[1]).get('token');
+    token = hashQuery().get('token');
   const initial = hash.startsWith('reset?')
     ? 'reset'
     : hash.startsWith('invite?')
@@ -34,7 +35,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       if (mode === 'login') {
         await api('/api/auth/login', { email, password });
         await onLogin();
-        if (!window.location.hash.startsWith('#dsp/')) window.location.hash = 'dsps';
+        if (!window.location.hash.startsWith('#dsp/')) navigate(platformHash());
       }
       if (mode === 'forgot') {
         await api('/api/auth/forgot-password', { email });
@@ -42,7 +43,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       }
       if (mode === 'reset') {
         await api('/api/auth/reset-password', { token, password });
-        window.location.hash = 'signin';
+        navigate(signInHash);
         setMode('login');
         setNotice('Password updated. Sign in with your new password.');
       }
@@ -57,7 +58,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
         );
         await api('/api/auth/login', { email: accepted.email, password });
         await onLogin();
-        window.location.hash = `dsp/${accepted.dspId}/overview`;
+        navigate(dspHash(accepted.dspId));
       }
     } catch (error) {
       setError((error as Error).message);
