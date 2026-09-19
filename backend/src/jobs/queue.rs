@@ -149,25 +149,23 @@ impl Store {
     pub fn cancel_job(&self, id: &str, dsp: &str) -> Result<Value> {
         let row = self.job(id, Some(dsp))?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE id=? AND dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id,dsp])?;
-        if s(&row, "kind") == "paycom.collect" {
-            self.clear_checkpoint(dsp, Some(id))?;
-        }
-        self.clear_live(dsp, Provider::from_job_kind(s(&row, "kind"))?, Some(id))?;
+        let provider = Provider::from_job_kind(s(&row, "kind"))?;
+        provider.collector().discard(self, dsp, Some(id))?;
+        self.clear_live(dsp, provider, Some(id))?;
         self.public_job(&self.job(id, Some(dsp))?)
     }
     pub fn cancel_provider(&self, id: &str, provider: Provider) -> Result<()> {
         self.clear_live(id, provider, None)?;
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND kind=? AND status IN ('queued','running','waiting_verification')",params![iso(),id,provider.job_kind()])?;
-        if provider == Provider::Paycom {
-            self.clear_checkpoint(id, None)?;
-        }
-        Ok(())
+        provider.collector().discard(self, id, None)
     }
     pub fn cancel_dsp(&self, id: &str) -> Result<()> {
         for provider in Provider::ALL {
             self.clear_live(id, *provider, None)?;
         }
-        self.clear_checkpoint(id, None)?;
+        for provider in Provider::ALL {
+            provider.collector().discard(self, id, None)?;
+        }
         self.jobs.exec("UPDATE jobs SET status='cancelled',message='Cancelled',completed_at=?,lease_owner=NULL,lease_until=NULL WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[&iso(),id])?;
         Ok(())
     }
@@ -277,13 +275,12 @@ impl Store {
             .contains(&e)
         }) && n(&row, "attempt") < n(&row, "max_attempts");
         self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+retry_delay(id,n(&row,"attempt")),id])?;
-        self.clear_live(
-            s(&row, "dsp_id"),
-            Provider::from_job_kind(s(&row, "kind"))?,
-            Some(id),
-        )?;
-        if !retry && s(&row, "kind") == "paycom.collect" {
-            self.clear_checkpoint(s(&row, "dsp_id"), Some(id))?;
+        let provider = Provider::from_job_kind(s(&row, "kind"))?;
+        self.clear_live(s(&row, "dsp_id"), provider, Some(id))?;
+        if !retry {
+            provider
+                .collector()
+                .discard(self, s(&row, "dsp_id"), Some(id))?;
         }
         Ok(())
     }
@@ -295,11 +292,8 @@ impl Store {
             .and_then(|key| key.split(':').next())
             .and_then(|id| self.collection_schedule(dsp, id).ok())
             .map(|row| s(&row, "name").to_owned());
-        let provider = if s(job, "kind") == "paycom.collect" {
-            "paycom"
-        } else {
-            "cortex"
-        };
+        // Only a registered kind is ever claimed, so a job always names its provider.
+        let provider = Provider::from_job_kind(s(job, "kind")).map_or("", Provider::id);
         let mut facts = vec![("provider", None, Some(provider.to_owned()))];
         if n(job, "attempt") > 1 || n(job, "max_attempts") > 1 {
             facts.push((

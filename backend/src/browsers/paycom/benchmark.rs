@@ -188,10 +188,10 @@ async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Resu
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-        let frame = driver.frame().await?;
-        if s(&frame,"url")==source && driver.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await?==true {break;}
+        let frame = driver.page.frame().await?;
+        if s(&frame,"url")==source && driver.page.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await?==true {break;}
         ensure(
-            driver.trusted(s(&frame, "url")),
+            driver.page.trusted(s(&frame, "url")),
             "authentication_failed",
             409,
         )?;
@@ -199,10 +199,8 @@ async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Resu
     }
     let config = json!({"employeeCode":code,"period":period,"sourceUrl":source});
     let record = driver
-        .evaluate(&format!(
-            "({})({config})",
-            include_str!("timecard.js").trim().trim_end_matches(';')
-        ))
+        .page
+        .evaluate(&call(include_str!("timecard.js"), &config))
         .await?;
     collection::project(&record, code)
 }
@@ -236,7 +234,7 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         );
         let config = json!({"employeeCode":code,"period":period,"sourceUrl":source});
         let extractor = include_str!("timecard.js").trim().trim_end_matches(';');
-        driver.evaluate(&format!(r#"(()=>{{globalThis.dispatchProbe=null;(async()=>{{try{{
+        driver.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchProbe=null;(async()=>{{try{{
           let stage='fetch';
           const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
           if(response.status!==200)throw 'status_'+response.status;
@@ -251,13 +249,16 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         let deadline = Instant::now() + Duration::from_secs(35);
         let probe = loop {
             ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-            let probe = driver.evaluate("globalThis.dispatchProbe").await?;
+            let probe = driver.page.evaluate("globalThis.dispatchProbe").await?;
             if !probe.is_null() {
                 break probe;
             }
             sleep(Duration::from_millis(100)).await;
         };
-        driver.evaluate("delete globalThis.dispatchProbe").await?;
+        driver
+            .page
+            .evaluate("delete globalThis.dispatchProbe")
+            .await?;
         if probe["ok"] != true {
             eprintln!(
                 "RESPONSE {}",
@@ -333,11 +334,11 @@ async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Res
         driver.navigate(&path).await?;
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline
-            && driver.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await? != true
+            && driver.page.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await? != true
         {
             sleep(Duration::from_millis(200)).await;
         }
-        let shape = driver.evaluate(r#"(()=>{const t=document.querySelector('#tbltimesheet');if(!t)return null;
+        let shape = driver.page.evaluate(r#"(()=>{const t=document.querySelector('#tbltimesheet');if(!t)return null;
           const heads=Array.from(t.querySelectorAll('thead [data-column]')).map(e=>e.getAttribute('data-column'));
           const time=/^(0?[1-9]|1[0-2]):[0-5][0-9] [AP]M$/,tally={};
           for(const row of t.querySelectorAll(':scope > tbody > tr'))for(const slot of ['i1','o1','i2','o2']){const cell=row.children[heads.indexOf(slot)];if(!cell)continue;

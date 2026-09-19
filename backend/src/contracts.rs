@@ -1,6 +1,6 @@
 //! Typed boundaries for authentication and collection jobs. Other endpoints can
 //! migrate independently without changing their wire format or stored schema.
-use super::{Error, Result, db, ensure, validate as v};
+use super::{Error, Result, collectors::Provider, db, ensure, validate as v};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -165,12 +165,26 @@ pub enum JobStatus {
     Failed,
     Cancelled,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum JobKind {
-    #[serde(rename = "paycom.collect")]
-    Paycom,
-    #[serde(rename = "cortex.meal_breaks.collect")]
-    CortexMeals,
+/// A job kind some registered provider runs. Anything else is not a stored job.
+#[derive(Clone, Copy, Debug)]
+pub struct JobKind(Provider);
+impl Serialize for JobKind {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.0.job_kind())
+    }
+}
+impl<'de> Deserialize<'de> for JobKind {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let kind = String::deserialize(deserializer)?;
+        Provider::from_job_kind(&kind)
+            .map(Self)
+            .map_err(|_| serde::de::Error::custom("unknown job kind"))
+    }
 }
 // A progress update may only move a claimed job between these active states.
 pub enum ActiveJobStatus {

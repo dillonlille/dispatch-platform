@@ -108,6 +108,37 @@ migration once, in one transaction. Requests never migrate. The previous release
 keep working on migrated data, so anything that is not additive follows the
 [rollback rule in RELEASES.md](RELEASES.md#production).
 
+## Adding a data provider
+
+1. Driver: `backend/src/browsers/<name>/` with a `Driver` that implements the `Driver` trait
+   of `browsers/driver.rs` (`request`, `collect`, `browser`). Tabs, window size, script
+   calls, screenshots, assistance and the attempt record come from `page.rs` and `attempt.rs`.
+   Declare the module in `browsers/mod.rs`.
+2. Collector: `backend/src/collectors/<name>.rs` implementing `Collector`: id, job kind,
+   database kind, seed, storage marker (`storage.<name>`), credential fields, browser files,
+   network policy, driver, fixture data, progress message, `publish`, `collected_at`, and,
+   when schedules run it, `schedule`/`scheduled`. The seed must insert its `connections` row.
+3. Storage: a `Kind` with a migration list under `backend/src/db/schema/<name>/`, as in
+   "Adding a table or column". Its baseline needs `storage_identity`, `connections`,
+   `collection_live_runs` and `collection_live_items`, as the Cortex baseline has.
+4. Registry: a `Provider` variant, its entry in `Provider::ALL` and its arm in
+   `Provider::collector`, all in `collectors/mod.rs`. Storage, connections routes,
+   credentials, revocation, the queue, the executor and fixture mode follow the registry.
+5. Hosts: a `NetworkPolicy` variant and its allow-list in `browsers/egress.rs`. The lists stay
+   there on purpose, next to the proxy that enforces them.
+6. Job kind: `jobs.kind` has a `CHECK` naming the two kinds, and `collection_schedules.collection`
+   one naming `paycom`, `meal_break` and `both`. Neither can be altered in place. A new kind
+   needs a rebuilt table over two releases per the [rollback rule](RELEASES.md#production);
+   until then a new provider cannot queue jobs. `both` and the `v::choice` list in
+   `schedules.rs` mirror that `CHECK`.
+7. Dashboard: the job kind union in `shared/contracts` and the labels in
+   `dashboard/src/collection-history.ts`. New count fields in job metrics are a
+   `job_metrics.rs` and contract change; without them a job reports no counts.
+8. A route that starts its collection, following `http/routes/jobs.rs` and "Adding an endpoint".
+
+Features written about one provider stay where they are: `workforce.rs`, `collection_checkpoint.rs`
+and `tenants.rs` (Paycom), `meals.rs` (Cortex), `meal_sync.rs` and `meal_comparison.rs` (both).
+
 ## Faster builds and deployment
 
 The workflow selects full checks for backend, tooling, dependencies and unknown

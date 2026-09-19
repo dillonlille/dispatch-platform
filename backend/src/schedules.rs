@@ -146,30 +146,33 @@ impl Store {
             .one("SELECT * FROM collection_schedules WHERE id=?", [schedule])?
             .ok_or_else(|| Error::new("schedule_not_found", 404))
     }
+    // `both` selects every collector a schedule can run; any other value selects one.
+    fn scheduled_providers(collection: &str) -> impl Iterator<Item = Provider> + '_ {
+        Provider::ALL.iter().copied().filter(move |provider| {
+            provider
+                .collector()
+                .schedule()
+                .is_some_and(|(name, _)| collection == "both" || collection == name)
+        })
+    }
+    /// Today, where the DSP is.
+    pub(crate) fn local_date(&self, id: &str) -> Result<String> {
+        let tz = timezone(s(&self.get_dsp(id)?, "timezone"))?;
+        Ok(chrono::Utc::now()
+            .with_timezone(&tz)
+            .format("%Y-%m-%d")
+            .to_string())
+    }
     fn check_schedule_sources(&self, id: &str, collection: &str) -> Result<()> {
-        if collection != "meal_break" {
+        for provider in Self::scheduled_providers(collection) {
+            let collector = provider.collector();
+            let (_, required) = collector.schedule().expect("scheduled collector");
             ensure(
-                flag(&self.connection_for(id, Provider::Paycom)?, "enabled"),
-                "schedule_paycom_required",
+                flag(&self.connection_for(id, provider)?, "enabled"),
+                required,
                 409,
             )?;
-        }
-        if collection != "paycom" {
-            ensure(
-                flag(&self.connection_for(id, Provider::Cortex)?, "enabled"),
-                "schedule_meals_required",
-                409,
-            )?;
-            let tz = timezone(s(&self.get_dsp(id)?, "timezone"))?;
-            let date = chrono::Utc::now()
-                .with_timezone(&tz)
-                .format("%Y-%m-%d")
-                .to_string();
-            ensure(
-                !self.meal_sync_scopes(id, &date)?.is_empty(),
-                "schedule_scope_required",
-                409,
-            )?;
+            collector.schedule_ready(self, id)?;
         }
         Ok(())
     }
@@ -299,10 +302,8 @@ impl Store {
         Ok(())
     }
     pub(crate) fn pause_provider_schedules(&self, id: &str, provider: Provider) -> Result<()> {
-        let target = if provider == Provider::Paycom {
-            "paycom"
-        } else {
-            "meal_break"
+        let Some((target, _)) = provider.collector().schedule() else {
+            return Ok(());
         };
         self.dsp(id)?.exec("UPDATE collection_schedules SET enabled=0,next_run=NULL,last_error=NULL,revision=revision+1 WHERE enabled=1 AND collection IN (?, 'both')",[target])?;
         Ok(())
@@ -350,22 +351,9 @@ impl Store {
         }
         self.check_schedule_sources(id, collection)?;
         let mut requests = Vec::new();
-        if collection != "meal_break" {
-            requests.push((format!("{key}paycom"), Provider::Paycom, json!({})));
-        }
-        if collection != "paycom" {
-            let tz = timezone(s(&self.get_dsp(id)?, "timezone"))?;
-            let date = chrono::Utc::now()
-                .with_timezone(&tz)
-                .format("%Y-%m-%d")
-                .to_string();
-            for (index, scope) in self.meal_sync_scopes(id, &date)?.iter().enumerate() {
-                scope.validate()?;
-                requests.push((
-                    format!("{key}flex:{index}"),
-                    Provider::Cortex,
-                    serde_json::to_value(scope)?,
-                ));
+        for provider in Self::scheduled_providers(collection) {
+            for (suffix, request) in provider.collector().scheduled(self, id)? {
+                requests.push((format!("{key}{suffix}"), provider, request));
             }
         }
         // Other collections finish before another recurring batch enters the queue.

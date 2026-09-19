@@ -1,7 +1,11 @@
 //! Deterministic Paycom driver. Credentials, attempt limits and orchestration
 //! belong to Rust; JavaScript is restricted to provider page operations.
 mod collection;
-use super::{attempt, page::Page};
+use super::{
+    attempt,
+    driver::{Collected, Driver as Drives, Pending, Run},
+    page::{Page, call},
+};
 #[cfg(test)]
 mod benchmark;
 use super::browseros;
@@ -18,13 +22,6 @@ use tokio::time::{Instant, sleep};
 const LANDING: &str = "/v4/cl/web.php/client-landing/arc";
 const SEARCH: &str = "/v4/cl/web.php/timecardsearch/index?from=main_menu";
 const AUTH: &str = include_str!("auth.js");
-pub(super) fn preflight(profile: &Path, retry: bool) -> Result<()> {
-    let parent = profile
-        .parent()
-        .ok_or_else(|| Error::new("unsafe_storage_path", 500))?;
-    attempt::Attempts::open(&parent.join("paycom-attempt.json"))?.check(retry)?;
-    Ok(())
-}
 struct Assistance {
     loader: String,
     challenge: Value,
@@ -59,60 +56,21 @@ impl Driver {
             browser,
             origin,
             fixture: fixture.is_some(),
-            attempts: attempt::Attempts::open(&parent.join("paycom-attempt.json"))?,
+            attempts: attempt::Attempts::beside(profile, "paycom")?,
             diagnostics: parent.join("paycom-diagnostics.json"),
             credentials: Value::Null,
             assistance: None,
         })
     }
-    async fn command(&self, method: &str, params: Value) -> Result<Value> {
-        self.page.command(method, params).await
-    }
-    async fn frame(&self) -> Result<Value> {
-        self.page.frame().await
-    }
-    fn trusted(&self, value: &str) -> bool {
-        self.page.trusted(value)
-    }
-    async fn evaluate(&self, expression: &str) -> Result<Value> {
-        self.page.evaluate(expression).await
-    }
     async fn script(&self, mut input: Value) -> Result<Value> {
         input["origin"] = json!(self.origin);
-        self.evaluate(&format!("({})({input})", AUTH.trim().trim_end_matches(';')))
-            .await
+        self.page.evaluate(&call(AUTH, &input)).await
     }
     async fn new_page(&mut self) -> Result<()> {
         let page = Page::open(self.browser.clone(), self.origin.clone()).await?;
-        let window = self
-            .browser
-            .command(
-                "Browser.getWindowForTarget",
-                json!({"targetId":page.target}),
-                None,
-            )
-            .await?;
-        self.browser.command("Browser.setWindowBounds",json!({"windowId":window["windowId"],"bounds":{"windowState":"normal","left":0,"top":0,"width":1024,"height":768}}),None).await?;
+        page.size_window().await?;
         self.page = page;
-        self.command("Page.bringToFront", json!({})).await?;
-        let targets = self
-            .browser
-            .command("Target.getTargets", json!({}), None)
-            .await?;
-        if let Some(targets) = targets["targetInfos"].as_array() {
-            for target in targets {
-                if s(target, "type") == "page" && s(target, "targetId") != self.page.target {
-                    self.browser
-                        .command(
-                            "Target.closeTarget",
-                            json!({"targetId":target["targetId"]}),
-                            None,
-                        )
-                        .await?;
-                }
-            }
-        }
-        Ok(())
+        self.page.front_alone().await
     }
     async fn navigate(&self, path: &str) -> Result<()> {
         self.page.navigate(path).await?;
@@ -145,8 +103,8 @@ impl Driver {
                     ]
                     .contains(&e.code.as_str()) =>
                 {
-                    let frame = self.frame().await?;
-                    if s(&frame, "url") != "about:blank" && !self.trusted(s(&frame, "url")) {
+                    let frame = self.page.frame().await?;
+                    if s(&frame, "url") != "about:blank" && !self.page.trusted(s(&frame, "url")) {
                         return Err(e);
                     }
                 }
@@ -165,7 +123,7 @@ impl Driver {
             "manual_verification_required",
             409,
         )?;
-        self.command("Page.bringToFront", json!({})).await?;
+        self.page.command("Page.bringToFront", json!({})).await?;
         let x = point["x"]
             .as_f64()
             .ok_or_else(|| Error::new("manual_verification_required", 409))?;
@@ -174,10 +132,10 @@ impl Driver {
             .ok_or_else(|| Error::new("manual_verification_required", 409))?;
         // BrowserOS chrome is asymmetric. Derive the content origin from a real
         // browser pointer event instead of assuming equal window borders.
-        self.evaluate("(()=>{globalThis.dispatchPointer=null;globalThis.dispatchPointerListener=e=>{if(e.isTrusted)globalThis.dispatchPointer={x:e.clientX,y:e.clientY,screenX:e.screenX,screenY:e.screenY,scale:devicePixelRatio};};window.addEventListener('mousemove',globalThis.dispatchPointerListener,true);return true;})()").await?;
+        self.page.evaluate("(()=>{globalThis.dispatchPointer=null;globalThis.dispatchPointerListener=e=>{if(e.isTrusted)globalThis.dispatchPointer={x:e.clientX,y:e.clientY,screenX:e.screenX,screenY:e.screenY,scale:devicePixelRatio};};window.addEventListener('mousemove',globalThis.dispatchPointerListener,true);return true;})()").await?;
         self.browser.native_move(510, 380).await?;
         self.browser.native_move(512, 384).await?;
-        let geometry=self.evaluate("(()=>{window.removeEventListener('mousemove',globalThis.dispatchPointerListener,true);delete globalThis.dispatchPointerListener;const value=globalThis.dispatchPointer;delete globalThis.dispatchPointer;return value;})()").await?;
+        let geometry=self.page.evaluate("(()=>{window.removeEventListener('mousemove',globalThis.dispatchPointerListener,true);delete globalThis.dispatchPointerListener;const value=globalThis.dispatchPointer;delete globalThis.dispatchPointer;return value;})()").await?;
         ensure(
             geometry["scale"] == 1 && geometry["screenX"] == 512 && geometry["screenY"] == 384,
             "browser_interaction_required",
@@ -191,7 +149,7 @@ impl Driver {
         Ok(())
     }
     async fn pin_fingerprint(&self) -> Result<Option<Vec<u8>>> {
-        let values=self.evaluate("(()=>{const fields=[...document.querySelectorAll('input[name=firstSecurityQuestion],input[name=secondSecurityQuestion]')];return fields.length===2&&fields.every(e=>e.value)?fields.map(e=>[e.name,e.value]):null})()").await?;
+        let values=self.page.evaluate("(()=>{const fields=[...document.querySelectorAll('input[name=firstSecurityQuestion],input[name=secondSecurityQuestion]')];return fields.length===2&&fields.every(e=>e.value)?fields.map(e=>[e.name,e.value]):null})()").await?;
         Ok(if values.is_null() {
             None
         } else {
@@ -202,7 +160,7 @@ impl Driver {
         let snapshot = &observation["snapshot"];
         let fingerprint = self.pin_fingerprint().await?;
         self.assistance = Some(Assistance {
-            loader: s(&self.frame().await?, "loaderId").into(),
+            loader: s(&self.page.frame().await?, "loaderId").into(),
             challenge: snapshot["challenge"].clone(),
             resume: fingerprint.is_none()
                 && (snapshot["loginPresent"]
@@ -352,7 +310,7 @@ impl Driver {
             return self.ready();
         }
         if let Some(assistance) = self.assistance.take() {
-            let same = assistance.loader == s(&self.frame().await?, "loaderId");
+            let same = assistance.loader == s(&self.page.frame().await?, "loaderId");
             if same
                 && assistance.fingerprint.is_some()
                 && assistance.fingerprint == self.pin_fingerprint().await?
@@ -379,17 +337,13 @@ impl Driver {
         let result=async { match s(&command,"action") {
             "start" | "check" => self.authenticate(command["credentials"].clone(),s(&command,"action")=="check" || command["ownerRetry"]==true).await,
             "complete_assistance" => self.complete().await,
-            "screenshot" => {
-                ensure(self.trusted(s(&self.frame().await?,"url")),"verification_expired",409)?;
-                let value=self.command("Page.captureScreenshot",json!({"format":"png"})).await?;
-                Ok(json!({"type":"screenshot","image":value["data"]}))
-            },
-            "assist" => self.assist(&command["input"]).await.map(|_|json!({"type":"assisted"})),
+            "screenshot" => self.page.screenshot().await,
+            "assist" => self.page.assisted(&command["input"]).await,
             "verify" => {
-                let focused=self.evaluate("(()=>{const fields=[...document.querySelectorAll('input[autocomplete=\"one-time-code\"],input[name=code],input[name=otp],input[name=verificationCode],input[name=verification_code]')].filter(e=>!e.disabled&&e.offsetParent!==null);if(fields.length!==1)return false;fields[0].focus();return true})()").await?;
+                let focused=self.page.evaluate("(()=>{const fields=[...document.querySelectorAll('input[autocomplete=\"one-time-code\"],input[name=code],input[name=otp],input[name=verificationCode],input[name=verification_code]')].filter(e=>!e.disabled&&e.offsetParent!==null);if(fields.length!==1)return false;fields[0].focus();return true})()").await?;
                 ensure(focused==true,"invalid_verification_code",409)?;
-                self.command("Input.insertText",json!({"text":command["code"]})).await?;
-                self.assist(&json!({"kind":"key","key":"Enter"})).await?;
+                self.page.command("Input.insertText",json!({"text":command["code"]})).await?;
+                self.page.assist(&json!({"kind":"key","key":"Enter"})).await?;
                 sleep(Duration::from_millis(350)).await;
                 self.complete().await
             },
@@ -410,7 +364,30 @@ impl Driver {
         )?;
         result
     }
-    async fn assist(&self, input: &Value) -> Result<()> {
-        self.page.assist(input).await
+}
+impl Drives for Driver {
+    fn request(&mut self, command: Value) -> Pending<'_, Value> {
+        Box::pin(Driver::request(self, command))
+    }
+    fn collect<'a>(&'a mut self, run: &'a Run<'a>) -> Pending<'a, Collected> {
+        Box::pin(async move {
+            let data = Driver::collect(
+                self,
+                run.timezone,
+                crate::workforce::collection_date(run.request, run.timezone)?,
+                run.metrics,
+                Some(&crate::collection_checkpoint::Checkpoint::new(
+                    run.state.clone(),
+                    run.job,
+                    run.owner,
+                )),
+                |progress, message| run.progress(progress, message),
+            )
+            .await?;
+            Ok(Collected { data, scope: None })
+        })
+    }
+    fn browser(&self) -> Option<&browseros::Session> {
+        Some(&self.browser)
     }
 }

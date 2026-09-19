@@ -1,6 +1,6 @@
 use crate::collectors::Provider;
 use crate::{
-    Error, State,
+    State,
     contracts::ActiveJobStatus,
     db::{n, now, s},
     ensure,
@@ -49,21 +49,17 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
                     &jid,
                     &worker,
                     10,
-                    if provider == Provider::Cortex {
-                        "Collecting meal breaks"
-                    } else {
-                        "Collecting workforce"
-                    },
+                    provider.collector().progress(),
                     ActiveJobStatus::Running,
                 )
             })
             .await?;
         metrics.phase(Phase::Collection);
         let request: Value = serde_json::from_str(s(&job, "request"))?;
-        let (data, scope) = session
+        let collected = session
             .collect(&state, &id, &owner, &metrics, &request)
             .await?;
-        metrics.counts(&data);
+        metrics.counts(&collected.data);
         metrics.phase(Phase::Publication);
         let jid = id.clone();
         let worker = owner.clone();
@@ -72,15 +68,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
         state
             .run(move |db| {
                 db.guard_job(&jid, &worker)?;
-                match provider {
-                    Provider::Paycom => db.publish(&tenant, &data)?,
-                    Provider::Cortex => db.publish_meals(
-                        &tenant,
-                        &jid,
-                        &serde_json::from_value(data)?,
-                        &scope.ok_or_else(|| Error::new("invalid_cortex_scope", 502))?,
-                    )?,
-                };
+                provider.collector().publish(db, &tenant, &jid, collected)?;
                 completed_metrics.finish("succeeded", None);
                 db.jobs.transaction(|| {
                     db.save_metrics(&jid, &worker, &completed_metrics.snapshot())?;

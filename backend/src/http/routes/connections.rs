@@ -4,7 +4,7 @@
 use crate::{
     Error, Result, State,
     accounts::Context,
-    browsers::{self, Provider},
+    browsers::Provider,
     db::{Store, s},
     ensure,
     http::{
@@ -108,7 +108,7 @@ async fn save(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
     let (c, provider) = open(&state, &input, access).await?;
     let id = s(&c.dsp, "id");
     let _operation = state.browsers.operation(id)?;
-    browsers::validate_credentials(&input.body, provider)?;
+    provider.validate_credentials(&input.body)?;
     stop(&state, &c, provider, access).await?;
     let (context, credentials) = (c.clone(), input.body);
     state

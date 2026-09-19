@@ -51,10 +51,9 @@ impl Store {
                 latest = Some(failed);
             }
         }
-        let collected = match provider {
-            Provider::Paycom => self.collector(id,provider)?.one("SELECT collected_at FROM publications WHERE period_from<=? AND period_to>=? ORDER BY collected_at DESC,id DESC LIMIT 1",[date,date])?,
-            Provider::Cortex => self.collector(id,provider)?.one("SELECT MAX(collected_at) collected_at FROM meal_publications WHERE report_date=? AND active=1",[date])?,
-        };
+        let collected = provider
+            .collector()
+            .collected_at(&*self.collector(id, provider)?, date)?;
         Ok(json!({
             "enabled":self.connection_for(id,provider)?["enabled"],
             "active":active.is_some(),
