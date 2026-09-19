@@ -604,6 +604,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         hash: String::new(),
         csrf: String::new(),
         raw: String::new(),
+        preview: None,
     };
     let context = db.context(&auth, dsp, "members.manage").unwrap();
     db.set_role(&context, s(&membership, "id"), None).unwrap();
