@@ -166,8 +166,8 @@ impl Store {
             };
             event.as_object_mut().unwrap().remove("data");
         }
-        let total = self.platform.one(
-            &format!("SELECT count(*) count {filters} AND {area}"),
+        let total = self.platform.count(
+            &format!("SELECT count(*) {filters} AND {area}"),
             rusqlite::params![
                 query.dsp,
                 query.from,
@@ -209,9 +209,7 @@ impl Store {
         } else {
             Vec::new()
         };
-        Ok(
-            json!({"events":events,"total":n(&total.unwrap(),"count"),"counts":counts,"actors":actors,"dsps":dsps}),
-        )
+        Ok(json!({"events":events,"total":total,"counts":counts,"actors":actors,"dsps":dsps}))
     }
 }
 // A changed field with its previous and new value; either side may be absent.

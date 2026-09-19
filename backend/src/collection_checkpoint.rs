@@ -25,17 +25,13 @@ impl Store {
         let db = self.collector(dsp, Provider::Paycom)?;
         db.transaction(|| {
             for row in db.all("SELECT job_id,created_at FROM collection_checkpoints", [])? {
-                let live = self.jobs.one(
-                    "SELECT status,kind,dsp_id FROM jobs WHERE id=?",
-                    [s(&row, "job_id")],
-                )?;
+                let live = self.job_row(s(&row, "job_id"), None).ok();
                 let keep = n(&row, "created_at") <= db::now()
                     && n(&row, "created_at") >= db::now() - TTL_MS
                     && live.is_some_and(|job| {
-                        s(&job, "dsp_id") == dsp
-                            && s(&job, "kind") == Provider::Paycom.job_kind()
-                            && ["queued", "running", "waiting_verification"]
-                                .contains(&s(&job, "status"))
+                        job.dsp_id == dsp
+                            && job.provider() == Provider::Paycom
+                            && job.status.is_active()
                     });
                 if !keep {
                     db.exec(

@@ -5,7 +5,8 @@ use crate::{
     Error, Result, State,
     accounts::Context,
     browsers::Provider,
-    db::{Store, s},
+    contracts::Connection,
+    db::Store,
     ensure,
     http::{
         input::{Input, Reply, optional},
@@ -42,18 +43,18 @@ pub fn routes() -> Vec<Route> {
 }
 
 /// The Paycom connection, with the browser session a member can take over when there is one.
-pub fn summary(db: &Store, c: &Member) -> Result<Value> {
+pub fn summary(db: &Store, c: &Member) -> Result<Connection> {
     let mut value = db.connection(c.dsp_id())?;
     if let Some(session) = c.state.browsers.get(c.dsp_id())
         && session.interactive()
     {
-        value["verificationSessionId"] = json!(session.id);
+        value.verification_session_id = Some(session.id.clone());
     }
     Ok(value)
 }
 
 fn connection(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    Ok(Reply::json(summary(db, c)?))
+    Reply::of(&summary(db, c)?)
 }
 
 // Every flow starts the same way: who is asking, and about which provider. An
@@ -75,8 +76,8 @@ async fn revalidate(state: &Arc<State>, c: &Context, access: Dsp) -> Result<()> 
 // member who may still see it.
 async fn answer(state: &Arc<State>, c: &Context, provider: Provider, access: Dsp) -> Result<Reply> {
     revalidate(state, c, access).await?;
-    let connection = state.connection(s(&c.dsp, "id"), provider).await?;
-    Ok(Reply::json(connection))
+    let connection = state.connection(&c.dsp.id, provider).await?;
+    Reply::of(&connection)
 }
 
 // Cancels the provider's jobs, then closes its browser, before credentials change.
@@ -85,22 +86,22 @@ async fn stop(state: &Arc<State>, c: &Context, provider: Provider, access: Dsp) 
     state
         .run(move |db| {
             access.revalidate(db, &context)?;
-            db.cancel_provider(s(&context.dsp, "id"), provider)
+            db.cancel_provider(context.dsp.id.as_str(), provider)
         })
         .await?;
-    state.browsers.revoke_for(s(&c.dsp, "id"), provider).await;
+    state.browsers.revoke_for(c.dsp.id.as_str(), provider).await;
     Ok(())
 }
 
 async fn provider_connection(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
     let (c, provider) = open(&state, &input, access).await?;
-    let connection = state.connection(s(&c.dsp, "id"), provider).await?;
-    Ok(Reply::json(connection))
+    let connection = state.connection(&c.dsp.id, provider).await?;
+    Reply::of(&connection)
 }
 
 async fn save(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
     let (c, provider) = open(&state, &input, access).await?;
-    let id = s(&c.dsp, "id");
+    let id = c.dsp.id.as_str();
     let _operation = state.browsers.operation(id)?;
     provider.validate_credentials(&input.body)?;
     stop(&state, &c, provider, access).await?;
@@ -114,7 +115,7 @@ async fn save(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
 
 async fn check(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
     let (c, provider) = open(&state, &input, access).await?;
-    let id = s(&c.dsp, "id");
+    let id = c.dsp.id.as_str();
     let _operation = state.browsers.operation(id)?;
     v::fields(&input.body, &[])?;
     state.ensure_provider_browser(id, true, provider).await?;
@@ -123,7 +124,7 @@ async fn check(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
 
 async fn disable(state: Arc<State>, input: Input, access: Dsp) -> Result<Reply> {
     let (c, provider) = open(&state, &input, access).await?;
-    let _operation = state.browsers.operation(s(&c.dsp, "id"))?;
+    let _operation = state.browsers.operation(c.dsp.id.as_str())?;
     v::fields(&input.body, &["removeCredentials"])?;
     let remove = optional(&input.body, "removeCredentials", v::boolean)?.unwrap_or(false);
     stop(&state, &c, provider, access).await?;
@@ -162,7 +163,7 @@ async fn step(state: Arc<State>, input: Input, access: Dsp, step: Step) -> Resul
     let expired = || Error::new("verification_expired", 409);
     let session = state
         .browsers
-        .get_for(s(&c.dsp, "id"), provider)
+        .get_for(c.dsp.id.as_str(), provider)
         .ok_or_else(expired)?;
     if step != Step::Verify {
         let sent = if step == Step::Screenshot {
@@ -242,14 +243,7 @@ async fn step(state: Arc<State>, input: Input, access: Dsp, step: Step) -> Resul
     )?;
     let context = c.clone();
     state
-        .run(move |db| {
-            db.audit(
-                Some(s(&context.auth.user, "id")),
-                Some(s(&context.dsp, "id")),
-                "connection.verification_submitted",
-                provider.id(),
-            )
-        })
+        .run(move |db| context.audit(db, "connection.verification_submitted", provider.id()))
         .await?;
     answer(&state, &c, provider, access).await
 }

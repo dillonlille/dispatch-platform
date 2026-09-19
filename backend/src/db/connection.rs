@@ -1,4 +1,7 @@
-use super::{Kind, migrations, private_file};
+use super::{
+    Kind, migrations, private_file,
+    row::{FromRow, Row},
+};
 use crate::{Result, ensure};
 use rusqlite::{Connection, Params, types::ValueRef};
 use serde_json::{Value, json};
@@ -112,6 +115,25 @@ impl Db {
             .prepare_cached(sql)?
             .query_row(p, row_json)
             .optional()?)
+    }
+    /// Every row, read into `T`. A column `T` needs that the query lacks is an error.
+    pub fn query_as<T: FromRow>(&self, sql: &str, p: impl Params) -> Result<Vec<T>> {
+        let mut stmt = self.0.prepare_cached(sql)?;
+        let mut rows = stmt.query(p)?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(T::from_row(&Row(row))?);
+        }
+        Ok(out)
+    }
+    pub fn one_as<T: FromRow>(&self, sql: &str, p: impl Params) -> Result<Option<T>> {
+        let mut stmt = self.0.prepare_cached(sql)?;
+        let mut rows = stmt.query(p)?;
+        rows.next()?.map(|row| T::from_row(&Row(row))).transpose()
+    }
+    /// The single number a `SELECT count(*) ...` answers with.
+    pub fn count(&self, sql: &str, p: impl Params) -> Result<i64> {
+        Ok(self.0.prepare_cached(sql)?.query_row(p, |row| row.get(0))?)
     }
     pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         let tx = self.0.unchecked_transaction()?;

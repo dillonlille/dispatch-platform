@@ -2,31 +2,55 @@
 use super::{
     Result,
     collectors::Provider,
-    db::{Store, flag, s},
-    ensure,
+    contracts::JobRow,
+    db::{Store, s},
+    ensure, job_statuses,
     meals::{Discovery, Scope},
     workforce,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
 
+const ACTIVE_OF_KIND: &str = concat!(
+    "SELECT * FROM jobs WHERE dsp_id=? AND kind=? AND status IN ",
+    job_statuses!(active),
+    " ORDER BY created_at DESC LIMIT 1"
+);
+const LATEST_FOR_DATE: &str = "SELECT * FROM jobs WHERE dsp_id=? AND kind=? \
+    AND (json_extract(request,'$.date')=? OR request='{}') ORDER BY created_at DESC LIMIT 1";
+const FAILED_STATION: &str = "SELECT * FROM jobs WHERE dsp_id=? AND kind=? \
+    AND substr(idempotency_key,1,?)=? AND status IN ('failed','cancelled') \
+    ORDER BY CASE status WHEN 'failed' THEN 0 ELSE 1 END,created_at DESC LIMIT 1";
+const BATCH: &str = "SELECT * FROM jobs WHERE dsp_id=? AND substr(idempotency_key,1,?)=? \
+    ORDER BY CASE kind WHEN 'paycom.collect' THEN 0 ELSE 1 END,idempotency_key";
+const ACTIVE_JOB: &str = concat!(
+    "SELECT id FROM jobs WHERE dsp_id=? AND status IN ",
+    job_statuses!(active),
+    " LIMIT 1"
+);
+// Reuse the selected day's proven scopes. For an uncollected day, use the
+// most recently collected day's scopes, never another DSP or ALL_DSPS.
+const SCOPES: &str = "SELECT station,service_area_id,provider,timezone FROM meal_publications \
+    WHERE active=1 AND report_date=COALESCE(\
+    (SELECT report_date FROM meal_publications WHERE active=1 AND report_date=? LIMIT 1),\
+    (SELECT report_date FROM meal_publications WHERE active=1 \
+     ORDER BY collected_at DESC,id DESC LIMIT 1)) ORDER BY station,service_area_id,provider";
+
 impl Store {
     fn meal_sync_discovery(&self, id: &str, date: &str) -> Result<Discovery> {
         let profile = self.profile(id)?;
-        let dsp = self.get_dsp(id)?;
+        let dsp = self.find_dsp(id)?;
         Ok(Discovery {
             date: date.into(),
             station: s(&profile, "stationCode").into(),
-            timezone: s(&dsp, "timezone").into(),
-            dsp_name: s(&dsp, "name").into(),
+            timezone: dsp.timezone,
+            dsp_name: dsp.name,
             dsp_abbreviation: s(&profile, "abbreviation").into(),
         })
     }
     pub(crate) fn meal_sync_scopes(&self, id: &str, date: &str) -> Result<Vec<Scope>> {
         let db = self.collector(id, Provider::Cortex)?;
-        // Reuse the selected day's proven scopes. For an uncollected day, use the
-        // most recently collected day's scopes, never another DSP or ALL_DSPS.
-        let rows = db.all("SELECT station,service_area_id,provider,timezone FROM meal_publications WHERE active=1 AND report_date=COALESCE((SELECT report_date FROM meal_publications WHERE active=1 AND report_date=? LIMIT 1),(SELECT report_date FROM meal_publications WHERE active=1 ORDER BY collected_at DESC,id DESC LIMIT 1)) ORDER BY station,service_area_id,provider", [date])?;
+        let rows = db.all(SCOPES, [date])?;
         Ok(rows
             .iter()
             .map(|row| Scope {
@@ -39,25 +63,31 @@ impl Store {
             .collect())
     }
     fn sync_source(&self, id: &str, date: &str, provider: Provider) -> Result<Value> {
-        let active = self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND kind=? AND status IN ('queued','running','waiting_verification') ORDER BY created_at DESC LIMIT 1", params![id,provider.job_kind()])?;
-        let mut latest = self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND kind=? AND (json_extract(request,'$.date')=? OR request='{}') ORDER BY created_at DESC LIMIT 1", params![id,provider.job_kind(),date])?;
+        let kind = provider.job_kind();
+        let active: Option<JobRow> = self.jobs.one_as(ACTIVE_OF_KIND, params![id, kind])?;
+        let mut latest: Option<JobRow> =
+            self.jobs.one_as(LATEST_FOR_DATE, params![id, kind, date])?;
         if let Some(row) = &latest
             && provider == Provider::Cortex
-            && let Some((prefix, _)) = s(row, "idempotency_key").rsplit_once(":flex:")
+            && let Some((prefix, _)) = row.idempotency_key.rsplit_once(":flex:")
         {
             let prefix = format!("{prefix}:flex:");
             // A multi-station sync succeeds only when every station succeeds.
-            if let Some(failed) = self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND kind=? AND substr(idempotency_key,1,?)=? AND status IN ('failed','cancelled') ORDER BY CASE status WHEN 'failed' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",params![id,provider.job_kind(),prefix.chars().count() as i64,prefix])? {
-                latest = Some(failed);
+            let failed: Option<JobRow> = self.jobs.one_as(
+                FAILED_STATION,
+                params![id, kind, prefix.chars().count() as i64, prefix],
+            )?;
+            if failed.is_some() {
+                latest = failed;
             }
         }
         let collected = provider
             .collector()
             .collected_at(&*self.collector(id, provider)?, date)?;
         Ok(json!({
-            "enabled":self.connection_for(id,provider)?["enabled"],
+            "enabled":self.connection_for(id,provider)?.enabled,
             "active":active.is_some(),
-            "job":active.as_ref().or(latest.as_ref()).map(|row|self.public_job(row)).transpose()?,
+            "job":active.or(latest).map(|row|self.public_job(row)).transpose()?,
             "collectedAt":collected.map(|row|row["collected_at"].clone()),
         }))
     }
@@ -78,27 +108,27 @@ impl Store {
         )
     }
     pub fn enqueue_meal_sync(&self, id: &str, actor: &str, key: &str, date: &str) -> Result<Value> {
-        workforce::collection_date(&json!({"date":date}), s(&self.get_dsp(id)?, "timezone"))?;
+        workforce::collection_date(&json!({"date":date}), &self.find_dsp(id)?.timezone)?;
         ensure(
-            flag(&self.connection_for(id, Provider::Paycom)?, "enabled"),
+            self.connection_for(id, Provider::Paycom)?.enabled,
             "meal_sync_paycom_required",
             409,
         )?;
         ensure(
-            flag(&self.connection_for(id, Provider::Cortex)?, "enabled"),
+            self.connection_for(id, Provider::Cortex)?.enabled,
             "meal_sync_flex_required",
             409,
         )?;
         // Replay the original batch even after discovery publishes its first
         // scope, or subsequent collections change the available stations.
         let prefix = format!("meal:{key}:");
-        let existing = self.jobs.all("SELECT * FROM jobs WHERE dsp_id=? AND substr(idempotency_key,1,?)=? ORDER BY CASE kind WHEN 'paycom.collect' THEN 0 ELSE 1 END,idempotency_key", params![id,prefix.chars().count() as i64,prefix])?;
+        let existing: Vec<JobRow> = self
+            .jobs
+            .query_as(BATCH, params![id, prefix.chars().count() as i64, prefix])?;
         let existing: Vec<_> = existing
             .into_iter()
             .filter(|row| {
-                let suffix = s(row, "idempotency_key")
-                    .strip_prefix(&prefix)
-                    .unwrap_or("");
+                let suffix = row.idempotency_key.strip_prefix(&prefix).unwrap_or("");
                 suffix == "paycom"
                     || suffix.strip_prefix("flex:").is_some_and(|index| {
                         !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit())
@@ -108,9 +138,9 @@ impl Store {
         if !existing.is_empty() {
             let mut jobs = Vec::new();
             for row in existing {
-                let request: Value = serde_json::from_str(s(&row, "request"))?;
+                let request: Value = serde_json::from_str(&row.request)?;
                 ensure(s(&request, "date") == date, "idempotency_conflict", 409)?;
-                jobs.push(self.public_job(&row)?);
+                jobs.push(self.public_job(row)?);
             }
             return Ok(json!({"date":date,"jobs":jobs}));
         }
@@ -142,7 +172,11 @@ impl Store {
                 serde_json::to_value(scope)?,
             ));
         }
-        ensure(self.jobs.one("SELECT id FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification') LIMIT 1",[id])?.is_none(),"sync_in_progress",409)?;
+        ensure(
+            self.jobs.one(ACTIVE_JOB, [id])?.is_none(),
+            "sync_in_progress",
+            409,
+        )?;
         let jobs = self.enqueue_batch(id, Some(actor), &requests)?;
         Ok(json!({"date":date,"jobs":jobs}))
     }

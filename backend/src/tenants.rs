@@ -2,29 +2,116 @@ use super::collectors::Provider;
 use super::{
     Error, Result,
     accounts::{Auth, Context},
+    contracts::{
+        ConnectionStatus, Dsp, DspStatus, DspSummary, DspSummaryLegacy, Member, OwnerStatus,
+    },
     crypto,
-    db::{Store, boolean, flag, iso, n, now, s},
+    db::{FromRow, Row, Store, flag, iso, now},
     ensure,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
-fn dsp(mut row: Value) -> Value {
-    boolean(&mut row, &["permanent"]);
-    let created = row
-        .as_object_mut()
-        .unwrap()
-        .remove("created_at")
-        .unwrap_or(Value::Null);
-    row["createdAt"] = created;
-    row
+
+const INSERT_DSP: &str = "INSERT INTO dsps(id,name,environment,status,timezone,permanent,created_at) \
+    VALUES (?,?,?,'provisioning',?,?,?)";
+// The DSPs a user may open, each with who owns it: an active owner, else the platform
+// owner of the permanent DSP, else whoever holds the newest open owner invitation.
+const DSPS: &str = "SELECT d.*,\
+    COALESCE((SELECT r.name FROM roles r WHERE r.id=m.role_id),m.role) member_role,\
+    (SELECT MIN(u.email) FROM memberships o JOIN users u ON u.id=o.user_id \
+     WHERE o.dsp_id=d.id AND o.role='owner' AND u.status='active') owner_email,\
+    CASE WHEN d.permanent=1 THEN \
+     (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,\
+    (SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL \
+     AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email \
+    FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? \
+    WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name";
+const MEMBERS: &str = "SELECT m.id,m.user_id,m.dsp_id,u.email,u.first_name||' '||u.last_name name,\
+    COALESCE(r.name,m.role) role,r.id role_id,COALESCE(r.system,m.role='owner') owner \
+    FROM memberships m JOIN users u ON u.id=m.user_id LEFT JOIN roles r ON r.id=m.role_id \
+    WHERE m.dsp_id=? ORDER BY u.first_name,u.last_name";
+const OWNER_COUNT: &str = "SELECT count(*) FROM memberships WHERE dsp_id=? AND role='owner'";
+// Only an account with no membership left, and never a platform owner's.
+const REMOVABLE_ACCOUNT: &str = "SELECT first_name||' '||last_name FROM users u WHERE id=? \
+    AND platform_owner=0 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=u.id)";
+
+struct DspListing {
+    dsp: Dsp,
+    legacy: DspSummaryLegacy,
+}
+impl FromRow for DspListing {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            dsp: Dsp::from_row(row)?,
+            legacy: DspSummaryLegacy {
+                member_role: row.get("member_role")?,
+                owner_email: row.get("owner_email")?,
+                platform_email: row.get("platform_email")?,
+                invite_email: row.get("invite_email")?,
+            },
+        })
+    }
+}
+/// A member as stored; who is online is added by the route.
+pub struct MemberRow {
+    pub id: String,
+    pub user_id: String,
+    pub dsp_id: String,
+    pub email: String,
+    pub name: String,
+    pub role: String,
+    pub role_id: Option<String>,
+    pub owner: bool,
+}
+impl FromRow for MemberRow {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            user_id: row.get("user_id")?,
+            dsp_id: row.get("dsp_id")?,
+            email: row.get("email")?,
+            name: row.get("name")?,
+            role: row.get("role")?,
+            role_id: row.get("role_id")?,
+            owner: row.get("owner")?,
+        })
+    }
+}
+impl MemberRow {
+    pub fn public(self, status: super::contracts::Presence) -> Member {
+        Member {
+            id: self.id,
+            user_id: self.user_id,
+            dsp_id: self.dsp_id,
+            email: self.email,
+            name: self.name,
+            role: self.role,
+            role_id: self.role_id,
+            owner: self.owner,
+            status,
+        }
+    }
 }
 impl Store {
-    pub fn get_dsp(&self, id: &str) -> Result<Value> {
+    pub fn find_dsp(&self, id: &str) -> Result<Dsp> {
         self.platform
-            .one("SELECT * FROM dsps WHERE id=?", [id])?
-            .map(dsp)
+            .one_as("SELECT * FROM dsps WHERE id=?", [id])?
             .ok_or_else(|| Error::new("dsp_not_found", 404))
     }
+    /// A DSP that may collect: active, and of the environment this backend serves.
+    pub fn ensure_dsp_active(&self, id: &str) -> Result<Dsp> {
+        let dsp = self.find_dsp(id)?;
+        ensure(self.serves(&dsp), "dsp_unavailable", 409)?;
+        Ok(dsp)
+    }
+    pub fn serves(&self, dsp: &Dsp) -> bool {
+        dsp.status == DspStatus::Active && dsp.environment == self.config.env()
+    }
+    /// `find_dsp` as JSON, for the integration tests written against it.
+    pub fn get_dsp(&self, id: &str) -> Result<Value> {
+        Ok(serde_json::to_value(self.find_dsp(id)?)?)
+    }
+    /// `new_dsp` as JSON, for the integration tests written against it.
     pub fn create_dsp(
         &self,
         name: &str,
@@ -32,22 +119,37 @@ impl Store {
         actor: &str,
         permanent: bool,
     ) -> Result<Value> {
+        Ok(serde_json::to_value(
+            self.new_dsp(name, timezone, actor, permanent)?,
+        )?)
+    }
+    pub fn new_dsp(&self, name: &str, timezone: &str, actor: &str, permanent: bool) -> Result<Dsp> {
         ensure(
             timezone.parse::<chrono_tz::Tz>().is_ok(),
             "invalid_timezone",
             400,
         )?;
         let id = crypto::id("dsp")?;
-        self.platform.exec("INSERT INTO dsps(id,name,environment,status,timezone,permanent,created_at) VALUES (?,?,?,'provisioning',?,?,?)",params![id,name,self.config.environment,timezone,permanent,iso()])?;
+        self.platform.exec(
+            INSERT_DSP,
+            params![
+                id,
+                name,
+                self.config.environment,
+                timezone,
+                permanent,
+                iso()
+            ],
+        )?;
         super::roles::seed(&self.platform, &id)?;
         self.provision(&id)?;
         self.audit(Some(actor), Some(&id), "dsp.created", "")?;
-        self.get_dsp(&id)
+        self.find_dsp(&id)
     }
     pub fn provision(&self, id: &str) -> Result<()> {
-        let dsp = self.get_dsp(id)?;
+        let dsp = self.find_dsp(id)?;
         ensure(
-            ["provisioning", "failed"].contains(&s(&dsp, "status")),
+            [DspStatus::Provisioning, DspStatus::Failed].contains(&dsp.status),
             "dsp_already_initialized",
             409,
         )?;
@@ -63,7 +165,7 @@ impl Store {
             // table, once a release without that reader has shipped.
             db.exec(
                 "INSERT OR IGNORE INTO schedules(provider,timezone) VALUES ('paycom',?)",
-                [s(&dsp, "timezone")],
+                [&dsp.timezone],
             )?;
             self.initialize_schedules(id)?;
             self.platform
@@ -76,52 +178,55 @@ impl Store {
         }
         result
     }
-    pub fn dsps(&self, a: &Auth) -> Result<Value> {
-        let rows = self.platform.all("SELECT d.*,COALESCE((SELECT r.name FROM roles r WHERE r.id=m.role_id),m.role) member_role,(SELECT MIN(u.email) FROM memberships o JOIN users u ON u.id=o.user_id WHERE o.dsp_id=d.id AND o.role='owner' AND u.status='active') owner_email,CASE WHEN d.permanent=1 THEN (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,(SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name",params![now(),s(&a.user,"id"),flag(&a.user,"platformOwner")])?;
+    pub fn dsps(&self, a: &Auth) -> Result<Vec<DspSummary>> {
+        let platform = a.user.platform_owner;
+        let rows: Vec<DspListing> = self
+            .platform
+            .query_as(DSPS, params![now(), a.user.id, platform])?;
         let mut result = Vec::new();
-        for row in rows {
-            let owner = row["owner_email"]
-                .as_str()
-                .or(row["platform_email"].as_str());
-            let invite = row["invite_email"].as_str();
+        for DspListing { dsp, legacy } in rows {
+            let owner = legacy
+                .owner_email
+                .as_deref()
+                .or(legacy.platform_email.as_deref());
+            let invite = legacy.invite_email.as_deref();
             let owner_status = if owner.is_some() {
-                "active"
+                OwnerStatus::Active
             } else if invite.is_some() {
-                "invited"
+                OwnerStatus::Invited
             } else {
-                "missing"
+                OwnerStatus::Missing
             };
-            let email = json!(owner.or(invite));
-            let role = if flag(&a.user, "platformOwner") {
-                json!("platform_owner")
-            } else {
-                row["member_role"].clone()
+            let mut summary = DspSummary {
+                profile: profile_default(),
+                owner_email: owner.or(invite).map(str::to_owned),
+                owner_status,
+                paycom: ConnectionStatus::NotConnected,
+                last_collection: None,
+                role: if platform {
+                    Some("platform_owner".to_owned())
+                } else {
+                    legacy.member_role.clone()
+                },
+                dsp,
+                legacy,
             };
-            let mut value = dsp(row);
-            let id = s(&value, "id").to_owned();
-            value["ownerStatus"] = json!(owner_status);
-            value["ownerEmail"] = email;
-            value["role"] = role;
-            value["paycom"] = json!("not_connected");
-            value["lastCollection"] = Value::Null;
-            value["profile"] = profile_default();
-            if ["active", "suspended"].contains(&s(&value, "status")) {
-                let db = self.collector(&id, Provider::Paycom)?;
-                value["profile"] = self.profile(&id)?;
-                if let Some(r) =
-                    db.one("SELECT status FROM connections WHERE provider='paycom'", [])?
-                {
-                    value["paycom"] = r["status"].clone();
+            if [DspStatus::Active, DspStatus::Suspended].contains(&summary.dsp.status) {
+                let id = &summary.dsp.id;
+                let db = self.collector(id, Provider::Paycom)?;
+                summary.profile = self.profile(id)?;
+                let status: Option<(ConnectionStatus,)> =
+                    db.one_as("SELECT status FROM connections WHERE provider='paycom'", [])?;
+                if let Some((status,)) = status {
+                    summary.paycom = status;
                 }
-                if let Some(r) =
-                    db.one("SELECT collected_at FROM publications WHERE active=1", [])?
-                {
-                    value["lastCollection"] = r["collected_at"].clone();
-                }
+                let collected: Option<(String,)> =
+                    db.one_as("SELECT collected_at FROM publications WHERE active=1", [])?;
+                summary.last_collection = collected.map(|(at,)| at);
             }
-            result.push(value);
+            result.push(summary);
         }
-        Ok(json!(result))
+        Ok(result)
     }
     pub fn profile(&self, id: &str) -> Result<Value> {
         let mut out = profile_default();
@@ -145,96 +250,97 @@ impl Store {
         self.dsp(id)?.set("dsp.profile", &profile)?;
         Ok(profile)
     }
-    pub fn set_status(&self, id: &str, status: &str, actor: &str) -> Result<Value> {
-        let dsp = self.get_dsp(id)?;
-        ensure(!flag(&dsp, "permanent"), "permanent_dev_required", 409)?;
+    pub fn set_status(&self, id: &str, status: DspStatus, actor: &str) -> Result<Dsp> {
+        let dsp = self.find_dsp(id)?;
+        ensure(!dsp.permanent, "permanent_dev_required", 409)?;
         ensure(
-            status != "active" || !flag(&self.profile(id)?, "removed"),
+            status != DspStatus::Active || !flag(&self.profile(id)?, "removed"),
             "restore_removed_dsp_first",
             409,
         )?;
         ensure(
-            ["active", "suspended"].contains(&s(&dsp, "status")),
+            [DspStatus::Active, DspStatus::Suspended].contains(&dsp.status),
             "dsp_unavailable",
             409,
         )?;
         self.platform.exec(
             "UPDATE dsps SET status=?,revision=revision+1 WHERE id=?",
-            [status, id],
+            params![status, id],
         )?;
         self.audit(
             Some(actor),
             Some(id),
-            if status == "active" {
+            if status == DspStatus::Active {
                 "dsp.resumed"
             } else {
                 "dsp.suspended"
             },
             "",
         )?;
-        self.get_dsp(id)
+        self.find_dsp(id)
     }
-    pub fn update_dsp(&self, c: &Context, name: &str, timezone: &str) -> Result<Value> {
-        let id = s(&c.dsp, "id");
+    pub fn update_dsp(&self, c: &Context, name: &str, timezone: &str) -> Result<Dsp> {
+        let id = c.dsp.id.as_str();
         self.platform.exec(
             "UPDATE dsps SET name=?,timezone=?,revision=revision+1 WHERE id=?",
             [name, timezone, id],
         )?;
-        if s(&c.dsp, "timezone") != timezone {
+        if c.dsp.timezone != timezone {
             self.retime_schedules(id, timezone)?;
         }
-        let changes: Vec<_> = [("name", name), ("timezone", timezone)]
-            .into_iter()
-            .filter(|(field, value)| s(&c.dsp, field) != *value)
-            .map(|(field, value)| {
-                (
-                    field,
-                    Some(s(&c.dsp, field).to_owned()),
-                    Some(value.to_owned()),
-                )
-            })
-            .collect();
+        let changes: Vec<_> = [
+            ("name", c.dsp.name.as_str(), name),
+            ("timezone", c.dsp.timezone.as_str(), timezone),
+        ]
+        .into_iter()
+        .filter(|(_, before, value)| before != value)
+        .map(|(field, before, value)| (field, Some(before.to_owned()), Some(value.to_owned())))
+        .collect();
         self.audit_with(
-            Some(s(&c.auth.user, "id")),
+            Some(c.actor()),
             Some(id),
             "dsp.settings_updated",
             "",
             None,
             &changes,
         )?;
-        self.get_dsp(id)
+        self.find_dsp(id)
     }
-    pub fn members(&self, id: &str) -> Result<Value> {
-        let mut rows = self.platform.all("SELECT m.id,m.user_id userId,m.dsp_id dspId,u.email,u.first_name||' '||u.last_name name,COALESCE(r.name,m.role) role,r.id roleId,COALESCE(r.system,m.role='owner') owner FROM memberships m JOIN users u ON u.id=m.user_id LEFT JOIN roles r ON r.id=m.role_id WHERE m.dsp_id=? ORDER BY u.first_name,u.last_name",[id])?;
-        for row in &mut rows {
-            boolean(row, &["owner"]);
-        }
-        Ok(json!(rows))
+    pub fn members(&self, id: &str) -> Result<Vec<MemberRow>> {
+        self.platform.query_as(MEMBERS, [id])
     }
     // The owner role is mirrored into the legacy column on every write, so it
     // stays the single count that protects a DSP from losing its last owner.
     pub fn set_role(&self, c: &Context, member: &str, role: Option<&str>) -> Result<()> {
-        let dsp = s(&c.dsp, "id");
+        let dsp = c.dsp.id.as_str();
         self.platform.transaction(|| {
-            let row = self
+            let user: (String,) = self
                 .platform
-                .one("SELECT * FROM memberships WHERE id=? AND dsp_id=?", [member, dsp])?
+                .one_as(
+                    "SELECT user_id FROM memberships WHERE id=? AND dsp_id=?",
+                    [member, dsp],
+                )?
                 .ok_or_else(|| Error::new("member_not_found", 404))?;
+            let user = user.0.as_str();
             let current = self
-                .grant(s(&row, "user_id"), dsp)?
+                .grant(user, dsp)?
                 .ok_or_else(|| Error::new("member_not_found", 404))?;
             self.ensure_assignable(c, &self.role(dsp, &current.id)?)?;
             let next = role.map(|id| self.role(dsp, id)).transpose()?;
             if let Some(next) = &next {
                 self.ensure_assignable(c, next)?;
             }
-            if current.owner && !next.as_ref().is_some_and(|next| flag(next, "system")) {
-                ensure(n(&self.platform.one("SELECT count(*) count FROM memberships WHERE dsp_id=? AND role='owner'",[dsp])?.unwrap(),"count")>1,"last_owner_required",409)?;
+            if current.owner && !next.as_ref().is_some_and(|next| next.system) {
+                ensure(
+                    self.platform.count(OWNER_COUNT, [dsp])? > 1,
+                    "last_owner_required",
+                    409,
+                )?;
             }
             if let Some(next) = &next {
                 self.platform.exec(
                     "UPDATE memberships SET role=?,role_id=? WHERE id=?",
-                    [Store::legacy_role(next), s(next, "id"), member],
+                    [next.legacy(), &next.id, member],
                 )?;
             } else {
                 self.platform
@@ -242,33 +348,32 @@ impl Store {
             }
             self.platform
                 .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
-            let user = self
+            let name: (String,) = self
                 .platform
-                .one(
-                    "SELECT first_name||' '||last_name name FROM users WHERE id=?",
-                    [s(&row, "user_id")],
+                .one_as(
+                    "SELECT first_name||' '||last_name FROM users WHERE id=?",
+                    [user],
                 )?
                 .ok_or_else(|| Error::new("member_not_found", 404))?;
-            let name = |role: &Value| s(role, "name").to_owned();
             self.audit_ref(
-                Some(s(&c.auth.user, "id")),
+                Some(c.actor()),
                 Some(dsp),
                 if next.is_some() {
                     "member.role_changed"
                 } else {
                     "member.removed"
                 },
-                next.as_ref().map_or("", |next| s(next, "name")),
-                Some(s(&user, "name")),
+                next.as_ref().map_or("", |next| &next.name),
+                Some(&name.0),
                 &[(
                     "role",
-                    Some(name(&self.role(dsp, &current.id)?)),
-                    next.as_ref().map(name),
+                    Some(self.role(dsp, &current.id)?.name),
+                    next.as_ref().map(|next| next.name.clone()),
                 )],
-                Some(("member", s(&row, "user_id"))),
+                Some(("member", user)),
             )?;
             if next.is_none() {
-                self.delete_account(s(&row, "user_id"), s(&c.auth.user, "id"))?;
+                self.delete_account(user, c.actor())?;
             }
             Ok(())
         })
@@ -276,7 +381,8 @@ impl Store {
     // A removed member's account goes with their last membership, freeing the
     // email for a fresh invitation. Their name stays on the activity they left.
     fn delete_account(&self, user: &str, actor: &str) -> Result<()> {
-        let Some(row) = self.platform.one("SELECT first_name||' '||last_name name FROM users u WHERE id=? AND platform_owner=0 AND NOT EXISTS (SELECT 1 FROM memberships WHERE user_id=u.id)",[user])? else {
+        let removable: Option<(String,)> = self.platform.one_as(REMOVABLE_ACCOUNT, [user])?;
+        let Some((name,)) = removable else {
             return Ok(());
         };
         self.platform
@@ -294,7 +400,7 @@ impl Store {
         }
         self.platform.exec(
             "UPDATE audit SET actor_name=?,actor_id=NULL WHERE actor_id=?",
-            [s(&row, "name"), user],
+            [name.as_str(), user],
         )?;
         self.platform.exec("DELETE FROM users WHERE id=?", [user])?;
         Ok(())

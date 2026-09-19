@@ -1,6 +1,8 @@
 use super::{
-    Error, Result, crypto,
-    db::{Store, flag, iso, n, now, s},
+    Error, Result,
+    contracts::{Dsp, DspStatus, PublicUser, UserStatus},
+    crypto,
+    db::{Db, FromRow, Row, Store, flag, iso, now, s},
     ensure,
     mail::templates as email,
     validate as v,
@@ -8,9 +10,50 @@ use super::{
 use rusqlite::params;
 use serde_json::{Value, json};
 const INVITATION_TTL: i64 = 7 * 86400000;
+const SESSION_USER: &str = "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id \
+    WHERE s.hash=? AND s.expires_at>? AND s.user_version=u.version AND u.status='active'";
+const RESET_USER: &str = "SELECT u.* FROM resets r JOIN users u ON u.id=r.user_id \
+    WHERE r.hash=? AND r.used_at IS NULL AND r.expires_at>? AND r.user_version=u.version \
+    AND u.status='active'";
+const INVITER: &str = "SELECT u.first_name||' '||u.last_name name,u.platform_owner \
+    FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?";
+const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,r.name role,r.id roleId,\
+    r.system owner FROM invitations i JOIN dsps d ON d.id=i.dsp_id \
+    JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL \
+    AND i.expires_at>? AND d.status='active' AND d.environment=?";
+
+/// A row of `users`, with the password hash: it never leaves the backend.
+#[derive(Clone)]
+pub struct UserRow {
+    pub user: PublicUser,
+    pub password: String,
+    pub status: UserStatus,
+    pub version: i64,
+}
+impl FromRow for UserRow {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            user: PublicUser::from_row(row)?,
+            password: row.get("password")?,
+            status: row.get("status")?,
+            version: row.get("version")?,
+        })
+    }
+}
+impl UserRow {
+    fn active(&self) -> bool {
+        self.status == UserStatus::Active
+    }
+    fn find(db: &Db, column: &str, value: &str) -> Result<Option<Self>> {
+        match column {
+            "id" => db.one_as("SELECT * FROM users WHERE id=?", [value]),
+            _ => db.one_as("SELECT * FROM users WHERE email=?", [value]),
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Auth {
-    pub user: Value,
+    pub user: PublicUser,
     pub hash: String,
     pub csrf: String,
     pub raw: String,
@@ -21,7 +64,7 @@ pub struct Auth {
 #[derive(Clone)]
 pub struct Context {
     pub auth: Auth,
-    pub dsp: Value,
+    pub dsp: Dsp,
     pub role: String,
     pub role_name: String,
     pub owner: bool,
@@ -38,10 +81,15 @@ impl Context {
             .any(|wanted| wanted == super::roles::ACCESS || self.can(wanted))
     }
 }
-pub fn user(row: &Value) -> Result<Value> {
-    Ok(serde_json::to_value(
-        super::contracts::PublicUser::from_row(row)?,
-    )?)
+impl Context {
+    /// The member who is acting, for the audit log.
+    pub fn actor(&self) -> &str {
+        &self.auth.user.id
+    }
+    /// Records what the member did in this DSP.
+    pub fn audit(&self, db: &Store, action: &str, detail: &str) -> Result<()> {
+        db.audit(Some(self.actor()), Some(&self.dsp.id), action, detail)
+    }
 }
 impl Store {
     pub fn create_user(
@@ -51,7 +99,7 @@ impl Store {
         last: &str,
         password: &str,
         owner: bool,
-    ) -> Result<Value> {
+    ) -> Result<PublicUser> {
         let value = json!({"email":email,"firstName":first,"lastName":last});
         let email = v::email(&value, "email")?;
         let first = v::name(&value, "firstName", 100)?;
@@ -65,17 +113,40 @@ impl Store {
             409,
         )?;
         let id = crypto::id("usr")?;
-        self.platform.exec("INSERT INTO users(id,email,first_name,last_name,password,platform_owner,created_at) VALUES (?,?,?,?,?,?,?)",params![id,email,first,last,encoded,owner,iso()])?;
-        Ok(json!({"id":id,"email":email,"firstName":first,"lastName":last,"platformOwner":owner}))
+        self.platform.exec(
+            "INSERT INTO users(id,email,first_name,last_name,password,platform_owner,created_at) \
+             VALUES (?,?,?,?,?,?,?)",
+            params![id, email, first, last, encoded, owner, iso()],
+        )?;
+        Ok(PublicUser {
+            id,
+            email,
+            first_name: first,
+            last_name: last,
+            platform_owner: owner,
+        })
     }
     pub fn throttle(&self, key: &str, max: i64, window: i64) -> Result<()> {
         let key = crypto::sha(key);
         self.platform.transaction(|| {
-            self.platform.exec("DELETE FROM throttle WHERE reset_at<?",[now()])?;
-            let row=self.platform.one("SELECT count FROM throttle WHERE key=?",[&key])?;
-            ensure(row.as_ref().map_or(0,|r|n(r,"count"))<max,"rate_limited",429)?;
-            ensure(row.is_some() || n(&self.platform.one("SELECT count(*) count FROM throttle",[])?.unwrap(),"count")<10000,"rate_limited",429)?;
-            self.platform.exec("INSERT INTO throttle(key,count,reset_at) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1",params![key,now()+window])?; Ok(())
+            self.platform
+                .exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
+            let row: Option<(i64,)> = self
+                .platform
+                .one_as("SELECT count FROM throttle WHERE key=?", [&key])?;
+            ensure(row.as_ref().map_or(0, |r| r.0) < max, "rate_limited", 429)?;
+            let known = row.is_some();
+            ensure(
+                known || self.platform.count("SELECT count(*) FROM throttle", [])? < 10000,
+                "rate_limited",
+                429,
+            )?;
+            self.platform.exec(
+                "INSERT INTO throttle(key,count,reset_at) VALUES (?,1,?) \
+                 ON CONFLICT(key) DO UPDATE SET count=count+1",
+                params![key, now() + window],
+            )?;
+            Ok(())
         })
     }
     pub fn authenticate(&self, raw: &str) -> Result<Auth> {
@@ -88,9 +159,12 @@ impl Store {
             401,
         )?;
         let hash = crypto::sha(raw);
-        let row=self.platform.one("SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.hash=? AND s.expires_at>? AND s.user_version=u.version AND u.status='active'",params![hash,now()])?.ok_or_else(||Error::new("sign_in_required",401))?;
+        let user: PublicUser = self
+            .platform
+            .one_as(SESSION_USER, params![hash, now()])?
+            .ok_or_else(|| Error::new("sign_in_required", 401))?;
         Ok(Auth {
-            user: user(&row)?,
+            user,
             hash,
             csrf: crypto::sign(&self.key, &format!("csrf:{raw}")),
             raw: raw.into(),
@@ -98,17 +172,17 @@ impl Store {
         })
     }
     pub fn context(&self, a: &Auth, id: &str, permission: &str) -> Result<Context> {
-        let dsp = self.get_dsp(id)?;
-        let grant = if !flag(&a.user, "platformOwner") {
-            self.grant(s(&a.user, "id"), id)?
+        let dsp = self.find_dsp(id)?;
+        let grant = if !a.user.platform_owner {
+            self.grant(&a.user.id, id)?
         } else if let Some(role) = &a.preview {
             // A previewed role that was deleted reads as a stale view, so the
             // dashboard reopens the DSP rather than showing a denial.
-            let row = self
-                .platform
-                .one("SELECT * FROM roles WHERE id=? AND dsp_id=?", [role, id])?
-                .ok_or_else(|| Error::new("dsp_view_expired", 409))?;
-            Some(super::roles::Grant::of(&row))
+            let row = self.find_role(id, role)?;
+            Some(
+                row.ok_or_else(|| Error::new("dsp_view_expired", 409))?
+                    .into(),
+            )
         } else {
             Some(super::roles::Grant {
                 id: "platform_owner".to_owned(),
@@ -127,9 +201,9 @@ impl Store {
             permissions: grant.permissions,
         };
         ensure(c.allows(permission), "permission_denied", 403)?;
-        ensure(s(&c.dsp, "status") == "active", "dsp_unavailable", 409)?;
+        ensure(c.dsp.status == DspStatus::Active, "dsp_unavailable", 409)?;
         ensure(
-            s(&c.dsp, "environment") == self.config.environment,
+            c.dsp.environment == self.config.env(),
             "environment_mismatch",
             403,
         )?;
@@ -140,7 +214,7 @@ impl Store {
     pub fn view_token(&self, c: &Context) -> String {
         format!(
             "{}.{}{}",
-            s(&c.dsp, "id"),
+            c.dsp.id,
             c.auth
                 .preview
                 .as_ref()
@@ -149,10 +223,7 @@ impl Store {
                 &self.key,
                 &format!(
                     "view:{}:{}:{}:{}",
-                    c.auth.hash,
-                    s(&c.dsp, "id"),
-                    n(&c.dsp, "revision"),
-                    c.role
+                    c.auth.hash, c.dsp.id, c.dsp.revision, c.role
                 )
             )
         )
@@ -184,9 +255,9 @@ impl Store {
             preview: c.auth.preview.clone(),
             ..self.authenticate(&c.auth.raw)?
         };
-        let fresh = self.context(&a, s(&c.dsp, "id"), permission)?;
+        let fresh = self.context(&a, &c.dsp.id, permission)?;
         ensure(
-            fresh.dsp["revision"] == c.dsp["revision"]
+            fresh.dsp.revision == c.dsp.revision
                 && fresh.role == c.role
                 && fresh.permissions == c.permissions,
             "dsp_view_expired",
@@ -213,12 +284,24 @@ impl Store {
         self.ensure_assignable(&c, &role)?;
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
         let raw = crypto::token()?;
-        self.platform.exec("INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) VALUES (?,?,?,?,?,?,?)",params![crypto::sha(&raw),dsp,email.to_lowercase(),Self::legacy_role(&role),s(&role,"id"),now()+INVITATION_TTL,s(&a.user,"id")])?;
+        self.platform.exec(
+            "INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) \
+             VALUES (?,?,?,?,?,?,?)",
+            params![
+                crypto::sha(&raw),
+                dsp,
+                email.to_lowercase(),
+                role.legacy(),
+                role.id,
+                now() + INVITATION_TTL,
+                a.user.id
+            ],
+        )?;
         self.audit_with(
-            Some(s(&a.user, "id")),
+            Some(&a.user.id),
             Some(dsp),
             "member.invited",
-            s(&role, "name"),
+            &role.name,
             Some(&email.to_lowercase()),
             &[],
         )?;
@@ -226,7 +309,13 @@ impl Store {
     }
     pub fn invitation(&self, raw: &str) -> Result<Value> {
         ensure(raw.len() == 43, "invitation_expired", 404)?;
-        let mut invitation = self.platform.one("SELECT i.email,i.dsp_id dspId,d.name dspName,r.name role,r.id roleId,r.system owner FROM invitations i JOIN dsps d ON d.id=i.dsp_id JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL AND i.expires_at>? AND d.status='active' AND d.environment=?",params![crypto::sha(raw),now(),self.config.environment])?.ok_or_else(||Error::new("invitation_expired",404))?;
+        let mut invitation = self
+            .platform
+            .one(
+                INVITATION,
+                params![crypto::sha(raw), now(), self.config.environment],
+            )?
+            .ok_or_else(|| Error::new("invitation_expired", 404))?;
         let owner = flag(&invitation, "owner");
         invitation.as_object_mut().unwrap().remove("owner");
         invitation["onboarding"] =
@@ -235,43 +324,33 @@ impl Store {
     }
     pub fn recovery(&self, email: &str) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
-        if let Some(user) = self.platform.one(
-            "SELECT * FROM users WHERE email=? AND status='active'",
-            [email.trim().to_lowercase()],
-        )? {
+        let found = UserRow::find(&self.platform, "email", &email.trim().to_lowercase())?;
+        if let Some(UserRow { user, version, .. }) = found.filter(UserRow::active) {
             let raw = crypto::token()?;
             self.platform.transaction(|| {
                 self.platform.exec(
                     "DELETE FROM resets WHERE user_id=? OR expires_at<?",
-                    params![s(&user, "id"), now()],
+                    params![user.id, now()],
                 )?;
                 self.platform.exec(
                     "INSERT INTO resets(hash,user_id,user_version,expires_at) VALUES (?,?,?,?)",
-                    params![
-                        crypto::sha(&raw),
-                        s(&user, "id"),
-                        n(&user, "version"),
-                        now() + 1800000
-                    ],
+                    params![crypto::sha(&raw), user.id, version, now() + 1800000],
                 )?;
                 let mail = email::reset(
                     &self.config.origin,
-                    self.config.environment == "preview",
-                    s(&user, "email"),
+                    self.config.env().is_preview(),
+                    &user.email,
                     &format!("{}/#reset?token={raw}", self.config.origin),
                 );
-                self.queue_mail(
-                    s(&user, "email"),
-                    &mail.subject,
-                    &mail.text,
-                    Some(&mail.html),
-                )
+                self.queue_mail(&user.email, &mail.subject, &mail.text, Some(&mail.html))
             })?;
         }
         Ok(())
     }
-    fn reset_user(&self, raw: &str) -> Result<Value> {
-        self.platform.one("SELECT u.* FROM resets r JOIN users u ON u.id=r.user_id WHERE r.hash=? AND r.used_at IS NULL AND r.expires_at>? AND r.user_version=u.version AND u.status='active'",params![crypto::sha(raw),now()])?.ok_or_else(||Error::new("reset_expired",400))
+    fn reset_user(&self, raw: &str) -> Result<UserRow> {
+        self.platform
+            .one_as(RESET_USER, params![crypto::sha(raw), now()])?
+            .ok_or_else(|| Error::new("reset_expired", 400))
     }
     pub fn invitation_mail(
         &self,
@@ -282,10 +361,10 @@ impl Store {
         raw: &str,
         onboarding: bool,
     ) -> Result<()> {
-        let inviter = format!("{} {}", s(&a.user, "firstName"), s(&a.user, "lastName"));
+        let inviter = a.user.name();
         let mail = email::invitation(&email::Invitation {
             origin: &self.config.origin,
-            dev: self.config.environment == "preview",
+            dev: self.config.env().is_preview(),
             to,
             inviter: inviter.trim(),
             dsp,
@@ -298,7 +377,7 @@ impl Store {
     }
     fn queue_mail(&self, to: &str, subject: &str, text: &str, html: Option<&str>) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
-        let subject = if self.config.environment == "preview" {
+        let subject = if self.config.env().is_preview() {
             format!("[Dispatch Dev] {subject}")
         } else {
             subject.to_owned()
@@ -343,8 +422,7 @@ impl super::State {
         let row = self
             .read(move |db| {
                 let a = db.authenticate(&a.raw)?;
-                db.platform
-                    .one("SELECT * FROM users WHERE id=?", [s(&a.user, "id")])?
+                UserRow::find(&db.platform, "id", &a.user.id)?
                     .ok_or_else(|| Error::new("sign_in_required", 401))
             })
             .await?;
@@ -352,7 +430,7 @@ impl super::State {
         let encoded = self
             .password_work(move || {
                 ensure(
-                    crypto::check_password(&current, s(&expected, "password")),
+                    crypto::check_password(&current, &expected.password),
                     "invalid_password",
                     403,
                 )?;
@@ -361,9 +439,7 @@ impl super::State {
             .await?;
         self.run(move |db| {
             db.authenticate(&auth.raw)?;
-            let fresh = db
-                .platform
-                .one("SELECT * FROM users WHERE id=?", [s(&row, "id")])?;
+            let fresh = UserRow::find(&db.platform, "id", &row.user.id)?;
             ensure(
                 fresh
                     .as_ref()
@@ -371,7 +447,7 @@ impl super::State {
                 "sign_in_required",
                 401,
             )?;
-            db.replace_password(s(&row, "id"), &encoded, "account.password_changed")
+            db.replace_password(&row.user.id, &encoded, "account.password_changed")
         })
         .await
     }
@@ -388,7 +464,7 @@ impl super::State {
         self.run(move |db| {
             let fresh = db.reset_user(&raw)?;
             ensure(same_password_user(&fresh, &row), "reset_expired", 400)?;
-            db.replace_password(s(&row, "id"), &encoded, "account.password_reset")
+            db.replace_password(&row.user.id, &encoded, "account.password_reset")
         })
         .await
     }
@@ -403,9 +479,7 @@ impl super::State {
         let (invite, existing) = self
             .read(move |db| {
                 let invite = db.invitation(&token)?;
-                let existing = db
-                    .platform
-                    .one("SELECT * FROM users WHERE email=?", [s(&invite, "email")])?;
+                let existing = UserRow::find(&db.platform, "email", s(&invite, "email"))?;
                 Ok((invite, existing))
             })
             .await?;
@@ -414,8 +488,7 @@ impl super::State {
             .password_work(move || {
                 if let Some(row) = expected {
                     ensure(
-                        s(&row, "status") == "active"
-                            && crypto::check_password(&password, s(&row, "password")),
+                        row.active() && crypto::check_password(&password, &row.password),
                         "sign_in_with_existing_password",
                         403,
                     )?;
@@ -425,29 +498,66 @@ impl super::State {
                 }
             })
             .await?;
-        self.run(move |db| db.platform.transaction(|| {
-            let fresh_invite = db.invitation(&raw)?;
-            ensure(fresh_invite == invite,"invitation_expired",404)?;
-            let fresh = db.platform.one("SELECT * FROM users WHERE email=?",[s(&invite,"email")])?;
-            let id = match (existing.as_ref(), fresh.as_ref()) {
-                (Some(before),Some(after)) if same_password_user(before,after) => s(after,"id").to_owned(),
-                (None,None) => {
-                    let id = crypto::id("usr")?;
-                    db.platform.exec("INSERT INTO users(id,email,first_name,last_name,password,created_at) VALUES (?,?,?,?,?,?)",params![id,s(&invite,"email"),first,last,encoded,iso()])?;
-                    id
-                },
-                _ => return Err(Error::new("sign_in_with_existing_password",403)),
-            };
-            let role = db.role(s(&invite,"dspId"),s(&invite,"roleId"))?;
-            db.platform.exec("INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) ON CONFLICT(user_id,dsp_id) DO NOTHING",params![crypto::id("mem")?,id,s(&invite,"dspId"),Store::legacy_role(&role),s(&role,"id")])?;
-            db.platform.exec("UPDATE invitations SET used_at=? WHERE hash=?",params![now(),crypto::sha(&raw)])?;
-            // A platform owner's name never reaches a DSP's log.
-            let inviter = db.platform.one("SELECT u.first_name||' '||u.last_name name,u.platform_owner FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?",[crypto::sha(&raw)])?;
-            let invited_by = inviter.and_then(|u| if !flag(&u,"platform_owner") { Some(s(&u,"name").to_owned()) } else if db.support_visible(s(&invite,"dspId")) { Some("Platform support".to_owned()) } else { None });
-            let name = format!("{first} {last}");
-            db.audit_ref(Some(&id),Some(s(&invite,"dspId")),"member.joined",s(&role,"name"),Some(&name),&invited_by.map(|name| ("invitedBy",None,Some(name))).into_iter().collect::<Vec<_>>(),Some(("member",&id)))?;
-            Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
-        })).await
+        self.run(move |db| {
+            db.platform.transaction(|| {
+                let fresh_invite = db.invitation(&raw)?;
+                ensure(fresh_invite == invite, "invitation_expired", 404)?;
+                let (email, dsp) = (s(&invite, "email"), s(&invite, "dspId"));
+                let fresh = UserRow::find(&db.platform, "email", email)?;
+                let id = match (existing.as_ref(), fresh.as_ref()) {
+                    (Some(before), Some(after)) if same_password_user(before, after) => {
+                        after.user.id.clone()
+                    }
+                    (None, None) => {
+                        let id = crypto::id("usr")?;
+                        db.platform.exec(
+                            "INSERT INTO users(id,email,first_name,last_name,password,created_at) \
+                             VALUES (?,?,?,?,?,?)",
+                            params![id, email, first, last, encoded, iso()],
+                        )?;
+                        id
+                    }
+                    _ => return Err(Error::new("sign_in_with_existing_password", 403)),
+                };
+                let role = db.role(dsp, s(&invite, "roleId"))?;
+                db.platform.exec(
+                    "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) \
+                     ON CONFLICT(user_id,dsp_id) DO NOTHING",
+                    params![crypto::id("mem")?, id, dsp, role.legacy(), role.id],
+                )?;
+                db.platform.exec(
+                    "UPDATE invitations SET used_at=? WHERE hash=?",
+                    params![now(), crypto::sha(&raw)],
+                )?;
+                // A platform owner's name never reaches a DSP's log.
+                let inviter = db.platform.one(INVITER, [crypto::sha(&raw)])?;
+                let invited_by = inviter.and_then(|u| {
+                    if !flag(&u, "platform_owner") {
+                        Some(s(&u, "name").to_owned())
+                    } else if db.support_visible(dsp) {
+                        Some("Platform support".to_owned())
+                    } else {
+                        None
+                    }
+                });
+                let name = format!("{first} {last}");
+                let changes: Vec<_> = invited_by
+                    .map(|name| ("invitedBy", None, Some(name)))
+                    .into_iter()
+                    .collect();
+                db.audit_ref(
+                    Some(&id),
+                    Some(dsp),
+                    "member.joined",
+                    &role.name,
+                    Some(&name),
+                    &changes,
+                    Some(("member", &id)),
+                )?;
+                Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
+            })
+        })
+        .await
     }
     pub async fn login(
         self: &std::sync::Arc<Self>,
@@ -464,8 +574,7 @@ impl super::State {
             .run(move |db| {
                 db.throttle(&format!("login:ip:{ip}"), 30, 900000)?;
                 db.throttle(&format!("login:email:{email}"), 10, 900000)?;
-                db.platform
-                    .one("SELECT * FROM users WHERE email=?", [email])
+                UserRow::find(&db.platform, "email", &email)
             })
             .await?;
         let value = row.clone();
@@ -473,7 +582,7 @@ impl super::State {
             let _permit = permit;
             static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
             let encoded = if let Some(ref row) = value {
-                s(row, "password")
+                &row.password
             } else {
                 DUMMY.get_or_init(|| {
                     crypto::hash_password("a-long-dummy-password-for-timing")
@@ -485,18 +594,13 @@ impl super::State {
         .await
         .map_err(|_| Error::new("login_failed", 500))?;
         let row = row
-            .filter(|r| valid && s(r, "status") == "active")
+            .filter(|r| valid && r.active())
             .ok_or_else(|| Error::new("invalid_login", 401))?;
         self.run(move |db| {
-            let current = db
-                .platform
-                .one(
-                    "SELECT status,version FROM users WHERE id=?",
-                    [s(&row, "id")],
-                )?
+            let current = UserRow::find(&db.platform, "id", &row.user.id)?
                 .ok_or_else(|| Error::new("invalid_login", 401))?;
             ensure(
-                s(&current, "status") == "active" && current["version"] == row["version"],
+                current.active() && current.version == row.version,
                 "invalid_login",
                 401,
             )?;
@@ -508,13 +612,13 @@ impl super::State {
                     "INSERT INTO sessions VALUES (?,?,?,?,?)",
                     params![
                         crypto::sha(&raw),
-                        s(&row, "id"),
-                        n(&row, "version"),
+                        row.user.id,
+                        row.version,
                         now() + 8 * 3600000,
                         now()
                     ],
                 )?;
-                db.audit(Some(s(&row, "id")), None, "account.signed_in", "")
+                db.audit(Some(&row.user.id), None, "account.signed_in", "")
             })?;
             Ok(raw)
         })
@@ -522,12 +626,12 @@ impl super::State {
     }
 }
 
-fn same_password_user(a: &Value, b: &Value) -> bool {
-    ["id", "version", "password"]
-        .iter()
-        .all(|key| a[key] == b[key])
-        && s(a, "status") == "active"
-        && s(b, "status") == "active"
+fn same_password_user(a: &UserRow, b: &UserRow) -> bool {
+    a.user.id == b.user.id
+        && a.version == b.version
+        && a.password == b.password
+        && a.active()
+        && b.active()
 }
 
 #[cfg(test)]

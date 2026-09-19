@@ -556,8 +556,8 @@ mod tests {
             .unwrap();
         store.open_collectors(&id).unwrap();
         assert_eq!(
-            store.connection_for(&id, Provider::Cortex).unwrap()["status"],
-            "ready"
+            store.connection_for(&id, Provider::Cortex).unwrap().status,
+            crate::contracts::ConnectionStatus::Ready
         );
         assert_eq!(
             snapshot(&store.collector(&id, Provider::Paycom).unwrap()),

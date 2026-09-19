@@ -3,7 +3,7 @@ use super::connections;
 use crate::{
     Result,
     collectors::Provider,
-    db::{Store, s},
+    db::Store,
     http::{
         input::{Input, Reply, descending, optional, optional_text, query_number},
         route::{Dsp, Member, Route, read, write},
@@ -101,7 +101,7 @@ fn save_paycom_settings(db: &Store, c: &Member, input: &Input) -> Result<Reply> 
 fn meal_comparison(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(&input.query, &["date"])?;
     let date = v::text(&input.query, "date", 10, 10)?;
-    let comparison = db.meal_comparison(c.dsp_id(), date, s(&c.dsp, "timezone"))?;
+    let comparison = db.meal_comparison(c.dsp_id(), date, c.dsp.timezone.as_str())?;
     Ok(Reply::json(comparison))
 }
 

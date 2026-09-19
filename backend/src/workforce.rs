@@ -354,19 +354,16 @@ impl Store {
         let publication_id = s(&publication, "id");
         let direction = if desc { "DESC" } else { "ASC" };
         let condition = "publication_id=?1 AND (?2='' OR department=?2) AND (?3='' OR station=?3) AND (?4='' OR instr(dispatch_lower(dispatch_name(name,?5)||' '||code),?4)>0)";
-        let total = db
-            .one(
-                &format!("SELECT count(*) n FROM employees WHERE {condition}"),
-                params![
-                    publication_id,
-                    s(p, "department"),
-                    s(p, "station"),
-                    query.to_lowercase(),
-                    s(p, "name_order")
-                ],
-            )?
-            .unwrap()["n"]
-            .clone();
+        let total = db.count(
+            &format!("SELECT count(*) FROM employees WHERE {condition}"),
+            params![
+                publication_id,
+                s(p, "department"),
+                s(p, "station"),
+                query.to_lowercase(),
+                s(p, "name_order")
+            ],
+        )?;
         let mut rows=db.all(&format!("SELECT code,dispatch_name(name,?5) name,department,position,station,active FROM employees WHERE {condition} ORDER BY name COLLATE dispatch_unicode {direction},code COLLATE dispatch_unicode {direction} LIMIT ?6 OFFSET ?7"),params![publication_id,s(p,"department"),s(p,"station"),query.to_lowercase(),s(p,"name_order"),limit as i64,offset as i64])?;
         for row in &mut rows {
             boolean(row, &["active"]);

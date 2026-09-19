@@ -1,23 +1,25 @@
 use crate::collectors::Provider;
 use crate::{
     State,
-    contracts::ActiveJobStatus,
-    db::{n, now, s},
+    contracts::{ActiveJobStatus, JobRow, JobStatus},
+    db::now,
     ensure,
     job_metrics::{self, Phase, Recorder},
 };
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
-pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
-    let id = s(&job, "id").to_owned();
-    let dsp = s(&job, "dsp_id").to_owned();
-    let metrics = Recorder::new(&job);
-    let provider = Provider::from_job_kind(s(&job, "kind")).expect("registered job kind");
+pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
+    let id = job.id.clone();
+    let dsp = job.dsp_id.clone();
+    let metrics = Recorder::start(&job);
+    let provider: Provider = job.provider();
     let task = async {
         let jid = id.clone();
         let worker = owner.clone();
-        state.run(move |db| db.guard_job(&jid, &worker)).await?;
+        state
+            .run(move |db| db.guard(&jid, &worker).map(|_| ()))
+            .await?;
         metrics.phase(Phase::Authentication);
         let session = state.ensure_provider_browser(&dsp, false, provider).await?;
         if session.challenge() {
@@ -44,7 +46,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
         let worker = owner.clone();
         state
             .run(move |db| {
-                db.guard_job(&jid, &worker)?;
+                db.guard(&jid, &worker)?;
                 db.progress(
                     &jid,
                     &worker,
@@ -55,7 +57,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
             })
             .await?;
         metrics.phase(Phase::Collection);
-        let request: Value = serde_json::from_str(s(&job, "request"))?;
+        let request: Value = serde_json::from_str(&job.request)?;
         let collected = session
             .collect(&state, &id, &owner, &metrics, &request)
             .await?;
@@ -67,7 +69,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
         let completed_metrics = metrics.clone();
         state
             .run(move |db| {
-                db.guard_job(&jid, &worker)?;
+                db.guard(&jid, &worker)?;
                 provider.collector().publish(db, &tenant, &jid, collected)?;
                 completed_metrics.finish("succeeded", None);
                 db.jobs.transaction(|| {
@@ -85,7 +87,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
         tokio::select! {
             result=&mut task=>break result,
             _=sample.tick()=>{
-                if let Some(pid)=state.browsers.get_for(&dsp,provider).filter(|session|session.revision==n(&job,"connection_revision")).and_then(|session|session.process_id())
+                if let Some(pid)=state.browsers.get_for(&dsp,provider).filter(|session|session.revision==job.connection_revision).and_then(|session|session.process_id())
                     && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
                     if let Some(session) = state.browsers.get_for(&dsp,provider) { session.observe_memory(&memory); }
                     metrics.observe(memory);
@@ -95,7 +97,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
             },
             _=heartbeat.tick()=>{
                 let jid=id.clone();let worker=owner.clone();
-                let guard=state.run(move|db|{db.guard_job(&jid,&worker)?;db.jobs.exec("UPDATE jobs SET lease_until=? WHERE id=? AND lease_owner=?",params![now()+120000,jid,worker])?;Ok(())}).await;
+                let guard=state.run(move|db|{db.guard(&jid,&worker)?;db.jobs.exec("UPDATE jobs SET lease_until=? WHERE id=? AND lease_owner=?",params![now()+120000,jid,worker])?;Ok(())}).await;
                 if let Err(error)=guard{break Err(error);}
             }
         }
@@ -110,7 +112,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
     {
         let jid = id.clone();
         let worker = owner.clone();
-        let attempt = n(&job, "attempt");
+        let attempt = job.attempt;
         let deferred=state.run(move |db| db.jobs.transaction(|| {
             let changed=db.jobs.exec("UPDATE jobs SET status='queued',attempt=attempt-1,started_at=NULL,lease_owner=NULL,lease_until=NULL,available_at=?,message='Waiting for browser resources' WHERE id=? AND lease_owner=? AND status='running'",params![now()+5000,jid,worker])?;
             if changed==1 { db.jobs.exec("DELETE FROM job_metrics WHERE job_id=? AND attempt=? AND owner=?",params![jid,attempt,worker])?; }
@@ -123,7 +125,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
     if let Err(error) = &result {
         let jid = id.clone();
         let cancelled = state
-            .run(move |db| Ok(s(&db.job(&jid, None)?, "status") == "cancelled"))
+            .run(move |db| Ok(db.job_row(&jid, None)?.status == JobStatus::Cancelled))
             .await
             .unwrap_or(false);
         metrics.finish(
@@ -141,16 +143,16 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
     }
     state
         .browsers
-        .revoke_provider_revision(&dsp, n(&job, "connection_revision"), provider)
+        .revoke_provider_revision(&dsp, job.connection_revision, provider)
         .await;
     let error = result.err().map(|e| e.code);
-    let actor = job["actor_id"].as_str().map(str::to_owned);
+    let actor = job.actor_id.clone();
     let snapshot = metrics.snapshot();
     // Request logs cannot explain a failed sync; record each attempt's outcome.
     crate::observability::event(
         if error.is_some() { "warn" } else { "info" },
         "job.finished",
-        json!({"jobId":id,"dspId":dsp,"kind":s(&job,"kind"),"attempt":n(&job,"attempt"),"error":error,"metrics":job_metrics::summary(&snapshot)}),
+        json!({"jobId":id,"dspId":dsp,"kind":provider.job_kind(),"attempt":job.attempt,"error":error,"metrics":job_metrics::summary(&snapshot)}),
     );
     let changed_dsp = dsp.clone();
     let _ = state
@@ -168,9 +170,9 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
             {
                 return Ok(());
             }
-            let (schedule, facts) = db.outcome_facts(&dsp, &job);
+            let (schedule, facts) = db.job_facts(&dsp, &(&job).into());
             // An attempt that will run again is not yet the collection's outcome.
-            let retrying = s(&db.job(&id, None)?, "status") == "queued";
+            let retrying = db.job_row(&id, None)?.status == JobStatus::Queued;
             db.audit_ref(
                 actor.as_deref(),
                 Some(&dsp),

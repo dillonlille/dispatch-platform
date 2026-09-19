@@ -1099,7 +1099,10 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         .unwrap();
     invite("colleague@dispatch.test", s(&member, "id"));
     let auth = Auth {
-        user: json!({"id":owner["id"],"platformOwner":true}),
+        user: serde_json::from_value(
+            json!({"id":owner["id"],"email":"","firstName":"","lastName":"","platformOwner":true}),
+        )
+        .unwrap(),
         hash: String::new(),
         csrf: String::new(),
         raw: String::new(),
