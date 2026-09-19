@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture, until } from './support.js';
+import { fixture, until, seedQueuedJob } from './support.js';
 const credentials = {
   clientCode: 'TEST',
   username: 'private-user',
@@ -134,7 +134,11 @@ test('cancelling a queued job preserves the active verification session and does
         j.id === first.id && j.status === 'waiting_verification',
     ),
   );
-  const second = (await owner.post('/api/dsp/jobs', { requestId: 'queued' })).value;
+  const blocked = await owner.post('/api/dsp/jobs', { requestId: 'queued' });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.value.error, 'sync_in_progress');
+  // A queue retained from an older release can still be cancelled safely.
+  const second = seedQueuedJob(f, first.id, 'legacy-queued');
   assert.equal((await owner.post(`/api/dsp/jobs/${second.id}/cancel`)).value.status, 'cancelled');
   assert.equal((await owner.get('/api/dsp/connections')).value.status, 'needs_verification');
   assert.equal(

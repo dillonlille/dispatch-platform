@@ -249,20 +249,40 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         self.jobs.transaction(|| {
-            let queued = requests.iter().zip(&connections);
-            queued
-                .map(|((key, provider, request), connection)| {
-                    let existing: Option<JobRow> = self.jobs.one_as(
+            let existing = requests
+                .iter()
+                .map(|(key, provider, request)| {
+                    let row: Option<JobRow> = self.jobs.one_as(
                         "SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",
                         [id, key],
                     )?;
-                    if let Some(row) = existing {
+                    if let Some(row) = &row {
                         ensure(
                             row.provider() == *provider
                                 && serde_json::from_str::<Value>(&row.request)? == *request,
                             "idempotency_conflict",
                             409,
                         )?;
+                    }
+                    Ok(row)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            // A manual sync owns the DSP until every job in its batch stops.
+            // Check before inserting any job, in the same transaction, while
+            // allowing retries of a request that already queued successfully.
+            if actor.is_some() && existing.iter().any(Option::is_none) {
+                ensure(
+                    self.jobs.count(ACTIVE_COUNT, [id])? == 0,
+                    "sync_in_progress",
+                    409,
+                )?;
+            }
+            requests
+                .iter()
+                .zip(&connections)
+                .zip(existing)
+                .map(|(((key, provider, request), connection), existing)| {
+                    if let Some(row) = existing {
                         return self.public_job(row);
                     }
                     ensure(self.jobs.count(ACTIVE_COUNT, [id])? < 5, "queue_full", 429)?;

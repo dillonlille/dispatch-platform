@@ -21,14 +21,18 @@ fn queue_limits_and_authority_are_checked_again_before_publication() {
         .unwrap()
         .unwrap();
     let actor = s(&user, "id");
-    for i in 0..5 {
-        db.enqueue(id, Some(actor), &format!("request-{i}"))
-            .unwrap();
-    }
+    db.enqueue(id, Some(actor), "request-0").unwrap();
     assert_eq!(
-        db.enqueue(id, Some(actor), "overflow").unwrap_err().status,
-        429
+        db.enqueue(id, Some(actor), "another-manual")
+            .unwrap_err()
+            .code,
+        "sync_in_progress"
     );
+    // The underlying queue still bounds internal batches independently of the manual lock.
+    for i in 1..5 {
+        db.enqueue(id, None, &format!("request-{i}")).unwrap();
+    }
+    assert_eq!(db.enqueue(id, None, "overflow").unwrap_err().status, 429);
     let job = db.claim("worker", |_, _| true).unwrap().unwrap();
     let jid = s(&job, "id");
     db.guard_job(jid, "worker").unwrap();

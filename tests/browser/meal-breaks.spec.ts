@@ -400,6 +400,117 @@ test('switching dates holds the layout until the new day arrives', async ({ page
   // The new day's rows may differ in height; everything above them stays put.
   expect((await layout()).slice(0, 2)).toEqual(before.slice(0, 2));
 });
+
+test('sync remains locked across dates, tabs and reloads until both sources stop', async ({
+  page,
+}) => {
+  test.setTimeout(45000);
+  let paycomStatus = 'succeeded';
+  let flexStatus = 'succeeded';
+  let jobDate: string | null = null;
+  const submitted: string[] = [];
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  let holdStatus: Promise<void> | undefined;
+  let releaseStatus!: () => void;
+  const active = (status: string) => ['queued', 'running', 'waiting_verification'].includes(status);
+  await page.route('**/api/dsp/jobs/meal-breaks?*', async (route) => {
+    await holdStatus;
+    const source = (status: string) => ({
+      enabled: true,
+      active: active(status),
+      job: { status },
+      jobDate,
+      collectedAt: null,
+    });
+    await route.fulfill({
+      json: {
+        date: new URL(route.request().url()).searchParams.get('date'),
+        scopeAvailable: true,
+        paycom: source(paycomStatus),
+        flex: source(flexStatus),
+      },
+    });
+  });
+  await page.route('**/api/dsp/jobs/meal-breaks', async (route) => {
+    jobDate = route.request().postDataJSON().date;
+    submitted.push(jobDate!);
+    paycomStatus = flexStatus = 'queued';
+    holdStatus = new Promise((resolve) => {
+      releaseStatus = resolve;
+    });
+    await route.fulfill({ status: 202, json: { date: jobDate, jobs: [] } });
+  });
+  await page.route('**/api/dsp/paycom/meal-breaks?*', (route) =>
+    route.fulfill({
+      json: { ...sample(), date: new URL(route.request().url()).searchParams.get('date') },
+    }),
+  );
+  await open(page, false, '2026-09-16');
+  // The sign-in screen intentionally receives 401 from its initial session check.
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  await expect(page).toHaveTitle(/Dispatch/);
+  await expect(page).toHaveURL(/\/paycom/);
+  await expect(page.getByRole('heading', { name: 'Meal Breaks', exact: true })).toBeVisible();
+  await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+  const sync = page.getByRole('button', { name: 'Sync now', exact: true });
+  const flex = page.getByRole('status', { name: 'Flex sync', exact: true });
+  const meals = page.getByRole('tab', { name: 'Meal Breaks', exact: true });
+  const employees = page.getByRole('tab', { name: 'Employees', exact: true });
+  await expect(sync).toBeEnabled();
+  await sync.click();
+  await expect(sync).toBeDisabled();
+  // A completed POST must not unlock the Employees tab before fresh status arrives.
+  await employees.click();
+  await expect(sync).toBeDisabled();
+  await expect.poll(() => submitted).toEqual(['2026-09-16']);
+  releaseStatus();
+  await expect(flex).toHaveText('Queued · Sep 16');
+  paycomStatus = 'succeeded';
+  flexStatus = 'running';
+  await page.reload();
+  await employees.click();
+  await expect(flex).toHaveText('Running · Sep 16');
+  await expect(sync).toBeDisabled();
+  await meals.click();
+  await page.getByLabel('Paycom date').fill('2026-09-15');
+  await expect(flex).toHaveText('Flex running · Sep 16');
+  await expect(sync).toBeDisabled();
+  await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
+  await expect(sync).toBeDisabled();
+  await page.getByRole('link', { name: 'Home Page', exact: true }).click();
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await expect(page.getByLabel('Paycom date')).toHaveValue('2026-09-15');
+  await expect(sync).toBeDisabled();
+  await expect(flex).toHaveText('Flex running · Sep 16');
+  await meals.click();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(flex).toHaveText('Flex running · Sep 16');
+    await expect(sync).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({ path: test.info().outputPath(`sync-date-lock-${width}.png`) });
+  }
+  flexStatus = 'waiting_verification';
+  await page.reload();
+  await expect(flex).toHaveText('Flex waiting verification · Sep 16');
+  await expect(sync).toBeDisabled();
+  for (const terminal of ['succeeded', 'failed', 'cancelled']) {
+    flexStatus = terminal;
+    await page.reload();
+    await expect(sync).toBeEnabled();
+  }
+  expect(submitted).toEqual(['2026-09-16']);
+  await sync.click();
+  await expect.poll(() => submitted).toEqual(['2026-09-16', '2026-09-15']);
+  await expect(sync).toBeDisabled();
+  releaseStatus();
+  expect(errors).toEqual([]);
+});
 test('shared date and sync controls survive tabs, navigation, reload and collection', async ({
   page,
 }) => {
