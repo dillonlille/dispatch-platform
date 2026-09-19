@@ -36,14 +36,16 @@ const HOOK_LAG = 0.55;
 const LIMIT = 0.5;
 const REST = 0.0004;
 const STRAP = 92; // from the anchors down to the clip, in the lanyard's own pixels
+const CENTRE = 120;
+const SPREAD = 72; // each strap is anchored this far to the side of the clip's resting place
+const STRAP_LENGTH = Math.hypot(SPREAD, STRAP);
 
-// The four strap shapes: each runs from fixed points on the top edge to the clip at (x, y).
-const strapPoints = (x: number, y: number) => [
-  `18,0 40,0 ${100 + x},${92 + y} ${86 + x},${96 + y}`,
-  `160,0 182,0 ${114 + x},${96 + y} ${100 + x},${92 + y}`,
-  `18,0 22,0 ${89 + x},${95 + y} ${86 + x},${96 + y}`,
-  `178,0 182,0 ${114 + x},${96 + y} ${111 + x},${95 + y}`,
-];
+// Each strap is drawn running straight up from the clip at (x, y), then turned to pass through its anchor.
+// It is never stretched: more or less of its length shows below the tab rule, as cloth would slide.
+function strapTransform(side: -1 | 1, x: number, y: number) {
+  const turn = (Math.atan2(side * SPREAD - x, STRAP + y) * 180) / Math.PI;
+  return `translate(${CENTRE + x} ${STRAP + y}) rotate(${turn})`;
+}
 
 function usePendulum() {
   const straps = useRef<SVGSVGElement>(null);
@@ -64,11 +66,13 @@ function usePendulum() {
     let target: number | null = null;
     let frame = 0;
     let last = 0;
-    const shapes = [...strapsEl.querySelectorAll('polygon')];
+    // The right strap is drawn first, so that the left one lies over it at the clip.
+    const [right, left] = [...strapsEl.querySelectorAll('.profile-strap')];
     const draw = () => {
       const x = -STRAP * Math.sin(swing);
       const y = STRAP * Math.cos(swing) - STRAP;
-      strapPoints(x, y).forEach((points, index) => shapes[index]!.setAttribute('points', points));
+      left!.setAttribute('transform', strapTransform(-1, x, y));
+      right!.setAttribute('transform', strapTransform(1, x, y));
       hangEl.style.transform = `translate(${x}px, ${y}px) rotate(${swing}rad)`;
       badgeEl.style.setProperty('--sway', `${sway}rad`);
     };
@@ -142,32 +146,55 @@ function usePendulum() {
   return { straps, hang, badge, grab };
 }
 
-const resting = strapPoints(0, 0);
+const CLOTH = { x: -17, y: -STRAP_LENGTH - 90, width: 34, height: STRAP_LENGTH + 90 };
+function Strap({ side }: { side: -1 | 1 }) {
+  return (
+    <g className="profile-strap" transform={strapTransform(side, 0, 0)}>
+      <rect className="profile-strap-cloth" {...CLOTH} />
+      <rect {...CLOTH} fill="url(#profile-weave)" />
+      {/* The name reads upward on the right strap, as it does on cloth that loops behind the neck. */}
+      {[48, 112, 176].map((above) => (
+        <text
+          key={above}
+          transform={`rotate(${side * -90})`}
+          x={side * above}
+          y="4"
+          textAnchor={side < 0 ? 'start' : 'end'}
+        >
+          Dispatch
+        </text>
+      ))}
+      <rect {...CLOTH} fill="url(#profile-drape)" />
+      <path d={`M-13.5 0 V${CLOTH.y} M13.5 0 V${CLOTH.y}`} />
+    </g>
+  );
+}
 function Straps({ svg }: { svg: RefObject<SVGSVGElement | null> }) {
   return (
-    <svg className="profile-straps" ref={svg} width="200" height="96" aria-hidden>
+    <svg className="profile-straps" ref={svg} width={CENTRE * 2} height="96" aria-hidden>
       <defs>
-        <pattern
-          id="profile-weave"
-          width="4"
-          height="4"
-          patternUnits="userSpaceOnUse"
-          patternTransform="rotate(45)"
-        >
-          <rect width="4" height="4" fill="var(--primary)" opacity=".55" />
-          <rect width="2" height="4" fill="#000" opacity=".18" />
+        {/* Ribs across the strap, with finer threads along it. */}
+        <pattern id="profile-weave" width="2" height="3" patternUnits="userSpaceOnUse">
+          <rect width="2" height="1.4" fill="#000" opacity=".2" />
+          <rect width="1" height="3" fill="#fff" opacity=".06" />
         </pattern>
+        {/* Cloth curls slightly away at its edges. */}
+        <linearGradient id="profile-drape" x1="0" x2="1">
+          <stop offset="0" stopColor="#000" stopOpacity=".34" />
+          <stop offset=".22" stopColor="#000" stopOpacity="0" />
+          <stop offset=".5" stopColor="#fff" stopOpacity=".1" />
+          <stop offset=".78" stopColor="#000" stopOpacity="0" />
+          <stop offset="1" stopColor="#000" stopOpacity=".34" />
+        </linearGradient>
       </defs>
-      <polygon points={resting[0]} fill="url(#profile-weave)" />
-      <polygon points={resting[1]} fill="url(#profile-weave)" />
-      <polygon points={resting[2]} fill="#fff" opacity=".12" />
-      <polygon points={resting[3]} fill="#000" opacity=".2" />
+      <Strap side={1} />
+      <Strap side={-1} />
     </svg>
   );
 }
 function Clip() {
   return (
-    <svg className="profile-clip" width="40" height="72" viewBox="80 88 40 72" aria-hidden>
+    <svg className="profile-clip" width="48" height="72" viewBox="76 88 48 72" aria-hidden>
       <defs>
         <linearGradient id="profile-metal" x1="0" x2="1">
           <stop offset="0" stopColor="#8d97a8" />
@@ -195,14 +222,17 @@ function Clip() {
           width="40"
           height="72"
         >
-          <rect x="80" y="88" width="40" height="72" fill="url(#profile-into-slot)" />
+          <rect x="76" y="88" width="48" height="72" fill="url(#profile-into-slot)" />
         </mask>
       </defs>
-      <rect x="84" y="88" width="32" height="20" rx="3" fill="url(#profile-metal)" />
-      <rect x="84" y="97" width="32" height="1.5" fill="#000" opacity=".25" />
-      <circle cx="100" cy="114" r="5" fill="none" stroke="url(#profile-metal)" strokeWidth="3" />
+      <rect x="79" y="88" width="42" height="22" rx="3.5" fill="url(#profile-metal)" />
+      <rect x="79" y="88" width="42" height="1.5" rx=".75" fill="#fff" opacity=".5" />
+      <rect x="79" y="104" width="42" height="1.5" fill="#000" opacity=".22" />
+      <circle cx="100" cy="97" r="3.2" fill="#000" opacity=".28" />
+      <circle cx="100" cy="96.4" r="2.6" fill="url(#profile-metal)" />
+      <circle cx="100" cy="115" r="5" fill="none" stroke="url(#profile-metal)" strokeWidth="3" />
       <path
-        d="M100 119 c0 5 -5 7 -5 13 c0 9 5 11 5 25"
+        d="M100 120 c0 5 -5 7 -5 12 c0 9 5 11 5 25"
         fill="none"
         stroke="url(#profile-metal)"
         strokeWidth="4"
