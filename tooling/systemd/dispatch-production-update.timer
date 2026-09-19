@@ -3,8 +3,8 @@ Description=Check GitHub for stable Dispatch releases
 
 [Timer]
 OnBootSec=2min
-OnUnitInactiveSec=2min
-AccuracySec=10s
+OnUnitInactiveSec=30s
+AccuracySec=5s
 
 [Install]
 WantedBy=timers.target

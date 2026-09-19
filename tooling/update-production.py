@@ -13,6 +13,7 @@ import shutil
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -20,6 +21,10 @@ from runtime_artifact import (MAX_BYTES, REPOSITORY, command, private_directory,
                               require, unpack, verify_artifact, write_json)
 
 API = f"https://api.github.com/repos/{REPOSITORY}/"
+RELEASES = f"https://github.com/{REPOSITORY}/releases/"
+# Anonymous API calls are limited to 60 an hour and unchanged responses still
+# count, so frequent timer ticks only read the public redirect between full checks.
+FULL_CHECK_SECONDS = 600
 
 
 def github(endpoint):
@@ -29,6 +34,27 @@ def github(endpoint):
     })
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def latest_tag():
+    """A hint only: it can skip a completed check, never select or trust a release."""
+    request = urllib.request.Request(RELEASES + "latest", method="HEAD",
+                                     headers={"User-Agent": "dispatch-production-updater"})
+    try:
+        urllib.request.build_opener(NoRedirect).open(request, timeout=15).close()
+    except urllib.error.HTTPError as response:
+        response.close()
+        location = response.headers.get("Location") or ""
+        if response.code == 302 and location.startswith(RELEASES + "tag/"):
+            return location[len(RELEASES + "tag/"):]
+    except OSError:
+        pass
+    return None
 
 
 def version(value):
@@ -93,6 +119,7 @@ class ProductionUpdater:
         self.previous = self.runtime / "previous"
         self.receipt = self.platform / "production-activation.json"
         self.status_file = self.platform / "production-update.json"
+        self.check_file = self.platform / "production-release-check.json"
         self.config = json.loads((self.root / "config/updater.json").read_text())
         require(self.config["service"] == "dispatch-production.service", "Production service required")
         require(re.fullmatch(r"http://127\.0\.0\.1:\d+/api/health", self.config["healthUrl"]),
@@ -164,14 +191,31 @@ class ProductionUpdater:
             self.recover()
             raise
 
+    def settled(self, current):
+        """Whether a recent full check already finished for the release GitHub still reports."""
+        try:
+            check = json.loads(self.check_file.read_text())
+            age = time.time() - check["checkedAt"]
+            return (0 <= age < FULL_CHECK_SECONDS and check["digest"] == current["digest"]
+                    and isinstance(check["tag"], str) and latest_tag() == check["tag"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def settle(self, release, current):
+        write_json(self.check_file, {"tag": release["tag_name"], "digest": current["digest"],
+                                    "checkedAt": time.time()})
+
     def update(self):
         self.recover()
         current = verify_artifact(self.live)
+        if self.settled(current):
+            return
         release = github("releases/latest")
         selected = release_version(release)
         # Old-format historical releases and intentionally older "latest" markers
         # cannot downgrade a healthy installation.
         if version(selected) < version(current["version"]):
+            self.settle(release, current)
             return
         if selected == current["version"]:
             require(self.healthy(current["digest"], timeout=5), "Installed Production runtime is not healthy")
@@ -179,10 +223,12 @@ class ProductionUpdater:
             if previous_status.get("status") != "ready" or previous_status.get("digest") != current["digest"]:
                 commit = json.loads((self.live / "tooling/build-info.json").read_text())["commit"]
                 self.status("ready", current, commit=commit)
+            self.settle(release, current)
             return
         if self.status_file.exists():
             status = json.loads(self.status_file.read_text())
             if status.get("failedReleaseId") == release["id"]:
+                self.settle(release, current)
                 return
         commit = release_commit(release["tag_name"])
         with tempfile.TemporaryDirectory(prefix="update-", dir=self.runtime) as temporary:
