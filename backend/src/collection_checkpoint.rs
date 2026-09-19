@@ -3,7 +3,7 @@ use super::{
     Result, State,
     collectors::Provider,
     crypto,
-    db::{self, Db, Store, n, s},
+    db::{self, Store, n, s},
     ensure, workforce,
 };
 use rusqlite::params;
@@ -12,24 +12,17 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub const TTL_MS: i64 = 15 * 60 * 1000;
-const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS collection_checkpoints (job_id TEXT PRIMARY KEY, connection_revision INTEGER NOT NULL, fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL, token TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS collection_checkpoint_pages (job_id TEXT NOT NULL REFERENCES collection_checkpoints(job_id) ON DELETE CASCADE, employee_code TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(job_id,employee_code));";
-
-pub fn initialize(db: &Db) -> Result<()> {
-    db.0.execute_batch(SCHEMA)?;
-    Ok(())
-}
 impl Store {
     pub fn clear_checkpoint(&self, dsp: &str, job: Option<&str>) -> Result<()> {
         let db = self.collector(dsp, Provider::Paycom)?;
-        if db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='collection_checkpoints'", [])?.is_some() {
-            db.exec("DELETE FROM collection_checkpoints WHERE (?1 IS NULL OR job_id=?1)", [job])?;
-        }
+        db.exec(
+            "DELETE FROM collection_checkpoints WHERE (?1 IS NULL OR job_id=?1)",
+            [job],
+        )?;
         Ok(())
     }
     pub fn prune_checkpoints(&self, dsp: &str) -> Result<()> {
         let db = self.collector(dsp, Provider::Paycom)?;
-        initialize(&db)?;
         db.transaction(|| {
             for row in db.all("SELECT job_id,created_at FROM collection_checkpoints", [])? {
                 let live = self.jobs.one(
