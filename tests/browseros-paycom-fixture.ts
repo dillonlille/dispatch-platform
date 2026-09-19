@@ -86,7 +86,7 @@ const employee = (code: string) => ({
   totals: { totalHours: 16, otHours: 0 },
   approvalPercentages: { employee: 100, supervisor: 100 },
 });
-function timecard(url: URL, mismatch: boolean, dailyHours = 8) {
+function timecard(url: URL, mismatch: boolean, dailyHours = 8, drift = false) {
   const start = Date.parse(url.searchParams.get('perioddates')!.split('_')[0]!);
   const rows = Array.from({ length: 14 }, (_, index) => {
     const date = new Date(start + index * 86400000),
@@ -101,8 +101,9 @@ function timecard(url: URL, mismatch: boolean, dailyHours = 8) {
     const punch = (time: string) =>
       `<span class="current-timecard-cell">${time}</span><div class="readOnly-combined-cell" style="display:none">${time} edited</div>`;
     if (index % 7 === 0) {
-      values.i1 = punch('08:00 AM');
-      values.o1 = punch(dailyHours === 9 ? '05:00 PM' : '04:00 PM');
+      // A drifted response still reconciles: both punches move by half an hour.
+      values.i1 = punch(drift ? '08:30 AM' : '08:00 AM');
+      values.o1 = punch(dailyHours === 9 ? '05:00 PM' : drift ? '04:30 PM' : '04:00 PM');
     }
     // Paycom can leave the dated row empty and put punches and totals on a
     // following pay-code row. Extraction folds those punches into the day.
@@ -148,9 +149,11 @@ export async function paycomFixture(
     missingContent: new Map<string, number>(),
     navigationStalls: new Map<string, number>(),
     readsByCode: new Map<string, number>(),
-    // The one response per job that re-reads an employee to prove responses equal
-    // rendered pages. Counted apart from the reads that supply published data.
+    // Reads that re-check an employee (one comparison per job, then a few random
+    // spot checks). Counted apart from the reads that supply published data.
     verifications: 0,
+    // Responses for later employees differ from their rendered pages yet validate.
+    responseDrift: false,
     expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
@@ -276,7 +279,7 @@ export async function paycomFixture(
         res.writeHead(403);
         return res.end('Employee not in this account');
       }
-      const verification = url.searchParams.has('dispatch_verify');
+      const verification = url.searchParams.get('dispatch_timecards') === '2';
       if (verification) state.verifications++;
       else if (url.searchParams.get('firstrefno') === accountCodes[0])
         state.accountStarts.push(account);
@@ -320,8 +323,12 @@ export async function paycomFixture(
         }
         if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
           url.searchParams.set('firstrefno', 'AA01');
+        const drift =
+          state.responseDrift &&
+          !(req.headers.accept ?? '').includes('text/html') &&
+          accountCodes.indexOf(code) >= 2;
         return html(
-          timecard(url, state.mismatch) +
+          timecard(url, state.mismatch, 8, drift) +
             (state.slowImages ? '<img src="/fixture/image">' : '') +
             (state.hydrate
               ? `<script>fetch('/fixture/hydrate${url.search}').then(r=>r.text()).then(html=>{const doc=new DOMParser().parseFromString(html,'text/html');document.querySelector('#tbltimesheet').replaceWith(doc.querySelector('#tbltimesheet'));document.querySelector('#periodtotals').textContent=doc.querySelector('#periodtotals').textContent;});</script>`

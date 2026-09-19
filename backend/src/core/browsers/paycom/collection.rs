@@ -2,7 +2,7 @@ use super::*;
 use crate::core::{collection_checkpoint::Checkpoint, job_metrics::Recorder};
 use chrono::{Datelike, NaiveDate};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     future::Future,
     sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
 };
@@ -370,6 +370,7 @@ impl Driver {
         } else {
             None
         };
+        let direct = Direct::new(&todo);
         let queue = Queue {
             employees: &employees,
             todo,
@@ -381,7 +382,7 @@ impl Driver {
             metrics,
             checkpoint,
             token: &token,
-            direct: Direct::default(),
+            direct,
         };
         // Drain both lanes even when one fails. Dropping a sibling's in-flight
         // CDP command intentionally closes the shared browser transport.
@@ -475,14 +476,48 @@ where
 /// its table after loading, which a response would miss while still validating, so
 /// each job first requires a response to equal a rendered read that has punches.
 /// One disagreement keeps the whole job on rendered reads.
-#[derive(Default)]
-struct Direct(AtomicU8);
+///
+/// That proves one employee. A few more, chosen at random in each job, are also
+/// rendered after their response is read, so a difference limited to some
+/// employees cannot be published for long without failing a collection.
+struct Direct {
+    state: AtomicU8,
+    sample: HashSet<usize>,
+}
 impl Direct {
     const ENABLED: u8 = 1;
     const DISABLED: u8 = 2;
     const VERIFYING: u8 = 3;
+    const SAMPLE: usize = 4;
+    /// `todo` holds employee indexes in reading order. The first two are rendered
+    /// before any response is trusted, and a short roster gains little from
+    /// responses, so neither is sampled.
+    fn new(todo: &[usize]) -> Self {
+        let mut sample = HashSet::new();
+        let later = todo.get(2..).unwrap_or_default();
+        if todo.len() >= 20 {
+            let mut random = [0u8; 8 * Self::SAMPLE * 4];
+            // Without entropy the first later employees are checked instead.
+            let drawn = getrandom::fill(&mut random).is_ok();
+            for (index, bytes) in random.chunks_exact(8).enumerate() {
+                if sample.len() == Self::SAMPLE {
+                    break;
+                }
+                let position = if drawn {
+                    u64::from_le_bytes(bytes.try_into().expect("eight bytes")) as usize
+                } else {
+                    index
+                };
+                sample.insert(later[position % later.len()] + 1);
+            }
+        }
+        Self {
+            state: AtomicU8::new(0),
+            sample,
+        }
+    }
     fn enabled(&self) -> bool {
-        self.0.load(Ordering::SeqCst) == Self::ENABLED
+        self.state.load(Ordering::SeqCst) == Self::ENABLED
     }
     async fn verify(
         &self,
@@ -498,14 +533,14 @@ impl Direct {
         // One lane verifies; the other keeps rendering until the result is known.
         if !punched
             || self
-                .0
+                .state
                 .compare_exchange(0, Self::VERIFYING, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
         {
             return Ok(());
         }
         let response = read_response(page, origin, employee, period, true).await;
-        self.0.store(
+        self.state.store(
             if response
                 .as_ref()
                 .is_ok_and(|r| r.as_deref() == Some(rendered))
@@ -538,7 +573,20 @@ async fn read_timecard(
                 metrics.page_stage(ordinal, "extraction");
                 metrics.direct();
                 metrics.page_finish(ordinal, None);
-                return Ok(records);
+                if !direct.sample.contains(&ordinal) {
+                    return Ok(records);
+                }
+                let rendered =
+                    read_rendered(page, origin, employee, period, metrics, ordinal, true).await?;
+                // A punch can land between the two reads; only a response that
+                // still disagrees with the rendered page is a provider mismatch.
+                let agrees = rendered == records
+                    || read_response(page, origin, employee, period, true)
+                        .await?
+                        .is_some_and(|again| again == rendered);
+                ensure(agrees, "provider_response_mismatch", 502)?;
+                metrics.spot_checked();
+                return Ok(rendered);
             }
             Ok(None) => metrics.page_cancel(ordinal),
             Err(error) => {
@@ -547,13 +595,43 @@ async fn read_timecard(
             }
         }
     }
+    let records = read_rendered(page, origin, employee, period, metrics, ordinal, false).await?;
+    direct
+        .verify(page, origin, employee, period, &records)
+        .await?;
+    Ok(records)
+}
+/// A rendered read with its one local retry. A verification read re-reads an
+/// employee that already counts as completed, so only its failures are recorded.
+async fn read_rendered(
+    page: &mut Page,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    metrics: &Recorder,
+    ordinal: usize,
+    verification: bool,
+) -> Result<Vec<Value>> {
     for attempt in 1..=2 {
         metrics.page_start(ordinal, attempt);
-        let result = read_once(page, origin, employee, period, metrics, ordinal).await;
-        metrics.page_finish(
+        let result = read_once(
+            page,
+            origin,
+            employee,
+            period,
+            metrics,
             ordinal,
-            result.as_ref().err().map(|error| error.code.as_str()),
-        );
+            verification,
+        )
+        .await;
+        if verification && result.is_ok() {
+            metrics.page_cancel(ordinal);
+        } else {
+            metrics.page_finish(
+                ordinal,
+                result.as_ref().err().map(|error| error.code.as_str()),
+            );
+        }
         let retry = result.as_ref().err().is_some_and(|error| {
             [
                 "provider_navigation_timeout",
@@ -564,11 +642,6 @@ async fn read_timecard(
             .contains(&error.code.as_str())
         });
         if attempt == 2 || !retry {
-            if let Ok(records) = &result {
-                direct
-                    .verify(page, origin, employee, period, records)
-                    .await?;
-            }
             return result;
         }
         // Only this page is reloaded. Authentication, throttling, extraction and
@@ -578,11 +651,14 @@ async fn read_timecard(
     }
     unreachable!()
 }
-fn timecard_url(origin: &str, employee: &Value, period: &Value) -> String {
+/// The extractor accepts two forms of a timecard address. The second marks a read
+/// that only checks another read of the same employee and publishes nothing new.
+fn timecard_url(origin: &str, employee: &Value, period: &Value, verification: bool) -> String {
     format!(
-        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards={}",
         s(employee, "code"),
-        s(period, "key")
+        s(period, "key"),
+        if verification { 2 } else { 1 }
     )
 }
 /// Fetch one timecard inside the authenticated tab and extract it from a detached
@@ -596,13 +672,7 @@ async fn read_response(
     period: &Value,
     verification: bool,
 ) -> Result<Option<Vec<Value>>> {
-    let source = timecard_url(origin, employee, period);
-    // Marks the one request per job that re-reads an employee for comparison.
-    let request = if verification {
-        format!("{source}&dispatch_verify=1")
-    } else {
-        source.clone()
-    };
+    let source = timecard_url(origin, employee, period, verification);
     let frame = page.frame().await?;
     if !s(&frame, "url").starts_with(&format!("{origin}/")) || !page.trusted(s(&frame, "url")) {
         return Ok(None);
@@ -612,7 +682,7 @@ async fn read_response(
     let started = page
         .evaluate(&format!(
             r#"(()=>{{globalThis.dispatchTimecard=null;(async()=>{{try{{
-            const response=await fetch({request},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
+            const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
             if(response.status===429||response.status>=500)throw 'unavailable';
             if(response.status!==200||!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 'response';
             const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
@@ -620,8 +690,7 @@ async fn read_response(
             text+=decoder.decode();const document=new DOMParser().parseFromString(text,'text/html'),location={{href:{source}}};
             globalThis.dispatchTimecard={{ok:true,record:({extractor})({config})}};
           }}catch(error){{globalThis.dispatchTimecard={{ok:false,unavailable:error==='unavailable'}};}}}})();return true;}})()"#,
-            source = json!(source),
-            request = json!(request)
+            source = json!(source)
         ))
         .await;
     if started.is_err() {
@@ -652,8 +721,9 @@ async fn read_once(
     period: &Value,
     metrics: &Recorder,
     ordinal: usize,
+    verification: bool,
 ) -> Result<Vec<Value>> {
-    let source = timecard_url(origin, employee, period);
+    let source = timecard_url(origin, employee, period, verification);
     page.monitor_loading().await?;
     let previous_loader = page.start_navigation(&source).await?;
     let started = Instant::now();

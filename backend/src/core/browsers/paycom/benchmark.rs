@@ -119,7 +119,7 @@ async fn measure_live_collection() -> Result<()> {
         }).await?;
         let elapsed=started.elapsed().as_millis();
         let reads=serde_json::to_value(recorder.snapshot())?["pageReads"].clone();
-        eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
+        eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],"spotChecked":reads["spotChecked"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
         let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
         let database=rusqlite::Connection::open_with_flags(crate::core::collectors::database_path(&dsp, crate::core::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();

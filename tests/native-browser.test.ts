@@ -118,8 +118,9 @@ test(
     const run = async (requestId: string, expected: string) => {
       const queued = await owner.post('/api/dsp/jobs', { requestId });
       assert.equal(queued.status, 202, queued.body);
+      let job: any;
       await until(async () => {
-        const job = (await owner.get('/api/dsp/jobs')).value.find(
+        job = (await owner.get('/api/dsp/jobs')).value.find(
           (j: { id: string }) => j.id === queued.value.id,
         );
         if (!['succeeded', 'failed', 'cancelled'].includes(job.status)) return false;
@@ -129,8 +130,15 @@ test(
       await until(
         async () => (await owner.get('/api/platform/health')).value.browsers.active === 0,
       );
+      return job;
     };
-    await run('parallel-complete', 'succeeded');
+    const complete = (await run('parallel-complete', 'succeeded')).metrics[0].pageReads;
+    // After one comparison most employees are read from responses, and a few
+    // random ones are rendered again to confirm the response that was read.
+    assert(complete.direct >= 20, JSON.stringify(complete));
+    assert(complete.spotChecked >= 1 && complete.spotChecked <= 4, JSON.stringify(complete));
+    assert.equal(f.state.verifications, 1 + complete.spotChecked);
+    assert.equal(complete.completed, 25);
     assert.equal(
       f.state.timecardsPeak,
       2,
@@ -160,6 +168,12 @@ test(
       cards.map((row) => ({ ...row })),
       f.state.codes.map((code) => ({ code, count: 14, hours: 16 })),
     );
+    // Responses that validate but differ from the rendered page pass the first
+    // comparison (early employees agree); a spot check must stop the publication.
+    f.state.responseDrift = true;
+    assert.equal((await run('response-drift', 'failed')).error, 'provider_response_mismatch');
+    assert.equal(publication(), id, 'Unconfirmed responses are never published');
+    f.state.responseDrift = false;
     f.state.wrongIdentity = true;
     await run('parallel-wrong-employee', 'failed');
     assert.equal(
