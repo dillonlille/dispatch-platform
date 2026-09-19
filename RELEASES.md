@@ -7,27 +7,46 @@ private state and management scripts; it needs neither a Git checkout nor build 
 
 ## Prepare a release
 
-1. Choose an unused stable `X.Y.Z`. Existing tags and release assets are immutable.
-   Pin the accepted Dev revision; exclude unfinished work. Create a release branch
-   containing that revision and the release tooling from `main`, and update the
-   root package files and backend Cargo version/lockfile.
-2. Open a release PR to `main`. Require the complete `platform` check and review
-   the source. The owner's release request authorizes this release PR merge and
-   publication; it does not authorize unrelated development PR merges.
-3. After merging, wait for the exact main commit's `Platform checks` run. It runs
-   backend/API, browser UI, native collector, artifact and dependency checks. The
-   final gate publishes `dispatch-main-<commit>` only after all required jobs pass.
-4. On `dispatch-dev`, run
-   `python3 tooling/prepare-release.py --commit <main-sha> --version X.Y.Z --output <private-new-directory>`.
-   Test the extracted runtime in a disposable environment on this machine. Promote
-   those exact bytes; never rebuild the published artifact on Production.
-5. Enable GitHub release immutability. Create a **draft** `vX.Y.Z` targeting the
-   checked main commit with `dispatch-platform-X.Y.Z.tar.gz`, `release.json`,
-   `provenance.json`, `SHA256SUMS` and release notes. Verify each uploaded digest
-   against the prepared files. Publish the draft as a stable release only after
-   validation. Never replace an existing tag or use `--clobber`.
-6. Confirm the Production updater, public health endpoint, runtime version/digest,
-   login and dashboard. A successful publication alone is not a deployment check.
+Run one command from the live checkout on `dispatch-dev`:
+
+`python3 tooling/release.py [X.Y.Z] [--bump minor|major] [--dev-commit <sha>]`
+
+Without a version it releases the next patch version. Existing tags and release
+assets are immutable. Every step first reads what GitHub and the private release
+directory already hold, so after a failure fix the cause and run the same command
+again; a bare rerun continues the unfinished release. The command:
+
+1. Pins the accepted Dev revision, which must have passed its Dev checks, and
+   excludes unfinished work. It creates `release/vX.Y.Z` from that revision, merges
+   `main` when Dev does not contain it, and commits the version in the root package
+   files and the backend Cargo manifest and lockfile. A merge conflict stops the
+   command; resolve and commit it in the release worktree, then rerun.
+2. Opens the release PR to `main` and waits for the complete `platform` check. Fix
+   failures on the release branch. The owner's release request authorizes this
+   release PR merge and publication; it does not authorize unrelated development
+   PR merges.
+3. Merges, then opens a PR that brings `main` back into `dev` so both branches keep
+   shared history and release-branch fixes reach Dev. Its checks run alongside the
+   rest of the release and it merges once they pass.
+4. Waits for the exact main commit's `Platform checks` run. The release PR already
+   ran backend/API, browser UI, native collector, artifact and dependency checks
+   on the identical merge tree, so main promotes those tested bytes after a smoke
+   check, exactly as Dev does. Without a matching validation main runs every suite.
+   The final gate publishes `dispatch-main-<commit>` only after all required jobs pass.
+5. Runs `prepare-release.py` into `releases/vX.Y.Z` and smoke tests that extracted
+   runtime against disposable state on this machine. Those exact bytes are
+   promoted; the published artifact is never rebuilt, on Production or elsewhere.
+6. Waits for the release notes in `releases/vX.Y.Z-notes.md`; write them while the
+   checks run. It creates a **draft** `vX.Y.Z` targeting the checked main commit with
+   `dispatch-platform-X.Y.Z.tar.gz`, `release.json`, `provenance.json` and
+   `SHA256SUMS`, verifies GitHub's digest of every uploaded asset against the
+   prepared files, and only then publishes it as a stable release. GitHub release
+   immutability stays enabled. It never replaces a tag or uses `--clobber`.
+7. Waits until the public Production health endpoint reports the released runtime
+   digest, checks the dashboard assets, and records `deployment-verification.json`.
+   A successful publication alone is not a deployment check; also confirm the
+   Production updater, login and dashboard.
+8. Removes the merged release and sync branches and worktrees.
 
 ## Production
 
@@ -55,9 +74,12 @@ The production email Worker uses `services/cloudflare-mail/wrangler.production.j
 and `DISPATCH_PRODUCTION_MAIL_WORKER_TOKEN` in the private systemd environment file.
 Never copy Dev mail credentials or the Cloudflare account API token to Production.
 
-`dispatch-production-update.timer` checks the public GitHub Releases API every two
-minutes without GitHub credentials. Only a newer published stable version can
-install. The updater verifies the tag belongs to `main`, GitHub's archive and
+`dispatch-production-update.timer` runs every 30 seconds without GitHub credentials.
+Anonymous API calls are limited to 60 an hour, so between full checks a tick only
+reads the public `releases/latest` redirect. That hint can skip a check that already
+finished for the same tag and runtime; a changed tag, and at least every ten
+minutes, runs the full Releases API check. Only that verified path can install,
+and only a newer published stable version. The updater verifies the tag belongs to `main`, GitHub's archive and
 manifest hashes, the complete runtime inventory and its source commit. Drafts,
 prereleases, old versions and main merges cannot update Production. GitHub API or
 download failures leave the current runtime running.
