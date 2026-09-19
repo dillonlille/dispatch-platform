@@ -243,12 +243,10 @@ impl Store {
             503,
         )?;
         // Missing initialized feature tables fail closed, rather than recreating lost data.
-        for table in [
-            "meal_publications",
-            "meal_itineraries",
-            "meal_delivery_events",
-            "meal_breaks",
-        ] {
+        // meal_delivery_events, meal_breaks and their trigger hold nothing and are not
+        // required here. They are still created because v0.0.9 refuses to start without
+        // them; stop creating them once a release without that check has shipped.
+        for table in ["meal_publications", "meal_itineraries"] {
             db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
         }
         if db
@@ -264,8 +262,7 @@ impl Store {
             })?;
         }
         ensure(
-            db.all("SELECT version FROM meal_record_schema", [])? == vec![json!({"version":1})]
-                && db.one("SELECT name FROM sqlite_master WHERE type='trigger' AND name='minimize_legacy_meal_publication'", [])?.is_some(),
+            db.all("SELECT version FROM meal_record_schema", [])? == vec![json!({"version":1})],
             "unsupported_cortex_schema",
             503,
         )?;
@@ -541,6 +538,24 @@ mod tests {
             .exec("UPDATE storage_identity SET dsp_id='another-dsp'", [])
             .unwrap();
         assert!(store.open_collectors(&id).is_err());
+    }
+    #[test]
+    fn cortex_storage_opens_without_the_emptied_delivery_history_tables() {
+        let (_root, store, id) = provisioned();
+        let cortex = store.collector(&id, Provider::Cortex).unwrap();
+        cortex.0.execute_batch("DROP TRIGGER minimize_legacy_meal_publication; DROP TABLE meal_breaks; DROP TABLE meal_delivery_events;").unwrap();
+        drop(cortex);
+        store.open_collectors(&id).unwrap();
+        let config = store.config.clone();
+        drop(store);
+        let reopened = Store::initialize(config).unwrap();
+        let cortex = reopened.collector(&id, Provider::Cortex).unwrap();
+        assert!(cortex.one("SELECT count(*) FROM meal_breaks", []).is_err());
+        cortex.one("SELECT count(*) FROM meal_records", []).unwrap();
+        // The tables that hold meal evidence are still required.
+        cortex.0.execute_batch("DROP TABLE meal_records").unwrap();
+        drop(cortex);
+        assert!(reopened.open_collectors(&id).is_err());
     }
     #[test]
     fn missing_initialized_cortex_database_is_not_recreated() {
