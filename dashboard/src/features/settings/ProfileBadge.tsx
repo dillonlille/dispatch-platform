@@ -41,10 +41,10 @@ const LIMIT = 0.5;
 const FRICTION = 2.6;
 // Stop only once what is left is far less than a pixel, so that coming to rest never shows.
 const REST = 1e-7;
-const FALL = 1800; // pixels per second squared
+const FALL = 4000; // pixels per second squared
 // Once taut the strap gives a little and soaks up the fall, rather than stopping it dead.
-const STRETCH = 900;
-const STRETCH_DAMPING = 54;
+const STRETCH = 1600;
+const STRETCH_DAMPING = 72;
 const SHEEN = 140; // percent the reflection slides per radian the badge leans
 const STRAP = 92; // from the anchors down to the clip, in the lanyard's own pixels
 const CENTRE = 120;
@@ -119,8 +119,8 @@ function usePendulum() {
             drop += dropSpeed * dt;
             if (before < 0 && drop >= 0) {
               // The strap draws taut: a nudge to the swing, and a slight tip of the badge on its hook.
-              swingSpeed += dropSpeed * 0.0003;
-              swaySpeed -= dropSpeed * 0.0002;
+              swingSpeed += dropSpeed * 0.0002;
+              swaySpeed -= dropSpeed * 0.00013;
             }
             if (Math.abs(drop) < 0.3 && Math.abs(dropSpeed) < 6) drop = dropSpeed = 0;
           }
