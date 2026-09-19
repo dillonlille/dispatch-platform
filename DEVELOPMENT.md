@@ -199,6 +199,8 @@ and `tenants.rs` (Paycom), `meals.rs` (Cortex), `meal_sync.rs` and `meal_compari
 
 The workflow selects full checks for backend, tooling, dependencies and unknown
 changes; dashboard-only changes retain UI, type, formatting and artifact checks.
+Browser test helpers under `tests/browser/` and documentation outside `backend/`
+count as dashboard-only: no other suite reads them.
 Full nightly and release validation remain in place.
 
 A successful same-repository PR targeting `dev` preserves both its validation
@@ -208,6 +210,8 @@ application bytes, binds commit metadata and the inventory to the actual merge,
 and runs a smoke check before publishing the Dev artifact. Missing/expired build
 artifacts fall back to a normal build; missing or mismatched validation falls back
 to the appropriate checks. A newer failed or pending run cannot reuse older success.
+A PR that is behind `dev` when it merges never matches: GitHub builds the merge on the
+new tip, so its base and tree differ from the receipt and the merge run checks it afresh.
 
 Release PRs targeting `main` are promoted the same way. Their receipt is bound to
 `main` and must record the full suite; a release merge without it runs every check.
