@@ -112,11 +112,14 @@ async fn measure_live_collection() -> Result<()> {
         driver.credentials=Value::Null;
         let timezone=std::env::var("DISPATCH_BENCHMARK_TIMEZONE").map_err(|_|Error::new("benchmark_configuration_required",400))?;
         let started=Instant::now();
-        let data=driver.collect(&timezone, None, &crate::core::job_metrics::Recorder::new(&json!({})), None, |progress,_| async move {
+        let recorder=crate::core::job_metrics::Recorder::new(&json!({}));
+        let data=driver.collect(&timezone, None, &recorder, None, |progress,_| async move {
             if progress % 10 == 0 { eprintln!("BENCH {}",json!({"progress":progress})); }
             Ok(())
         }).await?;
         let elapsed=started.elapsed().as_millis();
+        let reads=serde_json::to_value(recorder.snapshot())?["pageReads"].clone();
+        eprintln!("BENCH {}",json!({"completedReads":reads["completed"],"directReads":reads["direct"],"pageRetries":reads["retries"],"failedReads":reads["failures"].as_array().map(Vec::len)}));
         let collection_peak=peak.each_ref().map(|value| value.load(Ordering::Relaxed));
         let database=rusqlite::Connection::open_with_flags(crate::core::collectors::database_path(&dsp, crate::core::collectors::Provider::Paycom)?,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let mut expected=std::collections::BTreeMap::new();
@@ -137,8 +140,15 @@ async fn measure_live_collection() -> Result<()> {
         }
         eprintln!("BENCH {}",json!({"collectionMs":elapsed,"employeeCount":data["employees"].as_array().unwrap().len(),"timecardCount":records.len(),"comparedEqual":equal,"changedSincePublication":changed,"addedSincePublication":added,"previousCardCount":expected.len(),"collectionPeakRssKiB":collection_peak[0],"collectionPeakPssKiB":collection_peak[1],"collectionPeakPrivateKiB":collection_peak[2],"unreadableSmaps":collection_peak[3]}));
 
-        if std::env::var("DISPATCH_BENCHMARK_RESPONSE").as_deref() == Ok("1") {
-            inspect_responses(&driver, &data).await?;
+        // "1" keeps the original six-page probe; a larger number (or "all") covers
+        // the roster so parity is measured rather than sampled.
+        if let Ok(value) = std::env::var("DISPATCH_BENCHMARK_RESPONSE") {
+            let samples = match value.as_str() {
+                "1" => 6,
+                "all" => usize::MAX,
+                other => other.parse().map_err(|_| Error::new("benchmark_configuration_required", 400))?,
+            };
+            inspect_responses(&driver, &data, samples).await?;
         }
 
         if !differences.is_empty() {
@@ -200,7 +210,7 @@ async fn reference_timecard(driver: &Driver, code: &str, period: &Value) -> Resu
 // An explicit, read-only experiment. Raw HTML never leaves the authenticated
 // browser; only validated records and aggregate structure reach this process.
 // The detached document runs no provider scripts and is never inserted in a tab.
-async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
+async fn inspect_responses(driver: &Driver, data: &Value, samples: usize) -> Result<()> {
     let from = s(data, "from");
     let to = s(data, "to");
     let day = chrono::NaiveDate::parse_from_str(from, "%Y-%m-%d")
@@ -208,15 +218,17 @@ async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
     let period = json!({"start":from,"end":to,"key":format!("{from}_{to}"),"dates":(0..14).map(|i|(day+chrono::Duration::days(i)).to_string()).collect::<Vec<_>>()});
     let mut equal = 0;
     let mut validated = 0;
+    let mut rejected = Vec::new();
     let started = Instant::now();
     for (index, employee) in data["employees"]
         .as_array()
         .unwrap()
         .iter()
-        .take(6)
+        .take(samples)
         .enumerate()
     {
         let code = s(employee, "code");
+        let fetched = Instant::now();
         let source = format!(
             "{}/v4/cl/web.php/timecard/index?firstrefno={code}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
             driver.origin,
@@ -225,15 +237,17 @@ async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
         let config = json!({"employeeCode":code,"period":period,"sourceUrl":source});
         let extractor = include_str!("timecard.js").trim().trim_end_matches(';');
         driver.evaluate(&format!(r#"(()=>{{globalThis.dispatchProbe=null;(async()=>{{try{{
+          let stage='fetch';
           const response=await fetch({source},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
-          if(response.status!==200||!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
+          if(response.status!==200)throw 'status_'+response.status;
+          if(!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 'content_type';
           const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
-          for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 0;}}text+=decoder.decode(part.value,{{stream:true}});}}
+          for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 'size';}}text+=decoder.decode(part.value,{{stream:true}});}}
           text+=decoder.decode();const document=new DOMParser().parseFromString(text,'text/html'),location={{href:{source}}};
           const result={{bytes:size,tablePresent:!!document.querySelector('#tbltimesheet'),rows:document.querySelectorAll('#tbltimesheet > tbody > tr').length,scripts:document.scripts.length,record:null}};
           try{{result.record=({extractor})({config});}}catch{{}}
           globalThis.dispatchProbe={{ok:true,value:result}};
-        }}catch{{globalThis.dispatchProbe={{ok:false}};}}}})();return true;}})()"#, source=json!(source))).await?;
+        }}catch(error){{globalThis.dispatchProbe={{ok:false,reason:typeof error==='string'?error:String(error&&error.name||'error')}};}}}})();return true;}})()"#, source=json!(source))).await?;
         let deadline = Instant::now() + Duration::from_secs(35);
         let probe = loop {
             ensure(Instant::now() < deadline, "provider_timeout", 504)?;
@@ -244,7 +258,13 @@ async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
             sleep(Duration::from_millis(100)).await;
         };
         driver.evaluate("delete globalThis.dispatchProbe").await?;
-        ensure(probe["ok"] == true, "benchmark_response_failed", 502)?;
+        if probe["ok"] != true {
+            eprintln!(
+                "RESPONSE {}",
+                json!({"ordinal":index+1,"ms":fetched.elapsed().as_millis(),"fetchFailed":probe["reason"]})
+            );
+            continue;
+        }
         let value = &probe["value"];
         let actual = collection::project(&value["record"], code);
         let reference = data["timecards"]
@@ -257,19 +277,76 @@ async fn inspect_responses(driver: &Driver, data: &Value) -> Result<()> {
         if actual.is_ok() {
             validated += 1;
         }
+        // Field names only: which parts of a card differ, never their values.
+        let mut differs = std::collections::BTreeSet::new();
+        if let Ok(cards) = &actual {
+            for (card, expected) in cards.iter().zip(&reference) {
+                for key in ["date", "hours", "status"] {
+                    if card[key] != expected[key] {
+                        differs.insert(key.to_owned());
+                    }
+                }
+                let (a, b) = (card["punches"].as_array(), expected["punches"].as_array());
+                match (a, b) {
+                    (Some(a), Some(b)) if a.len() == b.len() => {
+                        for (x, y) in a.iter().zip(b) {
+                            for (field, value) in x.as_object().into_iter().flatten() {
+                                if y[field] != *value {
+                                    differs.insert(format!("punches.{field}"));
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        differs.insert("punches.length".to_owned());
+                    }
+                }
+            }
+            if cards.len() != reference.len() {
+                differs.insert("cards.length".to_owned());
+            }
+        }
+        let failure = actual.as_ref().err().map(|error| error.code.clone());
         let matches = actual.is_ok_and(|cards| cards == reference);
         if matches {
             equal += 1;
+        } else if rejected.len() < 4 {
+            rejected.push(code.to_owned());
         }
         eprintln!(
             "RESPONSE {}",
-            json!({"ordinal":index+1,"bytes":value["bytes"],"tablePresent":value["tablePresent"],"rows":value["rows"],"scripts":value["scripts"],"validated":!value["record"].is_null(),"matchesRendered":matches})
+            json!({"ordinal":index+1,"ms":fetched.elapsed().as_millis(),"bytes":value["bytes"],"tablePresent":value["tablePresent"],"rows":value["rows"],"scripts":value["scripts"],"validated":!value["record"].is_null(),"matchesRendered":matches,"differs":differs,"error":failure})
         );
         driver.page.collect_garbage().await?;
     }
     eprintln!(
         "RESPONSE {}",
-        json!({"samples":6.min(data["employees"].as_array().unwrap().len()),"validated":validated,"equal":equal,"elapsedMs":started.elapsed().as_millis()})
+        json!({"samples":samples.min(data["employees"].as_array().unwrap().len()),"validated":validated,"equal":equal,"elapsedMs":started.elapsed().as_millis()})
     );
+    // Why detached extraction was rejected: on the rendered page, tally each punch
+    // cell child's static signature against whether layout shows it. No values.
+    for code in rejected {
+        let path = format!(
+            "/v4/cl/web.php/timecard/index?firstrefno={code}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+            s(&period, "key")
+        );
+        driver.navigate(&path).await?;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < deadline
+            && driver.evaluate("document.readyState==='complete'&&!!document.querySelector('#tbltimesheet')&&!!document.querySelector('#periodtotals')").await? != true
+        {
+            sleep(Duration::from_millis(200)).await;
+        }
+        let shape = driver.evaluate(r#"(()=>{const t=document.querySelector('#tbltimesheet');if(!t)return null;
+          const heads=Array.from(t.querySelectorAll('thead [data-column]')).map(e=>e.getAttribute('data-column'));
+          const time=/^(0?[1-9]|1[0-2]):[0-5][0-9] [AP]M$/,tally={};
+          for(const row of t.querySelectorAll(':scope > tbody > tr'))for(const slot of ['i1','o1','i2','o2']){const cell=row.children[heads.indexOf(slot)];if(!cell)continue;
+            const kids=Array.from(cell.children);if(kids.length<2)continue;
+            for(const kid of kids){const text=(kid.textContent||'').replace(/\s+/g,' ').trim();
+              const key=[kid.tagName.toLowerCase(),'.'+Array.from(kid.classList).sort().join('.'),kid.getAttribute('style')?'[style='+kid.getAttribute('style').replace(/\s+/g,'')+']':'',kid.hidden?'[hidden]':'',time.test(text)?'<time>':text?'<text>':'<empty>',(kid.offsetParent!==null&&kid.getClientRects().length>0)?'VISIBLE':'hidden'].join(' ');
+              tally[key]=(tally[key]||0)+1;}}
+          return tally;})()"#).await?;
+        eprintln!("SHAPE {}", json!({"rendered":shape}));
+    }
     Ok(())
 }

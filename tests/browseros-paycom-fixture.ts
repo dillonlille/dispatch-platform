@@ -97,9 +97,12 @@ function timecard(url: URL, mismatch: boolean, dailyHours = 8) {
       hours: index % 7 === 0 ? String(dailyHours) : '0',
       total_hours: index % 7 === 0 ? String(dailyHours) : '0',
     };
+    // Paycom shows each punch in a span and keeps a hidden read-only copy beside it.
+    const punch = (time: string) =>
+      `<span class="current-timecard-cell">${time}</span><div class="readOnly-combined-cell" style="display:none">${time} edited</div>`;
     if (index % 7 === 0) {
-      values.i1 = '08:00 AM';
-      values.o1 = dailyHours === 9 ? '05:00 PM' : '04:00 PM';
+      values.i1 = punch('08:00 AM');
+      values.o1 = punch(dailyHours === 9 ? '05:00 PM' : '04:00 PM');
     }
     // Paycom can leave the dated row empty and put punches and totals on a
     // following pay-code row. Extraction folds those punches into the day.
@@ -145,6 +148,9 @@ export async function paycomFixture(
     missingContent: new Map<string, number>(),
     navigationStalls: new Map<string, number>(),
     readsByCode: new Map<string, number>(),
+    // The one response per job that re-reads an employee to prove responses equal
+    // rendered pages. Counted apart from the reads that supply published data.
+    verifications: 0,
     expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
@@ -270,13 +276,18 @@ export async function paycomFixture(
         res.writeHead(403);
         return res.end('Employee not in this account');
       }
-      if (url.searchParams.get('firstrefno') === accountCodes[0]) state.accountStarts.push(account);
+      const verification = url.searchParams.has('dispatch_verify');
+      if (verification) state.verifications++;
+      else if (url.searchParams.get('firstrefno') === accountCodes[0])
+        state.accountStarts.push(account);
       const active = (state.activeByAccount.get(account) ?? 0) + 1;
       state.activeByAccount.set(account, active);
       state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
       const code = url.searchParams.get('firstrefno')!;
-      state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
-      events.push('timecard');
+      if (!verification) {
+        state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
+        events.push('timecard');
+      }
       state.timecardsActive++;
       state.timecardsPeak = Math.max(state.timecardsPeak, state.timecardsActive);
       state.timecardAccountsPeak = Math.max(

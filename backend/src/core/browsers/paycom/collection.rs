@@ -4,7 +4,7 @@ use chrono::{Datelike, NaiveDate};
 use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
 };
 const API: &str = "https://time-and-attendance.paycomonline.net/api/cl/timecard-search/employees";
 const FIELDS: &[&str] = &[
@@ -381,6 +381,7 @@ impl Driver {
             metrics,
             checkpoint,
             token: &token,
+            direct: Direct::default(),
         };
         // Drain both lanes even when one fails. Dropping a sibling's in-flight
         // CDP command intentionally closes the shared browser transport.
@@ -419,6 +420,7 @@ struct Queue<'a, F> {
     metrics: &'a Recorder,
     checkpoint: Option<&'a Checkpoint>,
     token: &'a str,
+    direct: Direct,
 }
 impl<F, Fut> Queue<'_, F>
 where
@@ -446,6 +448,7 @@ where
                 self.period,
                 self.metrics,
                 index + 1,
+                &self.direct,
             )
             .await?;
             if let Some(checkpoint) = self.checkpoint {
@@ -468,6 +471,54 @@ where
     }
 }
 
+/// Whether this job may read timecards from responses. A page can fill or change
+/// its table after loading, which a response would miss while still validating, so
+/// each job first requires a response to equal a rendered read that has punches.
+/// One disagreement keeps the whole job on rendered reads.
+#[derive(Default)]
+struct Direct(AtomicU8);
+impl Direct {
+    const ENABLED: u8 = 1;
+    const DISABLED: u8 = 2;
+    const VERIFYING: u8 = 3;
+    fn enabled(&self) -> bool {
+        self.0.load(Ordering::SeqCst) == Self::ENABLED
+    }
+    async fn verify(
+        &self,
+        page: &Page,
+        origin: &str,
+        employee: &Value,
+        period: &Value,
+        rendered: &[Value],
+    ) -> Result<()> {
+        let punched = rendered
+            .iter()
+            .any(|card| card["punches"].as_array().is_some_and(|p| !p.is_empty()));
+        // One lane verifies; the other keeps rendering until the result is known.
+        if !punched
+            || self
+                .0
+                .compare_exchange(0, Self::VERIFYING, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+        {
+            return Ok(());
+        }
+        let response = read_response(page, origin, employee, period, true).await;
+        self.0.store(
+            if response
+                .as_ref()
+                .is_ok_and(|r| r.as_deref() == Some(rendered))
+            {
+                Self::ENABLED
+            } else {
+                Self::DISABLED
+            },
+            Ordering::SeqCst,
+        );
+        response.map(|_| ())
+    }
+}
 async fn read_timecard(
     page: &mut Page,
     origin: &str,
@@ -475,7 +526,27 @@ async fn read_timecard(
     period: &Value,
     metrics: &Recorder,
     ordinal: usize,
+    direct: &Direct,
 ) -> Result<Vec<Value>> {
+    // The provider's response already holds the whole timecard, so once this job
+    // has proven that, read it without rendering. Anything a response cannot fully
+    // validate still falls through to a rendered read.
+    if direct.enabled() {
+        metrics.page_start(ordinal, 1);
+        match read_response(page, origin, employee, period, false).await {
+            Ok(Some(records)) => {
+                metrics.page_stage(ordinal, "extraction");
+                metrics.direct();
+                metrics.page_finish(ordinal, None);
+                return Ok(records);
+            }
+            Ok(None) => metrics.page_cancel(ordinal),
+            Err(error) => {
+                metrics.page_finish(ordinal, Some(&error.code));
+                return Err(error);
+            }
+        }
+    }
     for attempt in 1..=2 {
         metrics.page_start(ordinal, attempt);
         let result = read_once(page, origin, employee, period, metrics, ordinal).await;
@@ -493,6 +564,11 @@ async fn read_timecard(
             .contains(&error.code.as_str())
         });
         if attempt == 2 || !retry {
+            if let Ok(records) = &result {
+                direct
+                    .verify(page, origin, employee, period, records)
+                    .await?;
+            }
             return result;
         }
         // Only this page is reloaded. Authentication, throttling, extraction and
@@ -502,6 +578,73 @@ async fn read_timecard(
     }
     unreachable!()
 }
+fn timecard_url(origin: &str, employee: &Value, period: &Value) -> String {
+    format!(
+        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
+        s(employee, "code"),
+        s(period, "key")
+    )
+}
+/// Fetch one timecard inside the authenticated tab and extract it from a detached
+/// document: no provider script runs and the HTML never leaves the page. `None`
+/// means "use a rendered read" (wrong origin, redirect, unexpected response, or
+/// records that fail validation); only throttling and server errors stop the job.
+async fn read_response(
+    page: &Page,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    verification: bool,
+) -> Result<Option<Vec<Value>>> {
+    let source = timecard_url(origin, employee, period);
+    // Marks the one request per job that re-reads an employee for comparison.
+    let request = if verification {
+        format!("{source}&dispatch_verify=1")
+    } else {
+        source.clone()
+    };
+    let frame = page.frame().await?;
+    if !s(&frame, "url").starts_with(&format!("{origin}/")) || !page.trusted(s(&frame, "url")) {
+        return Ok(None);
+    }
+    let config = json!({"employeeCode":employee["code"],"period":period,"sourceUrl":source});
+    let extractor = include_str!("timecard.js").trim().trim_end_matches(';');
+    let started = page
+        .evaluate(&format!(
+            r#"(()=>{{globalThis.dispatchTimecard=null;(async()=>{{try{{
+            const response=await fetch({request},{{credentials:'include',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(30000)}});
+            if(response.status===429||response.status>=500)throw 'unavailable';
+            if(response.status!==200||!/^text\/html(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 'response';
+            const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let text='',size=0;
+            for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 'response';}}text+=decoder.decode(part.value,{{stream:true}});}}
+            text+=decoder.decode();const document=new DOMParser().parseFromString(text,'text/html'),location={{href:{source}}};
+            globalThis.dispatchTimecard={{ok:true,record:({extractor})({config})}};
+          }}catch(error){{globalThis.dispatchTimecard={{ok:false,unavailable:error==='unavailable'}};}}}})();return true;}})()"#,
+            source = json!(source),
+            request = json!(request)
+        ))
+        .await;
+    if started.is_err() {
+        return Ok(None);
+    }
+    let deadline = Instant::now() + Duration::from_secs(35);
+    let outcome = loop {
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        match page.evaluate("globalThis.dispatchTimecard").await {
+            Ok(value) if !value.is_null() => break value,
+            Ok(_) => sleep(Duration::from_millis(100)).await,
+            Err(_) => return Ok(None),
+        }
+    };
+    let _ = page.evaluate("delete globalThis.dispatchTimecard").await;
+    ensure(outcome["unavailable"] != true, "provider_unavailable", 502)?;
+    if outcome["ok"] != true {
+        return Ok(None);
+    }
+    Ok(project(&outcome["record"], s(employee, "code")).ok())
+}
 async fn read_once(
     page: &Page,
     origin: &str,
@@ -510,11 +653,7 @@ async fn read_once(
     metrics: &Recorder,
     ordinal: usize,
 ) -> Result<Vec<Value>> {
-    let source = format!(
-        "{origin}/v4/cl/web.php/timecard/index?firstrefno={}&perioddates={}&formtype=SUMMARY&dispatch_timecards=1",
-        s(employee, "code"),
-        s(period, "key")
-    );
+    let source = timecard_url(origin, employee, period);
     page.monitor_loading().await?;
     let previous_loader = page.start_navigation(&source).await?;
     let started = Instant::now();

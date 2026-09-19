@@ -68,6 +68,7 @@ export function JobPerformance({ metrics = [] }: { metrics: JobMetrics[] }) {
                   <div aria-label="Timecard diagnostics">
                     <p>
                       {attempt.pageReads.completed} timecards validated ·{' '}
+                      {attempt.pageReads.direct ?? 0} without rendering ·{' '}
                       {attempt.pageReads.retries} page retries · {attempt.pageReads.recovered}{' '}
                       recovered · {attempt.pageReads.resumed ?? 0} resumed ·{' '}
                       {attempt.pageReads.earlyReady ?? 0} ready before full page load

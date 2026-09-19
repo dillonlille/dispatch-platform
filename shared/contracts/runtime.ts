@@ -105,6 +105,7 @@ export const metricsSchema = z.object({
       recovered: count,
       resumed: count.optional(),
       earlyReady: count.optional(),
+      direct: count.optional(),
       totalMs: milliseconds,
       active: z.array(pageRead),
       slowest: z.array(pageRead),
