@@ -852,26 +852,10 @@
 .date-field {
   position: relative;
 }
-.date-field-icon {
-  display: none;
-  position: absolute;
-  top: 50%;
-  right: 11px;
-  transform: translateY(-50%);
-  color: var(--muted-foreground);
-  pointer-events: none;
-}
-@media (pointer: fine) {
-  .date-field input {
-    padding-right: 34px;
-    cursor: pointer;
-  }
-  .date-field input::-webkit-calendar-picker-indicator {
-    display: none;
-  }
-  .date-field-icon {
-    display: block;
-  }
+.date-field input {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
 .date-calendar {
   position: fixed;

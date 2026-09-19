@@ -5,8 +5,10 @@ import {
   addMonths,
   clampDay,
   dayLabel,
+  displayDay,
   monthLabel,
   monthWeeks,
+  parseDay,
   sameDayOf,
 } from '../dashboard/src/lib/calendar.js';
 
@@ -56,4 +58,23 @@ test('days are clamped and named', () => {
   assert.equal(clampDay('1999-01-01', '2000-01-01', '2026-09-19'), '2000-01-01');
   assert.equal(monthLabel('2026-09'), 'September 2026');
   assert.equal(dayLabel('2026-09-19'), 'Saturday, September 19, 2026');
+});
+
+test('a typed day is read in either form and refused when it is not a real day', () => {
+  assert.equal(displayDay('2026-09-05'), '09/05/2026');
+  assert.equal(parseDay('9/5/2026'), '2026-09-05');
+  assert.equal(parseDay(' 09/05/2026 '), '2026-09-05');
+  assert.equal(parseDay('2026-09-05'), '2026-09-05');
+  assert.equal(parseDay('2/29/2024'), '2024-02-29');
+  for (const text of [
+    '2/29/2026',
+    '02/30/2026',
+    '13/01/2026',
+    '0/10/2026',
+    '9/5/26',
+    '9/5',
+    'today',
+    '',
+  ])
+    assert.equal(parseDay(text), undefined, text);
 });

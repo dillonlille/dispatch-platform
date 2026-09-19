@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect, demo, login } from './fixtures.js';
+import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
 import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 
@@ -103,7 +103,7 @@ async function open(page: Page, member = false, selectedDate: string | null = da
     await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-  if (selectedDate) await page.getByLabel('Paycom date').fill(selectedDate);
+  if (selectedDate) await setDate(page, selectedDate);
 }
 test('approved comparison table, filters, details, links, date errors and mobile overflow', async ({
   page,
@@ -475,14 +475,14 @@ test('sync remains locked across dates, tabs and reloads until both sources stop
   await expect(flex).toHaveText('Running · Sep 16');
   await expect(sync).toBeDisabled();
   await meals.click();
-  await page.getByLabel('Paycom date').fill('2026-09-15');
+  await setDate(page, '2026-09-15');
   await expect(flex).toHaveText('Flex running · Sep 16');
   await expect(sync).toBeDisabled();
   await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
   await expect(sync).toBeDisabled();
   await page.getByRole('link', { name: 'Home Page', exact: true }).click();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  await expect(page.getByLabel('Paycom date')).toHaveValue('2026-09-15');
+  await expectDate(page, '2026-09-15');
   await expect(sync).toBeDisabled();
   await expect(flex).toHaveText('Flex running · Sep 16');
   await meals.click();
@@ -579,25 +579,22 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     return route.fulfill({ status: 202, json: { date, jobs: [] } });
   });
   await open(page);
-  const dateInput = page.getByLabel('Paycom date');
   const sync = page.getByRole('button', { name: 'Sync now', exact: true });
   const timecards = page.getByRole('tab', { name: 'Timecard', exact: true });
   const meals = page.getByRole('tab', { name: 'Meal Breaks', exact: true });
   await timecards.click();
   await page.getByRole('button', { name: 'Previous day', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Previous day', exact: true })).toBeFocused();
-  await dateInput.fill('2026-09-14');
-  await dateInput.fill(date);
+  await setDate(page, '2026-09-14');
+  await setDate(page, date);
   for (const viewport of [
     { width: 1586, height: 992 },
     { width: 390, height: 844 },
   ]) {
     await page.setViewportSize(viewport);
     await timecards.click();
-    await expect(dateInput).toHaveValue(date);
-    await expect(page.locator('.paycom-timecard-heading').getByLabel('Paycom date')).toHaveValue(
-      date,
-    );
+    await expectDate(page, date);
+    await expectDate(page.locator('.paycom-timecard-heading'), date);
     await expect(
       page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
     ).toBeVisible();
@@ -611,9 +608,9 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     });
     await meals.click();
     await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
-    await expect(dateInput).toHaveValue(date);
+    await expectDate(page, date);
     expect(mealDates.at(-1)).toBe(date);
-    await expect(page.locator('.meal-heading').getByLabel('Paycom date')).toHaveValue(date);
+    await expectDate(page.locator('.meal-heading'), date);
     await expect(
       page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
     ).toBeVisible();
@@ -658,7 +655,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await meals.click();
   await expect.poll(() => mealReads, { timeout: 10000 }).toBeGreaterThan(before);
   await expect(sync).toBeEnabled({ timeout: 10000 });
-  await expect(dateInput).toHaveValue(date);
+  await expectDate(page, date);
   expect(syncRequests).toBe(1);
   await timecards.click();
   await sync.click();
@@ -667,16 +664,16 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   syncStatus = flexStatus = 'succeeded';
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await meals.click();
-  await expect(dateInput).toHaveValue(date);
+  await expectDate(page, date);
   await page.getByRole('link', { name: 'Home Page', exact: true }).click();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  await expect(dateInput).toHaveValue(date);
+  await expectDate(page, date);
   await page.reload();
-  await expect(dateInput).toHaveValue(date);
+  await expectDate(page, date);
   await meals.click();
   await page.getByRole('button', { name: 'Previous day', exact: true }).click();
   await timecards.click();
-  await expect(dateInput).toHaveValue('2026-09-14');
+  await expectDate(page, '2026-09-14');
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
   await page
     .getByRole('row')
@@ -685,8 +682,9 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     .click();
   await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  await expect(dateInput).toBeVisible();
-  await expect(dateInput).not.toHaveValue('2026-09-14');
+  // Another DSP starts on its own day, not the one chosen for the last DSP.
+  await expect(page.getByLabel('Paycom date')).toBeVisible();
+  await expect(page.getByLabel('Paycom date')).not.toHaveValue('09/14/2026');
   expect(errors).toEqual([]);
 });
 
@@ -727,9 +725,10 @@ test.describe('DSP calendar dates', () => {
       return route.fulfill({ status: 202, json: { date: synced.at(-1), jobs: [] } });
     });
     await open(page, false, null);
-    const input = page.getByLabel('Paycom date');
-    await expect(input).toHaveValue('2026-09-16');
-    await expect(input).toHaveAttribute('max', '2026-09-16');
+    await expectDate(page, '2026-09-16');
+    // The DSP's day is the last one that can be chosen, by button or by typing.
+    await setDate(page, '2026-09-17');
+    await expectDate(page, '2026-09-16');
     await expect(page.getByRole('button', { name: 'Today', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Next day', exact: true })).toBeDisabled();
     // The sync happened "today" for the DSP, shown on the DSP's clock.
@@ -737,7 +736,7 @@ test.describe('DSP calendar dates', () => {
     await page.getByRole('button', { name: 'Sync now', exact: true }).click();
     await expect.poll(() => synced).toEqual(['2026-09-16']);
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
-    await expect(input).toHaveValue('2026-09-16');
+    await expectDate(page, '2026-09-16');
     await expect(
       page.getByLabel('Timecard timezones').getByText('America/Chicago', { exact: true }),
     ).toBeVisible();
@@ -747,21 +746,21 @@ test.describe('DSP calendar dates', () => {
       dspId,
     );
     await page.reload();
-    await expect(input).toHaveValue('2026-09-16');
-    await input.fill('2026-09-15');
+    await expectDate(page, '2026-09-16');
+    await setDate(page, '2026-09-15');
     await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
     await page.reload();
-    await expect(input).toHaveValue('2026-09-15');
+    await expectDate(page, '2026-09-15');
     await page.getByRole('button', { name: 'Today', exact: true }).click();
-    await expect(input).toHaveValue('2026-09-16');
+    await expectDate(page, '2026-09-16');
     // The DSP's midnight, not the viewer's, opens the next day.
     await page.clock.setFixedTime(new Date('2026-09-17T05:01:00Z'));
     await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
     await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-    await expect(input).toHaveAttribute('max', '2026-09-17');
-    await expect(input).toHaveValue('2026-09-16');
+    await expect(page.getByRole('button', { name: 'Next day', exact: true })).toBeEnabled();
+    await expectDate(page, '2026-09-16');
     await page.getByRole('button', { name: 'Today', exact: true }).click();
-    await expect(input).toHaveValue('2026-09-17');
+    await expectDate(page, '2026-09-17');
   });
 
   test('activity times follow the DSP clock, with no personal timezone setting', async ({

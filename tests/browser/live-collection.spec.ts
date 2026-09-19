@@ -1,5 +1,5 @@
 import type { Route } from '@playwright/test';
-import { test, expect, demo, login } from './fixtures.js';
+import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
 import { paycomDefaults } from '../../shared/paycom.js';
 
 test('driver results update open timecards and meal breaks without resetting the view', async ({
@@ -72,7 +72,7 @@ test('driver results update open timecards and meal breaks without resetting the
   await login(page, demo.member);
   await page.getByRole('heading', { name: 'Currently under development' }).waitFor();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  await page.getByLabel('Paycom date').fill(date);
+  await setDate(page, date);
   await page.getByRole('button', { name: 'View punches for Live Driver' }).click();
   await expect(page.getByRole('dialog')).toContainText('17:00');
   await expect.poll(() => waiting.size).toBe(1);
@@ -117,7 +117,7 @@ test('driver results update open timecards and meal breaks without resetting the
     'aria-expanded',
     'true',
   );
-  await expect(page.getByLabel('Paycom date')).toHaveValue(date);
+  await expectDate(page, date);
   failNextRead = true;
   meals = [{ ...meals[0], lastDelivery: `${date}T21:24:00Z` }];
   await announce();
@@ -143,7 +143,7 @@ test('driver results update open timecards and meal breaks without resetting the
   await expect(page.locator('.meal-gap.over-limit')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Gaps > 5 min 0', exact: true })).toBeVisible();
 
-  await page.getByLabel('Paycom date').fill('2026-09-14');
+  await setDate(page, '2026-09-14');
   await announce();
   await expect(page.getByText('No meal breaks or punches for this date')).toBeVisible();
   await page.unrouteAll({ behavior: 'ignoreErrors' });
