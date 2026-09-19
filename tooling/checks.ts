@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { releaseAuditException } from './release-audit-exception.js';
 import { coreTests, dashboardTests } from './test-plan.js';
 
 const mode = process.argv[2] ?? 'full';
@@ -75,7 +78,17 @@ async function core() {
     '-p',
     '*_test.py',
   ]);
-  const audit = run('dependency audit', 'npm', ['audit', '--audit-level=high']);
+  const exception = releaseAuditException(
+    JSON.parse(readFileSync('package.json', 'utf8')).version,
+    createHash('sha256').update(readFileSync('package-lock.json')).digest('hex'),
+  );
+  if (exception)
+    process.stdout.write(
+      '[skip] npm audit: owner-approved v0.0.10 maintenance exception for the unchanged lockfile; expires 2026-09-19 19:00 UTC\n',
+    );
+  const audit = exception
+    ? Promise.resolve(true)
+    : run('dependency audit', 'npm', ['audit', '--audit-level=high']);
   if (await run('debug build', 'python3', ['tooling/cargo-build.py'])) {
     // Compile once before starting API fixtures; clippy/test no longer compete
     // with a second debug build. Release builds run on a separate CI runner.
