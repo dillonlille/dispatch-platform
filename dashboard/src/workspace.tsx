@@ -26,7 +26,8 @@ import {
 } from './ui/index.js';
 import { time, timeOfDay, title } from './lib/format.js';
 import { can } from './app/permissions.js';
-import { EmployeesPage, TimecardsPage } from './dsp.js';
+import { EmployeesPage } from './features/timecard/EmployeesPage.js';
+import { TimecardsPage } from './features/timecard/TimecardsPage.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './features/timecard/DateControls.js';
 import { localDate } from '../../shared/meal-breaks.js';

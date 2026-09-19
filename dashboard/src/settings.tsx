@@ -4,7 +4,7 @@ import { api, useData } from './app/api.js';
 import { DataState, DetailList, Empty, ErrorBox, Header, Tabs } from './ui/index.js';
 import { can } from './app/permissions.js';
 import { AuditLog } from './audit.js';
-import { ConnectionsPage } from './dsp.js';
+import { ConnectionsPage } from './features/connections/index.js';
 import { useAction } from './app/useAction.js';
 import { ThemeSection } from './features/settings/ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from './app/navigation.js';
