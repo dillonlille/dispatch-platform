@@ -30,17 +30,21 @@ import { leavePresence, usePresence } from './presence.js';
 // The role a platform owner looks through survives a reload of this tab and is
 // forgotten once they leave the DSP.
 const VIEW_ROLE = 'dispatch-view-role';
+let viewRole: string | null | undefined;
 function savedRole(dspId: string) {
-  try {
-    const [dsp, role] = sessionStorage.getItem(VIEW_ROLE)?.split(' ') ?? [];
-    return dsp === dspId ? role : undefined;
-  } catch {
-    return undefined;
-  }
+  if (viewRole === undefined)
+    try {
+      viewRole = sessionStorage.getItem(VIEW_ROLE);
+    } catch {
+      viewRole = null;
+    }
+  const [dsp, role] = viewRole?.split(' ') ?? [];
+  return dsp === dspId ? role : undefined;
 }
 function saveRole(dspId?: string, roleId?: string) {
+  viewRole = dspId && roleId ? `${dspId} ${roleId}` : null;
   try {
-    if (dspId && roleId) sessionStorage.setItem(VIEW_ROLE, `${dspId} ${roleId}`);
+    if (viewRole) sessionStorage.setItem(VIEW_ROLE, viewRole);
     else sessionStorage.removeItem(VIEW_ROLE);
   } catch {
     /* The role still applies until the page reloads. */
