@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { JobMetrics } from '../../shared/contracts/index.js';
-import { title } from './ui.js';
+import { title } from './lib/format.js';
 
 export function duration(ms: number | null) {
   if (ms === null) return '—';

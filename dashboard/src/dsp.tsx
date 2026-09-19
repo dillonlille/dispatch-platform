@@ -4,11 +4,23 @@ import { BrowserVerification } from './browser-verification.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
 import { localDate } from '../../shared/meal-breaks.js';
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowUpDown, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
+import { ArrowLeft, Plug, RefreshCw, ShieldCheck, Globe, Info } from 'lucide-react';
 import type { Connection, Employee, Timecard } from '../../shared/contracts/index.js';
 import { paycomColumns, type PaycomPreferences, type PaycomColumn } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
-import { Badge, Empty, ErrorBox, Loading, Modal, time, title } from './ui.js';
+import {
+  Badge,
+  ConfirmDialog,
+  DataState,
+  DetailList,
+  Empty,
+  ErrorBox,
+  Modal,
+  Pagination,
+  SortHeader,
+  usePagination,
+} from './ui/index.js';
+import { time, title } from './lib/format.js';
 import { messageOf } from './lib/errors.js';
 import { useAction } from './lib/useAction.js';
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
@@ -21,10 +33,10 @@ const pageSize = 100;
 export function EmployeesPage() {
   const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
   const [query, setQuery] = useUpdateState('employee-query', ''),
-    [offset, setOffset] = useUpdateState('employee-offset', 0),
+    [page, setPage] = useUpdateState('employee-page', 0),
     [employee, setEmployee] = useState<string>();
   const { data, error } = useData<Employees>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${offset}&limit=${pageSize}&direction=${direction}`,
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${page * pageSize}&limit=${pageSize}&direction=${direction}`,
   );
   if (employee) return <EmployeeDetail code={employee} close={() => setEmployee(undefined)} />;
   return (
@@ -39,79 +51,57 @@ export function EmployeesPage() {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setOffset(0);
+              setPage(0);
             }}
           />
         </label>
       </div>
-      <ErrorBox message={error} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <div className="paycom-data-table">
-          <div className="paycom-table-heading">
-            <h2>Employees</h2>
-            <span>{data.total} employees</span>
-          </div>
-          <div className="table-wrap">
-            <table aria-label="Employee directory">
-              <thead>
-                <tr>
-                  <th aria-sort={direction === 'asc' ? 'ascending' : 'descending'}>
-                    <button
-                      className="table-sort"
-                      onClick={() => {
+      <DataState data={data} error={error}>
+        {(data) => (
+          <div className="paycom-data-table">
+            <div className="paycom-table-heading">
+              <h2>Employees</h2>
+              <span>{data.total} employees</span>
+            </div>
+            <div className="table-wrap">
+              <table aria-label="Employee directory">
+                <thead>
+                  <tr>
+                    <SortHeader
+                      direction={direction === 'asc' ? 'asc' : 'desc'}
+                      onSort={() => {
                         setDirection(direction === 'asc' ? 'desc' : 'asc');
-                        setOffset(0);
+                        setPage(0);
                       }}
                     >
                       Employee
-                      <ArrowUpDown size={14} />
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.employees.map((person) => (
-                  <tr key={person.code}>
-                    <td>
-                      <button className="employee-link" onClick={() => setEmployee(person.code)}>
-                        {person.name}
-                      </button>
-                    </td>
+                    </SortHeader>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!data.employees.length && (
-            <Empty title={query ? 'No employees match your search' : 'No workforce data yet'}>
-              {query
-                ? 'Try another name.'
-                : 'Employees will appear after the first collection finishes.'}
-            </Empty>
-          )}
-          {(offset > 0 || data.total > pageSize) && (
-            <div className="paycom-pagination">
-              <span>
-                {offset + 1}–{Math.min(offset + pageSize, data.total)} of {data.total}
-              </span>
-              <button
-                disabled={!offset}
-                onClick={() => setOffset((v) => Math.max(0, v - pageSize))}
-              >
-                Previous
-              </button>
-              <button
-                disabled={offset + pageSize >= data.total}
-                onClick={() => setOffset((v) => v + pageSize)}
-              >
-                Next
-              </button>
+                </thead>
+                <tbody>
+                  {data.employees.map((person) => (
+                    <tr key={person.code}>
+                      <td>
+                        <button className="employee-link" onClick={() => setEmployee(person.code)}>
+                          {person.name}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
-      )}
+            {!data.employees.length && (
+              <Empty title={query ? 'No employees match your search' : 'No workforce data yet'}>
+                {query
+                  ? 'Try another name.'
+                  : 'Employees will appear after the first collection finishes.'}
+              </Empty>
+            )}
+            <Pagination page={page} pageSize={pageSize} total={data.total} onChange={setPage} />
+          </div>
+        )}
+      </DataState>
     </div>
   );
 }
@@ -125,65 +115,60 @@ function EmployeeDetail({ code, close }: { code: string; close: () => void }) {
         <ArrowLeft size={16} />
         Back to employees
       </button>
-      <ErrorBox message={error} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <>
-          <div className="paycom-day-toolbar">
-            <div>
-              <h2>{data.employee.name}</h2>
-              <p className="paycom-source-note">{data.employee.position}</p>
-            </div>
-            <Badge value={data.employee.active ? 'active' : 'inactive'} />
-          </div>
-          <dl className="paycom-employee-details">
-            {[
-              ['Employee code', code],
-              ['Department', data.employee.department],
-              ['Delivery station', data.employee.station],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>{value || '—'}</dd>
+      <DataState data={data} error={error}>
+        {(data) => (
+          <>
+            <div className="paycom-day-toolbar">
+              <div>
+                <h2>{data.employee.name}</h2>
+                <p className="paycom-source-note">{data.employee.position}</p>
               </div>
-            ))}
-          </dl>
-          <h2>Employee timecard</h2>
-          <div className="paycom-data-table">
-            <div className="table-wrap">
-              <table className="paycom-day-table" aria-label="Employee period timecard">
-                <thead>
-                  <tr>
-                    {[
-                      'Date',
-                      'Clock in',
-                      'Lunch out',
-                      'Lunch in',
-                      'Clock out',
-                      'Hours',
-                      'Punch status',
-                    ].map((label) => (
-                      <th key={label}>{label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.timecards.map((card) => (
-                    <tr key={card.date}>
-                      <td>{card.date}</td>
-                      <PunchCells card={card} />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Badge value={data.employee.active ? 'active' : 'inactive'} />
             </div>
-          </div>
-          <p className="paycom-source-note">
-            Blank days indicate no recorded activity, not an absence.
-          </p>
-        </>
-      )}
+            <DetailList
+              className="paycom-employee-details"
+              items={[
+                ['Employee code', code || '—'],
+                ['Department', data.employee.department || '—'],
+                ['Delivery station', data.employee.station || '—'],
+              ]}
+            />
+            <h2>Employee timecard</h2>
+            <div className="paycom-data-table">
+              <div className="table-wrap">
+                <table className="paycom-day-table" aria-label="Employee period timecard">
+                  <thead>
+                    <tr>
+                      {[
+                        'Date',
+                        'Clock in',
+                        'Lunch out',
+                        'Lunch in',
+                        'Clock out',
+                        'Hours',
+                        'Punch status',
+                      ].map((label) => (
+                        <th key={label}>{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.timecards.map((card) => (
+                      <tr key={card.date}>
+                        <td>{card.date}</td>
+                        <PunchCells card={card} />
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="paycom-source-note">
+              Blank days indicate no recorded activity, not an absence.
+            </p>
+          </>
+        )}
+      </DataState>
     </div>
   );
 }
@@ -237,7 +222,7 @@ export function TimecardsPage({
   timezone: string;
   preferences: PaycomPreferences;
 }) {
-  const [offset, setOffset] = useUpdateState('timecard-offset', 0);
+  const [requestedPage, setPage] = useUpdateState('timecard-page', 0);
   const calendarToday = localDate(timezone);
   const [sort, setSort] = useUpdateState('timecard-sort', 'name'),
     [direction, setDirection] = useUpdateState('timecard-direction', 'asc'),
@@ -256,11 +241,14 @@ export function TimecardsPage({
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? stale;
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);
+  const { page, start, end } = usePagination(requestedPage, data?.rows.length ?? 0, pageSize);
   function order(key: string) {
     setDirection(sort === key && direction === 'asc' ? 'desc' : 'asc');
     setSort(key);
-    setOffset(0);
+    setPage(0);
   }
+  const sorted = (key: string) =>
+    sort === key ? (direction === 'asc' ? 'asc' : 'desc') : undefined;
   return (
     <div className="paycom-data-view">
       <div className="paycom-data-table paycom-timecard-table">
@@ -276,105 +264,72 @@ export function TimecardsPage({
             today={calendarToday}
             onChange={(value) => {
               onDateChange(value);
-              setOffset(0);
+              setPage(0);
               setSelectedCode(undefined);
             }}
           />
         </div>
-        <ErrorBox message={error} />
-        {!data ? (
-          error ? null : (
-            <Loading />
-          )
-        ) : !data.available ? (
-          <Empty title="No collection covers this date">
-            Choose another date or collect the current pay period.
-          </Empty>
-        ) : (
-          <div className="paycom-day-results" aria-busy={!current} inert={!current}>
-            <div className="table-wrap">
-              <table className="paycom-day-table" aria-label="Daily employee timecards">
-                <thead>
-                  <tr>
-                    <th
-                      aria-sort={
-                        sort === 'name'
-                          ? direction === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : 'none'
-                      }
-                    >
-                      <button className="table-sort" onClick={() => order('name')}>
-                        Employee
-                        <ArrowUpDown size={14} />
-                      </button>
-                    </th>
-                    {paycomColumns.map(([key, label]) => (
-                      <th
-                        key={key}
-                        aria-sort={
-                          sort === key ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'
-                        }
-                      >
-                        <button className="table-sort" onClick={() => order(key)}>
-                          {label}
-                          <ArrowUpDown size={14} />
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.rows.slice(offset, offset + pageSize).map((card) => (
-                    <tr key={card.employeeCode}>
-                      <td>
-                        <button
-                          className="employee-timecard"
-                          aria-label={`View punches for ${card.name}`}
-                          onClick={() => setSelectedCode(card.employeeCode)}
-                        >
-                          {card.name}
-                        </button>
-                      </td>
-                      <PunchCells card={card} />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {(offset > 0 || data.rows.length > pageSize) && (
-              <div className="paycom-pagination">
-                <span>
-                  {offset + 1}–{Math.min(offset + pageSize, data.rows.length)} of {data.rows.length}
-                </span>
-                <button
-                  disabled={!offset}
-                  onClick={() => setOffset(Math.max(0, offset - pageSize))}
-                >
-                  Previous
-                </button>
-                <button
-                  disabled={offset + pageSize >= data.rows.length}
-                  onClick={() => setOffset(offset + pageSize)}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-            {!data.rows.length && (
-              <Empty
-                title={
-                  preferences.driver_departments?.length === 0
-                    ? 'No driver departments selected'
-                    : 'No employees match your Timecard settings'
-                }
-              >
-                Your DSP owner can choose which departments appear in Timecard Settings.
+        <DataState data={data} error={error} failed={Boolean(error)}>
+          {(data) =>
+            !data.available ? (
+              <Empty title="No collection covers this date">
+                Choose another date or collect the current pay period.
               </Empty>
-            )}
-          </div>
-        )}
+            ) : (
+              <div className="paycom-day-results" aria-busy={!current} inert={!current}>
+                <div className="table-wrap">
+                  <table className="paycom-day-table" aria-label="Daily employee timecards">
+                    <thead>
+                      <tr>
+                        <SortHeader direction={sorted('name')} onSort={() => order('name')}>
+                          Employee
+                        </SortHeader>
+                        {paycomColumns.map(([key, label]) => (
+                          <SortHeader key={key} direction={sorted(key)} onSort={() => order(key)}>
+                            {label}
+                          </SortHeader>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.rows.slice(start, end).map((card) => (
+                        <tr key={card.employeeCode}>
+                          <td>
+                            <button
+                              className="employee-timecard"
+                              aria-label={`View punches for ${card.name}`}
+                              onClick={() => setSelectedCode(card.employeeCode)}
+                            >
+                              {card.name}
+                            </button>
+                          </td>
+                          <PunchCells card={card} />
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  page={page}
+                  pageSize={pageSize}
+                  total={data.rows.length}
+                  onChange={setPage}
+                />
+                {!data.rows.length && (
+                  <Empty
+                    title={
+                      preferences.driver_departments?.length === 0
+                        ? 'No driver departments selected'
+                        : 'No employees match your Timecard settings'
+                    }
+                  >
+                    Your DSP owner can choose which departments appear in Timecard Settings.
+                  </Empty>
+                )}
+              </div>
+            )
+          }
+        </DataState>
         <footer className="paycom-timecard-footer" aria-label="Timecard timezones">
           <span>
             <Globe size={16} aria-hidden="true" />
@@ -524,132 +479,125 @@ function ConnectionCard({
   }
   return (
     <>
-      <ErrorBox message={error} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <article className="archived-connection-card">
-          <header>
-            <h3>
-              <Plug size={20} />
-              {name}
-            </h3>
-          </header>
-          <div className="archived-connection-content">
-            <div role="status">
-              <Badge value={saving ? 'signing_in' : data.status} />
+      <DataState data={data} error={error}>
+        {(data) => (
+          <article className="archived-connection-card">
+            <header>
+              <h3>
+                <Plug size={20} />
+                {name}
+              </h3>
+            </header>
+            <div className="archived-connection-content">
+              <div role="status">
+                <Badge value={saving ? 'signing_in' : data.status} />
+              </div>
+              <p className="muted">
+                {saving
+                  ? `Signing in to ${name}…`
+                  : data.status === 'ready'
+                    ? `Your ${name} connection is ready to use.`
+                    : data.enabled
+                      ? 'Test your connection or update the saved credentials.'
+                      : `Connect your ${name} account to get started.`}
+              </p>
+              {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
+              {!saving && data.status === 'needs_verification' && (
+                <div className="verification">
+                  <h3>
+                    {provider === 'cortex'
+                      ? 'Finish signing in to Cortex'
+                      : 'Paycom needs your verification'}
+                  </h3>
+                  <p>
+                    {data.verificationSessionId
+                      ? 'Complete the verification in the browser window, then press Submit to continue.'
+                      : 'Enter the verification code from your provider.'}
+                  </p>
+                  {data.verificationSessionId ? (
+                    <button type="button" onClick={() => setClosedVerification(undefined)}>
+                      Open verification window
+                    </button>
+                  ) : (
+                    <form
+                      className="inline-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void verify.run(new FormData(event.currentTarget).get('code'));
+                      }}
+                    >
+                      <input
+                        name="code"
+                        aria-label="Verification code"
+                        autoComplete="one-time-code"
+                        required
+                        maxLength={128}
+                      />
+                      <button className="primary">Verify</button>
+                    </form>
+                  )}
+                  {development && !data.verificationSessionId && (
+                    <small>Synthetic fixture verification code: 123456.</small>
+                  )}
+                </div>
+              )}
+
+              {data.lastVerifiedAt && (
+                <p className="muted">Last checked: {time(data.lastVerifiedAt, timezone)}</p>
+              )}
             </div>
-            <p className="muted">
-              {saving
-                ? `Signing in to ${name}…`
-                : data.status === 'ready'
-                  ? `Your ${name} connection is ready to use.`
-                  : data.enabled
-                    ? 'Test your connection or update the saved credentials.'
-                    : `Connect your ${name} account to get started.`}
-            </p>
-            {!saving && <ErrorBox message={saveError || (data.error ? title(data.error) : '')} />}
-            {!saving && data.status === 'needs_verification' && (
-              <div className="verification">
-                <h3>
-                  {provider === 'cortex'
-                    ? 'Finish signing in to Cortex'
-                    : 'Paycom needs your verification'}
-                </h3>
-                <p>
-                  {data.verificationSessionId
-                    ? 'Complete the verification in the browser window, then press Submit to continue.'
-                    : 'Enter the verification code from your provider.'}
-                </p>
-                {data.verificationSessionId ? (
-                  <button type="button" onClick={() => setClosedVerification(undefined)}>
-                    Open verification window
-                  </button>
-                ) : (
-                  <form
-                    className="inline-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void verify.run(new FormData(event.currentTarget).get('code'));
+            <footer>
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() => {
+                  setCredentialError('');
+                  setEditing(true);
+                }}
+              >
+                {data.enabled ? 'Update credentials' : `Connect ${name}`}
+              </button>
+              {data.enabled && (
+                <>
+                  <button
+                    disabled={
+                      busy || data.status === 'signing_in' || data.status === 'needs_verification'
+                    }
+                    onClick={() => {
+                      setSaveError('');
+                      void check.run();
                     }}
                   >
-                    <input
-                      name="code"
-                      aria-label="Verification code"
-                      autoComplete="one-time-code"
-                      required
-                      maxLength={128}
-                    />
-                    <button className="primary">Verify</button>
-                  </form>
-                )}
-                {development && !data.verificationSessionId && (
-                  <small>Synthetic fixture verification code: 123456.</small>
-                )}
-              </div>
-            )}
-
-            {data.lastVerifiedAt && (
-              <p className="muted">Last checked: {time(data.lastVerifiedAt, timezone)}</p>
-            )}
-          </div>
-          <footer>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() => {
-                setCredentialError('');
-                setEditing(true);
-              }}
-            >
-              {data.enabled ? 'Update credentials' : `Connect ${name}`}
-            </button>
-            {data.enabled && (
-              <>
-                <button
-                  disabled={
-                    busy || data.status === 'signing_in' || data.status === 'needs_verification'
-                  }
-                  onClick={() => {
-                    setSaveError('');
-                    void check.run();
-                  }}
-                >
-                  <RefreshCw size={16} />
-                  Test connection
-                </button>
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => setDisconnecting(true)}
-                >
-                  Disconnect
-                </button>
-              </>
-            )}
-          </footer>
-        </article>
-      )}
+                    <RefreshCw size={16} />
+                    Test connection
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => setDisconnecting(true)}
+                  >
+                    Disconnect
+                  </button>
+                </>
+              )}
+            </footer>
+          </article>
+        )}
+      </DataState>
       {disconnecting && (
-        <Modal title={`Disconnect ${name}?`} onClose={() => setDisconnecting(false)}>
-          <p>
-            Features will lose access to this service until you reconnect. Previously collected data
-            will remain available.
-          </p>
-          <div className="form-actions">
-            <button onClick={() => setDisconnecting(false)}>Cancel</button>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() => {
-                setSaveError('');
-                void disconnect.run();
-              }}
-            >
-              Disconnect
-            </button>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          title={`Disconnect ${name}?`}
+          confirm="Disconnect"
+          busy={busy}
+          onConfirm={() => {
+            setSaveError('');
+            void disconnect.run();
+          }}
+          onCancel={() => setDisconnecting(false)}
+        >
+          Features will lose access to this service until you reconnect. Previously collected data
+          will remain available.
+        </ConfirmDialog>
       )}
       {editing && (
         <Modal title={`${name} credentials`} onClose={() => setEditing(false)}>

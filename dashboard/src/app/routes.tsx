@@ -14,7 +14,9 @@ import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { PaycomSettingsPage } from '../paycom-settings.js';
 import { AuditPage, DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../platform.js';
 import { SettingsPage } from '../settings.js';
-import { ErrorBox, can, title } from '../ui.js';
+import { ErrorBox } from '../ui/index.js';
+import { title } from '../lib/format.js';
+import { can } from './permissions.js';
 import { HomePage, PaycomPage, TeamPage } from '../workspace.js';
 
 type Access = { session: SessionView; view?: DspView };

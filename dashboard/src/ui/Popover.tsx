@@ -1,18 +1,32 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Ellipsis } from 'lucide-react';
 
-export function DspActionsMenu({ name, children }: { name: string; children: ReactNode }) {
+/** A `<details>` menu that closes on Escape, on a press outside it, and once an item is chosen. */
+export function Popover({
+  label,
+  trigger,
+  children,
+  className,
+  triggerClassName,
+  anchored = false,
+}: {
+  label: string;
+  trigger: ReactNode;
+  children: ReactNode;
+  className: string;
+  triggerClassName?: string;
+  /** Places the panel against the viewport so a scrolling or clipping ancestor cannot cut it off. */
+  anchored?: boolean;
+}) {
   const details = useRef<HTMLDetailsElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-
   useLayoutEffect(() => {
     if (!open) return;
     const element = details.current!;
-    const trigger = element.querySelector('summary')!;
-    const menu = element.querySelector<HTMLElement>('.account-popover')!;
-    // Keep the popup outside table clipping while anchoring it to this row.
+    const summary = element.querySelector('summary')!;
+    const menu = panel.current!;
     const place = () => {
-      const anchor = trigger.getBoundingClientRect();
+      const anchor = summary.getBoundingClientRect();
       if (
         anchor.bottom < 0 ||
         anchor.top > window.innerHeight ||
@@ -34,38 +48,41 @@ export function DspActionsMenu({ name, children }: { name: string; children: Rea
       if (!element.contains(event.target as Node)) element.open = false;
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        element.open = false;
-        trigger.focus();
-      }
+      if (event.key !== 'Escape') return;
+      element.open = false;
+      summary.focus();
     };
-    place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, { capture: true, passive: true });
+    if (anchored) {
+      place();
+      window.addEventListener('resize', place);
+      window.addEventListener('scroll', place, { capture: true, passive: true });
+    }
     document.addEventListener('pointerdown', dismiss);
     document.addEventListener('keydown', escape);
     return () => {
-      menu.style.visibility = 'hidden';
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      if (anchored) {
+        menu.style.visibility = 'hidden';
+        window.removeEventListener('resize', place);
+        window.removeEventListener('scroll', place, true);
+      }
       document.removeEventListener('pointerdown', dismiss);
       document.removeEventListener('keydown', escape);
     };
-  }, [open]);
-
+  }, [open, anchored]);
   return (
     <details
       ref={details}
-      className="row-menu"
+      className={className}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary aria-label={`Actions for ${name}`}>
-        <Ellipsis size={18} />
+      <summary className={triggerClassName} aria-label={label}>
+        {trigger}
       </summary>
       <div
+        ref={panel}
         className="account-popover"
         onClick={() => {
-          if (details.current) details.current.open = false;
+          details.current!.open = false;
         }}
       >
         {children}

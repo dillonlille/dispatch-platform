@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import type { Job } from '../../shared/contracts/index.js';
 import { collectionHistory } from './collection-history.js';
 import { duration, memory } from './job-performance.js';
-import { Badge, time, deviceTimezone } from './ui.js';
+import { Badge, DetailList } from './ui/index.js';
+import { time, deviceTimezone } from './lib/format.js';
 
 export function CollectionHistory({ jobs }: { jobs: Job[] }) {
   const groups = useMemo(() => collectionHistory(jobs), [jobs]);
@@ -36,24 +37,18 @@ export function CollectionHistory({ jobs }: { jobs: Job[] }) {
           </select>
         </label>
       </div>
-      <dl className="collection-history-stats">
-        <div>
-          <dt>Last successful collection</dt>
-          <dd>{last ? time(last, deviceTimezone()) : 'None in this history'}</dd>
-        </div>
-        <div>
-          <dt>Median collection time</dt>
-          <dd>{duration(group.medianMs)}</dd>
-        </div>
-        <div>
-          <dt>95th percentile</dt>
-          <dd>{group.samples < 5 ? 'Needs 5 full runs' : duration(group.p95Ms)}</dd>
-        </div>
-        <div>
-          <dt>Full runs measured</dt>
-          <dd>{group.samples}</dd>
-        </div>
-      </dl>
+      <DetailList
+        className="collection-history-stats"
+        items={[
+          [
+            'Last successful collection',
+            last ? time(last, deviceTimezone()) : 'None in this history',
+          ],
+          ['Median collection time', duration(group.medianMs)],
+          ['95th percentile', group.samples < 5 ? 'Needs 5 full runs' : duration(group.p95Ms)],
+          ['Full runs measured', group.samples],
+        ]}
+      />
       {group.warnings.map((warning) => (
         <p className="notice" key={warning}>
           {warning}

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Brand } from './brand.js';
 import { api, useData } from './api.js';
-import { ErrorBox } from './ui.js';
+import { ErrorBox } from './ui/index.js';
 import { messageOf } from './lib/errors.js';
 import { dspHash, hashQuery, navigate, platformHash, signInHash } from './app/navigation.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {

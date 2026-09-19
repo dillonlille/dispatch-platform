@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, useData } from './api.js';
-import { Header, Tabs, ErrorBox, Loading, Empty, can } from './ui.js';
+import { DataState, DetailList, Empty, ErrorBox, Header, Tabs } from './ui/index.js';
+import { can } from './app/permissions.js';
 import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
 import { useAction } from './lib/useAction.js';
@@ -48,52 +49,33 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
             <div>
               <h2>Account</h2>
             </div>
-            <dl className="detail-list">
-              <div>
-                <dt>First name</dt>
-                <dd>{session.user.firstName}</dd>
-              </div>
-              <div>
-                <dt>Last name</dt>
-                <dd>{session.user.lastName}</dd>
-              </div>
-              <div>
-                <dt>Email address</dt>
-                <dd>{session.user.email}</dd>
-              </div>
-              <div>
-                <dt>Role</dt>
-                <dd>
-                  {session.user.platformOwner
+            <DetailList
+              items={[
+                ['First name', session.user.firstName],
+                ['Last name', session.user.lastName],
+                ['Email address', session.user.email],
+                [
+                  'Role',
+                  session.user.platformOwner
                     ? 'Platform owner'
-                    : (view?.role.name ?? 'Team member')}
-                </dd>
-              </div>
-            </dl>
+                    : (view?.role.name ?? 'Team member'),
+                ],
+              ]}
+            />
           </section>
           {view && (
             <section className="settings-section">
               <div>
                 <h2>Workspace</h2>
               </div>
-              <dl className="detail-list">
-                <div>
-                  <dt>DSP</dt>
-                  <dd>{view.dsp.name}</dd>
-                </div>
-                <div>
-                  <dt>Station</dt>
-                  <dd>{view.profile?.stationCode || '—'}</dd>
-                </div>
-                <div>
-                  <dt>Business timezone</dt>
-                  <dd>{view.dsp.timezone}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>{view.dsp.status}</dd>
-                </div>
-              </dl>
+              <DetailList
+                items={[
+                  ['DSP', view.dsp.name],
+                  ['Station', view.profile?.stationCode || '—'],
+                  ['Business timezone', view.dsp.timezone],
+                  ['Status', view.dsp.status],
+                ]}
+              />
             </section>
           )}
         </>
@@ -196,33 +178,34 @@ function SupportVisibility() {
       <div>
         <h2>Show Platform support in audit logs</h2>
       </div>
-      <ErrorBox message={error} />
-      {!dsps ? (
-        !error && <Loading />
-      ) : !dsps.length ? (
-        <Empty title="No DSPs" />
-      ) : (
-        <div className="permission-rows support-visibility">
-          {dsps.map((dsp) => (
-            <label className="permission-row" key={dsp.id}>
-              <span>{dsp.name}</span>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={chosen[dsp.id] ?? dsp.profile.supportVisible}
-                onChange={(event) => {
-                  const visible = event.target.checked;
-                  setChosen((current) => ({ ...current, [dsp.id]: visible }));
-                  void show.run(dsp, visible).then((saved) => {
-                    if (!saved) setChosen((current) => ({ ...current, [dsp.id]: !visible }));
-                    refresh();
-                  });
-                }}
-              />
-            </label>
-          ))}
-        </div>
-      )}
+      <DataState data={dsps} error={error} failed={Boolean(error)}>
+        {(dsps) =>
+          !dsps.length ? (
+            <Empty title="No DSPs" />
+          ) : (
+            <div className="permission-rows support-visibility">
+              {dsps.map((dsp) => (
+                <label className="permission-row" key={dsp.id}>
+                  <span>{dsp.name}</span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={chosen[dsp.id] ?? dsp.profile.supportVisible}
+                    onChange={(event) => {
+                      const visible = event.target.checked;
+                      setChosen((current) => ({ ...current, [dsp.id]: visible }));
+                      void show.run(dsp, visible).then((saved) => {
+                        if (!saved) setChosen((current) => ({ ...current, [dsp.id]: !visible }));
+                        refresh();
+                      });
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          )
+        }
+      </DataState>
     </section>
   );
 }

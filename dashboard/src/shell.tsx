@@ -2,54 +2,38 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, X, Check, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { Brand } from './brand.js';
+import { Popover, useFocusTrap } from './ui/index.js';
 import { dspHash, platformHash } from './app/navigation.js';
 import type { DspRouteId, PlatformRouteId } from './app/routes.js';
 
 // Lets a platform owner look through any role the DSP has, custom ones included.
 function ViewRoleMenu({ view, viewAs }: { view: DspView; viewAs: (roleId?: string) => void }) {
-  const details = useRef<HTMLDetailsElement>(null);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    const dismiss = (event: PointerEvent) => {
-      if (!details.current?.contains(event.target as Node)) details.current!.open = false;
-    };
-    document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
-  }, [open]);
   const current = (role: { id: string; owner: boolean }) =>
     view.role.owner ? role.owner : role.id === view.role.id;
   return (
-    <details
-      ref={details}
+    <Popover
       className="view-role-menu"
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.currentTarget.open = false;
-        event.currentTarget.querySelector('summary')?.focus();
-      }}
+      label="View as role"
+      trigger={
+        <>
+          {view.roles?.find(current)?.name ?? view.role.name}
+          <ChevronDown aria-hidden="true" />
+        </>
+      }
     >
-      <summary aria-label="View as role">
-        {view.roles?.find(current)?.name ?? view.role.name}
-        <ChevronDown aria-hidden="true" />
-      </summary>
-      <div className="account-popover">
-        {view.roles?.map((role) => (
-          <button
-            key={role.id}
-            aria-current={current(role) || undefined}
-            onClick={() => {
-              details.current!.open = false;
-              if (!current(role)) viewAs(role.owner ? undefined : role.id);
-            }}
-          >
-            <span>{role.name}</span>
-            {current(role) && <Check size={16} aria-hidden="true" />}
-          </button>
-        ))}
-      </div>
-    </details>
+      {view.roles?.map((role) => (
+        <button
+          key={role.id}
+          aria-current={current(role) || undefined}
+          onClick={() => {
+            if (!current(role)) viewAs(role.owner ? undefined : role.id);
+          }}
+        >
+          <span>{role.name}</span>
+          {current(role) && <Check size={16} aria-hidden="true" />}
+        </button>
+      ))}
+    </Popover>
   );
 }
 
@@ -88,39 +72,7 @@ export function Shell({
   }, [label]);
   // Navigation closes the drawer; a DSP view that finishes loading behind it does not.
   useEffect(() => setMobile(false), [page, dspId]);
-  useEffect(() => {
-    if (!mobile) return;
-    const before = document.body.style.overflow;
-    const previousFocus = document.activeElement as HTMLElement | null;
-    document.body.style.overflow = 'hidden';
-    const focusable = () =>
-      Array.from(
-        sidebar.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), summary') ??
-          [],
-      ).filter((element) => element.getClientRects().length > 0);
-    focusable()[0]?.focus();
-    const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMobile(false);
-      if (event.key === 'Tab') {
-        const elements = focusable();
-        const first = elements[0],
-          last = elements.at(-1);
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', key);
-    return () => {
-      document.body.style.overflow = before;
-      document.removeEventListener('keydown', key);
-      previousFocus?.focus();
-    };
-  }, [mobile]);
+  useFocusTrap(sidebar, { active: mobile, onEscape: () => setMobile(false) });
   return (
     <div className="application">
       <a
@@ -173,45 +125,41 @@ export function Shell({
           ))}
         </nav>
         <div className="sidebar-account">
-          <details
+          <Popover
             className="account-menu"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') event.currentTarget.open = false;
-            }}
-          >
-            <summary className="account-button" aria-label="Account menu">
-              <span className="avatar">
-                {session.user.firstName[0]}
-                {session.user.lastName[0]}
-              </span>
-              <span className="account-copy">
-                <strong>{name}</strong>
-                <span>
-                  {session.user.platformOwner
-                    ? `Platform owner${view ? ' · Viewing DSP' : ''}`
-                    : view
-                      ? view.role.name
-                      : 'Team member'}
+            triggerClassName="account-button"
+            label="Account menu"
+            trigger={
+              <>
+                <span className="avatar">
+                  {session.user.firstName[0]}
+                  {session.user.lastName[0]}
                 </span>
-              </span>
-              <ChevronDown aria-hidden="true" />
-            </summary>
-            <div className="account-popover">
-              <a
-                href={dspId ? dspHash(dspId, 'settings') : platformHash('account')}
-                onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}
-              >
-                Account settings
-              </a>
-              {!session.user.platformOwner && session.dsps.length > 1 && (
-                <a href={platformHash()}>Switch DSP</a>
-              )}
-              <button onClick={logout}>
-                <LogOut size={16} />
-                Sign out
-              </button>
-            </div>
-          </details>
+                <span className="account-copy">
+                  <strong>{name}</strong>
+                  <span>
+                    {session.user.platformOwner
+                      ? `Platform owner${view ? ' · Viewing DSP' : ''}`
+                      : view
+                        ? view.role.name
+                        : 'Team member'}
+                  </span>
+                </span>
+                <ChevronDown aria-hidden="true" />
+              </>
+            }
+          >
+            <a href={dspId ? dspHash(dspId, 'settings') : platformHash('account')}>
+              Account settings
+            </a>
+            {!session.user.platformOwner && session.dsps.length > 1 && (
+              <a href={platformHash()}>Switch DSP</a>
+            )}
+            <button onClick={logout}>
+              <LogOut size={16} />
+              Sign out
+            </button>
+          </Popover>
         </div>
       </aside>
       <div className="main-area" inert={mobile}>

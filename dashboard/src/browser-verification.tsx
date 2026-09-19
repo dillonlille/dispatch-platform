@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import type { BrowserFrame, BrowserInput } from '../../shared/browser.js';
 import { api, ApiError } from './api.js';
-import { ErrorBox, Loading, Modal } from './ui.js';
+import { ErrorBox, Loading, Modal } from './ui/index.js';
 import { messageOf } from './lib/errors.js';
 
 export function BrowserVerification({

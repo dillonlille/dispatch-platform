@@ -10,7 +10,6 @@ import {
   Eye,
   Plug,
   RefreshCw,
-  Search,
   Settings,
   Shield,
   RotateCw,
@@ -29,7 +28,8 @@ import type {
   Permission,
 } from '../../shared/contracts/index.js';
 import { api, errorLabel, useData } from './api.js';
-import { Empty, ErrorBox, Loading, deviceTimezone, title } from './ui.js';
+import { DataState, Empty, ErrorBox, SearchInput } from './ui/index.js';
+import { deviceTimezone, title } from './lib/format.js';
 import { permissionLabels } from './roles.js';
 import { useAction } from './lib/useAction.js';
 import { dspHash } from './app/navigation.js';
@@ -548,16 +548,13 @@ export function AuditLog({ view }: { view?: DspView }) {
     <div className="audit-log" aria-busy={!data && Boolean(stale)}>
       <ErrorBox message={error || download.error || truncated} />
       <div className="audit-toolbar">
-        <label className="search">
-          <Search size={16} />
-          <input
-            type="search"
-            aria-label="Search activity"
-            placeholder="Search people, roles, schedules…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
+        <SearchInput
+          type="search"
+          label="Search activity"
+          placeholder="Search people, roles, schedules…"
+          value={search}
+          onChange={setSearch}
+        />
         {view && (
           <span className="audit-zone" title={timeZone}>
             Times in {zone}
@@ -640,160 +637,164 @@ export function AuditLog({ view }: { view?: DspView }) {
           </button>
         )}
       </div>
-      {!page ? (
-        !error && <Loading />
-      ) : !page.events.length ? (
-        <Empty title={filtered ? 'No matching activity' : 'No activity yet'} />
-      ) : (
-        <>
-          {days.map((group) => (
-            <section key={group.label} aria-label={group.label}>
-              <h2 className="audit-day">{group.label}</h2>
-              <ol className="audit-feed">
-                {entries(group.events).map((entry) => {
-                  const event = entry.events[0]!;
-                  const run = entry.events.length > 1;
-                  const expanded = open.has(entry.key);
-                  const reason = failure(event);
-                  const failed = event.action.endsWith('.failed') && reason;
-                  const retrying = event.action === 'collection.retrying';
-                  const Icon = retrying
-                    ? RotateCw
-                    : failed
-                      ? TriangleAlert
-                      : event.action === 'collection.completed'
-                        ? Check
-                        : views.has(event.action)
-                          ? Eye
-                          : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
-                  const text = run
-                    ? [...sentence(event), ` ${entry.events.length} times`]
-                    : sentence(event);
-                  const edits = event.changes.filter((change) => !facts.has(change.field));
-                  const granted = edits.filter((change) => change.field === 'permission');
-                  const detail = !edits.length && !spoken.has(event.action) && event.detail;
-                  // The second line reads left to right, its parts set apart by dots.
-                  const second: ReactNode[] = run
-                    ? []
-                    : [
-                        failed ? <span className="audit-failure">{failed}</span> : reason,
-                        ...notes(event, !view),
-                        detail && <span className="audit-pill">{detail}</span>,
-                        ...edits
-                          .filter((change) => change.field !== 'permission')
-                          .map((change, index) => <Change key={index} change={change} />),
-                        granted.length > 0 && (
-                          <span className="audit-change">
-                            {granted.map((change, index) => (
-                              <Change key={index} change={change} />
-                            ))}
-                          </span>
-                        ),
-                      ].filter(Boolean);
-                  return (
-                    <li
-                      key={entry.key}
-                      className={views.has(event.action) || retrying ? 'quiet' : undefined}
-                    >
-                      <button
-                        className="audit-row"
-                        aria-expanded={expanded}
-                        onClick={() => toggle(entry.key)}
-                      >
-                        <span
-                          className={`audit-icon${retrying ? '' : failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}${support(event) ? ' support' : ''}`}
+      <DataState data={page} failed={Boolean(error)}>
+        {(page) =>
+          !page.events.length ? (
+            <Empty title={filtered ? 'No matching activity' : 'No activity yet'} />
+          ) : (
+            <>
+              {days.map((group) => (
+                <section key={group.label} aria-label={group.label}>
+                  <h2 className="audit-day">{group.label}</h2>
+                  <ol className="audit-feed">
+                    {entries(group.events).map((entry) => {
+                      const event = entry.events[0]!;
+                      const run = entry.events.length > 1;
+                      const expanded = open.has(entry.key);
+                      const reason = failure(event);
+                      const failed = event.action.endsWith('.failed') && reason;
+                      const retrying = event.action === 'collection.retrying';
+                      const Icon = retrying
+                        ? RotateCw
+                        : failed
+                          ? TriangleAlert
+                          : event.action === 'collection.completed'
+                            ? Check
+                            : views.has(event.action)
+                              ? Eye
+                              : (areas.find(([id]) => id === event.area)?.[2] ?? Settings);
+                      const text = run
+                        ? [...sentence(event), ` ${entry.events.length} times`]
+                        : sentence(event);
+                      const edits = event.changes.filter((change) => !facts.has(change.field));
+                      const granted = edits.filter((change) => change.field === 'permission');
+                      const detail = !edits.length && !spoken.has(event.action) && event.detail;
+                      // The second line reads left to right, its parts set apart by dots.
+                      const second: ReactNode[] = run
+                        ? []
+                        : [
+                            failed ? <span className="audit-failure">{failed}</span> : reason,
+                            ...notes(event, !view),
+                            detail && <span className="audit-pill">{detail}</span>,
+                            ...edits
+                              .filter((change) => change.field !== 'permission')
+                              .map((change, index) => <Change key={index} change={change} />),
+                            granted.length > 0 && (
+                              <span className="audit-change">
+                                {granted.map((change, index) => (
+                                  <Change key={index} change={change} />
+                                ))}
+                              </span>
+                            ),
+                          ].filter(Boolean);
+                      return (
+                        <li
+                          key={entry.key}
+                          className={views.has(event.action) || retrying ? 'quiet' : undefined}
                         >
-                          <Icon size={16} aria-hidden />
-                        </span>
-                        <span className="audit-body">
-                          <span>
-                            {text.map((part, index) =>
-                              typeof part === 'string' ? (
-                                <Fragment key={index}>{part}</Fragment>
-                              ) : (
-                                <strong key={index}>{part.strong}</strong>
-                              ),
-                            )}
-                          </span>
-                          {second.length > 0 && (
-                            <span className="audit-sub">
-                              {second.map((part, index) => (
-                                <Fragment key={index}>
-                                  {index > 0 && <span aria-hidden>·</span>}
-                                  {typeof part === 'string' ? <span>{part}</span> : part}
-                                </Fragment>
-                              ))}
+                          <button
+                            className="audit-row"
+                            aria-expanded={expanded}
+                            onClick={() => toggle(entry.key)}
+                          >
+                            <span
+                              className={`audit-icon${retrying ? '' : failed ? ' failed' : event.action === 'collection.completed' ? ' done' : ''}${support(event) ? ' support' : ''}`}
+                            >
+                              <Icon size={16} aria-hidden />
                             </span>
-                          )}
-                        </span>
-                        <time dateTime={event.at}>
-                          {run
-                            ? `${clock.format(new Date(entry.events.at(-1)!.at))} – ${clock.format(new Date(event.at))}`
-                            : clock.format(new Date(event.at))}
-                          {run && <ChevronDown size={16} className="audit-chevron" aria-hidden />}
-                        </time>
-                      </button>
-                      {expanded && (
-                        <dl className="audit-detail">
-                          {run ? (
-                            <Row label="Times">
-                              {entry.events
-                                .map((visit) => clock.format(new Date(visit.at)))
-                                .join(', ')}
-                            </Row>
-                          ) : (
-                            <Row label="Exact time">{exact.format(new Date(event.at))}</Row>
-                          )}
-                          <Row label="By">{event.actorName}</Row>
-                          {!view && event.dspName && <Row label="DSP">{event.dspName}</Row>}
-                          {event.target && <Row label="Subject">{event.target}</Row>}
-                          {!run && event.detail && <Row label="Detail">{event.detail}</Row>}
-                          <Row label="Event">
-                            <code>
-                              {event.action} · #{event.id}
-                            </code>
-                          </Row>
-                          {!run && (event.target || event.ref) && (
-                            <div className="audit-links">
-                              {event.target && event.ref?.kind !== 'job' && (
-                                <button
-                                  className="text-button"
-                                  onClick={() => {
-                                    setSubject({
-                                      key: event.ref ? `${event.ref.kind}:${event.ref.id}` : '',
-                                      name: event.target!,
-                                    });
-                                    window.scrollTo({ top: 0 });
-                                  }}
-                                >
-                                  All activity involving {event.target}
-                                </button>
+                            <span className="audit-body">
+                              <span>
+                                {text.map((part, index) =>
+                                  typeof part === 'string' ? (
+                                    <Fragment key={index}>{part}</Fragment>
+                                  ) : (
+                                    <strong key={index}>{part.strong}</strong>
+                                  ),
+                                )}
+                              </span>
+                              {second.length > 0 && (
+                                <span className="audit-sub">
+                                  {second.map((part, index) => (
+                                    <Fragment key={index}>
+                                      {index > 0 && <span aria-hidden>·</span>}
+                                      {typeof part === 'string' ? <span>{part}</span> : part}
+                                    </Fragment>
+                                  ))}
+                                </span>
                               )}
-                              {view && event.ref && pages[event.ref.kind] && (
-                                <a href={dspHash(view.dsp.id, pages[event.ref.kind])}>
-                                  Open {routeLabel('dsp', pages[event.ref.kind]!)}
-                                </a>
+                            </span>
+                            <time dateTime={event.at}>
+                              {run
+                                ? `${clock.format(new Date(entry.events.at(-1)!.at))} – ${clock.format(new Date(event.at))}`
+                                : clock.format(new Date(event.at))}
+                              {run && (
+                                <ChevronDown size={16} className="audit-chevron" aria-hidden />
                               )}
-                            </div>
+                            </time>
+                          </button>
+                          {expanded && (
+                            <dl className="audit-detail">
+                              {run ? (
+                                <Row label="Times">
+                                  {entry.events
+                                    .map((visit) => clock.format(new Date(visit.at)))
+                                    .join(', ')}
+                                </Row>
+                              ) : (
+                                <Row label="Exact time">{exact.format(new Date(event.at))}</Row>
+                              )}
+                              <Row label="By">{event.actorName}</Row>
+                              {!view && event.dspName && <Row label="DSP">{event.dspName}</Row>}
+                              {event.target && <Row label="Subject">{event.target}</Row>}
+                              {!run && event.detail && <Row label="Detail">{event.detail}</Row>}
+                              <Row label="Event">
+                                <code>
+                                  {event.action} · #{event.id}
+                                </code>
+                              </Row>
+                              {!run && (event.target || event.ref) && (
+                                <div className="audit-links">
+                                  {event.target && event.ref?.kind !== 'job' && (
+                                    <button
+                                      className="text-button"
+                                      onClick={() => {
+                                        setSubject({
+                                          key: event.ref ? `${event.ref.kind}:${event.ref.id}` : '',
+                                          name: event.target!,
+                                        });
+                                        window.scrollTo({ top: 0 });
+                                      }}
+                                    >
+                                      All activity involving {event.target}
+                                    </button>
+                                  )}
+                                  {view && event.ref && pages[event.ref.kind] && (
+                                    <a href={dspHash(view.dsp.id, pages[event.ref.kind])}>
+                                      Open {routeLabel('dsp', pages[event.ref.kind]!)}
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                            </dl>
                           )}
-                        </dl>
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          ))}
-          <p className="audit-more">
-            Showing {page.events.length} of {page.total}
-            {page.events.length < page.total && limit < LOAD_LIMIT && (
-              <button onClick={() => setLimit((value) => Math.min(LOAD_LIMIT, value + PAGE))}>
-                Load more
-              </button>
-            )}
-          </p>
-        </>
-      )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </section>
+              ))}
+              <p className="audit-more">
+                Showing {page.events.length} of {page.total}
+                {page.events.length < page.total && limit < LOAD_LIMIT && (
+                  <button onClick={() => setLimit((value) => Math.min(LOAD_LIMIT, value + PAGE))}>
+                    Load more
+                  </button>
+                )}
+              </p>
+            </>
+          )
+        }
+      </DataState>
     </div>
   );
 }

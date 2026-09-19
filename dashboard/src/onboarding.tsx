@@ -1,6 +1,6 @@
 import { Brand } from './brand.js';
 import { api } from './api.js';
-import { ErrorBox } from './ui.js';
+import { ErrorBox } from './ui/index.js';
 import { useAction } from './lib/useAction.js';
 export function DspOnboarding({ complete }: { complete: () => Promise<void> }) {
   const save = useAction(

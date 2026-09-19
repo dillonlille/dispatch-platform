@@ -5,7 +5,6 @@ import {
   ArrowRight,
   RefreshCw,
   Plus,
-  Search,
   Ellipsis,
   Settings,
   AlertTriangle,
@@ -13,7 +12,20 @@ import {
 import type { Connection, DspView, Membership, Job, Role } from '../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
-import { Badge, Empty, ErrorBox, Header, Loading, Modal, Tabs, title, time, can } from './ui.js';
+import {
+  Badge,
+  ConfirmDialog,
+  DataState,
+  Empty,
+  ErrorBox,
+  Header,
+  Loading,
+  Modal,
+  SearchInput,
+  Tabs,
+} from './ui/index.js';
+import { title, time } from './lib/format.js';
+import { can } from './app/permissions.js';
 import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './paycom-day-controls.js';
@@ -378,81 +390,78 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
       {tab === 'members' && (
         <>
           <div className="table-toolbar">
-            <label className="search">
-              <Search />
-              <input
-                aria-label="Search members"
-                placeholder="Search members"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
+            <SearchInput
+              label="Search members"
+              placeholder="Search members"
+              value={search}
+              onChange={setSearch}
+            />
             <button className="icon-button" aria-label="Refresh members" onClick={refresh}>
               <RefreshCw size={16} />
             </button>
           </div>
-          {!data ? (
-            <Loading />
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: '45%' }}>Member</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map((member) => (
-                    <tr key={member.id}>
-                      <td>
-                        <div className="member-identity">
-                          <span className="avatar">
-                            {member.name
-                              .split(/\s+/)
-                              .slice(0, 2)
-                              .map((part) => part[0])
-                              .join('')}
-                          </span>
-                          <div>
-                            <strong>{member.name}</strong>
-                            <small>{member.email}</small>
-                          </div>
-                        </div>
-                      </td>
-                      <td>{member.role}</td>
-                      <td>
-                        <Badge value={member.status} />
-                      </td>
-                      <td>
-                        {canManage && grantable.some((role) => role.id === member.roleId) && (
-                          <button
-                            className="icon-button"
-                            aria-label={`Edit ${member.name}`}
-                            onClick={() => {
-                              setRemoving(false);
-                              setEditing(member);
-                            }}
-                          >
-                            <Ellipsis size={18} />
-                          </button>
-                        )}
-                      </td>
+          <DataState data={data}>
+            {() => (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '45%' }}>Member</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!members.length && (
-                <Empty title="No team members">
-                  Invite a member to give them access to this DSP.
-                </Empty>
-              )}
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {members.map((member) => (
+                      <tr key={member.id}>
+                        <td>
+                          <div className="member-identity">
+                            <span className="avatar">
+                              {member.name
+                                .split(/\s+/)
+                                .slice(0, 2)
+                                .map((part) => part[0])
+                                .join('')}
+                            </span>
+                            <div>
+                              <strong>{member.name}</strong>
+                              <small>{member.email}</small>
+                            </div>
+                          </div>
+                        </td>
+                        <td>{member.role}</td>
+                        <td>
+                          <Badge value={member.status} />
+                        </td>
+                        <td>
+                          {canManage && grantable.some((role) => role.id === member.roleId) && (
+                            <button
+                              className="icon-button"
+                              aria-label={`Edit ${member.name}`}
+                              onClick={() => {
+                                setRemoving(false);
+                                setEditing(member);
+                              }}
+                            >
+                              <Ellipsis size={18} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!members.length && (
+                  <Empty title="No team members">
+                    Invite a member to give them access to this DSP.
+                  </Empty>
+                )}
+              </div>
+            )}
+          </DataState>
         </>
       )}
       {tab === 'roles' && <RolesTab view={view} roles={roles.data} edit={setRoleEditor} />}
@@ -526,15 +535,14 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
         </>
       )}
       {revoking && (
-        <Modal title="Revoke invitation" onClose={() => setRevoking(undefined)}>
-          <p>Revoke the pending invitation for {revoking.email}? Its link will stop working.</p>
-          <div className="form-actions">
-            <button onClick={() => setRevoking(undefined)}>Cancel</button>
-            <button className="primary" onClick={() => void revoke.run(revoking)}>
-              Revoke invitation
-            </button>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          title="Revoke invitation"
+          confirm="Revoke invitation"
+          onConfirm={() => void revoke.run(revoking)}
+          onCancel={() => setRevoking(undefined)}
+        >
+          Revoke the pending invitation for {revoking.email}? Its link will stop working.
+        </ConfirmDialog>
       )}
       {inviting && (
         <Modal

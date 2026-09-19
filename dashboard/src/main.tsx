@@ -8,7 +8,8 @@ import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js'
 import { Page, findRoute, navigation, routeLabel } from './app/routes.js';
 import { AuthScreen } from './auth.js';
 import { messageOf } from './lib/errors.js';
-import { Loading, can } from './ui.js';
+import { Loading } from './ui/index.js';
+import { can } from './app/permissions.js';
 import './styles.css';
 import { DspOnboarding } from './onboarding.js';
 import { Shell } from './shell.js';

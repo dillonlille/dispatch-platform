@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Building2, Globe2, Pencil, Plus } from 'lucide-react';
 import { api, ApiError, useData } from './api.js';
-import { Header, ErrorBox, Loading, Modal } from './ui.js';
+import { DataState, ErrorBox, Header, Modal } from './ui/index.js';
 import { dateFormatter } from '../../shared/date-format.js';
 import {
   scheduleIssues,
@@ -508,122 +508,122 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
         </button>
       </Header>
       <ErrorBox message={error || query.error} />
-      {!query.data ? (
-        !query.error && <Loading />
-      ) : (
-        <>
-          <div className="schedule-section-heading">
-            <div>
-              <h2>Sync schedules</h2>
-              <span className="schedule-count">{schedules.length}</span>
+      <DataState data={query.data} failed={Boolean(query.error)}>
+        {(data) => (
+          <>
+            <div className="schedule-section-heading">
+              <div>
+                <h2>Sync schedules</h2>
+                <span className="schedule-count">{schedules.length}</span>
+              </div>
+              <span className="schedule-timezone">
+                <Globe2 size={14} aria-hidden="true" />
+                DSP time zone · {data.timezone}
+              </span>
             </div>
-            <span className="schedule-timezone">
-              <Globe2 size={14} aria-hidden="true" />
-              DSP time zone · {query.data.timezone}
-            </span>
-          </div>
-          {schedules.length ? (
-            <div className="schedule-table-wrap">
-              <table className="schedule-table">
-                <caption className="sr-only">Sync schedules</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Schedule</th>
-                    <th scope="col">Collection</th>
-                    <th scope="col">Repeat</th>
-                    <th scope="col">Next collection</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedules.map((schedule) => (
-                    <tr key={schedule.id}>
-                      <th scope="row">{schedule.name}</th>
-                      <td data-label="Collection">
-                        <CollectionLabels collection={schedule.collection} />
-                      </td>
-                      <td data-label="Repeat">{repeat(schedule)}</td>
-                      <td data-label="Next collection" className="schedule-next">
-                        {schedule.enabled
-                          ? nextCollection(schedule.nextRun, query.data!.timezone)
-                          : 'Paused'}
-                        {schedule.lastError && (
-                          <small>
-                            {scheduleIssues[schedule.lastError] ??
-                              'Collection delayed. Check connections.'}
-                          </small>
-                        )}
-                      </td>
-                      <td data-label="Status">
-                        <label className="schedule-toggle">
-                          <input
-                            type="checkbox"
-                            role="switch"
-                            aria-label={`Enable ${schedule.name}`}
-                            checked={schedule.enabled}
-                            disabled={busyId !== undefined}
-                            onChange={() => void toggle(schedule)}
-                          />
-                          <span>{schedule.enabled ? 'On' : 'Paused'}</span>
-                        </label>
-                      </td>
-                      <td className="schedule-row-actions">
-                        <button
-                          className="icon-button"
-                          aria-label={`Edit ${schedule.name}`}
-                          onClick={() => setEditing(schedule)}
-                        >
-                          <Pencil size={16} aria-hidden="true" />
-                        </button>
-                      </td>
+            {schedules.length ? (
+              <div className="schedule-table-wrap">
+                <table className="schedule-table">
+                  <caption className="sr-only">Sync schedules</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Schedule</th>
+                      <th scope="col">Collection</th>
+                      <th scope="col">Repeat</th>
+                      <th scope="col">Next collection</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="schedule-empty">
-              <h3>No schedules</h3>
-              <button onClick={() => setEditing(null)}>
-                <Plus size={16} aria-hidden="true" />
-                New schedule
-              </button>
-            </div>
-          )}
-          <LateDas dspId={dspId} onSaved={setMessage} onError={setError} />
-          <footer className="schedule-footer">
-            <span>
-              <Building2 size={14} aria-hidden="true" />
-              Applies to {query.data.dspName}
-            </span>
-            <span role="status">
-              {message || `${active} ${active === 1 ? 'schedule' : 'schedules'} active`}
-            </span>
-          </footer>
-          {editing !== undefined && (
-            <ScheduleEditor
-              key={`${editing?.id ?? 'new'}-${editing?.revision ?? 0}`}
-              schedule={editing}
-              timezone={query.data.timezone}
-              onClose={() => setEditing(undefined)}
-              onSaved={(text) => {
-                setEditing(undefined);
-                setMessage(text);
-                query.refresh();
-              }}
-              onReload={async () => {
-                const fresh = await api<CollectionSchedules>('/api/dsp/schedules');
-                const schedule = fresh.schedules.find((value) => value.id === editing?.id);
-                setEditing(schedule);
-                query.refresh();
-              }}
-            />
-          )}
-        </>
-      )}
+                  </thead>
+                  <tbody>
+                    {schedules.map((schedule) => (
+                      <tr key={schedule.id}>
+                        <th scope="row">{schedule.name}</th>
+                        <td data-label="Collection">
+                          <CollectionLabels collection={schedule.collection} />
+                        </td>
+                        <td data-label="Repeat">{repeat(schedule)}</td>
+                        <td data-label="Next collection" className="schedule-next">
+                          {schedule.enabled
+                            ? nextCollection(schedule.nextRun, data.timezone)
+                            : 'Paused'}
+                          {schedule.lastError && (
+                            <small>
+                              {scheduleIssues[schedule.lastError] ??
+                                'Collection delayed. Check connections.'}
+                            </small>
+                          )}
+                        </td>
+                        <td data-label="Status">
+                          <label className="schedule-toggle">
+                            <input
+                              type="checkbox"
+                              role="switch"
+                              aria-label={`Enable ${schedule.name}`}
+                              checked={schedule.enabled}
+                              disabled={busyId !== undefined}
+                              onChange={() => void toggle(schedule)}
+                            />
+                            <span>{schedule.enabled ? 'On' : 'Paused'}</span>
+                          </label>
+                        </td>
+                        <td className="schedule-row-actions">
+                          <button
+                            className="icon-button"
+                            aria-label={`Edit ${schedule.name}`}
+                            onClick={() => setEditing(schedule)}
+                          >
+                            <Pencil size={16} aria-hidden="true" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="schedule-empty">
+                <h3>No schedules</h3>
+                <button onClick={() => setEditing(null)}>
+                  <Plus size={16} aria-hidden="true" />
+                  New schedule
+                </button>
+              </div>
+            )}
+            <LateDas dspId={dspId} onSaved={setMessage} onError={setError} />
+            <footer className="schedule-footer">
+              <span>
+                <Building2 size={14} aria-hidden="true" />
+                Applies to {data.dspName}
+              </span>
+              <span role="status">
+                {message || `${active} ${active === 1 ? 'schedule' : 'schedules'} active`}
+              </span>
+            </footer>
+            {editing !== undefined && (
+              <ScheduleEditor
+                key={`${editing?.id ?? 'new'}-${editing?.revision ?? 0}`}
+                schedule={editing}
+                timezone={data.timezone}
+                onClose={() => setEditing(undefined)}
+                onSaved={(text) => {
+                  setEditing(undefined);
+                  setMessage(text);
+                  query.refresh();
+                }}
+                onReload={async () => {
+                  const fresh = await api<CollectionSchedules>('/api/dsp/schedules');
+                  const schedule = fresh.schedules.find((value) => value.id === editing?.id);
+                  setEditing(schedule);
+                  query.refresh();
+                }}
+              />
+            )}
+          </>
+        )}
+      </DataState>
     </div>
   );
 }

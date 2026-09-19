@@ -7,7 +7,8 @@ import {
   type Role,
 } from '../../shared/contracts/index.js';
 import { api } from './api.js';
-import { Empty, Loading, Modal, can } from './ui.js';
+import { DataState, Empty, Modal } from './ui/index.js';
+import { can } from './app/permissions.js';
 import { useAction } from './lib/useAction.js';
 
 export const permissionLabels: Record<Permission, string> = {
@@ -72,51 +73,54 @@ export function RolesTab({
   roles?: Role[];
   edit: (role: Role) => void;
 }) {
-  if (!roles) return <Loading />;
   const manage = can(view, 'roles.manage');
   return (
-    <div className="table-wrap role-table">
-      <table>
-        <thead>
-          <tr>
-            <th style={{ width: '30%' }}>Role</th>
-            <th>Permissions</th>
-            <th style={{ width: '14%' }}>Members</th>
-            <th>
-              <span className="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {roles.map((role) => (
-            <tr key={role.id}>
-              <td>
-                <strong className="role-name">
-                  {role.name}
-                  {role.owner && <Lock size={14} aria-label="Locked" />}
-                </strong>
-              </td>
-              <td>
-                <PermissionSummary role={role} />
-              </td>
-              <td className="muted">{role.members}</td>
-              <td>
-                {manage && !role.owner && assignable(view, role) && (
-                  <button
-                    className="icon-button"
-                    aria-label={`Edit ${role.name}`}
-                    onClick={() => edit(role)}
-                  >
-                    <Ellipsis size={18} />
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!roles.length && <Empty title="No roles" />}
-    </div>
+    <DataState data={roles}>
+      {(roles) => (
+        <div className="table-wrap role-table">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: '30%' }}>Role</th>
+                <th>Permissions</th>
+                <th style={{ width: '14%' }}>Members</th>
+                <th>
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.map((role) => (
+                <tr key={role.id}>
+                  <td>
+                    <strong className="role-name">
+                      {role.name}
+                      {role.owner && <Lock size={14} aria-label="Locked" />}
+                    </strong>
+                  </td>
+                  <td>
+                    <PermissionSummary role={role} />
+                  </td>
+                  <td className="muted">{role.members}</td>
+                  <td>
+                    {manage && !role.owner && assignable(view, role) && (
+                      <button
+                        className="icon-button"
+                        aria-label={`Edit ${role.name}`}
+                        onClick={() => edit(role)}
+                      >
+                        <Ellipsis size={18} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!roles.length && <Empty title="No roles" />}
+        </div>
+      )}
+    </DataState>
   );
 }
 
