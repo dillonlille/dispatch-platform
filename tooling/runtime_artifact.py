@@ -1,8 +1,10 @@
-"""Shared GitHub access, runtime inventory verification and safe extraction.
+"""Shared GitHub access, runtime inventory verification, safe extraction and the
+service lifecycle of the host updaters.
 
 Installed beside the host updaters, so it imports only the standard library.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -12,6 +14,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+import urllib.request
 import zipfile
 
 REPOSITORY = "dillonlille/dispatch-platform"
@@ -199,3 +203,101 @@ def download_run_artifact(artifact, directory, commit, package=None):
     candidate = directory / "candidate"
     unpack(package, candidate)
     return candidate, verify_artifact(candidate, commit)
+
+
+class RuntimeUpdater:
+    """Stopping, switching, starting and rolling back one environment's service.
+
+    A subclass names its systemd user unit, what its health endpoint must report and its
+    lock file, and sets `platform`, `previous`, `receipt` and `config`. What may be
+    installed, and everything about where it comes from, stays with each updater.
+    """
+
+    SERVICE = None
+    # What /api/health must report beside the expected release digest.
+    HEALTH = {}
+    LOCK = None
+
+    def load_config(self, filename, service_message, health_message):
+        self.config = json.loads(Path(filename).read_text())
+        require(self.config["service"] == self.SERVICE, service_message)
+        require(re.fullmatch(r"http://127\.0\.0\.1:\d+/api/health", self.config["healthUrl"]),
+                health_message)
+
+    def service(self, action):
+        command("systemctl", "--user", action, self.config["service"], timeout=90)
+
+    def healthy(self, digest, timeout=40):
+        expected = {"status": "ready", **self.HEALTH, "release": digest}
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(self.config["healthUrl"], timeout=2) as response:
+                    data = json.load(response)
+                if all(data.get(key) == value for key, value in expected.items()):
+                    return True
+            except (OSError, ValueError):
+                pass
+            time.sleep(1)
+        return False
+
+    def switch(self, candidate, active, record, digest, failure, stopped=None, switched=None, ready=None):
+        """Replace `active` with `candidate`, keeping the old runtime until the new one is healthy.
+
+        `record` is written as the activation receipt before anything changes, so an
+        interrupted switch is rolled back by `recover` on the next run. `stopped` runs
+        once the service is down, `switched` once the runtimes are exchanged and `ready`
+        once the new one answers; any failure, in them too, recovers and is raised again.
+        """
+        if self.previous.exists():
+            require(self.previous.resolve() == self.previous and not self.previous.is_symlink(),
+                    "Unsafe rollback path")
+            shutil.rmtree(self.previous)
+        write_json(self.receipt, record)
+        try:
+            self.service("stop")
+            if stopped:
+                stopped()
+            active.rename(self.previous)
+            candidate.rename(active)
+            if switched:
+                switched()
+            self.service("start")
+            require(self.healthy(digest), failure)
+            if ready:
+                ready()
+            self.receipt.unlink()
+        except BaseException:
+            self.recover()
+            raise
+
+    def roll_back(self, active, verify, digest, unsafe, failure, restored=None):
+        """Stop, put the retained runtime back and start it; the caller then clears the receipt.
+
+        `verify(path)` raises unless `path` holds the runtime the receipt names. It sees
+        the retained copy, or `active` when the interruption came before the exchange.
+        `restored` runs with its result before the service starts.
+        """
+        self.service("stop")
+        if self.previous.exists():
+            old = verify(self.previous)
+            if active.exists():
+                require(active.resolve() == active and not active.is_symlink(), unsafe)
+                shutil.rmtree(active)
+            self.previous.rename(active)
+        else:
+            old = verify(active)
+        if restored:
+            restored(old)
+        self.service("start")
+        require(self.healthy(digest), failure)
+        return old
+
+    def run_locked(self):
+        """One update at a time; a timer tick that finds another one running does nothing."""
+        with (self.platform / self.LOCK).open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return
+            self.update()
