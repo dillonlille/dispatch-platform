@@ -3,21 +3,17 @@
 
 import argparse
 from datetime import datetime, timezone
-import fcntl
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import (REPOSITORY, command, download_run_artifact, github, latest_run, passed,
-                              private_directory, require, verify_artifact, write_json)
+from runtime_artifact import (REPOSITORY, RuntimeUpdater, command, download_run_artifact, github, latest_run,
+                              passed, private_directory, require, verify_artifact, write_json)
 
 PRIVATE_PATHS = ("config", "data", "dsps", ".platform.lock")
 
@@ -54,7 +50,11 @@ def install_management(live, tooling=None):
                 os.unlink(temporary)
 
 
-class DevUpdater:
+class DevUpdater(RuntimeUpdater):
+    SERVICE = "dispatch-dev.service"
+    HEALTH = {"environment": "preview"}
+    LOCK = "dev-update.lock"
+
     def __init__(self, root):
         self.root = Path(root).absolute()
         require(self.root.name == "dev" and self.root.resolve() == self.root,
@@ -71,12 +71,11 @@ class DevUpdater:
                 out.write("\n# Private Dev environment; preserve across updates.\n" + "\n".join(missing) + "\n")
         self.platform = private_directory(self.root / "data/platform")
         self.runtime = private_directory(self.live / ".runtime")
+        self.previous = self.runtime / "previous"
         self.receipt = self.platform / "dev-activation.json"
         self.status_file = self.platform / "dev-update.json"
-        self.config = json.loads((self.root / "config/updater.json").read_text())
-        require(self.config["service"] == "dispatch-dev.service", "Dev service required")
-        require(re.fullmatch(r"http://127\.0\.0\.1:\d+/api/health", self.config["healthUrl"]),
-                "Dev health endpoint must be loopback")
+        self.load_config(self.root / "config/updater.json", "Dev service required",
+                         "Dev health endpoint must be loopback")
 
     def git(self, *args):
         return command("git", *args, cwd=self.live)
@@ -99,22 +98,6 @@ class DevUpdater:
                                     "digest": json.loads((self.live / ".build/release.json").read_text())["digest"],
                                     "updatedAt": datetime.now(timezone.utc).isoformat()})
 
-    def service(self, action):
-        command("systemctl", "--user", action, self.config["service"], timeout=90)
-
-    def healthy(self, digest, timeout=40):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(self.config["healthUrl"], timeout=2) as response:
-                    data = json.load(response)
-                if data.get("status") == "ready" and data.get("environment") == "preview" and data.get("release") == digest:
-                    return True
-            except (OSError, ValueError):
-                pass
-            time.sleep(1)
-        return False
-
     def recover(self):
         if not self.receipt.exists():
             return
@@ -125,19 +108,9 @@ class DevUpdater:
         self.clean_checkout()
         require(self.git("rev-parse", "HEAD") in (record["oldCommit"], record["commit"]),
                 "Checkout changed during interrupted update")
-        previous, active = self.runtime / "previous", self.live / ".build"
-        self.service("stop")
-        if previous.exists():
-            verify_artifact(previous, record["oldCommit"])
-            if active.exists():
-                require(active.resolve() == active and not active.is_symlink(), "Unsafe build path")
-                shutil.rmtree(active)
-            previous.rename(active)
-        else:
-            verify_artifact(active, record["oldCommit"])
-        self.git("reset", "--hard", record["oldCommit"])
-        self.service("start")
-        require(self.healthy(record["oldDigest"]), "Previous Dev build failed health check")
+        self.roll_back(self.live / ".build", lambda runtime: verify_artifact(runtime, record["oldCommit"]),
+                       record["oldDigest"], "Unsafe build path", "Previous Dev build failed health check",
+                       restored=lambda _old: self.git("reset", "--hard", record["oldCommit"]))
         self.status("rolled_back", record["oldCommit"])
         self.receipt.unlink()
 
@@ -151,26 +124,16 @@ class DevUpdater:
         require(old["schema"] == manifest["schema"], "Schema change requires an explicit migration plan")
         self.git("merge-base", "--is-ancestor", current, commit)
         self.git("merge-base", "--is-ancestor", commit, "origin/dev")
-        previous = self.runtime / "previous"
-        if previous.exists():
-            require(previous.resolve() == previous and not previous.is_symlink(), "Unsafe rollback path")
-            shutil.rmtree(previous)
-        write_json(self.receipt, {"commit": commit, "oldCommit": current,
-                                 "oldDigest": old["digest"], "previous": "previous"})
-        try:
-            self.service("stop")
+
+        def unchanged():
             self.clean_checkout()
             require(self.git("rev-parse", "HEAD") == current, "Checkout changed during update")
-            (self.live / ".build").rename(previous)
-            candidate.rename(self.live / ".build")
-            self.git("merge", "--ff-only", commit)
-            self.service("start")
-            require(self.healthy(manifest["digest"]), "New Dev build failed health check")
-            self.status("ready", commit)
-            self.receipt.unlink()
-        except BaseException:
-            self.recover()
-            raise
+
+        self.switch(candidate, self.live / ".build",
+                    {"commit": commit, "oldCommit": current, "oldDigest": old["digest"], "previous": "previous"},
+                    manifest["digest"], "New Dev build failed health check", stopped=unchanged,
+                    switched=lambda: self.git("merge", "--ff-only", commit),
+                    ready=lambda: self.status("ready", commit))
 
     def refresh_management(self):
         """Follow the clean, activated checkout so the installed updater cannot drift from it."""
@@ -247,12 +210,7 @@ def main():
         require(not drift, f"Installed host updater differs from the checkout ({', '.join(drift)}); "
                 "run tooling/update-dev.py --install-management from the checkout")
         return
-    with (updater.platform / "dev-update.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return
-        updater.update()
+    updater.run_locked()
 
 
 if __name__ == "__main__":

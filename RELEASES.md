@@ -33,7 +33,7 @@ again; a bare rerun continues the unfinished release. The command:
    on the identical merge tree, so main promotes those tested bytes after a smoke
    check, exactly as Dev does. Without a matching validation main runs every suite.
    The final gate publishes `dispatch-main-<commit>` only after all required jobs pass.
-5. Runs `prepare-release.py` into `releases/vX.Y.Z` and smoke tests that extracted
+5. Downloads that artifact into `releases/vX.Y.Z` and smoke tests the extracted
    runtime against disposable state on this machine. Those exact bytes are
    promoted; the published artifact is never rebuilt, on Production or elsewhere.
 6. Waits for the release notes in `releases/vX.Y.Z-notes.md`; write them while the

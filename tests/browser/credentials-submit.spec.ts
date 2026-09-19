@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures.js';
+import { test, expect, login, openDsp } from './fixtures.js';
 
 test('credentials close before login finishes, errors stay on the card, and CAPTCHA opens after retry', async ({
   page,
@@ -47,12 +47,8 @@ test('credentials close before login finishes, errors stay on the card, and CAPT
     }),
   );
   try {
-    await page.goto('/');
-    await page.getByLabel('Email address').fill('owner@dispatch.test');
-    await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByRole('button', { name: /Northline Logistics/ }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+    await login(page);
+    await openDsp(page, 'Northline Logistics');
     const settings = page.getByRole('link', { name: 'Settings', exact: true });
     // Both platform and DSP navigation have Settings. Wait for the selected DSP
     // view before clicking, including when its session request is still loading.

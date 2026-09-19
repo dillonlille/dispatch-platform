@@ -1,4 +1,5 @@
-import { test, expect } from './fixtures.js';
+// These pages are synthetic and routed in the browser; no Dispatch server is needed.
+import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 const auth = fs
   .readFileSync('backend/src/browsers/paycom/auth.js', 'utf8')

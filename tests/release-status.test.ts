@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 
 test('each environment reports only its own updater status', async (t) => {
   for (const environment of ['preview', 'production']) {

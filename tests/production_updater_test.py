@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import importlib.util
 import io
@@ -8,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from dev_updater_test import artifact
+from dev_updater_test import artifact, runtime
 
 spec = importlib.util.spec_from_file_location("production", Path(__file__).parents[1] / "tooling/update-production.py")
 production = importlib.util.module_from_spec(spec)
@@ -68,6 +69,35 @@ class ProductionUpdaterTests(unittest.TestCase):
             self.instance.recover()
         self.assertEqual(production.verify_artifact(self.instance.live), self.old)
         self.assertFalse(self.instance.receipt.exists())
+
+    def test_service_health_and_lock_are_the_production_ones(self):
+        with patch.object(runtime, "command") as command:
+            self.instance.service("stop")
+        command.assert_called_once_with("systemctl", "--user", "stop", "dispatch-production.service", timeout=90)
+        ready = {"status": "ready", "environment": "production", "release": "digest", "runtime": "rust"}
+        for answer, healthy in [(ready, True), (ready | {"environment": "preview"}, False),
+                                (ready | {"runtime": "node"}, False), (ready | {"release": "other"}, False),
+                                ({key: value for key, value in ready.items() if key != "runtime"}, False)]:
+            with self.subTest(answer=answer), patch.object(runtime.time, "sleep"), \
+                    patch.object(runtime.urllib.request, "urlopen",
+                                 side_effect=lambda *_args, **_kwargs: io.BytesIO(json.dumps(answer).encode())):
+                self.assertEqual(self.instance.healthy("digest", timeout=0.05), healthy)
+        with patch.object(self.instance, "update") as update:
+            with (self.instance.platform / "production-update.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self.instance.run_locked()
+                update.assert_not_called()
+            self.instance.run_locked()
+        update.assert_called_once_with()
+
+    def test_activation_and_rollback_keep_their_order(self):
+        steps = []
+        with patch.object(self.instance, "service", side_effect=steps.append), \
+                patch.object(self.instance, "healthy", side_effect=lambda digest: steps.append(digest) or len(steps) > 3):
+            with self.assertRaisesRegex(RuntimeError, "New Production runtime"):
+                self.instance.activate(self.candidate, "b" * 40)
+        self.assertEqual(steps, ["stop", "start", self.new["digest"], "stop", "start", self.old["digest"]])
+        self.assertEqual((self.instance.live / "services/rust/dispatch-backend").stat().st_mode & 0o777, 0o700)
 
     def test_drafts_prereleases_and_non_versions_never_stop_service(self):
         for change in ({"draft": True}, {"prerelease": True}, {"published_at": None},

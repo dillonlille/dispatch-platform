@@ -19,7 +19,8 @@ import time
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import REPOSITORY, STABLE, command, github, latest_run, passed, require, unpack, write_json
+from runtime_artifact import (REPOSITORY, STABLE, command, download_run_artifact, github, latest_run, passed,
+                              private_directory, require, unpack, write_json)
 
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = ROOT.parent
@@ -95,6 +96,41 @@ def wait_for_checks(sha, event, branch=None, timeout=1800):
             return run
         time.sleep(10)
     raise RuntimeError(f"No completed checks for {sha} within {timeout // 60} minutes")
+
+
+def prepare_assets(commit, version, output):
+    """Download the fully checked main artifact as the immutable assets of one release."""
+    require(re.fullmatch(r"[a-f0-9]{40}", commit), "Full source commit required")
+    require(re.fullmatch(STABLE, version), "Stable release version required")
+    comparison = github(f"compare/{commit}...main")
+    require(comparison["status"] in ("ahead", "identical"), "Source must be merged into main")
+    runs = github(f"actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={commit}&per_page=30")["workflow_runs"]
+    run = latest_run(runs, commit, "push", "main")
+    require(run, "No main validation run found")
+    require(passed(run), "Main checks have not passed")
+    artifacts = github(f"actions/runs/{run['id']}/artifacts")["artifacts"]
+    artifacts = [a for a in artifacts if a["name"] == f"dispatch-main-{commit}" and not a["expired"]]
+    require(len(artifacts) == 1, "Verified main artifact unavailable")
+    artifact = artifacts[0]
+    output = Path(output).absolute()
+    require(not output.exists(), "Release output already exists; never overwrite prepared assets")
+    private_directory(output)
+    with tempfile.TemporaryDirectory(prefix="prepare-", dir=output) as temporary:
+        archive = output / f"dispatch-platform-{version}.tar.gz"
+        candidate, manifest = download_run_artifact(artifact, temporary, commit, package=archive)
+        require(manifest["version"] == version, "Compiled artifact has another version")
+        shutil.copyfile(candidate / "release.json", output / "release.json")
+        write_json(output / "provenance.json", {
+            "repository": REPOSITORY, "commit": commit, "version": version,
+            "workflowRun": run["id"], "workflowAttempt": run["run_attempt"],
+            "artifactId": artifact["id"], "artifactDigest": artifact["digest"],
+            "runtimeDigest": manifest["digest"],
+            "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        })
+    names = (archive.name, "release.json", "provenance.json")
+    (output / "SHA256SUMS").write_text("".join(
+        f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in names))
+    say(f"Prepared {version} from checked main commit {commit}: {manifest['digest']}")
 
 
 def asset_problems(release, directory, names):
@@ -223,8 +259,7 @@ class Release:
                     and (self.output / "SHA256SUMS").exists(), f"{self.output} holds another preparation")
             return provenance
         wait_for_checks(commit, "push", "main")
-        subprocess.run([sys.executable, str(ROOT / "tooling/prepare-release.py"), "--commit", commit,
-                        "--version", self.version, "--output", str(self.output)], check=True, timeout=600)
+        prepare_assets(commit, self.version, self.output)
         return json.loads((self.output / "provenance.json").read_text())
 
     def smoke(self):
