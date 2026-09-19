@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { localDate, shiftDate } from '../../../../shared/meal-breaks.js';
+import { DateField } from '../../ui/index.js';
 
 function validDay(value: string, today: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '2000-01-01' || value > today) return false;
@@ -60,17 +61,14 @@ export function PaycomDateControls({
       >
         <ChevronLeft size={16} />
       </button>
-      <label>
-        <span className="sr-only">Date</span>
-        <input
-          type="date"
-          aria-label="Paycom date"
-          min="2000-01-01"
-          max={today}
-          value={date}
-          onChange={(event) => select(event.target.value)}
-        />
-      </label>
+      <DateField
+        label="Paycom date"
+        value={date}
+        min="2000-01-01"
+        max={today}
+        today={today}
+        onChange={select}
+      />
       <button
         className="icon-button"
         aria-label="Next day"

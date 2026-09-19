@@ -847,3 +847,101 @@
     padding: 12px;
   }
 }
+
+/* DateField: a typed date with a calendar that opens from anywhere on the field. */
+.date-field {
+  position: relative;
+}
+.date-field-icon {
+  display: none;
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  transform: translateY(-50%);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+@media (pointer: fine) {
+  .date-field input {
+    padding-right: 34px;
+    cursor: pointer;
+  }
+  .date-field input::-webkit-calendar-picker-indicator {
+    display: none;
+  }
+  .date-field-icon {
+    display: block;
+  }
+}
+.date-calendar {
+  position: fixed;
+  z-index: 60;
+  visibility: hidden;
+  width: 292px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 10px 30px var(--shadow-color);
+}
+.date-calendar-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.date-calendar-month strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.date-calendar-month button.icon-button {
+  width: 32px;
+  min-height: 32px;
+  padding: 6px;
+  border-color: transparent;
+  background: transparent;
+}
+.date-calendar-month button.icon-button:hover:not(:disabled) {
+  background: var(--accent);
+}
+.date-calendar-grid [role='row'] {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  justify-items: center;
+  align-items: center;
+  min-height: 38px;
+}
+.date-calendar-grid [role='columnheader'] {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+button.date-calendar-day {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+button.date-calendar-day:hover:not(:disabled) {
+  background: var(--accent);
+}
+button.date-calendar-day[aria-current='date'] {
+  border-color: var(--ring);
+}
+button.date-calendar-day[aria-pressed='true'],
+button.date-calendar-day[aria-pressed='true']:hover {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+button.date-calendar-day:disabled {
+  color: var(--muted-foreground);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
