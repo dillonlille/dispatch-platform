@@ -11,12 +11,12 @@ use super::{
     accounts::Context,
     crypto,
     db::{self, Store, flag, iso, n, s},
-    ensure, validate as v, workforce,
+    ensure, workforce,
 };
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -147,8 +147,8 @@ impl Manager {
         self.sessions.lock().map(|s| s.len()).unwrap_or(0)
     }
     pub async fn revoke(&self, id: &str) {
-        for provider in [Provider::Paycom, Provider::Cortex] {
-            self.revoke_for(id, provider).await;
+        for provider in Provider::ALL {
+            self.revoke_for(id, *provider).await;
         }
     }
     pub async fn revoke_for(&self, id: &str, provider: Provider) {
@@ -385,40 +385,6 @@ impl Session {
         }
     }
 }
-pub fn validate_credentials(value: &Value, provider: Provider) -> Result<()> {
-    if provider == Provider::Cortex {
-        v::fields(value, &["username", "password"])?;
-        v::name(value, "username", 200)?;
-        v::text(value, "password", 1, 256)?;
-        return Ok(());
-    }
-    v::fields(
-        value,
-        &["clientCode", "username", "password", "securityAnswers"],
-    )?;
-    v::name(value, "clientCode", 80)?;
-    v::name(value, "username", 200)?;
-    v::text(value, "password", 1, 256)?;
-    let answers = value["securityAnswers"]
-        .as_array()
-        .ok_or_else(|| Error::new("invalid_input", 400))?;
-    ensure(
-        answers.len() == 5
-            && answers.iter().all(|a| {
-                a.as_str().is_some_and(|s| {
-                    !s.is_empty() && s.chars().count() <= 64 && !s.contains(['\r', '\n', '\0'])
-                })
-            })
-            && answers
-                .iter()
-                .map(Value::to_string)
-                .collect::<HashSet<_>>()
-                .len()
-                == 5,
-        "invalid_input",
-        400,
-    )
-}
 impl Store {
     pub fn connection(&self, id: &str) -> Result<Value> {
         self.connection_for(id, Provider::Paycom)
@@ -441,7 +407,7 @@ impl Store {
     }
     pub fn save_credentials(&self, c: &Context, value: &Value, provider: Provider) -> Result<()> {
         self.revalidate(c, "connections.manage")?;
-        validate_credentials(value, provider)?;
+        provider.validate_credentials(value)?;
         let id = s(&c.dsp, "id");
         let area = self.area(id, "secrets")?;
         let key = db::key_file(&area.join("vault.key"))?;
@@ -449,7 +415,7 @@ impl Store {
             &area.join(format!("{}.enc", provider.id())),
             crypto::encrypt(&key, &format!("{id}:{}:2", provider.id()), value)?.as_bytes(),
         )?;
-        self.collector(id, provider)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[if provider == Provider::Paycom { s(value,"clientCode") } else { "" },&iso(),provider.id()])?;
+        self.collector(id, provider)?.exec("UPDATE connections SET enabled=1,status='not_connected',error=NULL,account_label=?,verified_at=NULL,revision=revision+1,updated_at=? WHERE provider=?",[provider.collector().account_label(value),&iso(),provider.id()])?;
         self.clear_collector_browser_state(id, provider)?;
         self.audit(
             Some(s(&c.auth.user, "id")),
@@ -475,12 +441,7 @@ impl Store {
         let db = self.collector(id, provider)?;
         db.transaction(|| {
             db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;
-            // v0.0.9 refuses Paycom settings saves while its old schedule row is on
-            // and Paycom is disconnected. Drop this with the table.
-            if provider == Provider::Paycom {
-                db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?", [provider.id()])?;
-            }
-            Ok(())
+            provider.collector().disabled(&db)
         })?;
         self.pause_provider_schedules(id, provider)?;
         self.clear_collector_browser_state(id, provider)?;
@@ -678,7 +639,7 @@ impl State {
                 match provider { Provider::Paycom => paycom::preflight(&profile,retry)?, Provider::Cortex => cortex::preflight(&profile,retry)? };
                 let policy=if let Some(value)=&self.config.fixture_url {
                     browseros::NetworkPolicy::Fixture(std::num::NonZeroU16::new(url::Url::parse(value).expect("validated fixture URL").port().unwrap()).unwrap())
-                } else { match provider { Provider::Paycom => browseros::NetworkPolicy::Paycom, Provider::Cortex => browseros::NetworkPolicy::Cortex } };
+                } else { provider.collector().network() };
                 let runtime=self.browsers.runtime(&self.config)?;
                 let browser=runtime.start(&profile,browseros::Mode::Windowed,policy).await?;
                 session.process_id.store(browser.process_id(),Ordering::Release);
