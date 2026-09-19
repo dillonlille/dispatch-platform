@@ -4,7 +4,7 @@ use dispatch_backend::core::{
     config::Config,
     crypto,
     db::{self, Store, s},
-    jobs, operations, workforce,
+    operations, schedules, workforce,
 };
 use serde_json::{Value, json};
 use std::os::unix::fs::{PermissionsExt, symlink};
@@ -19,6 +19,14 @@ fn store() -> (tempfile::TempDir, Store) {
     config.standalone = true;
     let store = Store::initialize(config).unwrap();
     (root, store)
+}
+fn audits(db: &Store, dsp: Option<&str>) -> dispatch_backend::core::Result<Value> {
+    let mut page = db.audit_page(&db::AuditQuery {
+        dsp,
+        limit: 200,
+        ..db::AuditQuery::default()
+    })?;
+    Ok(page["events"].take())
 }
 #[test]
 fn startup_removes_owned_browseros_runs_and_rejects_unknown_entries() {
@@ -239,7 +247,6 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         .unwrap();
     let mut values = db.preferences(id).unwrap()["values"].clone();
     values["driver_departments"] = json!([]);
-    values["automatic_sync"] = json!(false);
     db.save_preferences(id, s(&actor, "id"), 0, &values)
         .unwrap();
     let day = workforce::fixture("UTC").unwrap()["to"]
@@ -256,6 +263,44 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         db.save_preferences(id, s(&actor, "id"), 1, &values)
             .is_err()
     );
+}
+#[test]
+fn retired_sync_preferences_are_not_returned_and_open_dashboards_may_still_send_them() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsp = db
+        .platform
+        .one("SELECT id FROM dsps WHERE permanent=1", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&dsp, "id");
+    let actor = db
+        .platform
+        .one("SELECT id FROM users WHERE platform_owner=1", [])
+        .unwrap()
+        .unwrap();
+    // Preferences as v0.0.9 stored them.
+    let mut older = workforce::defaults();
+    older["automatic_sync"] = json!(true);
+    older["sync_interval_seconds"] = json!(3600);
+    db.collector(id, Provider::Paycom)
+        .unwrap()
+        .set(
+            "paycom.preferences",
+            &json!({"revision":4,"values":older,"history":[]}),
+        )
+        .unwrap();
+    let values = db.preferences(id).unwrap()["values"].clone();
+    assert_eq!(values, workforce::defaults());
+    let saved = db.save_preferences(id, s(&actor, "id"), 4, &older).unwrap();
+    assert_eq!(saved["revision"], 5);
+    assert_eq!(saved["values"], workforce::defaults());
+    let stored = db
+        .collector(id, Provider::Paycom)
+        .unwrap()
+        .setting("paycom.preferences", Value::Null)
+        .unwrap();
+    assert_eq!(stored["values"], workforce::defaults());
 }
 #[test]
 fn late_da_settings_default_for_older_preferences_and_validate() {
@@ -316,14 +361,14 @@ fn schedule_handles_dst_gaps_and_repeated_minutes() {
             .timestamp_millis()
     };
     assert_eq!(
-        jobs::next_occurrence("02:30", "America/Chicago", parse("2026-03-08T07:59:00Z")).unwrap(),
+        schedules::next_daily("02:30", "America/Chicago", parse("2026-03-08T07:59:00Z")).unwrap(),
         "2026-03-09T07:30:00.000Z"
     );
     assert_eq!(
-        jobs::next_occurrence("01:30", "America/Chicago", parse("2026-11-01T06:30:00Z")).unwrap(),
+        schedules::next_daily("01:30", "America/Chicago", parse("2026-11-01T06:30:00Z")).unwrap(),
         "2026-11-02T07:30:00.000Z"
     );
-    assert!(jobs::next_occurrence("25:99", "UTC", 0).is_err());
+    assert!(schedules::next_daily("25:99", "UTC", 0).is_err());
 }
 #[test]
 fn private_storage_rejects_links_and_world_readable_files() {
@@ -531,17 +576,17 @@ fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
 }
 
 #[test]
-fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
+fn listed_jobs_respect_the_cap_scope_names_and_attempt_order() {
     let (_root, db) = store();
     operations::seed(&db).unwrap();
     let dsps = db
         .platform
         .all("SELECT id,name FROM dsps ORDER BY id", [])
         .unwrap();
-    for index in 0..12 {
+    for index in 0..204 {
         let dsp = &dsps[index % dsps.len()];
         let job = format!("job-{index}");
-        db.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,?,'preview','paycom.collect','succeeded',0,?,'test',1,?)",rusqlite::params![job,s(dsp,"id"),format!("2026-09-{:02}",index+1),job]).unwrap();
+        db.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,?,'preview','paycom.collect','succeeded',0,?,'test',1,?)",rusqlite::params![job,s(dsp,"id"),format!("2026-09-01T{index:04}"),job]).unwrap();
         for attempt in [2, 1] {
             db.jobs
                 .exec(
@@ -551,21 +596,17 @@ fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
                 .unwrap();
         }
     }
-    let recent = db.recent_jobs(None, 8).unwrap();
-    assert_eq!(recent.as_array().unwrap().len(), 8);
-    assert_eq!(recent[0]["id"], "job-11");
+    let recent = db.list_jobs(None).unwrap();
+    assert_eq!(recent.as_array().unwrap().len(), 200);
+    assert_eq!(recent[0]["id"], "job-203");
     assert_eq!(recent[0]["metrics"], json!([{"attempt":1},{"attempt":2}]));
     let dsp = &dsps[0];
-    for row in db
-        .recent_jobs(Some(s(dsp, "id")), 200)
-        .unwrap()
-        .as_array()
-        .unwrap()
-    {
+    let scoped = db.list_jobs(Some(s(dsp, "id"))).unwrap();
+    assert_eq!(scoped.as_array().unwrap().len(), 68);
+    for row in scoped.as_array().unwrap() {
         assert_eq!(row["dspId"], dsp["id"]);
         assert_eq!(row["dspName"], dsp["name"]);
     }
-    assert_eq!(db.recent_jobs(None, 0).unwrap(), json!([]));
 }
 
 #[test]
@@ -578,14 +619,20 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
         .unwrap()
         .unwrap();
     let id = s(&dsp, "id");
-    db.set_schedule(id, false, "06:00", "UTC").unwrap();
     assert!(
         !db.schedule_deadlines()
             .unwrap()
             .iter()
             .any(|(d, _)| d == id)
     );
-    db.set_schedule(id, true, "06:00", "UTC").unwrap();
+    let schedule = db
+        .save_collection_schedule(
+            id,
+            None,
+            &json!({"name":"Morning","collection":"paycom","cadence":"daily","intervalMinutes":null,"localTime":"06:00","enabled":true}),
+        )
+        .unwrap();
+    let key = s(&schedule, "id");
     assert!(
         db.schedule_deadlines()
             .unwrap()
@@ -602,8 +649,19 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
     assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
     assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
     assert_eq!(db.list_jobs(Some(id)).unwrap().as_array().unwrap().len(), 1);
-    db.set_schedule(id, false, "06:00", "UTC").unwrap();
+    db.enable_collection_schedule(
+        id,
+        key,
+        &json!({"revision":schedule["revision"],"enabled":false}),
+    )
+    .unwrap();
     assert_eq!(db.schedule_due(id).unwrap(), None);
+    assert!(
+        !db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(d, _)| d == id)
+    );
 }
 
 #[tokio::test]
@@ -680,7 +738,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     db.audit(None, Some(id), "collection.completed", "")
         .unwrap();
     let actions = |dsp| -> Vec<String> {
-        db.audits(dsp, 200)
+        audits(&db, dsp)
             .unwrap()
             .as_array()
             .unwrap()
@@ -713,7 +771,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
             "schedule.updated"
         ]
     );
-    let log = db.audits(Some(id), 200).unwrap();
+    let log = audits(&db, Some(id)).unwrap();
     assert_eq!(s(&log[0], "actorName"), "Platform support");
     assert!(log[0]["actorId"].is_null());
     assert!(!log.to_string().contains(owner_id));
@@ -732,7 +790,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
             .contains(&json!({"id":"support","name":"Platform support"}))
     );
     // The platform's own log keeps the real name.
-    let named = db.audits(None, 200).unwrap();
+    let named = audits(&db, None).unwrap();
     assert_ne!(s(&named[0], "actorName"), "Platform support");
     db.set_profile(id, json!({"supportVisible":false})).unwrap();
     db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
@@ -1060,7 +1118,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         one("SELECT created_by FROM invitations").unwrap()["created_by"],
         owner["id"]
     );
-    let log = db.audits(Some(dsp), 200).unwrap();
+    let log = audits(&db, Some(dsp)).unwrap();
     let event = log
         .as_array()
         .unwrap()
@@ -1069,7 +1127,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         .unwrap();
     assert_eq!(s(event, "actorName"), "Jordan Ellis");
     assert!(event["actorId"].is_null());
-    let platform = db.audits(None, 200).unwrap();
+    let platform = audits(&db, None).unwrap();
     let removal = platform
         .as_array()
         .unwrap()

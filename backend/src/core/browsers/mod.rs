@@ -473,7 +473,15 @@ impl Store {
         self.revalidate(c, "connections.manage")?;
         let id = s(&c.dsp, "id");
         let db = self.collector(id, provider)?;
-        db.transaction(||{db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;if provider == Provider::Paycom { db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?",[provider.id()])?; }Ok(())})?;
+        db.transaction(|| {
+            db.exec("UPDATE connections SET enabled=0,status='not_connected',error=NULL,revision=revision+1,updated_at=? WHERE provider=?",[iso(),provider.id().into()])?;
+            // v0.0.9 refuses Paycom settings saves while its old schedule row is on
+            // and Paycom is disconnected. Drop this with the table.
+            if provider == Provider::Paycom {
+                db.exec("UPDATE schedules SET enabled=0,next_run=NULL WHERE provider=?", [provider.id()])?;
+            }
+            Ok(())
+        })?;
         self.pause_provider_schedules(id, provider)?;
         self.clear_collector_browser_state(id, provider)?;
         if remove {

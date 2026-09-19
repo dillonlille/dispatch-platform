@@ -288,16 +288,30 @@ test('Rust owns verification, encrypted credentials, collection, idempotency and
   );
   await until(async () => (await owner.get('/api/dsp/jobs')).value[0].status === 'succeeded');
   assert.equal((await owner.get('/api/dsp/employees')).value.total, 12);
-  assert.equal(
-    (await owner.post('/api/dsp/schedule', { enabled: true, localTime: '06:00' })).status,
-    200,
-  );
+  const schedule = await owner.post('/api/dsp/schedules', {
+    name: 'Morning',
+    collection: 'paycom',
+    cadence: 'daily',
+    intervalMinutes: null,
+    localTime: '06:00',
+    enabled: true,
+  });
+  assert.equal(schedule.status, 201);
+  assert.equal(schedule.value.enabled, true);
   assert.equal(
     (await owner.post('/api/dsp/connections/paycom/disable', { removeCredentials: true })).status,
     200,
   );
   assert.equal(fs.existsSync(vault), false);
-  assert.equal((await owner.get('/api/dsp/schedule')).value.enabled, false);
+  const paused = (await owner.get('/api/dsp/schedules')).value.schedules;
+  assert.deepEqual(
+    paused.map((s: { id: string; enabled: boolean; nextRun: string | null }) => [
+      s.id,
+      s.enabled,
+      s.nextRun,
+    ]),
+    [[schedule.value.id, false, null]],
+  );
   assert.equal((await owner.get('/api/dsp/employees')).value.total, 12);
 });
 
@@ -353,7 +367,6 @@ test('Rust workforce settings enforce revisions, filter employees and timecards,
     name_order: 'last_first',
     department: 'Delivery',
     driver_departments: ['Delivery'],
-    automatic_sync: false,
   };
   assert.equal(
     (await owner.post('/api/dsp/paycom/settings', { revision: before.revision, values })).status,

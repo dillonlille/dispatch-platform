@@ -491,10 +491,8 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
     }
     let invalidate_schedule = input.method == "POST"
         && (input.path.contains("/dsps")
-            || input.path.ends_with("/schedule")
             || (input.path.contains("/schedules") && !input.path.ends_with("/preview"))
-            || input.path.ends_with("/profile")
-            || input.path.ends_with("/settings"));
+            || input.path.ends_with("/profile"));
     let pool = state.clone();
     let reply = if input.method == "GET" && !input.path.starts_with("/api/invitations/") {
         state.read(move |db| synchronous(db, &input, &pool)).await?
@@ -704,9 +702,6 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
                 db.provision(parts[3])?;
                 return Ok(Reply::json(db.get_dsp(parts[3])?));
             }
-            if write && parts.get(2) == Some(&"releases") {
-                return Err(Error::new("github_manages_updates", 409));
-            }
             Err(Error::new("not_found", 404))
         }
     }
@@ -729,11 +724,10 @@ fn tenant_permission(endpoint: &str, detail: Option<&str>, write: bool) -> &'sta
         ("roles", _, true) => "roles.manage",
         ("members" | "roles", _, false) => TEAM,
         ("audit", ..) => "audit.view",
-        ("settings", ..) | ("profile", _, true) => "settings.manage",
-        ("paycom" | "schedule", _, true) | ("schedules", ..) => "timecard.manage",
+        ("profile", _, true) => "settings.manage",
+        ("paycom", _, true) | ("schedules", ..) => "timecard.manage",
         ("jobs", Some("meal-breaks"), false) => "timecard.view",
         ("jobs", ..) | ("cortex", _, true) => "collections.run",
-        ("overview", ..) => roles::ACCESS,
         _ => "timecard.view",
     }
 }
@@ -759,9 +753,8 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
     match (i.method.as_str(),i.path.as_str()) {
         ("GET","/api/dsp/paycom/status") => {
             let publication = db.collector(id,super::collectors::Provider::Paycom)?.one("SELECT collected_at FROM publications WHERE active=1",[])?;
-            Ok(Reply::json(json!({"connection":connection()?,"schedule":db.schedule(id)?,"workforce":{"collectedAt":publication.map(|p|p["collected_at"].clone())}})))
+            Ok(Reply::json(json!({"connection":connection()?,"workforce":{"collectedAt":publication.map(|p|p["collected_at"].clone())}})))
         },
-        ("GET","/api/dsp/overview")=>{let jobs=if c.can("collections.run"){db.recent_jobs(Some(id),8)?}else{json!([])};let workforce=if c.can("timecard.view"){db.employees(id,"",0,5,false)?}else{Value::Null};let audit=if c.can("audit.view"){db.audits(Some(id),10)?}else{json!([])};Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":workforce,"audit":audit})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
         ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=&request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested",request.date.as_deref().unwrap_or(""))?;Ok(Reply::status(job,202))},
@@ -772,8 +765,6 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
         ("POST","/api/dsp/schedules/preview")=>Ok(Reply::json(db.preview_schedule(id,b)?)),
         ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit_ref(Some(actor),Some(id),"schedule.created",s(&result,"name"),Some(s(&result,"name")),&[],Some(("schedule",s(&result,"id"))))?;Ok(Reply::status(result,201))},
-        ("GET","/api/dsp/schedule")=>Ok(Reply::json(db.schedule(id)?)),
-        ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let before=db.schedule(id)?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit_with(Some(actor),Some(id),"schedule.updated","",None,&super::schedules::schedule_changes(&before,&result))?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
             db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("station",None,Some(station.to_uppercase())),("abbreviation",None,Some(abbreviation.to_owned()))])?;Ok(Reply::ok())
@@ -795,7 +786,6 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audit_page(&audit_query(&i.query,Some(id))?)?)),
         ("POST","/api/dsp/audit/export")=>Ok(Reply::json(db.audit_export(actor,audit_query(b,Some(id))?)?)),
-        ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
             if write && endpoint=="schedules" {
                 let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;

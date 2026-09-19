@@ -319,7 +319,6 @@ impl Store {
             1,
             true,
         )?;
-        super::jobs::migrate(&jobs)?;
         // Additive tables retain compatibility with the previous Rust release.
         jobs.0.execute_batch(include_str!("jobMetricsSchema.sql"))?;
         let store = Self {
@@ -334,7 +333,6 @@ impl Store {
             key,
             dsp_cache: std::cell::RefCell::new(Vec::new()),
         };
-        super::mail::migrate(&store.platform)?;
         super::roles::migrate(&store.platform)?;
         migrate_audit(&store.platform)?;
         store
@@ -350,7 +348,7 @@ impl Store {
             [],
         )? {
             let id = s(&row, "id");
-            store.migrate_collector_storage(id)?;
+            store.open_collectors(id)?;
             store.initialize_schedules(id)?;
         }
         Ok(store)
@@ -513,14 +511,6 @@ impl Store {
     pub fn support_visible(&self, dsp: &str) -> bool {
         self.profile(dsp)
             .is_ok_and(|profile| flag(&profile, "supportVisible"))
-    }
-    pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        let mut page = self.audit_page(&AuditQuery {
-            dsp,
-            limit,
-            ..AuditQuery::default()
-        })?;
-        Ok(page["events"].take())
     }
     // A DSP's log lists its members' and the system's actions. A platform owner's
     // appear only where the DSP shows Platform support, and never under their name.

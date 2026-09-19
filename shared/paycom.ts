@@ -8,8 +8,6 @@ export const paycomColumns = [
 ] as const;
 export type PaycomColumn = (typeof paycomColumns)[number][0];
 export interface PaycomPreferences {
-  automatic_sync: boolean;
-  sync_interval_seconds: number;
   opening_page: 'timecards' | 'meal-breaks' | 'employees';
   rows_per_page: number;
   name_order: 'first_last' | 'last_first';
@@ -22,8 +20,6 @@ export interface PaycomPreferences {
   late_da_departments: string[];
 }
 export const paycomDefaults: PaycomPreferences = {
-  automatic_sync: true,
-  sync_interval_seconds: 3600,
   opening_page: 'timecards',
   rows_per_page: 100,
   name_order: 'first_last',

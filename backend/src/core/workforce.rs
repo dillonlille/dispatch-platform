@@ -1,7 +1,7 @@
 use super::collectors::Provider;
 use super::{
     Error, Result, crypto,
-    db::{AuditChange, Db, Store, at, boolean, flag, iso, n, now, s},
+    db::{AuditChange, Db, Store, boolean, flag, iso, n, s},
     ensure, validate as v,
 };
 use rusqlite::params;
@@ -19,7 +19,7 @@ const COLUMNS: [&str; 6] = [
     "condition",
 ];
 pub fn defaults() -> Value {
-    json!({"automatic_sync":true,"sync_interval_seconds":3600,"opening_page":"timecards","rows_per_page":100,"name_order":"first_last","default_sort":"employeeName","department":null,"station":null,"columns":COLUMNS,"driver_departments":null,"late_da_time":"10:01","late_da_departments":[]})
+    json!({"opening_page":"timecards","rows_per_page":100,"name_order":"first_last","default_sort":"employeeName","department":null,"station":null,"columns":COLUMNS,"driver_departments":null,"late_da_time":"10:01","late_da_departments":[]})
 }
 fn preferences(db: &Db) -> Result<Value> {
     let mut stored = db.setting(
@@ -32,18 +32,21 @@ fn preferences(db: &Db) -> Result<Value> {
             stored["values"][key] = value.clone();
         }
     }
-    stored["values"]["automatic_sync"] = json!(
-        db.one("SELECT enabled FROM schedules WHERE provider='paycom'", [])?
-            .is_some_and(|r| flag(&r, "enabled"))
-    );
+    without_retired(&mut stored["values"]);
     Ok(stored)
+}
+// Collection schedules replaced these. Preferences saved through v0.0.9 hold
+// them, and a dashboard opened before an update still sends them.
+fn without_retired(values: &mut Value) {
+    if let Some(values) = values.as_object_mut() {
+        values
+            .retain(|key, _| !["automatic_sync", "sync_interval_seconds"].contains(&key.as_str()));
+    }
 }
 fn validate_preferences(value: &Value) -> Result<()> {
     v::fields(
         value,
         &[
-            "automatic_sync",
-            "sync_interval_seconds",
             "opening_page",
             "rows_per_page",
             "name_order",
@@ -55,12 +58,6 @@ fn validate_preferences(value: &Value) -> Result<()> {
             "late_da_time",
             "late_da_departments",
         ],
-    )?;
-    v::boolean(value, "automatic_sync")?;
-    ensure(
-        [1800, 3600, 7200, 14400].contains(&v::integer(value, "sync_interval_seconds", 1, 14400)?),
-        "invalid_input",
-        400,
     )?;
     v::choice(
         value,
@@ -172,9 +169,7 @@ fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
 // The settings a member can change, compared for the audit log. An unset
 // filter means "All", and an empty list "None".
 fn preference_changes(before: &Value, after: &Value) -> Vec<AuditChange> {
-    const FIELDS: [(&str, &str); 12] = [
-        ("automatic_sync", "paycom.automatic_sync"),
-        ("sync_interval_seconds", "paycom.sync_interval_seconds"),
+    const FIELDS: [(&str, &str); 10] = [
         ("opening_page", "paycom.opening_page"),
         ("rows_per_page", "paycom.rows_per_page"),
         ("name_order", "paycom.name_order"),
@@ -222,27 +217,17 @@ impl Store {
         revision: i64,
         values: &Value,
     ) -> Result<Value> {
+        let mut values = values.clone();
+        without_retired(&mut values);
+        let values = &values;
         validate_preferences(values)?;
         let previous = self.preferences(id)?;
-        let sync_changed = previous["values"]["automatic_sync"] != values["automatic_sync"]
-            || previous["values"]["sync_interval_seconds"] != values["sync_interval_seconds"];
         let db = self.collector(id, Provider::Paycom)?;
         db.transaction(|| {
             let before = preferences(&db)?;
             ensure(
                 n(&before, "revision") == revision,
                 "settings_changed_reload_before_saving",
-                409,
-            )?;
-            let enabled = db
-                .one(
-                    "SELECT enabled FROM connections WHERE provider='paycom'",
-                    [],
-                )?
-                .is_some_and(|r| flag(&r, "enabled"));
-            ensure(
-                !flag(values, "automatic_sync") || enabled,
-                "connect_paycom_before_automatic_sync",
                 409,
             )?;
             let mut history =
@@ -252,34 +237,8 @@ impl Store {
             db.set(
                 "paycom.preferences",
                 &json!({"revision":revision+1,"values":values,"history":history}),
-            )?;
-            let changed = db
-                .setting("paycom.syncIntervalSeconds", Value::Null)?
-                .is_null()
-                || before["values"]["automatic_sync"] != values["automatic_sync"]
-                || before["values"]["sync_interval_seconds"] != values["sync_interval_seconds"];
-            db.set(
-                "paycom.syncIntervalSeconds",
-                &values["sync_interval_seconds"],
-            )?;
-            if changed {
-                db.exec(
-                    "UPDATE schedules SET enabled=?,next_run=? WHERE provider='paycom'",
-                    params![
-                        flag(values, "automatic_sync"),
-                        if flag(values, "automatic_sync") {
-                            Some(at(now() + n(values, "sync_interval_seconds") * 1000))
-                        } else {
-                            None
-                        }
-                    ],
-                )?;
-            }
-            Ok(())
+            )
         })?;
-        if sync_changed {
-            self.import_legacy_schedule(id, true)?;
-        }
         self.audit_with(
             Some(actor),
             Some(id),

@@ -10,25 +10,6 @@ use super::{
 use rusqlite::params;
 use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-// Preserve the original user_version so the prior runtime can still operate Paycom
-// after rollback. The new request column has a default for its old INSERTs.
-pub(crate) fn migrate(db: &super::db::Db) -> Result<()> {
-    let columns = db.all("PRAGMA table_info(jobs)", [])?;
-    if columns.iter().any(|c| s(c, "name") == "request") {
-        return Ok(());
-    }
-    db.0.execute_batch("PRAGMA foreign_keys=OFF")?;
-    let result=db.transaction(|| {
-        let schema=include_str!("jobSchema.sql");
-        let (table,indexes)=schema.split_once('\n').unwrap();
-        db.0.execute_batch(&table.replacen("CREATE TABLE jobs ","CREATE TABLE jobs_next ",1))?;
-        let names=columns.iter().map(|c|s(c,"name")).collect::<Vec<_>>().join(",");
-        db.0.execute_batch(&format!("INSERT INTO jobs_next ({names}) SELECT {names} FROM jobs; DROP TABLE jobs; ALTER TABLE jobs_next RENAME TO jobs; {indexes}"))?;
-        ensure(db.all("PRAGMA foreign_key_check",[])?.is_empty(),"invalid_job_migration",503)
-    });
-    db.0.execute_batch("PRAGMA foreign_keys=ON")?;
-    result
-}
 fn public_job(row: &Value, name: &Value, metrics: Vec<Value>) -> Result<Value> {
     Ok(serde_json::to_value(PublicJob::from_row(
         row, name, metrics,
@@ -43,19 +24,14 @@ impl Store {
         )
     }
     pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
-        self.recent_jobs(id, 200)
-    }
-    pub fn recent_jobs(&self, id: Option<&str>, limit: usize) -> Result<Value> {
-        let limit = limit.min(200) as i64;
         let rows = match id {
             Some(id) => self.jobs.all(
-                "SELECT * FROM jobs WHERE dsp_id=? ORDER BY created_at DESC LIMIT ?",
-                params![id, limit],
+                "SELECT * FROM jobs WHERE dsp_id=? ORDER BY created_at DESC LIMIT 200",
+                [id],
             )?,
-            None => self.jobs.all(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
-                [limit],
-            )?,
+            None => self
+                .jobs
+                .all("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 200", [])?,
         };
         if rows.is_empty() {
             return Ok(json!([]));
@@ -163,7 +139,7 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         self.jobs.transaction(|| requests.iter().zip(&connections).map(|((key,provider,request),connection)| {
-            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind().unwrap() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
+            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
             ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
             let job=crypto::id("job")?;
             self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key,request) VALUES (?,?,?,?,'queued',?,?,?,?,?,?,?)",params![job,id,self.config.environment,provider.job_kind(),now(),iso(),self.config.release,actor,n(connection,"revision"),key,serde_json::to_string(request)?])?;
@@ -349,28 +325,6 @@ impl Store {
         }
         (schedule, facts)
     }
-    pub fn schedule(&self, id: &str) -> Result<Value> {
-        let db = self.collector(id, Provider::Paycom)?;
-        let r = db
-            .one("SELECT * FROM schedules WHERE provider='paycom'", [])?
-            .unwrap();
-        let mut value = json!({"enabled":flag(&r,"enabled"),"localTime":r["local_time"],"timezone":r["timezone"],"nextRun":r["next_run"]});
-        let interval = db.setting("paycom.syncIntervalSeconds", Value::Null)?;
-        if !interval.is_null() {
-            value["intervalSeconds"] = interval;
-        }
-        Ok(value)
-    }
-    pub fn set_schedule(&self, id: &str, enabled: bool, time: &str, tz: &str) -> Result<Value> {
-        let next = next_occurrence(time, tz, now())?;
-        let db = self.collector(id, Provider::Paycom)?;
-        db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
-        self.import_legacy_schedule(id, true)?;
-        self.schedule(id)
-    }
-}
-pub fn next_occurrence(time: &str, tz: &str, after: i64) -> Result<String> {
-    super::schedules::next_daily(time, tz, after)
 }
 // Stable per-job jitter survives restarts and disperses DSP retries. No secret
 // material or provider identity participates in the delay.
@@ -675,43 +629,5 @@ mod retry_tests {
         let delay = retry_delay("job-test", 2);
         assert!((120000..=180000).contains(&delay));
         assert_eq!(delay, retry_delay("job-test", 2));
-    }
-}
-
-#[cfg(test)]
-mod migration_tests {
-    use super::*;
-    #[test]
-    fn extending_job_kinds_preserves_jobs_metrics_and_legacy_inserts() {
-        let db = super::super::db::Db(rusqlite::Connection::open_in_memory().unwrap());
-        let old = include_str!("jobSchema.sql")
-            .replace(
-                "CHECK(kind IN ('paycom.collect','cortex.meal_breaks.collect'))",
-                "CHECK(kind='paycom.collect')",
-            )
-            .replace(" request TEXT NOT NULL DEFAULT '{}',", "");
-        db.0.execute_batch(&old).unwrap();
-        db.0.execute_batch(include_str!("jobMetricsSchema.sql"))
-            .unwrap();
-        let insert = "INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,'dsp','preview','paycom.collect','queued',0,'2026','test',1,?)";
-        db.exec(insert, ["job-1", "key-1"]).unwrap();
-        db.exec(
-            "INSERT INTO job_metrics VALUES ('job-1',1,'worker','{}')",
-            [],
-        )
-        .unwrap();
-        migrate(&db).unwrap();
-        migrate(&db).unwrap();
-        assert_eq!(
-            db.one("SELECT request FROM jobs WHERE id='job-1'", [])
-                .unwrap()
-                .unwrap()["request"],
-            "{}"
-        );
-        assert_eq!(db.all("SELECT * FROM job_metrics", []).unwrap().len(), 1);
-        db.exec(insert, ["job-2", "key-2"]).unwrap();
-        assert!(db.all("PRAGMA foreign_key_check", []).unwrap().is_empty());
-        db.exec("DELETE FROM jobs WHERE id='job-1'", []).unwrap();
-        assert!(db.all("SELECT * FROM job_metrics", []).unwrap().is_empty());
     }
 }

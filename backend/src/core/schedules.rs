@@ -1,4 +1,4 @@
-//! DSP-owned recurring collections. Provider databases remain rollback-compatible.
+//! DSP-owned recurring collections.
 use super::{
     Error, Result,
     collectors::Provider,
@@ -10,7 +10,6 @@ use chrono::{NaiveTime, TimeZone};
 use rusqlite::params;
 use serde_json::{Value, json};
 
-const LEGACY: &str = "legacy-paycom";
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS collection_schedules (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, collection TEXT NOT NULL CHECK(collection IN ('paycom','meal_break','both')),
     cadence TEXT NOT NULL CHECK(cadence IN ('interval','daily')), interval_minutes INTEGER, local_time TEXT NOT NULL,
@@ -131,52 +130,11 @@ impl Store {
     pub(crate) fn initialize_schedules(&self, id: &str) -> Result<()> {
         let db = self.dsp(id)?;
         db.0.execute_batch(SCHEMA)?;
-        if db.setting("collectionSchedules.initialized", json!(false))? == json!(true) {
-            return Ok(());
+        // v0.0.9 imports the DSP's old single schedule unless this is set.
+        if db.setting("collectionSchedules.initialized", json!(false))? != json!(true) {
+            db.set("collectionSchedules.initialized", &json!(true))?;
         }
-        self.import_legacy_schedule(id, false)?;
-        db.set("collectionSchedules.initialized", &json!(true))
-    }
-    pub(crate) fn import_legacy_schedule(&self, id: &str, force: bool) -> Result<()> {
-        let legacy = self.schedule(id)?;
-        // A fresh DSP starts empty; do not present an invented default schedule.
-        if !force && !flag(&legacy, "enabled") && legacy["intervalSeconds"].is_null()
-            && s(&legacy, "localTime") == "06:00"
-            && self.platform.one("SELECT id FROM audit WHERE dsp_id=? AND action IN ('schedule.updated','paycom.settings_updated') LIMIT 1", [id])?.is_none()
-        {
-            return Ok(());
-        }
-        let interval = legacy["intervalSeconds"].as_i64().map(|v| v / 60);
-        let zone = timezone(s(&legacy, "timezone"))?;
-        let time = if interval.is_some() {
-            legacy["nextRun"]
-                .as_str()
-                .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-                .map(|date| date.with_timezone(&zone).format("%H:%M").to_string())
-                .unwrap_or_else(|| s(&legacy, "localTime").into())
-        } else {
-            s(&legacy, "localTime").into()
-        };
-        let start = legacy["nextRun"]
-            .as_str()
-            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
-            .map(|v| v.timestamp_millis())
-            .unwrap_or(anchor(&time, s(&legacy, "timezone"), now())?);
-        self.dsp(id)?.exec("INSERT INTO collection_schedules(id,name,collection,cadence,interval_minutes,local_time,anchor,enabled,next_run,created_at) VALUES (?,'Paycom sync','paycom',?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET collection='paycom',cadence=excluded.cadence,interval_minutes=excluded.interval_minutes,local_time=excluded.local_time,anchor=excluded.anchor,enabled=excluded.enabled,next_run=excluded.next_run,last_error=NULL,revision=collection_schedules.revision+1",params![LEGACY,if interval.is_some(){"interval"}else{"daily"},interval,time,start,flag(&legacy,"enabled"),legacy["nextRun"].as_str(),iso()])?;
         Ok(())
-    }
-    fn mirror_legacy_schedule(&self, id: &str, row: &Value) -> Result<()> {
-        if s(row, "id") != LEGACY {
-            return Ok(());
-        }
-        let db = self.collector(id, Provider::Paycom)?;
-        db.transaction(|| {
-            db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![flag(row,"enabled") && s(row,"collection")!="meal_break",s(row,"local_time"),s(&self.get_dsp(id)?,"timezone"),row["next_run"].as_str()])?;
-            if s(row,"cadence")=="interval" {
-                db.set("paycom.syncIntervalSeconds",&json!(n(row,"interval_minutes")*60))?;
-            } else { db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?; }
-            Ok(())
-        })
     }
     pub fn collection_schedules(&self, id: &str) -> Result<Value> {
         let dsp = self.get_dsp(id)?;
@@ -312,9 +270,7 @@ impl Store {
             Some(next(&row, tz, now())?)
         };
         self.dsp(id)?.exec("INSERT INTO collection_schedules(id,name,collection,cadence,interval_minutes,local_time,anchor,enabled,next_run,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,collection=excluded.collection,cadence=excluded.cadence,interval_minutes=excluded.interval_minutes,local_time=excluded.local_time,anchor=excluded.anchor,enabled=excluded.enabled,next_run=excluded.next_run,last_error=NULL,revision=collection_schedules.revision+1",params![key,name,collection,s(value,"cadence"),value["intervalMinutes"].as_i64(),s(value,"localTime"),start,enabled,next_run,iso()])?;
-        let row = self.schedule_row(id, &key)?;
-        self.mirror_legacy_schedule(id, &row)?;
-        Ok(public(&row))
+        Ok(public(&self.schedule_row(id, &key)?))
     }
     pub fn enable_collection_schedule(
         &self,
@@ -340,7 +296,7 @@ impl Store {
         value: &Value,
     ) -> Result<()> {
         v::fields(value, &["revision"])?;
-        let mut row = self.schedule_row(id, schedule)?;
+        let row = self.schedule_row(id, schedule)?;
         ensure(
             n(&row, "revision") == v::integer(value, "revision", 1, i64::MAX)?,
             "schedule_changed",
@@ -348,9 +304,7 @@ impl Store {
         )?;
         self.dsp(id)?
             .exec("DELETE FROM collection_schedules WHERE id=?", [schedule])?;
-        row["enabled"] = json!(false);
-        row["next_run"] = Value::Null;
-        self.mirror_legacy_schedule(id, &row)
+        Ok(())
     }
     pub(crate) fn pause_provider_schedules(&self, id: &str, provider: Provider) -> Result<()> {
         let target = if provider == Provider::Paycom {
@@ -359,12 +313,6 @@ impl Store {
             "meal_break"
         };
         self.dsp(id)?.exec("UPDATE collection_schedules SET enabled=0,next_run=NULL,last_error=NULL,revision=revision+1 WHERE enabled=1 AND collection IN (?, 'both')",[target])?;
-        if let Some(row) = self
-            .dsp(id)?
-            .one("SELECT * FROM collection_schedules WHERE id=?", [LEGACY])?
-        {
-            self.mirror_legacy_schedule(id, &row)?;
-        }
         Ok(())
     }
     pub(crate) fn retime_schedules(&self, id: &str, tz: &str) -> Result<()> {
@@ -466,8 +414,6 @@ impl Store {
                 "UPDATE collection_schedules SET next_run=?,last_error=NULL WHERE id=?",
                 [&deadline, s(&row, "id")],
             )?;
-            row["next_run"] = json!(deadline);
-            self.mirror_legacy_schedule(id, &row)?;
             let ms = chrono::DateTime::parse_from_rfc3339(&deadline)
                 .map_err(|_| Error::new("invalid_schedule", 500))?
                 .timestamp_millis();
@@ -595,41 +541,6 @@ mod tests {
             changed["nextRun"],
             next_daily("06:00", "America/Chicago", now()).unwrap()
         );
-    }
-    #[test]
-    fn migration_preserves_the_legacy_interval_and_does_not_resurrect_deletion() {
-        let (_root, db, id) = setup();
-        db.dsp(&id)
-            .unwrap()
-            .exec(
-                "DELETE FROM settings WHERE key='collectionSchedules.initialized'",
-                [],
-            )
-            .unwrap();
-        let legacy = db.collector(&id, Provider::Paycom).unwrap();
-        legacy
-            .set("paycom.syncIntervalSeconds", &json!(1800))
-            .unwrap();
-        legacy
-            .exec(
-                "UPDATE schedules SET enabled=1,next_run='2099-01-01T00:00:00.000Z'",
-                [],
-            )
-            .unwrap();
-        db.initialize_schedules(&id).unwrap();
-        let schedules = db.collection_schedules(&id).unwrap();
-        let row = &schedules["schedules"][0];
-        assert_eq!(row["intervalMinutes"], 30);
-        assert_eq!(row["nextRun"], "2099-01-01T00:00:00.000Z");
-        assert_eq!(row["enabled"], true);
-        db.delete_collection_schedule(&id, LEGACY, &json!({"revision":1}))
-            .unwrap();
-        db.initialize_schedules(&id).unwrap();
-        assert_eq!(
-            db.collection_schedules(&id).unwrap()["schedules"],
-            json!([])
-        );
-        assert!(!flag(&db.schedule(&id).unwrap(), "enabled"));
     }
     #[test]
     fn each_collection_target_queues_the_correct_jobs_and_replay_is_idempotent() {

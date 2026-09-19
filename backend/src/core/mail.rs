@@ -1,27 +1,11 @@
 use super::{
     Result, State,
-    db::{self, Db, Store, n, s},
+    db::{self, Store, n},
     ensure,
 };
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::{Value, json};
-
-// Nullable, additive columns allow an older Rust runtime to keep sending mail
-// after rollback. Historical retry rows have no reliable enqueue time.
-pub fn migrate(db: &Db) -> Result<()> {
-    let columns = db.all("PRAGMA table_info(outbox)", [])?;
-    db.transaction(|| {
-        for (name, kind) in [("created_at", "INTEGER"), ("last_attempt_at", "INTEGER"), ("last_error", "TEXT")] {
-            if !columns.iter().any(|c| s(c, "name") == name) {
-                db.0.execute_batch(&format!("ALTER TABLE outbox ADD COLUMN {name} {kind}"))?;
-            }
-        }
-        db.exec("UPDATE outbox SET created_at=available_at WHERE created_at IS NULL AND attempts=0 AND status='pending'", [])?;
-        db.0.execute_batch("CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(status,available_at); CREATE INDEX IF NOT EXISTS outbox_last_attempt ON outbox(last_attempt_at DESC); CREATE INDEX IF NOT EXISTS outbox_sent ON outbox(sent_at DESC)")?;
-        Ok(())
-    })
-}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,32 +53,4 @@ pub fn record_delivery(db: &Store, id: &str, attempts: i64, error: Option<&str>)
         db.platform.exec("UPDATE outbox SET status='sent',encrypted_message='',sent_at=?,last_attempt_at=?,last_error=NULL WHERE id=? AND status='pending'", params![db::iso(),db::now(),id])?
     };
     ensure(changed == 1, "email_delivery_record_missing", 500)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn diagnostics_migration_preserves_old_runtime_inserts_and_retry_age() {
-        let db = Db(rusqlite::Connection::open_in_memory().unwrap());
-        db.0.execute_batch(include_str!("platformSchema.sql"))
-            .unwrap();
-        db.exec("INSERT INTO outbox(id,encrypted_message,attempts,available_at) VALUES ('old','secret',2,1000)", []).unwrap();
-        migrate(&db).unwrap();
-        migrate(&db).unwrap();
-        assert!(
-            db.one("SELECT created_at FROM outbox WHERE id='old'", [])
-                .unwrap()
-                .unwrap()["created_at"]
-                .is_null()
-        );
-        // Prior binaries omit the new nullable columns and remain compatible.
-        db.exec("INSERT INTO outbox(id,encrypted_message,available_at) VALUES ('rollback','secret',2000)", []).unwrap();
-        assert_eq!(
-            db.one("SELECT count(*) n FROM outbox", [])
-                .unwrap()
-                .unwrap()["n"],
-            2
-        );
-    }
 }
