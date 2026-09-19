@@ -37,16 +37,37 @@ checks must pass for the final PR head. Keep its branch and worktree until merge
 4. Add the route's row to the inventory in `backend/tests/http_routes.rs`.
 5. When the dashboard consumes the response, add its type to `shared/contracts`.
 
+## Where things live
+
+```
+dashboard/src/
+  main.tsx     entry point: session, DSP view, Shell and the open page
+  app/         app-wide plumbing every feature may use: api, useAction, feedback, navigation,
+               route-meta, routes, permissions, session, live updates, presence, Brand
+  shell/       the frame around a page: sidebar, account menu, view-as-role banner
+  ui/          generic building blocks with no product knowledge, one per file
+  lib/         pure helpers: format, errors, backoff, activity
+  features/    one folder per product area (auth, home, platform, timecard, team,
+               connections, audit, settings), one component per file, `index.ts` as its entry
+```
+
+`tests/dashboard-structure.test.ts` holds the layout: `lib` imports nothing else, `ui` imports
+`lib` only, features import `ui`, `lib` and `app`, a feature reaches another only through its
+`index.ts` and only on an edge listed in the test, only `app/routes.tsx` and `main.tsx` import
+features, and no modules import each other in a cycle.
+
 ## Adding a page
 
-1. Write the page as one component file in `dashboard/src/` (a `features/` folder per
-   product area arrives in a follow-up).
-2. Add one entry to the table in `dashboard/src/app/routes.tsx`: `id` (its address),
-   `scope` (`dsp` for `#dsp/<id>/<page>`, `platform` for `#<page>`), `label`, `icon`,
-   `nav`, and `render`, which receives the session, the DSP view and `reopen`.
-3. Access goes in the entry's `permission`, written once: the sidebar, the page and
+1. Write the page as a component file in its product area's folder,
+   `dashboard/src/features/<area>/`, and export it from that folder's `index.ts`.
+2. Declare its address in `dashboard/src/app/route-meta.ts`: `id`, `scope` (`dsp` for
+   `#dsp/<id>/<page>`, `platform` for `#<page>`) and `label`. A page without its own
+   sidebar item names the item to highlight in `parent`.
+3. Give it its entry under the same id in `dashboard/src/app/routes.tsx`: `icon`, `nav`,
+   and `render`, which receives the session, the DSP view and `reopen`. The compiler
+   rejects an address without an entry.
+4. Access goes in the entry's `permission`, written once: the sidebar, the page and
    the "not available for your role" message all follow it.
-4. A page without its own sidebar item names the item to highlight in `parent`.
 5. Link with `dspHash`/`platformHash` and move with `navigate` from
    `dashboard/src/app/navigation.ts`; do not write hash strings by hand.
 6. `tests/dashboard-structure.test.ts` fails on a duplicate id or an unknown parent.
@@ -56,12 +77,14 @@ checks must pass for the final PR head. Keep its branch and worktree until merge
 - Generic building blocks live in `dashboard/src/ui/`, one per file, exported from
   `ui/index.ts`. They hold no product knowledge: no API calls, no permission checks,
   no contracts, nothing about timecards or DSPs. The structure test enforces the imports.
-- A component that knows the product stays next to the page that uses it.
+- A component that knows the product lives in its feature folder,
+  `dashboard/src/features/<area>/`, one component per file. What two features share moves
+  down: visuals to `ui/`, pure logic to `lib/`, product plumbing to `app/`.
 - Before writing markup, look for the primitive: `Header`, `Tabs`, `Modal`,
   `ConfirmDialog`, `Popover`, `DataState`, `SearchInput`, `Pagination`, `SortHeader`,
   `DetailList`, `Badge`, `Empty`, `ErrorBox`, `Loading`, `useFocusTrap`.
 - Loading and errors use `DataState`: no data shows the spinner, data shows the content.
-- Mutations use `useAction` from `dashboard/src/lib/useAction.ts` for `run`, `busy` and
+- Mutations use `useAction` from `dashboard/src/app/useAction.ts` for `run`, `busy` and
   `error`. Failures show at the top of the page and `success` is toasted; pass `inline`
   to render `error` inside a form or dialog instead.
 - Formatting (`time`, `duration`, `bytes`, `title`, names) comes from `dashboard/src/lib/format.ts`.

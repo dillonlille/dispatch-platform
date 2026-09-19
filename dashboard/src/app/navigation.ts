@@ -1,4 +1,4 @@
-import type { DspRouteId, PlatformRouteId } from './routes.js';
+import type { DspRouteId, PlatformRouteId } from './route-meta.js';
 
 export const dspHash = (
   dspId: string,
