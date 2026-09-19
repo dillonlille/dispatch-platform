@@ -20,6 +20,23 @@ Do not repeat the full local CI suite just to duplicate a successful GitHub run.
 Rerun affected checks after fixes, new changes, or failures. All required GitHub
 checks must pass for the final PR head. Keep its branch and worktree until merged.
 
+## Adding an endpoint
+
+1. Write the handler in `backend/src/http/routes/<area>.rs`. A database handler is
+   `fn(&Store, &Member, &Input) -> Result<Reply>`; its second argument is what the
+   route's access produced (`Anyone`, `User` for a session or platform owner, `Member`
+   for a DSP permission). Path parameters come from `input.param("name")`.
+2. Register it in that file's `routes()` with the access it requires:
+   `read(path, access, handler)` for a GET, `write(path, access, handler)` for a POST.
+   Access is `Public`, `Session`, `PlatformOwner` or `Dsp("permission")`. The helper
+   authorizes and runs the handler inside one database closure. Add
+   `.invalidates_schedules()` when the route changes which DSPs or schedules exist.
+3. Work that must wait outside the database uses `async_get`/`async_post`. Its handler
+   receives the registered access and calls `access.authorize(db, &input)` inside its
+   own `state.read`/`state.run` closure, and `access.revalidate` after each wait.
+4. Add the route's row to the inventory in `backend/tests/http_routes.rs`.
+5. When the dashboard consumes the response, add its type to `shared/contracts`.
+
 ## Faster builds and deployment
 
 The workflow selects full checks for backend, tooling, dependencies and unknown
