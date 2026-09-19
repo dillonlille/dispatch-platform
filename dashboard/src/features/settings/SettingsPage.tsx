@@ -61,20 +61,6 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
               <small>{session.user.email}</small>
             </div>
           </div>
-          <section className="settings-section">
-            <div>
-              <h2>Account</h2>
-            </div>
-            <DetailList
-              className="field-grid"
-              items={[
-                ['First name', session.user.firstName],
-                ['Last name', session.user.lastName],
-                ['Email address', session.user.email],
-                ['Role', role],
-              ]}
-            />
-          </section>
           {view && (
             <section className="settings-section">
               <div>
