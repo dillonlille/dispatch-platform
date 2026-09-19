@@ -9,7 +9,8 @@ import type { Connection, Employee, Timecard } from '../../shared/contracts/inde
 import { paycomColumns, type PaycomPreferences, type PaycomColumn } from '../../shared/paycom.js';
 import { api, useData } from './api.js';
 import { Badge, Empty, ErrorBox, Loading, Modal, time, title } from './ui.js';
-import { type Perform } from './platform.js';
+import { messageOf } from './lib/errors.js';
+import { useAction } from './lib/useAction.js';
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
 type Daily = {
   rows: (Timecard & { name: string })[];
@@ -423,11 +424,9 @@ export function TimecardsPage({
   );
 }
 export function ConnectionsPage({
-  perform,
   development,
   timezone,
 }: {
-  perform: Perform;
   development: boolean;
   timezone: string;
 }) {
@@ -437,18 +436,8 @@ export function ConnectionsPage({
         <h2 id="connections-heading">Connections</h2>
       </div>
       <div className="connection-cards">
-        <ConnectionCard
-          provider="paycom"
-          perform={perform}
-          development={development}
-          timezone={timezone}
-        />
-        <ConnectionCard
-          provider="cortex"
-          perform={perform}
-          development={development}
-          timezone={timezone}
-        />
+        <ConnectionCard provider="paycom" development={development} timezone={timezone} />
+        <ConnectionCard provider="cortex" development={development} timezone={timezone} />
       </div>
       <p className="connection-permissions muted">
         <ShieldCheck size={16} />
@@ -458,12 +447,10 @@ export function ConnectionsPage({
   );
 }
 function ConnectionCard({
-  perform,
   development,
   provider,
   timezone,
 }: {
-  perform: Perform;
   development: boolean;
   provider: Connection['provider'];
   timezone: string;
@@ -477,10 +464,45 @@ function ConnectionCard({
   const [disconnecting, setDisconnecting] = useState(false);
   const [credentialError, setCredentialError] = useState('');
   const [saveError, setSaveError] = useState('');
-  const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false),
-    [busy, setBusy] = useState(false),
     [closedVerification, setClosedVerification] = useState<string>();
+  const connect = useAction(
+    async (credentials: Record<string, unknown>) => {
+      try {
+        await api(endpoint, credentials);
+      } catch (error) {
+        setSaveError(messageOf(error));
+        throw error;
+      } finally {
+        refresh();
+      }
+    },
+    { success: 'Connection saved' },
+  );
+  const verify = useAction(
+    async (code: FormDataEntryValue | null) => {
+      await api(`${endpoint}/verify`, { code });
+      refresh();
+    },
+    { success: 'Verification submitted' },
+  );
+  const check = useAction(
+    async () => {
+      await api(`${endpoint}/check`, {});
+      refresh();
+    },
+    { success: 'Connection checked' },
+  );
+  const disconnect = useAction(
+    async () => {
+      await api(`${endpoint}/disable`, { removeCredentials: true });
+      refresh();
+      setDisconnecting(false);
+    },
+    { success: () => `${name} disconnected` },
+  );
+  const saving = connect.busy,
+    busy = connect.busy || disconnect.busy;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -494,28 +516,11 @@ function ConnectionCard({
     event.currentTarget.reset();
     setEditing(false);
     setClosedVerification(data?.verificationSessionId);
-    setSaving(true);
-    setBusy(true);
-    try {
-      await perform(async () => {
-        try {
-          await api(endpoint, {
-            ...(provider === 'paycom'
-              ? { clientCode: form.get('clientCode'), securityAnswers }
-              : {}),
-            username: form.get('username'),
-            password: form.get('password'),
-          });
-        } catch (error) {
-          setSaveError((error as Error).message);
-          throw error;
-        }
-      }, 'Connection saved');
-    } finally {
-      setSaving(false);
-      setBusy(false);
-      refresh();
-    }
+    await connect.run({
+      ...(provider === 'paycom' ? { clientCode: form.get('clientCode'), securityAnswers } : {}),
+      username: form.get('username'),
+      password: form.get('password'),
+    });
   }
   return (
     <>
@@ -565,13 +570,7 @@ function ConnectionCard({
                     className="inline-form"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      const form = new FormData(event.currentTarget);
-                      void perform(async () => {
-                        await api(`${endpoint}/verify`, {
-                          code: form.get('code'),
-                        });
-                        refresh();
-                      }, 'Verification submitted');
+                      void verify.run(new FormData(event.currentTarget).get('code'));
                     }}
                   >
                     <input
@@ -613,10 +612,7 @@ function ConnectionCard({
                   }
                   onClick={() => {
                     setSaveError('');
-                    void perform(async () => {
-                      await api(`${endpoint}/check`, {});
-                      refresh();
-                    }, 'Connection checked');
+                    void check.run();
                   }}
                 >
                   <RefreshCw size={16} />
@@ -647,12 +643,7 @@ function ConnectionCard({
               disabled={busy}
               onClick={() => {
                 setSaveError('');
-                setBusy(true);
-                void perform(async () => {
-                  await api(`${endpoint}/disable`, { removeCredentials: true });
-                  refresh();
-                  setDisconnecting(false);
-                }, `${name} disconnected`).finally(() => setBusy(false));
+                void disconnect.run();
               }}
             >
               Disconnect

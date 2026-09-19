@@ -11,6 +11,7 @@ import {
 } from '../../shared/schedules.js';
 import type { PaycomSettings } from '../../shared/paycom.js';
 import { dspHash } from './app/navigation.js';
+import { messageOf } from './lib/errors.js';
 import './timecard-schedules.css';
 
 const newSchedule = (): ScheduleInput => ({
@@ -123,10 +124,7 @@ function ScheduleEditor({
       )
         .then((result) => setPreview(result.nextRun))
         .catch((cause: unknown) => {
-          if (!controller.signal.aborted)
-            setPreviewError(
-              cause instanceof Error ? cause.message : 'Could not preview this schedule.',
-            );
+          if (!controller.signal.aborted) setPreviewError(messageOf(cause));
         });
     }, 200);
     return () => {
@@ -155,7 +153,7 @@ function ScheduleEditor({
         });
       onSaved(remove ? 'Schedule deleted' : schedule ? 'Schedule saved' : 'Schedule created');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The schedule could not be saved.');
+      setError(messageOf(cause));
       setStale(cause instanceof ApiError && cause.code === 'schedule_changed');
     } finally {
       setBusy(false);
@@ -290,7 +288,7 @@ function ScheduleEditor({
             type="button"
             disabled={busy}
             onClick={() => {
-              void onReload().catch((cause) => setError(cause.message));
+              void onReload().catch((cause) => setError(messageOf(cause)));
             }}
           >
             Reload schedule
@@ -397,7 +395,7 @@ function LateDas({
       setDraft(undefined);
       onSaved('Late DAs saved');
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : 'Could not save Late DAs.');
+      onError(messageOf(cause));
       query.refresh();
     } finally {
       setBusy(false);
@@ -491,7 +489,7 @@ export function PaycomSettingsPage({ dspId }: { dspId: string }) {
       setMessage(schedule.enabled ? 'Schedule paused' : 'Schedule enabled');
     } catch (cause) {
       setUpdated(undefined);
-      setError(cause instanceof Error ? cause.message : 'Could not update the schedule.');
+      setError(messageOf(cause));
     } finally {
       query.refresh();
       setBusyId(undefined);

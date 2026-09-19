@@ -1,10 +1,14 @@
-import { useState } from 'react';
 import { Brand } from './brand.js';
 import { api } from './api.js';
 import { ErrorBox } from './ui.js';
+import { useAction } from './lib/useAction.js';
 export function DspOnboarding({ complete }: { complete: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+  const save = useAction(
+    (profile: Record<string, FormDataEntryValue>) =>
+      api('/api/dsp/profile', profile).then(complete),
+    { inline: true },
+  );
+  const { busy, error } = save;
   return (
     <main className="auth-layout">
       <div className="auth-brand">
@@ -17,13 +21,7 @@ export function DspOnboarding({ complete }: { complete: () => Promise<void> }) {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            setBusy(true);
-            setError('');
-            void api('/api/dsp/profile', Object.fromEntries(form))
-              .then(complete)
-              .catch((error) => setError(error.message))
-              .finally(() => setBusy(false));
+            void save.run(Object.fromEntries(new FormData(event.currentTarget)));
           }}
         >
           <label>

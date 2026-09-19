@@ -31,6 +31,7 @@ import type {
 import { api, errorLabel, useData } from './api.js';
 import { Empty, ErrorBox, Loading, deviceTimezone, title } from './ui.js';
 import { permissionLabels } from './roles.js';
+import { useAction } from './lib/useAction.js';
 import { dspHash } from './app/navigation.js';
 import { routeLabel, type DspRouteId } from './app/routes.js';
 import { paycomColumns } from '../../shared/paycom.js';
@@ -410,8 +411,7 @@ export function AuditLog({ view }: { view?: DspView }) {
   const [q, setQ] = useState(search.trim());
   const [limit, setLimit] = useUpdateState('audit-limit', PAGE);
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState('');
+  const [truncated, setTruncated] = useState('');
   useEffect(() => {
     const timer = setTimeout(() => setQ(search.trim()), 250);
     return () => clearTimeout(timer);
@@ -487,14 +487,13 @@ export function AuditLog({ view }: { view?: DspView }) {
       if (!next.delete(key)) next.add(key);
       return next;
     });
-  const download = async () => {
-    setExporting(true);
-    setExportError('');
-    try {
+  const download = useAction(
+    async () => {
+      setTruncated('');
       // The server records the export and returns every matching event.
       const all = await api<AuditPage>(`${base}/export`, Object.fromEntries(query));
       if (all.total > all.events.length)
-        setExportError(
+        setTruncated(
           `Exported the newest ${all.events.length.toLocaleString('en-US')} of ${all.total.toLocaleString('en-US')} events.`,
         );
       const cell = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -538,19 +537,16 @@ export function AuditLog({ view }: { view?: DspView }) {
       link.download = `audit-log-${dayKey.format(new Date())}.csv`;
       link.click();
       URL.revokeObjectURL(link.href);
-    } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Export failed.');
-    } finally {
-      setExporting(false);
-    }
-  };
+    },
+    { inline: true },
+  );
 
   const counts = page?.counts ?? {};
   const everything = areas.reduce((sum, [id]) => sum + (counts[id] ?? 0), 0);
   const filtered = Boolean(area || actor || q || within || subject || range !== 'all');
   return (
     <div className="audit-log" aria-busy={!data && Boolean(stale)}>
-      <ErrorBox message={error || exportError} />
+      <ErrorBox message={error || download.error || truncated} />
       <div className="audit-toolbar">
         <label className="search">
           <Search size={16} />
@@ -604,7 +600,7 @@ export function AuditLog({ view }: { view?: DspView }) {
           </select>
           <ChevronDown size={16} aria-hidden />
         </label>
-        <button onClick={() => void download()} disabled={exporting || !page?.total}>
+        <button onClick={() => void download.run()} disabled={download.busy || !page?.total}>
           <Download size={16} />
           Export
         </button>

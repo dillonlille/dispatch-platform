@@ -1,14 +1,14 @@
 import { useBrowserUpdate } from './browser-update.js';
 import { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { X } from 'lucide-react';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, credentials, ApiError } from './api.js';
+import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
 import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
 import { Page, findRoute, navigation, routeLabel } from './app/routes.js';
 import { AuthScreen } from './auth.js';
-import { type Perform } from './platform.js';
-import { Loading, ErrorBox, can } from './ui.js';
+import { messageOf } from './lib/errors.js';
+import { Loading, can } from './ui.js';
 import './styles.css';
 import { DspOnboarding } from './onboarding.js';
 import { Shell } from './shell.js';
@@ -54,9 +54,8 @@ function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [address, setAddress] = useState(() => parseHash(window.location.hash)),
-    [notice, setNotice] = useState(''),
-    [error, setError] = useState(''),
     [switching, setSwitching] = useState(false);
+  const { perform, fail } = useFeedback();
   useEffect(() => {
     const id = session?.user.id ?? 'signed-out';
     const apply = () => applyAppearance(readAppearance(id));
@@ -69,34 +68,37 @@ function App() {
       window.removeEventListener('dispatch-appearance', apply);
     };
   }, [session?.user.id]);
-  const load = useCallback(async (afterLogin = false) => {
-    try {
-      const next = await api<Session>('/api/session');
-      credentials(next.csrf);
-      setSession(next);
-      if (
-        !next.user.platformOwner &&
-        (afterLogin || !/^#(?:invite\?|reset\?|signin)/.test(window.location.hash)) &&
-        !window.location.hash.startsWith('#dsp/') &&
-        next.dsps.length === 1
-      )
-        navigate(dspHash(next.dsps[0]!.id));
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        credentials('');
-        setSession(null);
-      } else setError((error as Error).message);
-    }
-  }, []);
+  const load = useCallback(
+    async (afterLogin = false) => {
+      try {
+        const next = await api<Session>('/api/session');
+        credentials(next.csrf);
+        setSession(next);
+        if (
+          !next.user.platformOwner &&
+          (afterLogin || !/^#(?:invite\?|reset\?|signin)/.test(window.location.hash)) &&
+          !window.location.hash.startsWith('#dsp/') &&
+          next.dsps.length === 1
+        )
+          navigate(dspHash(next.dsps[0]!.id));
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          credentials('');
+          setSession(null);
+        } else fail(messageOf(error));
+      }
+    },
+    [fail],
+  );
   useEffect(() => {
     void load();
     const changed = () => {
       setAddress(parseHash(window.location.hash));
-      setError('');
+      fail('');
     };
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
-  }, [load]);
+  }, [load, fail]);
   const { route, dspId, page } = address;
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
   // A platform owner looking into a DSP is never shown to its team.
@@ -140,7 +142,7 @@ function App() {
         }
       })
       .catch((error) => {
-        if (active) setError((error as Error).message);
+        if (active) fail(messageOf(error));
       })
       .finally(() => {
         if (active) setSwitching(false);
@@ -148,28 +150,12 @@ function App() {
     return () => {
       active = false;
     };
-  }, [session, dspId]);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), 5000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-  const perform: Perform = async (work, success) => {
-    setError('');
-    try {
-      await work();
-      if (success) setNotice(success);
-      return true;
-    } catch (error) {
-      setError((error as Error).message);
-      return false;
-    }
-  };
+  }, [session, dspId, fail]);
   if (session === undefined)
     return (
       <>
         <Loading />
-        <ErrorBox message={error} />
+        <FeedbackMessages />
       </>
     );
   if (
@@ -206,27 +192,23 @@ function App() {
         void perform(reopen);
       }}
     >
-      <ErrorBox message={error} />
-      {notice && (
-        <div className="toast" role="status">
-          {notice}
-          <button aria-label="Dismiss notification" onClick={() => setNotice('')}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
+      <FeedbackMessages />
       {dspId ? (
         switching ? (
           <Loading />
         ) : view ? (
           <div key={`${view.dsp.id}:${view.dsp.revision}:${view.role.id}`}>
-            <Page session={session} view={view} page={page} perform={perform} reopen={reopen} />
+            <Page session={session} view={view} page={page} reopen={reopen} />
           </div>
         ) : null
       ) : (
-        <Page session={session} page={page} perform={perform} reopen={reopen} />
+        <Page session={session} page={page} reopen={reopen} />
       )}
     </Shell>
   );
 }
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <FeedbackProvider>
+    <App />
+  </FeedbackProvider>,
+);

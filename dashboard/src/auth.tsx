@@ -3,6 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Brand } from './brand.js';
 import { api, useData } from './api.js';
 import { ErrorBox } from './ui.js';
+import { messageOf } from './lib/errors.js';
 import { dspHash, hashQuery, navigate, platformHash, signInHash } from './app/navigation.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const hash = window.location.hash.slice(1),
@@ -61,7 +62,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
         navigate(dspHash(accepted.dspId));
       }
     } catch (error) {
-      setError((error as Error).message);
+      setError(messageOf(error));
     } finally {
       setBusy(false);
     }

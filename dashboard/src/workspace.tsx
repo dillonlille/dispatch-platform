@@ -18,7 +18,7 @@ import { EmployeesPage, TimecardsPage } from './dsp.js';
 import { MealBreaksPage } from './meal-breaks.js';
 import { usePaycomDate } from './paycom-day-controls.js';
 import { localDate } from '../../shared/meal-breaks.js';
-import { type Perform } from './platform.js';
+import { useAction } from './lib/useAction.js';
 import { dspHash, navigate } from './app/navigation.js';
 import { RoleSheet, RolesTab, assignable } from './roles.js';
 
@@ -133,10 +133,9 @@ function SourceSyncStatus({
   );
 }
 
-export function PaycomPage({ view, perform }: { view: DspView; perform: Perform }) {
+export function PaycomPage({ view }: { view: DspView }) {
   const canCollect = can(view, 'collections.run');
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
-  const [syncing, setSyncing] = useState(false);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
   const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
   const tab = selectedTab ?? 'timecards';
@@ -175,12 +174,23 @@ export function PaycomPage({ view, perform }: { view: DspView; perform: Perform 
       ? 'Connect Paycom to sync.'
       : '';
   const canConnect = can(view, 'connections.manage');
+  const sync = useAction(
+    async () => {
+      await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
+        requestId: crypto.randomUUID(),
+        ...(tab !== 'employees' ? { date } : {}),
+      });
+      refresh();
+      syncState.refresh();
+    },
+    { success: () => (daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued') },
+  );
   const syncButton = canCollect && (
     <button
       disabled={
         !!syncUnavailable ||
         !!syncState.error ||
-        syncing ||
+        sync.busy ||
         !!activeSync ||
         (daily && !sourceCurrent)
       }
@@ -188,24 +198,7 @@ export function PaycomPage({ view, perform }: { view: DspView; perform: Perform 
         syncUnavailable ||
         (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
       }
-      onClick={async () => {
-        setSyncing(true);
-        try {
-          await perform(
-            async () => {
-              await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-                requestId: crypto.randomUUID(),
-                ...(tab !== 'employees' ? { date } : {}),
-              });
-              refresh();
-              syncState.refresh();
-            },
-            daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued',
-          );
-        } finally {
-          setSyncing(false);
-        }
-      }}
+      onClick={() => void sync.run()}
     >
       <RefreshCw size={16} />
       Sync now
@@ -308,15 +301,7 @@ export function PaycomPage({ view, perform }: { view: DspView; perform: Perform 
 }
 
 type Invitation = { email: string; role: string; expiresAt: number; accepted: boolean };
-export function TeamPage({
-  view,
-  perform,
-  reopen,
-}: {
-  view: DspView;
-  perform: Perform;
-  reopen: () => Promise<void>;
-}) {
+export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promise<void> }) {
   const { data, error, refresh } = useData<Membership[]>('/api/dsp/members', 10000);
   const canInvite = can(view, 'members.invite'),
     canManage = can(view, 'members.manage'),
@@ -331,6 +316,33 @@ export function TeamPage({
   const [editing, setEditing] = useState<Membership>();
   const [removing, setRemoving] = useState(false);
   const [revoking, setRevoking] = useState<Invitation>();
+  const revoke = useAction(
+    async (invitation: Invitation) => {
+      await api('/api/dsp/invitations/revoke', { email: invitation.email });
+      setRevoking(undefined);
+      invitations.refresh();
+    },
+    { success: 'Invitation revoked' },
+  );
+  const invite = useAction(
+    async (form: FormData) => {
+      await api('/api/dsp/members/invite', { email: form.get('email'), role: form.get('role') });
+      setInviting(false);
+      invitations.refresh();
+      roles.refresh();
+    },
+    { success: (form) => `Invitation email queued for ${form.get('email')}` },
+  );
+  // A null role removes the member.
+  const assign = useAction(
+    async (member: Membership, role: FormDataEntryValue | null) => {
+      await api(`/api/dsp/members/${member.id}`, { role });
+      setEditing(undefined);
+      await reopen();
+      refresh();
+    },
+    { success: (_, role) => (role === null ? 'Member removed' : 'Role updated') },
+  );
   const members =
     data?.filter((member) =>
       `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase()),
@@ -448,7 +460,6 @@ export function TeamPage({
         <RoleSheet
           view={view}
           role={roleEditor === 'new' ? undefined : roleEditor}
-          perform={perform}
           close={() => setRoleEditor(undefined)}
           saved={async (permissionsChanged) => {
             if (permissionsChanged) await reopen();
@@ -519,16 +530,7 @@ export function TeamPage({
           <p>Revoke the pending invitation for {revoking.email}? Its link will stop working.</p>
           <div className="form-actions">
             <button onClick={() => setRevoking(undefined)}>Cancel</button>
-            <button
-              className="primary"
-              onClick={() =>
-                void perform(async () => {
-                  await api('/api/dsp/invitations/revoke', { email: revoking.email });
-                  setRevoking(undefined);
-                  invitations.refresh();
-                }, 'Invitation revoked')
-              }
-            >
+            <button className="primary" onClick={() => void revoke.run(revoking)}>
               Revoke invitation
             </button>
           </div>
@@ -544,19 +546,7 @@ export function TeamPage({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              void perform(
-                async () => {
-                  await api('/api/dsp/members/invite', {
-                    email: form.get('email'),
-                    role: form.get('role'),
-                  });
-                  setInviting(false);
-                  invitations.refresh();
-                  roles.refresh();
-                },
-                `Invitation email queued for ${form.get('email')}`,
-              );
+              void invite.run(new FormData(event.currentTarget));
             }}
           >
             <label>
@@ -593,13 +583,7 @@ export function TeamPage({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              void perform(async () => {
-                await api(`/api/dsp/members/${editing.id}`, { role: form.get('role') });
-                setEditing(undefined);
-                await reopen();
-                refresh();
-              }, 'Role updated');
+              void assign.run(editing, new FormData(event.currentTarget).get('role'));
             }}
           >
             <label>
@@ -621,14 +605,7 @@ export function TeamPage({
                 <button
                   type="button"
                   className="danger"
-                  onClick={() =>
-                    void perform(async () => {
-                      await api(`/api/dsp/members/${editing.id}`, { role: null });
-                      setEditing(undefined);
-                      await reopen();
-                      refresh();
-                    }, 'Member removed')
-                  }
+                  onClick={() => void assign.run(editing, null)}
                 >
                   Remove member
                 </button>

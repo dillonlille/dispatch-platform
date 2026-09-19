@@ -8,7 +8,7 @@ import {
 } from '../../shared/contracts/index.js';
 import { api } from './api.js';
 import { Empty, Loading, Modal, can } from './ui.js';
-import { type Perform } from './platform.js';
+import { useAction } from './lib/useAction.js';
 
 export const permissionLabels: Record<Permission, string> = {
   'timecard.view': 'View Timecard',
@@ -123,13 +123,11 @@ export function RolesTab({
 export function RoleSheet({
   view,
   role,
-  perform,
   close,
   saved,
 }: {
   view: DspView;
   role?: Role;
-  perform: Perform;
   close: () => void;
   saved: (permissionsChanged: boolean) => Promise<void> | void;
 }) {
@@ -138,6 +136,25 @@ export function RoleSheet({
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
   const inUse = role ? role.members + role.invitations > 0 : false;
+  const save = useAction(
+    async () => {
+      await api(role ? `/api/dsp/roles/${role.id}` : '/api/dsp/roles', {
+        name,
+        permissions: allPermissions.filter((p) => chosen.includes(p)),
+      });
+      close();
+      await saved(Boolean(role));
+    },
+    { success: role ? 'Role updated' : 'Role created' },
+  );
+  const remove = useAction(
+    async () => {
+      await api(`/api/dsp/roles/${role!.id}/remove`, {});
+      close();
+      await saved(false);
+    },
+    { success: 'Role deleted' },
+  );
   function toggle(permission: Permission, on: boolean) {
     setChosen((current) => {
       const next = current.filter((p) => p !== permission);
@@ -152,17 +169,7 @@ export function RoleSheet({
         className="role-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void perform(
-            async () => {
-              await api(role ? `/api/dsp/roles/${role.id}` : '/api/dsp/roles', {
-                name,
-                permissions: allPermissions.filter((p) => chosen.includes(p)),
-              });
-              close();
-              await saved(Boolean(role));
-            },
-            role ? 'Role updated' : 'Role created',
-          );
+          void save.run();
         }}
       >
         <label>
@@ -215,13 +222,7 @@ export function RoleSheet({
               className="danger"
               disabled={inUse}
               title={inUse ? 'Move this role’s members and pending invitations first.' : undefined}
-              onClick={() =>
-                void perform(async () => {
-                  await api(`/api/dsp/roles/${role.id}/remove`, {});
-                  close();
-                  await saved(false);
-                }, 'Role deleted')
-              }
+              onClick={() => void remove.run()}
             >
               Delete role
             </button>

@@ -4,22 +4,22 @@ import { api, useData } from './api.js';
 import { Header, Tabs, ErrorBox, Loading, Empty, can } from './ui.js';
 import { AuditLog } from './audit.js';
 import { ConnectionsPage } from './dsp.js';
-import { type Perform } from './platform.js';
+import { useAction } from './lib/useAction.js';
 import { ThemeSection } from './theme.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from './app/navigation.js';
 
-export function SettingsPage({
-  session,
-  view,
-  perform,
-}: {
-  session: SessionView;
-  view?: DspView;
-  perform: Perform;
-}) {
+export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
   const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
   const [passwordError, setPasswordError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const changePassword = useAction(async (form: FormData) => {
+    await api('/api/auth/password', {
+      currentPassword: form.get('currentPassword'),
+      password: form.get('password'),
+    });
+    navigate(signInHash);
+    location.reload();
+  });
+  const busy = changePassword.busy;
   const connections = can(view, 'connections.manage');
   const tabs = [
     ['general', 'General'],
@@ -113,15 +113,7 @@ export function SettingsPage({
                 setPasswordError('The new passwords must match.');
                 return;
               }
-              setBusy(true);
-              void perform(async () => {
-                await api('/api/auth/password', {
-                  currentPassword: form.get('currentPassword'),
-                  password: form.get('password'),
-                });
-                navigate(signInHash);
-                location.reload();
-              }).finally(() => setBusy(false));
+              void changePassword.run(form);
             }}
           >
             <label>
@@ -170,7 +162,6 @@ export function SettingsPage({
       {tab === 'connections' && connections && view && (
         <div className="settings-connections">
           <ConnectionsPage
-            perform={perform}
             development={session.providerMode === 'fixture'}
             timezone={view.dsp.timezone}
           />
@@ -178,18 +169,28 @@ export function SettingsPage({
       )}
       {tab === 'theme' && <ThemeSection userId={session.user.id} />}
       {tab === 'audit' && view && <AuditLog view={view} />}
-      {tab === 'support' && <SupportVisibility perform={perform} />}
+      {tab === 'support' && <SupportVisibility />}
     </>
   );
 }
 
 // Where it is on, a platform owner's activity is listed in that DSP's audit log,
 // always as "Platform support". It applies from the moment it is switched.
-function SupportVisibility({ perform }: { perform: Perform }) {
+function SupportVisibility() {
   const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps');
   const dsps = data?.filter((dsp) => !dsp.profile.removed);
   // The switch moves at once; a refused change puts it back.
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const show = useAction(
+    (dsp: DspSummary, visible: boolean) =>
+      api(`/api/platform/dsps/${dsp.id}/support-visibility`, { visible }),
+    {
+      success: (dsp, visible) =>
+        visible
+          ? `Platform support shown to ${dsp.name}`
+          : `Platform support hidden from ${dsp.name}`,
+    },
+  );
   return (
     <section className="settings-section">
       <div>
@@ -212,12 +213,7 @@ function SupportVisibility({ perform }: { perform: Perform }) {
                 onChange={(event) => {
                   const visible = event.target.checked;
                   setChosen((current) => ({ ...current, [dsp.id]: visible }));
-                  void perform(
-                    () => api(`/api/platform/dsps/${dsp.id}/support-visibility`, { visible }),
-                    visible
-                      ? `Platform support shown to ${dsp.name}`
-                      : `Platform support hidden from ${dsp.name}`,
-                  ).then((saved) => {
+                  void show.run(dsp, visible).then((saved) => {
                     if (!saved) setChosen((current) => ({ ...current, [dsp.id]: !visible }));
                     refresh();
                   });

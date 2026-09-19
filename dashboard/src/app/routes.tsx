@@ -12,20 +12,13 @@ import {
 } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { PaycomSettingsPage } from '../paycom-settings.js';
-import {
-  AuditPage,
-  DiagnosticsPage,
-  DspList,
-  DspPicker,
-  ReleasesPage,
-  type Perform,
-} from '../platform.js';
+import { AuditPage, DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../platform.js';
 import { SettingsPage } from '../settings.js';
 import { ErrorBox, can, title } from '../ui.js';
 import { HomePage, PaycomPage, TeamPage } from '../workspace.js';
 
 type Access = { session: SessionView; view?: DspView };
-type PageContext = { session: SessionView; perform: Perform };
+type PageContext = { session: SessionView };
 type DspPageContext = PageContext & { view: DspView; reopen: () => Promise<void> };
 type Entry = {
   id: string;
@@ -62,7 +55,7 @@ export const routes = [
     nav: true,
     // The link stays put while a view loads; the page itself waits for the view.
     permission: ({ view }) => !view || can(view, 'timecard.view'),
-    render: ({ view, perform }) => <PaycomPage view={view} perform={perform} />,
+    render: ({ view }) => <PaycomPage view={view} />,
   },
   {
     id: 'paycom-settings',
@@ -81,9 +74,7 @@ export const routes = [
     nav: true,
     permission: ({ view }) =>
       can(view, 'members.invite') || can(view, 'members.manage') || can(view, 'roles.manage'),
-    render: ({ view, perform, reopen }) => (
-      <TeamPage view={view} perform={perform} reopen={reopen} />
-    ),
+    render: ({ view, reopen }) => <TeamPage view={view} reopen={reopen} />,
   },
   {
     id: 'settings',
@@ -91,9 +82,7 @@ export const routes = [
     label: 'Settings',
     icon: Settings,
     nav: true,
-    render: ({ session, view, perform }) => (
-      <SettingsPage session={session} view={view} perform={perform} />
-    ),
+    render: ({ session, view }) => <SettingsPage session={session} view={view} />,
   },
   {
     id: 'dsps',
@@ -101,8 +90,8 @@ export const routes = [
     label: 'DSPs',
     icon: Building2,
     nav: true,
-    render: ({ session, perform }) =>
-      session.user.platformOwner ? <DspList perform={perform} /> : <DspPicker session={session} />,
+    render: ({ session }) =>
+      session.user.platformOwner ? <DspList /> : <DspPicker session={session} />,
   },
   {
     id: 'releases',
@@ -120,7 +109,7 @@ export const routes = [
     icon: FlaskConical,
     nav: true,
     permission: platformOwner,
-    render: ({ perform }) => <DiagnosticsPage perform={perform} />,
+    render: () => <DiagnosticsPage />,
   },
   {
     id: 'audit',
@@ -137,7 +126,7 @@ export const routes = [
     label: 'Settings',
     icon: Settings,
     nav: platformOwner,
-    render: ({ session, perform }) => <SettingsPage session={session} perform={perform} />,
+    render: ({ session }) => <SettingsPage session={session} />,
   },
 ] as const satisfies readonly Route[];
 

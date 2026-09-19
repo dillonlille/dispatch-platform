@@ -25,6 +25,7 @@ import {
 } from '../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../shared/paycom.js';
 import { PaycomDateControls } from './paycom-day-controls.js';
+import { useAction } from './lib/useAction.js';
 import './meal-breaks.css';
 
 function Source({ name }: { name: 'Paycom' | 'Flex' }) {
@@ -289,9 +290,7 @@ function LinkEmployees({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(data.drivers.map((d) => [d.id, selection(d.id)])),
   );
-  const [query, setQuery] = useState(''),
-    [error, setError] = useState(''),
-    [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
   const changes = data.drivers
     .filter((d) => values[d.id] !== selection(d.id))
     .map((d) => ({
@@ -299,6 +298,14 @@ function LinkEmployees({
       paycomCode: values[d.id]?.startsWith('paycom:') ? values[d.id]!.slice(7) : null,
       ...(values[d.id] === 'auto' ? { automatic: true } : {}),
     }));
+  const save = useAction(
+    async () => {
+      await api('/api/dsp/paycom/employee-links', { revision: data.links.revision, changes });
+      saved();
+    },
+    { inline: true },
+  );
+  const { busy, error } = save;
   return (
     <Modal
       title="Link employees"
@@ -381,21 +388,7 @@ function LinkEmployees({
         <button
           className="primary"
           disabled={busy || !changes.length}
-          onClick={async () => {
-            setBusy(true);
-            setError('');
-            try {
-              await api('/api/dsp/paycom/employee-links', {
-                revision: data.links.revision,
-                changes,
-              });
-              saved();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : 'Unable to save employee links.');
-            } finally {
-              setBusy(false);
-            }
-          }}
+          onClick={() => void save.run()}
         >
           {busy
             ? 'Saving…'

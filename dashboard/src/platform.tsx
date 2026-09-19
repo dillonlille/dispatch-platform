@@ -1,8 +1,9 @@
 import { useUpdateState } from './browser-update.js';
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Building2, Plus, Search, RefreshCw, Eye, FlaskConical } from 'lucide-react';
 import type { DspSummary, Job, PlatformHealth, SessionView } from '../../shared/contracts/index.js';
 import { dspHash, navigate, platformHash } from './app/navigation.js';
+import { useAction } from './lib/useAction.js';
 import { api, errorLabel, useData } from './api.js';
 import { DspAvatar } from './brand.js';
 import { DspActionsMenu } from './dsp-actions-menu.js';
@@ -22,17 +23,15 @@ import {
   title,
   Tabs,
 } from './ui.js';
-export type Perform = (work: () => Promise<unknown>, success?: string) => Promise<boolean>;
 const open = (dsp: { id: string }) => navigate(dspHash(dsp.id));
-export function DspList({ perform }: { perform: Perform }) {
+export function DspList() {
   const { data, error, refresh } = useData<DspSummary[]>('/api/platform/dsps', 10000);
   const [query, setQuery] = useUpdateState('dsp-query', ''),
     [filter, setFilter] = useUpdateState('dsp-filter', 'all'),
     [creating, setCreating] = useState(false),
     [suspending, setSuspending] = useState<DspSummary>(),
     [removing, setRemoving] = useState<DspSummary>(),
-    [detail, setDetail] = useState<DspSummary>(),
-    [busy, setBusy] = useState(false);
+    [detail, setDetail] = useState<DspSummary>();
   const dsps = data ?? [],
     visible = dsps.filter(
       (d) =>
@@ -45,22 +44,47 @@ export function DspList({ perform }: { perform: Perform }) {
               (filter === 'onboarding' &&
                 (d.ownerStatus !== 'active' || d.profile.setupRequired)))),
     );
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setBusy(true);
-    const ok = await perform(
-      async () => {
-        await api('/api/platform/dsps', {
-          ownerEmail: form.get('ownerEmail'),
-        });
-        refresh();
-      },
-      `Invitation email queued for ${form.get('ownerEmail')}`,
-    );
-    setBusy(false);
-    if (ok) setCreating(false);
-  }
+  const create = useAction(
+    async (ownerEmail: FormDataEntryValue | null) => {
+      await api('/api/platform/dsps', { ownerEmail });
+      refresh();
+    },
+    { success: (ownerEmail) => `Invitation email queued for ${ownerEmail}` },
+  );
+  const restore = useAction(
+    async (dsp: DspSummary) => {
+      await api(`/api/platform/dsps/${dsp.id}/restore`, {});
+      refresh();
+    },
+    { success: 'DSP restored' },
+  );
+  const resume = useAction(
+    async (dsp: DspSummary) => {
+      await api(
+        `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
+        dsp.status === 'failed' ? {} : { status: 'active' },
+      );
+      refresh();
+    },
+    { success: 'DSP available' },
+  );
+  const remove = useAction(
+    async (dsp: DspSummary) => {
+      await api(`/api/platform/dsps/${dsp.id}/remove`, {});
+      setRemoving(undefined);
+      refresh();
+    },
+    { success: 'DSP removed' },
+  );
+  const suspend = useAction(
+    async (dsp: DspSummary) => {
+      await api(`/api/platform/dsps/${dsp.id}/status`, { status: 'suspended' });
+      setSuspending(undefined);
+      refresh();
+    },
+    { success: 'DSP suspended' },
+  );
+  const busy = create.busy;
   return (
     <>
       <Header title="DSPs">
@@ -166,33 +190,14 @@ export function DspList({ perform }: { perform: Perform }) {
                   <td style={{ textAlign: 'right' }}>
                     <DspActionsMenu name={dsp.name}>
                       {dsp.profile.removed ? (
-                        <button
-                          onClick={() =>
-                            void perform(async () => {
-                              await api(`/api/platform/dsps/${dsp.id}/restore`, {});
-                              refresh();
-                            }, 'DSP restored')
-                          }
-                        >
-                          Restore DSP
-                        </button>
+                        <button onClick={() => void restore.run(dsp)}>Restore DSP</button>
                       ) : dsp.status === 'active' ? (
                         <button onClick={() => open(dsp)}>
                           <Eye size={16} />
                           View
                         </button>
                       ) : (
-                        <button
-                          onClick={() =>
-                            void perform(async () => {
-                              await api(
-                                `/api/platform/dsps/${dsp.id}/${dsp.status === 'failed' ? 'retry' : 'status'}`,
-                                dsp.status === 'failed' ? {} : { status: 'active' },
-                              );
-                              refresh();
-                            }, 'DSP available')
-                          }
-                        >
+                        <button onClick={() => void resume.run(dsp)}>
                           {dsp.status === 'failed' ? 'Retry' : 'Resume DSP'}
                         </button>
                       )}
@@ -227,7 +232,13 @@ export function DspList({ perform }: { perform: Perform }) {
           variant="sheet"
           onClose={() => setCreating(false)}
         >
-          <form onSubmit={(event) => void create(event)}>
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              if (await create.run(form.get('ownerEmail'))) setCreating(false);
+            }}
+          >
             <label>
               Owner email
               <input
@@ -336,16 +347,7 @@ export function DspList({ perform }: { perform: Perform }) {
           </p>
           <div className="form-actions">
             <button onClick={() => setRemoving(undefined)}>Cancel</button>
-            <button
-              className="primary"
-              onClick={() =>
-                void perform(async () => {
-                  await api(`/api/platform/dsps/${removing.id}/remove`, {});
-                  setRemoving(undefined);
-                  refresh();
-                }, 'DSP removed')
-              }
-            >
+            <button className="primary" onClick={() => void remove.run(removing)}>
               Remove DSP
             </button>
           </div>
@@ -356,16 +358,7 @@ export function DspList({ perform }: { perform: Perform }) {
           <p>Members lose access and active collections are cancelled until you resume this DSP.</p>
           <div className="form-actions">
             <button onClick={() => setSuspending(undefined)}>Cancel</button>
-            <button
-              className="danger"
-              onClick={() =>
-                void perform(async () => {
-                  await api(`/api/platform/dsps/${suspending.id}/status`, { status: 'suspended' });
-                  setSuspending(undefined);
-                  refresh();
-                }, 'DSP suspended')
-              }
-            >
+            <button className="danger" onClick={() => void suspend.run(suspending)}>
               Suspend DSP
             </button>
           </div>
@@ -445,7 +438,7 @@ function JobTable({ jobs }: { jobs: Job[] }) {
     <Empty title="No collections yet">Start a collection from a DSP workspace.</Empty>
   );
 }
-export function DiagnosticsPage({ perform }: { perform: Perform }) {
+export function DiagnosticsPage() {
   const health = useData<PlatformHealth>('/api/platform/health', 10000);
   const { data, error, refresh } = useData<{
     enabled: boolean;
@@ -454,7 +447,14 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
     dsps: { id: string; name: string; status: string }[];
   }>('/api/platform/diagnostics', 5000);
   const jobs = useData<Job[]>('/api/platform/jobs', 3000);
-  const [busy, setBusy] = useState(false);
+  const deploy = useAction(
+    async () => {
+      await api('/api/platform/diagnostics', {});
+      refresh();
+    },
+    { success: 'Test DSP ready' },
+  );
+  const busy = deploy.busy;
   return (
     <>
       <Header title="Diagnostics" />
@@ -538,13 +538,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
             <button
               className="primary"
               disabled={busy || !data.enabled}
-              onClick={() => {
-                setBusy(true);
-                void perform(async () => {
-                  await api('/api/platform/diagnostics', {});
-                  refresh();
-                }, 'Test DSP ready').finally(() => setBusy(false));
-              }}
+              onClick={() => void deploy.run()}
             >
               <FlaskConical size={16} />
               {busy ? 'Requesting test DSP…' : 'Deploy test DSP'}
