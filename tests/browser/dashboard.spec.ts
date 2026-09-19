@@ -1,12 +1,5 @@
-import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, demo, login, openDsp } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
-async function login(page: Page, email = 'owner@dispatch.test') {
-  await page.goto('/');
-  await page.getByLabel('Email address').fill(email);
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-}
 test('owner dashboard, search, workforce, timecards, connection verification and collection', async ({
   page,
   dispatch,
@@ -162,8 +155,7 @@ test('the mobile drawer stays open while the DSP behind it finishes loading', as
     await held;
     await route.continue();
   });
-  await page.getByText('Northline Logistics', { exact: true }).first().click();
-  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await openDsp(page, 'Northline Logistics');
   await page.getByRole('button', { name: 'Open navigation' }).click();
   const settings = page.getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toBeVisible();
@@ -304,7 +296,7 @@ test('archived account tabs preserve names and appearance preferences', async ({
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
-  await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
+  await page.getByLabel('Current password', { exact: true }).fill(demo.password);
   await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
   await page.getByLabel('Confirm new password', { exact: true }).fill('Different-password-2!');
   await page.getByRole('button', { name: 'Change password', exact: true }).click();

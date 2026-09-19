@@ -1,12 +1,4 @@
-import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
-
-async function login(page: Page, email = 'owner@dispatch.test') {
-  await page.goto('/');
-  await page.getByLabel('Email address').fill(email);
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-}
+import { test, expect, login, openDsp } from './fixtures.js';
 
 test('owner creates a role and the member’s interface follows its permissions', async ({
   page,
@@ -15,8 +7,7 @@ test('owner creates a role and the member’s interface follows its permissions'
   // Two waits of up to 15 s for the open session to follow a permission change.
   test.slow();
   await login(page);
-  await page.getByText('Northline Logistics', { exact: true }).first().click();
-  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await openDsp(page, 'Northline Logistics');
   await page.getByRole('link', { name: 'Team & Roles', exact: true }).click();
   await page.getByRole('tab', { name: 'Roles', exact: true }).click();
   const owner = page.getByRole('row', { name: /^Owner/ });

@@ -1,4 +1,4 @@
-import { collectorDatabase } from '../tooling/collector-storage.js';
+import { collectorDatabase } from './collector-storage.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,27 +7,54 @@ import net from 'node:net';
 import http from 'node:http';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+
+// The one place tests and tooling start a private Dispatch server: temporary state,
+// a free port, the fixture environment, seeded data, `serve`, the health wait and login.
+
+/** The accounts `seed` creates; `bootstrap` gives the owner the same password. */
+export const demo = {
+  email: 'owner@dispatch.test',
+  member: 'member@dispatch.test',
+  password: 'Dispatch-demo-2026!',
+};
+/** The release build `npm run build` writes, which browser and smoke checks serve. */
+export const built = {
+  binary: path.resolve('.build/services/rust/dispatch-backend'),
+  env: { DISPATCH_ARTIFACT_ROOT: path.resolve('.build') },
+};
+export type FixtureOptions = {
+  /** `seed` loads the demo DSPs (default); false bootstraps an empty platform. */
+  seed?: boolean;
+  /** Added to, or replacing, the fixture environment. */
+  env?: NodeJS.ProcessEnv;
+  /** Defaults to DISPATCH_TEST_BINARY or the debug build. */
+  binary?: string;
+  /** `inherit` streams the server's output instead of keeping it for `logs()`. */
+  output?: 'capture' | 'inherit';
+};
 const defaultBinary = path.resolve(
   process.env.DISPATCH_TEST_BINARY ?? 'target/debug/dispatch-backend',
 );
-const password = 'Dispatch-demo-2026!';
-export async function fixture(
-  options: boolean | { seed?: boolean; env?: NodeJS.ProcessEnv; binary?: string } = true,
-) {
+export async function freePort() {
+  const listener = net.createServer();
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  const port = (listener.address() as net.AddressInfo).port;
+  await new Promise<void>((resolve) => listener.close(() => resolve()));
+  return port;
+}
+/** Private state, environment and seeded data for a server that is not running yet. */
+export async function prepare(options: boolean | FixtureOptions = true) {
   let binary = typeof options === 'boolean' ? defaultBinary : (options.binary ?? defaultBinary);
   const seed = typeof options === 'boolean' ? options : (options.seed ?? true);
   const overrides = typeof options === 'boolean' ? {} : (options.env ?? {});
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-rust-core-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-fixture-'));
   if (overrides.DISPATCH_FIXTURE_PROVIDER_URL) {
     const executable = path.join(root, 'dispatch-backend');
     fs.copyFileSync(binary, executable, fs.constants.COPYFILE_FICLONE);
     fs.chmodSync(executable, 0o700);
     binary = executable;
   }
-  const listener = net.createServer();
-  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
-  const port = (listener.address() as net.AddressInfo).port;
-  await new Promise<void>((resolve) => listener.close(() => resolve()));
+  const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const env = {
     ...process.env,
@@ -49,9 +76,24 @@ export async function fixture(
       env: { ...env, DISPATCH_PROVIDER_MODE: 'fixture' },
       stdio: 'pipe',
     });
-  else cli(['bootstrap', 'owner@dispatch.test', 'Fresh', 'Owner'], password);
+  else cli(['bootstrap', demo.email, 'Fresh', 'Owner'], demo.password);
+  return { root, binary, env, port, address: origin, cli };
+}
+export async function fixture(options: boolean | FixtureOptions = true) {
+  const { root, binary, env, address: origin, cli } = await prepare(options);
+  const overrides = typeof options === 'boolean' ? {} : (options.env ?? {});
+  const inherit = typeof options !== 'boolean' && options.output === 'inherit';
+  const password = demo.password;
   let server: ChildProcess | undefined;
   let logs = '';
+  /** The untouched response, for pages and assets that are not JSON. */
+  const raw = (url: string, body?: unknown, headers: Record<string, string> = {}) =>
+    fetch(origin + url, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { origin: env.DISPATCH_ORIGIN, 'content-type': 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(overrides.DISPATCH_FIXTURE_PROVIDER_URL ? 180000 : 15000),
+    });
   const request = async (url: string, body?: unknown, headers: Record<string, string> = {}) => {
     if (headers.host) {
       return await new Promise<{
@@ -80,12 +122,7 @@ export async function fixture(
         req.end();
       });
     }
-    const response = await fetch(origin + url, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { origin: env.DISPATCH_ORIGIN, 'content-type': 'application/json', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(overrides.DISPATCH_FIXTURE_PROVIDER_URL ? 180000 : 15000),
-    });
+    const response = await raw(url, body, headers);
     const value = await response.json();
     return {
       status: response.status,
@@ -97,11 +134,14 @@ export async function fixture(
     };
   };
   const start = async () => {
-    server = spawn(binary, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-    server.stdout!.on('data', (data) => {
+    server = spawn(binary, ['serve'], {
+      env,
+      stdio: inherit ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe'],
+    });
+    server.stdout?.on('data', (data) => {
       logs += data;
     });
-    server.stderr!.on('data', (data) => {
+    server.stderr?.on('data', (data) => {
       logs += data;
     });
     await until(async () => {
@@ -137,7 +177,7 @@ export async function fixture(
       db.close();
     }
   };
-  const client = async (email = 'owner@dispatch.test', secret = password) => {
+  const client = async (email = demo.email, secret = password) => {
     const login = await request('/api/auth/login', { email, password: secret });
     assert.equal(login.status, 200, JSON.stringify(login.value));
     const headers: Record<string, string> = {
@@ -166,11 +206,19 @@ export async function fixture(
     start,
     stop,
     request,
+    raw,
     client,
     database,
     collector: <T>(dspId: string, callback: (db: DatabaseSync) => T): T =>
       database(path.relative(root, collectorDatabase(root, dspId, 'paycom')), callback),
     pid: () => server!.pid!,
+    /** Resolves when the running server exits, however it was stopped. */
+    exited: () =>
+      new Promise<void>((resolve) =>
+        server!.exitCode === null && server!.signalCode === null
+          ? server!.once('exit', () => resolve())
+          : resolve(),
+      ),
     logs: () => logs,
     close: async () => {
       await stop();

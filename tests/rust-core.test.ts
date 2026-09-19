@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { capturedMail } from './mail-support.js';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 import { employeeName } from '../shared/paycom.js';
 const password = 'Dispatch-demo-2026!';
 const credentials = {

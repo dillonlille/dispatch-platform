@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 
 type Role = { id: string; name: string; owner: boolean; permissions: string[]; members: number };
 

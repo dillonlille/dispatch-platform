@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fixture, until } from './rust-support.js';
+import { fixture, until } from './support.js';
 import { jobSchema, parseApiResponse, sessionSchema } from '../shared/contracts/runtime.js';
 
 test('trusted tunnel clients have separate IP allowances and retain account throttling', async (t) => {

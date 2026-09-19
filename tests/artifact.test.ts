@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fixture } from './rust-support.js';
+import { fixture } from './support.js';
 import { verifyArtifact } from '../tooling/artifact.js';
 
 test(

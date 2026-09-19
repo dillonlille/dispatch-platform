@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures.js';
+import { test, expect, openDsp, signIn } from './fixtures.js';
 
 test.use({ hasTouch: true });
 
@@ -79,11 +79,8 @@ test('Paycom window scales input, supports drag/scroll/keyboard, and only contin
   try {
     await page.goto('/');
     await expect(page).toHaveTitle(/Dispatch/);
-    await page.getByLabel('Email address').fill('owner@dispatch.test');
-    await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByRole('button', { name: /Northline Logistics/ }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+    await signIn(page);
+    await openDsp(page, 'Northline Logistics');
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Connections', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Complete Paycom verification' });

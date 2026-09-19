@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures.js';
+import { test, expect, login, openDsp } from './fixtures.js';
 import type { AuditEvent, AuditPage } from '../../shared/contracts/index.js';
 
 let next = 100;
@@ -163,12 +163,8 @@ async function open(page: Page) {
       } satisfies AuditPage,
     });
   });
-  await page.goto('/');
-  await page.getByLabel('Email address').fill('owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByText('Northline Logistics', { exact: true }).first().click();
-  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
   if (page.viewportSize()!.width < 700)
     await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
@@ -316,14 +312,10 @@ test('the audit log fits a phone', async ({ page }) => {
 test('a DSP lists Platform support only once the platform owner shows it there', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByLabel('Email address').fill('owner@dispatch.test');
-  await page.getByLabel('Password', { exact: true }).fill('Dispatch-demo-2026!');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await login(page);
   const visit = async () => {
     await page.getByRole('link', { name: 'DSPs', exact: true }).click();
-    await page.getByText('Northline Logistics', { exact: true }).first().click();
-    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await openDsp(page, 'Northline Logistics');
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
   };
