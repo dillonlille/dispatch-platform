@@ -376,7 +376,8 @@
 }
 .profile-clip {
   z-index: 2;
-  margin-bottom: -13px;
+  margin-bottom: -23px;
+  pointer-events: none;
   position: relative;
 }
 .profile-badge {

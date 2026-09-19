@@ -167,7 +167,7 @@ function Straps({ svg }: { svg: RefObject<SVGSVGElement | null> }) {
 }
 function Clip() {
   return (
-    <svg className="profile-clip" width="40" height="62" viewBox="80 88 40 62" aria-hidden>
+    <svg className="profile-clip" width="40" height="72" viewBox="80 88 40 72" aria-hidden>
       <defs>
         <linearGradient id="profile-metal" x1="0" x2="1">
           <stop offset="0" stopColor="#8d97a8" />
@@ -175,16 +175,38 @@ function Clip() {
           <stop offset=".6" stopColor="#9aa4b4" />
           <stop offset="1" stopColor="#5f697a" />
         </linearGradient>
+        {/* The hook fades out as it passes into the badge's slot. */}
+        <linearGradient
+          id="profile-into-slot"
+          gradientUnits="userSpaceOnUse"
+          x1="0"
+          y1="148"
+          x2="0"
+          y2="158"
+        >
+          <stop offset="0" stopColor="#fff" />
+          <stop offset="1" stopColor="#000" />
+        </linearGradient>
+        <mask
+          id="profile-hook-mask"
+          maskUnits="userSpaceOnUse"
+          x="80"
+          y="88"
+          width="40"
+          height="72"
+        >
+          <rect x="80" y="88" width="40" height="72" fill="url(#profile-into-slot)" />
+        </mask>
       </defs>
       <rect x="84" y="88" width="32" height="20" rx="3" fill="url(#profile-metal)" />
       <rect x="84" y="97" width="32" height="1.5" fill="#000" opacity=".25" />
       <circle cx="100" cy="114" r="5" fill="none" stroke="url(#profile-metal)" strokeWidth="3" />
       <path
-        d="M100 119 c0 4 -6 4 -6 10 a6 6 0 0 0 12 0"
+        d="M100 119 c0 5 -5 7 -5 13 c0 9 5 11 5 25"
         fill="none"
         stroke="url(#profile-metal)"
         strokeWidth="4"
-        strokeLinecap="round"
+        mask="url(#profile-hook-mask)"
       />
     </svg>
   );
