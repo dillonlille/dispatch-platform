@@ -105,6 +105,10 @@ test(
     assert.equal(f.state.readsByCode.get('AA01'), 2);
     for (const code of ['BB02', 'CC03', 'DD04', 'EE05'])
       assert.equal(f.state.readsByCode.get(code), 1);
+    // Each attempt proves one response equals a rendered read before the healthy
+    // lane reads later employees without rendering.
+    assert.equal(f.state.verifications, 2);
+    assert.equal(job.metrics[1].pageReads.direct, 0);
     assert.notEqual(publication(), previous);
     assert.equal(
       f.collector(
@@ -147,6 +151,10 @@ test(
       return job.status === 'succeeded';
     }, 20000);
     assert.equal(f.state.hydrated, 2);
+    // The response still holds the 8-hour table the page replaces, so the one
+    // comparison fails and no employee is read without rendering.
+    assert.equal(f.state.verifications, 1);
+    assert.equal(job.metrics[0].pageReads.direct, 0);
     assert.equal(f.state.imagesFinished, 0);
     assert.equal(job.metrics[0].pageReads.earlyReady, 2);
     assert.equal(job.metrics[0].pageReads.retries, 0);

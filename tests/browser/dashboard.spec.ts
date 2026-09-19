@@ -153,6 +153,57 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   );
 });
 
+test('platform owner looks through a DSP role until they leave the DSP', async ({
+  page,
+  dispatch,
+}) => {
+  const owner = await dispatch.client();
+  const dsp = owner.session.dsps.find((d: any) => d.name === 'Northline Logistics');
+  await owner.select(dsp.id);
+  await owner.post('/api/dsp/profile', {
+    name: dsp.name,
+    abbreviation: 'NL',
+    stationCode: 'DEMO1',
+    timezone: 'America/Chicago',
+  });
+  await owner.select(dsp.id);
+  const created = await owner.post('/api/dsp/roles', { name: 'Auditor', permissions: [] });
+  expect(created.status).toBe(201);
+  await login(page);
+  await page.goto(`/#dsp/${dsp.id}/team`);
+  const banner = page.getByRole('region', { name: 'DSP viewing mode' });
+  const menu = banner.getByLabel('View as role');
+  await expect(banner).toContainText('as DSP owner');
+  await expect(menu).toHaveText('Owner');
+  await menu.click();
+  await expect(banner.getByRole('button')).toHaveText([
+    'Owner',
+    'Manager',
+    'Member',
+    'Auditor',
+    'Exit view',
+  ]);
+  await page.screenshot({ path: test.info().outputPath('view-as-role-menu.png') });
+  await banner.getByRole('button', { name: 'Auditor', exact: true }).click();
+  await expect(banner).toContainText('Viewing Northline Logistics as Auditor');
+  await expect(menu).toHaveText('Auditor');
+  await expect(page.getByText('This page is not available for your role.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Timecard', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Team & Roles', exact: true })).toHaveCount(0);
+
+  await page.reload();
+  await expect(banner).toContainText('as Auditor');
+  await menu.click();
+  await banner.getByRole('button', { name: 'Manager', exact: true }).click();
+  await expect(banner).toContainText('as Manager');
+  await expect(page.getByRole('link', { name: 'Timecard', exact: true })).toBeVisible();
+
+  await banner.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
+  await page.goto(`/#dsp/${dsp.id}/team`);
+  await expect(banner).toContainText('as DSP owner');
+  await expect(page.getByRole('link', { name: 'Team & Roles', exact: true })).toBeVisible();
+});
 test('create a DSP and accept its owner invitation while another account is signed in', async ({
   page,
   dispatch,
@@ -204,21 +255,16 @@ test('create a DSP and accept its owner invitation while another account is sign
   ).toBeVisible();
 });
 
-test('archived account tabs preserve names, appearance and display timezone preferences', async ({
-  page,
-}) => {
+test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByText('First name', { exact: true })).toBeVisible();
   await expect(page.getByText('Last name', { exact: true })).toBeVisible();
-  await page.getByLabel('Display timezone').selectOption('America/Los_Angeles');
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
-  await expect(page.getByLabel('Display timezone')).toHaveValue('America/Los_Angeles');
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
   await page.getByLabel('Current password', { exact: true }).fill('Dispatch-demo-2026!');
   await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');

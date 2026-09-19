@@ -54,10 +54,12 @@ export const sessionSchema = z.object({
   release: text,
   providerMode: z.enum(['fixture', 'native']),
 }) satisfies z.ZodType<SessionView>;
+const viewRole = z.object({ id: text, name: text, owner: z.boolean() });
 const viewSchema = z.object({
   dsp,
   token: text.min(1),
-  role: z.object({ id: text, name: text, owner: z.boolean() }),
+  role: viewRole,
+  roles: z.array(viewRole).optional(),
   permissions: z.array(permission),
   profile,
 });
@@ -105,6 +107,8 @@ export const metricsSchema = z.object({
       recovered: count,
       resumed: count.optional(),
       earlyReady: count.optional(),
+      direct: count.optional(),
+      spotChecked: count.optional(),
       totalMs: milliseconds,
       active: z.array(pageRead),
       slowest: z.array(pageRead),

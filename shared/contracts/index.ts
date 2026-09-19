@@ -73,6 +73,7 @@ export interface Membership {
   role: string;
   roleId: string | null;
   owner: boolean;
+  status: 'active' | 'idle' | 'offline';
 }
 export interface SessionView {
   user: User;
@@ -88,6 +89,8 @@ export interface DspView {
   dsp: Dsp;
   token: string;
   role: Pick<Role, 'id' | 'name' | 'owner'>;
+  /** Every role of the DSP, sent only to a platform owner so they can look through one. */
+  roles?: Pick<Role, 'id' | 'name' | 'owner'>[];
   permissions: Permission[];
 }
 export interface Connection {
@@ -141,6 +144,8 @@ export interface JobMetrics {
     recovered: number;
     resumed?: number;
     earlyReady?: number;
+    direct?: number;
+    spotChecked?: number;
     totalMs: number;
     active: PageRead[];
     slowest: PageRead[];

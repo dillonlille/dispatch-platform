@@ -404,6 +404,27 @@ async fn process(state: Arc<State>, request: Request) -> Result<Response> {
             .await?;
         return Ok(Json(json!({"revision":revision})).into_response());
     }
+    if input.method == "POST" && input.path == "/api/dsp/presence" {
+        // Heartbeats only touch memory, so they stay off the platform write lock.
+        v::fields(&input.body, &["tab", "state"])?;
+        let tab = v::text(&input.body, "tab", 1, 64)?.to_owned();
+        let active = match v::choice(&input.body, "state", &["active", "idle", "gone"])? {
+            "gone" => None,
+            state => Some(state == "active"),
+        };
+        let member = state
+            .read(move |db| {
+                let c = input.context(db, roles::ACCESS)?;
+                // A platform owner looking into a DSP is never shown to its team.
+                Ok((!flag(&c.auth.user, "platformOwner"))
+                    .then(|| (s(&c.dsp, "id").to_owned(), s(&c.auth.user, "id").to_owned())))
+            })
+            .await?;
+        if let Some((dsp, user)) = member {
+            state.presence.beat(&dsp, &user, &tab, active);
+        }
+        return Ok(Reply::ok().into_response());
+    }
     if input.method == "POST" && input.path == "/api/auth/login" {
         let login = LoginRequest::parse(&input.body)?;
         let raw = state
@@ -526,22 +547,40 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
             })?));
         }
         ("POST", "/api/session/dsp") => {
-            let a = i.auth(db)?;
-            v::fields(b, &["dspId"])?;
+            let mut a = i.auth(db)?;
+            v::fields(b, &["dspId", "roleId"])?;
+            let platform = flag(&a.user, "platformOwner");
+            // Only a platform owner may look through a role other than their own.
+            if !b["roleId"].is_null() {
+                ensure(platform, "permission_denied", 403)?;
+                a.preview = Some(v::text(b, "roleId", 1, 100)?.to_owned());
+            }
             let c = db.context(&a, v::text(b, "dspId", 1, 100)?, roles::ACCESS)?;
             db.audit(
                 Some(s(&a.user, "id")),
                 Some(s(&c.dsp, "id")),
-                if flag(&a.user, "platformOwner") {
+                if platform {
                     "dsp.owner_view_opened"
                 } else {
                     "dsp.view_opened"
                 },
-                "",
+                if a.preview.is_some() {
+                    &c.role_name
+                } else {
+                    ""
+                },
             )?;
-            return Ok(Reply::json(
-                json!({"dsp":c.dsp,"role":{"id":c.role,"name":c.role_name,"owner":c.owner},"permissions":if c.owner{roles::all()}else{c.permissions.clone()},"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?}),
-            ));
+            let mut view = json!({"dsp":c.dsp,"role":{"id":c.role,"name":c.role_name,"owner":c.owner},"permissions":if c.owner{roles::all()}else{c.permissions.clone()},"token":db.view_token(&c),"profile":db.profile(s(&c.dsp,"id"))?});
+            if platform {
+                view["roles"] = db
+                    .roles(s(&c.dsp, "id"))?
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|role| json!({"id":role["id"],"name":role["name"],"owner":role["owner"]}))
+                    .collect();
+            }
+            return Ok(Reply::json(view));
         }
         _ => {}
     }
@@ -743,7 +782,7 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
             let offset=query_number(q,"offset",0,0,100000)?;let limit=query_number(q,"limit",50,1,100)?;Ok(Reply::json(db.employees(id,query,offset,limit,desc)?))
         },
         ("GET","/api/dsp/timecards")=>{let q=&i.query;v::fields(q,&["date","sort","direction"])?;let sort=q.get("sort").map(|_|v::choice(q,"sort",&["name","hours","inDay","outLunch","inLunch","outDay","totalHours","condition"])).transpose()?.unwrap_or("name");Ok(Reply::json(db.daily(id,v::text(q,"date",10,10)?,sort,direction(q)?)?))},
-        ("GET","/api/dsp/members")=>Ok(Reply::json(db.members(id)?)),
+        ("GET","/api/dsp/members")=>{let mut members=db.members(id)?;for member in members.as_array_mut().into_iter().flatten(){member["status"]=json!(state.presence.status(id,s(member,"userId")));}Ok(Reply::json(members))},
         ("GET","/api/dsp/invitations")=>Ok(Reply::json(json!(db.platform.all("SELECT i.email,COALESCE(r.name,i.role) role,i.expires_at expiresAt,i.used_at IS NOT NULL accepted FROM invitations i LEFT JOIN roles r ON r.id=i.role_id WHERE i.dsp_id=? ORDER BY i.expires_at DESC LIMIT 100",[id])?))),
         ("GET","/api/dsp/roles")=>Ok(Reply::json(db.roles(id)?)),
         ("POST","/api/dsp/roles")=>{let (name,permissions)=role_input(b)?;Ok(Reply::status(db.create_role(&c,&name,&permissions)?,201))},

@@ -12,6 +12,9 @@ pub struct Auth {
     pub hash: String,
     pub csrf: String,
     pub raw: String,
+    // The DSP role a platform owner chose to look through instead of their
+    // own owner access. Members never carry one.
+    pub preview: Option<String>,
 }
 #[derive(Clone)]
 pub struct Context {
@@ -89,19 +92,28 @@ impl Store {
             hash,
             csrf: crypto::sign(&self.key, &format!("csrf:{raw}")),
             raw: raw.into(),
+            preview: None,
         })
     }
     pub fn context(&self, a: &Auth, id: &str, permission: &str) -> Result<Context> {
         let dsp = self.get_dsp(id)?;
-        let grant = if flag(&a.user, "platformOwner") {
+        let grant = if !flag(&a.user, "platformOwner") {
+            self.grant(s(&a.user, "id"), id)?
+        } else if let Some(role) = &a.preview {
+            // A previewed role that was deleted reads as a stale view, so the
+            // dashboard reopens the DSP rather than showing a denial.
+            let row = self
+                .platform
+                .one("SELECT * FROM roles WHERE id=? AND dsp_id=?", [role, id])?
+                .ok_or_else(|| Error::new("dsp_view_expired", 409))?;
+            Some(super::roles::Grant::of(&row))
+        } else {
             Some(super::roles::Grant {
                 id: "platform_owner".to_owned(),
                 name: "Platform owner".to_owned(),
                 owner: true,
                 permissions: super::roles::all(),
             })
-        } else {
-            self.grant(s(&a.user, "id"), id)?
         };
         let grant = grant.ok_or_else(|| Error::new("permission_denied", 403))?;
         let c = Context {
@@ -121,10 +133,16 @@ impl Store {
         )?;
         Ok(c)
     }
+    // A previewed role rides in the token so every request rebuilds the same
+    // access; the signature covers it, so it cannot be swapped for another.
     pub fn view_token(&self, c: &Context) -> String {
         format!(
-            "{}.{}",
+            "{}.{}{}",
             s(&c.dsp, "id"),
+            c.auth
+                .preview
+                .as_ref()
+                .map_or_else(String::new, |role| format!("{role}.")),
             crypto::sign(
                 &self.key,
                 &format!(
@@ -145,8 +163,12 @@ impl Store {
         )?;
         // A stale view is reported before a missing permission so a member whose
         // role just changed reopens the DSP instead of seeing a denial.
-        let id = token.split('.').next().unwrap_or("");
-        let c = self.context(a, id, super::roles::ACCESS)?;
+        let parts: Vec<_> = token.split('.').collect();
+        let a = Auth {
+            preview: (parts.len() == 3).then(|| parts[1].to_owned()),
+            ..a.clone()
+        };
+        let c = self.context(&a, parts[0], super::roles::ACCESS)?;
         ensure(
             crypto::equal(&self.view_token(&c), token),
             "dsp_view_expired",
@@ -156,7 +178,10 @@ impl Store {
         Ok(c)
     }
     pub fn revalidate(&self, c: &Context, permission: &str) -> Result<Context> {
-        let a = self.authenticate(&c.auth.raw)?;
+        let a = Auth {
+            preview: c.auth.preview.clone(),
+            ..self.authenticate(&c.auth.raw)?
+        };
         let fresh = self.context(&a, s(&c.dsp, "id"), permission)?;
         ensure(
             fresh.dsp["revision"] == c.dsp["revision"]

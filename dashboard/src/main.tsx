@@ -25,9 +25,43 @@ import { SettingsPage } from './settings.js';
 import { PaycomPage, HomePage, TeamPage } from './workspace.js';
 type Session = SessionView;
 import { readAppearance, applyAppearance } from './appearance.js';
-import { initializePreferences } from './preferences.js';
+import { leavePresence, usePresence } from './presence.js';
+// The role a platform owner looks through survives a reload of this tab and is
+// forgotten once they leave the DSP.
+const VIEW_ROLE = 'dispatch-view-role';
+let viewRole: string | null | undefined;
+function savedRole(dspId: string) {
+  if (viewRole === undefined)
+    try {
+      viewRole = sessionStorage.getItem(VIEW_ROLE);
+    } catch {
+      viewRole = null;
+    }
+  const [dsp, role] = viewRole?.split(' ') ?? [];
+  return dsp === dspId ? role : undefined;
+}
+function saveRole(dspId?: string, roleId?: string) {
+  viewRole = dspId && roleId ? `${dspId} ${roleId}` : null;
+  try {
+    if (viewRole) sessionStorage.setItem(VIEW_ROLE, viewRole);
+    else sessionStorage.removeItem(VIEW_ROLE);
+  } catch {
+    /* The role still applies until the page reloads. */
+  }
+}
+async function openView(session: Session, dspId: string) {
+  const roleId = session.user.platformOwner ? savedRole(dspId) : undefined;
+  if (!roleId) return api<DspView>('/api/session/dsp', { dspId });
+  try {
+    return await api<DspView>('/api/session/dsp', { dspId, roleId });
+  } catch (error) {
+    // The DSP deleted the role being looked through; owner access remains.
+    if (!(error instanceof ApiError) || error.code !== 'dsp_view_expired') throw error;
+    saveRole();
+    return api<DspView>('/api/session/dsp', { dspId });
+  }
+}
 function App() {
-  const [, setPreferencesRevision] = useState(0);
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [route, setRoute] = useState(window.location.hash.slice(1) || 'dsps'),
@@ -36,7 +70,6 @@ function App() {
     [switching, setSwitching] = useState(false);
   useEffect(() => {
     const id = session?.user.id ?? 'signed-out';
-    initializePreferences(id);
     const apply = () => applyAppearance(readAppearance(id));
     const media = matchMedia('(prefers-color-scheme: dark)');
     apply();
@@ -47,16 +80,10 @@ function App() {
       window.removeEventListener('dispatch-appearance', apply);
     };
   }, [session?.user.id]);
-  useEffect(() => {
-    const changed = () => setPreferencesRevision((value) => value + 1);
-    window.addEventListener('dispatch-preferences', changed);
-    return () => window.removeEventListener('dispatch-preferences', changed);
-  }, []);
   const load = useCallback(async (afterLogin = false) => {
     try {
       const next = await api<Session>('/api/session');
       credentials(next.csrf);
-      initializePreferences(next.user.id);
       setSession(next);
       if (
         !next.user.platformOwner &&
@@ -84,9 +111,11 @@ function App() {
   const dspId = route.startsWith('dsp/') ? route.split('/')[1] : undefined,
     page = (dspId ? route.split('/')[2] || 'overview' : route).split('?')[0]!;
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
+  // A platform owner looking into a DSP is never shown to its team.
+  usePresence(session?.user.platformOwner ? undefined : view?.token);
   const reopen = useCallback(async () => {
     if (!session || !dspId) return;
-    const next = await api<DspView>('/api/session/dsp', { dspId });
+    const next = await openView(session, dspId);
     if (window.location.hash.split('/')[1] !== dspId) return;
     credentials(session.csrf, next.token);
     setView(next);
@@ -109,12 +138,13 @@ function App() {
   }, []);
   useEffect(() => {
     setView(undefined);
+    if (!dspId) saveRole();
     if (!session) return;
     credentials(session.csrf);
     if (!dspId) return;
     let active = true;
     setSwitching(true);
-    void api<DspView>('/api/session/dsp', { dspId })
+    void openView(session, dspId)
       .then((next) => {
         if (active) {
           credentials(session.csrf, next.token);
@@ -192,6 +222,7 @@ function App() {
           : []),
       ];
   async function logout() {
+    await leavePresence();
     await api('/api/auth/logout', {});
     credentials('');
     setSession(null);
@@ -207,6 +238,10 @@ function App() {
       navigation={nav}
       logout={() => void perform(logout)}
       exitView={platform}
+      viewAs={(roleId) => {
+        saveRole(dspId, roleId);
+        void perform(reopen);
+      }}
     >
       <ErrorBox message={error} />
       {notice && (
@@ -221,7 +256,7 @@ function App() {
         switching ? (
           <Loading />
         ) : view ? (
-          <div key={`${view.dsp.id}:${view.dsp.revision}`}>
+          <div key={`${view.dsp.id}:${view.dsp.revision}:${view.role.id}`}>
             {page === 'overview' ? (
               <HomePage />
             ) : page === 'paycom' && canViewTimecard ? (
@@ -235,7 +270,11 @@ function App() {
             ) : page === 'timecards' && canViewTimecard ? (
               <TimecardsPage timezone={view.dsp.timezone} />
             ) : page === 'connections' && can(view, 'connections.manage') ? (
-              <ConnectionsPage perform={perform} development={session.providerMode === 'fixture'} />
+              <ConnectionsPage
+                perform={perform}
+                development={session.providerMode === 'fixture'}
+                timezone={view.dsp.timezone}
+              />
             ) : page === 'settings' ? (
               <SettingsPage session={session} view={view} perform={perform} />
             ) : (
