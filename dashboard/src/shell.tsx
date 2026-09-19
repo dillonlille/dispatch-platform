@@ -87,8 +87,9 @@ export function Shell({
       title(page));
   useEffect(() => {
     document.title = `${label} · Dispatch`;
-    setMobile(false);
-  }, [label, page, view?.dsp.id]);
+  }, [label]);
+  // Navigation closes the drawer; a DSP view that finishes loading behind it does not.
+  useEffect(() => setMobile(false), [page, dspId]);
   useEffect(() => {
     if (!mobile) return;
     const before = document.body.style.overflow;

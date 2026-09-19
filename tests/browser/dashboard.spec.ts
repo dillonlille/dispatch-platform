@@ -153,6 +153,30 @@ test('member lands in own DSP, cannot see privileged navigation, mobile drawer w
   );
 });
 
+test('the mobile drawer stays open while the DSP behind it finishes loading', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/api/session/dsp', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.getByText('Northline Logistics', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  const settings = page.getByRole('link', { name: 'Settings', exact: true });
+  await expect(settings).toBeVisible();
+  const opened = page.waitForResponse((response) => response.url().endsWith('/api/session/dsp'));
+  release();
+  await opened;
+  await expect(page.getByRole('link', { name: 'Timecard', exact: true })).toBeVisible();
+  await expect(settings).toBeVisible();
+  await settings.click();
+  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toBeVisible();
+  await expect(settings).toBeHidden();
+});
+
 test('platform owner looks through a DSP role until they leave the DSP', async ({
   page,
   dispatch,
