@@ -853,9 +853,13 @@
   position: relative;
 }
 .date-field input {
+  caret-color: transparent;
   text-align: center;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+}
+.date-field input[data-typing] {
+  caret-color: auto;
 }
 .date-calendar {
   position: fixed;
