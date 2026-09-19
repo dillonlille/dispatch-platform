@@ -21,7 +21,6 @@ import {
 } from '../../../../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../../../../shared/paycom.js';
 import { PaycomDateControls } from '../DateControls.js';
-
 import { Source } from './cells.js';
 import { EmployeeRows } from './EmployeeRows.js';
 import { LinkEmployees } from './LinkEmployees.js';

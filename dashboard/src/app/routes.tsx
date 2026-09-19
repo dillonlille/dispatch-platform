@@ -11,7 +11,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
-import { PaycomSettingsPage } from '../paycom-settings.js';
 import { DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../features/platform/index.js';
 import { AuditPage } from '../features/audit/index.js';
 import { SettingsPage } from '../settings.js';
@@ -19,7 +18,7 @@ import { ErrorBox } from '../ui/index.js';
 import { title } from '../lib/format.js';
 import { can } from './permissions.js';
 import { HomePage } from '../features/home/index.js';
-import { PaycomPage } from '../features/timecard/index.js';
+import { PaycomPage, PaycomSettingsPage } from '../features/timecard/index.js';
 import { TeamPage } from '../features/team/index.js';
 
 type Access = { session: SessionView; view?: DspView };

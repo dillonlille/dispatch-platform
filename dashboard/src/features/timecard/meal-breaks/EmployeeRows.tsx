@@ -5,7 +5,6 @@ import {
   mealPairs,
   type MealEmployee,
 } from '../../../../../shared/meal-breaks.js';
-
 import { Clock, GapBadge, LunchCell } from './cells.js';
 
 export function EmployeeRows({
