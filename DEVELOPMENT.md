@@ -75,7 +75,18 @@ Shared pieces:
    receives the registered access and calls `access.authorize(db, &input)` inside its
    own `state.read`/`state.run` closure, and `access.revalidate` after each wait.
 4. Add the route's row to the inventory in `backend/tests/http_routes.rs`.
-5. When the dashboard consumes the response, add its type to `shared/contracts`.
+5. Answer with a struct: define it in `backend/src/contracts.rs` with `Serialize` and
+   `#[cfg_attr(test, derive(ts_rs::TS))]`, reply with `Reply::of(&value)`, and read its rows
+   with `Db::query_as`/`one_as` through a `FromRow` impl, which fails on a column the query
+   lacks. Closed sets of text are `text_enum!`s. `i64` fields need `ts(type = "number")`.
+6. When the dashboard consumes it, list the type in `contracts::generated::bindings`, run
+   `npm run contracts:generate`, and commit `shared/contracts/generated`. `cargo test` fails
+   while those files differ from the Rust types. Re-export the type from
+   `shared/contracts/index.ts` and give the endpoint its function in
+   `dashboard/src/app/endpoints.ts`. A response that is still built with `json!` keeps a
+   hand-written type in `shared/contracts` until it moves.
+7. Compare an error with `error.is(Code::X)`, never with its text; a code the backend
+   branches on is a variant of `Code` in `backend/src/error.rs`.
 
 ## Where things live
 

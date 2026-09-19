@@ -17,6 +17,7 @@ type Session = SessionView;
 import { readAppearance, applyAppearance } from './app/appearance.js';
 import { leavePresence, usePresence } from './app/presence.js';
 import { openView, saveRole } from './app/session.js';
+import { getSession } from './app/endpoints.js';
 function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
@@ -38,7 +39,7 @@ function App() {
   const load = useCallback(
     async (afterLogin = false) => {
       try {
-        const next = await api<Session>('/api/session');
+        const next = await getSession();
         credentials(next.csrf);
         setSession(next);
         if (

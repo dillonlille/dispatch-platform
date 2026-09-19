@@ -5,6 +5,7 @@ import { ErrorBox, Modal } from '../../../ui/index.js';
 import type { CollectionSchedule, ScheduleInput } from '../../../../../shared/schedules.js';
 import { messageOf } from '../../../lib/errors.js';
 import { nextCollection } from './nextCollection.js';
+import { saveSchedule, removeSchedule } from '../../../app/endpoints.js';
 
 const newSchedule = (): ScheduleInput => ({
   name: '',
@@ -102,10 +103,9 @@ export function ScheduleEditor({
     setBusy(true);
     setError('');
     try {
-      if (remove && schedule)
-        await api(`/api/dsp/schedules/${schedule.id}/remove`, { revision: schedule.revision });
+      if (remove && schedule) await removeSchedule(schedule.id, schedule.revision);
       else
-        await api(schedule ? `/api/dsp/schedules/${schedule.id}` : '/api/dsp/schedules', {
+        await saveSchedule(schedule?.id, {
           ...draft,
           name: draft.name.trim(),
           collection: paycom && meal ? 'both' : paycom ? 'paycom' : 'meal_break',

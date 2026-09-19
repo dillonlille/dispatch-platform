@@ -1,0 +1,60 @@
+// The endpoints whose responses are generated from the backend's Rust types: each address
+// is written once, next to the type it answers with. Other endpoints still call `api` and
+// `useData` directly; move one here when its response gains a generated type.
+import { api, useData } from './api.js';
+import type {
+  CollectionSchedule,
+  CollectionSchedules,
+  Connection,
+  DspSummary,
+  DspView,
+  Job,
+  Membership,
+  Permission,
+  Role,
+  SessionView,
+} from '../../../shared/contracts/index.js';
+import type { ScheduleInput } from '../../../shared/schedules.js';
+
+export const getSession = () => api<SessionView>('/api/session');
+export const openDsp = (dspId: string, roleId?: string) =>
+  api<DspView>('/api/session/dsp', roleId ? { dspId, roleId } : { dspId });
+
+export const usePlatformDsps = (poll = 0) => useData<DspSummary[]>('/api/platform/dsps', poll);
+export const usePlatformJobs = (poll = 0) => useData<Job[]>('/api/platform/jobs', poll);
+
+export const useMembers = (poll = 0) => useData<Membership[]>('/api/dsp/members', poll);
+export const inviteMember = (email: unknown, role: unknown) =>
+  api('/api/dsp/members/invite', { email, role });
+/** A null role removes the member from the DSP. */
+export const setMemberRole = (member: string, role: string | null) =>
+  api(`/api/dsp/members/${member}`, { role });
+
+export const useRoles = (poll = 0) => useData<Role[]>('/api/dsp/roles', poll);
+export const saveTeamRole = (
+  id: string | undefined,
+  role: { name: string; permissions: Permission[] },
+) => api<Role>(id ? `/api/dsp/roles/${id}` : '/api/dsp/roles', role);
+export const removeRole = (id: string) => api(`/api/dsp/roles/${id}/remove`, {});
+
+const schedules = '/api/dsp/schedules';
+export const useSchedules = (dspId: string) =>
+  useData<CollectionSchedules>(schedules, 10000, dspId, dspId);
+export const getSchedules = () => api<CollectionSchedules>(schedules);
+/** Saving an existing schedule names the revision it was read at. */
+export const saveSchedule = (
+  id: string | undefined,
+  schedule: ScheduleInput & { revision?: number },
+) => api<CollectionSchedule>(id ? `${schedules}/${id}` : schedules, schedule);
+export const setScheduleEnabled = (id: string, enabled: boolean, revision: number) =>
+  api<CollectionSchedule>(`${schedules}/${id}/enabled`, { enabled, revision });
+export const removeSchedule = (id: string, revision: number) =>
+  api(`${schedules}/${id}/remove`, { revision });
+
+export const connectionUrl = (provider: Connection['provider']) =>
+  `/api/dsp/connections/${provider}`;
+export const useConnection = (provider: Connection['provider'], poll = 0) =>
+  useData<Connection>(
+    provider === 'paycom' ? '/api/dsp/connections' : connectionUrl(provider),
+    poll,
+  );

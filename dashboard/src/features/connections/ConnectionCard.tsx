@@ -2,11 +2,12 @@ import { BrowserVerification } from './BrowserVerification.js';
 import { useState, type FormEvent } from 'react';
 import { Plug, RefreshCw } from 'lucide-react';
 import type { Connection } from '../../../../shared/contracts/index.js';
-import { api, useData } from '../../app/api.js';
+import { api } from '../../app/api.js';
 import { Badge, ConfirmDialog, DataState, ErrorBox, Modal } from '../../ui/index.js';
 import { time, title } from '../../lib/format.js';
 import { messageOf } from '../../lib/errors.js';
 import { useAction } from '../../app/useAction.js';
+import { connectionUrl, useConnection } from '../../app/endpoints.js';
 
 export function ConnectionCard({
   development,
@@ -18,11 +19,8 @@ export function ConnectionCard({
   timezone: string;
 }) {
   const name = provider === 'paycom' ? 'Paycom' : 'Cortex';
-  const endpoint = `/api/dsp/connections/${provider}`;
-  const { data, error, refresh } = useData<Connection>(
-    provider === 'paycom' ? '/api/dsp/connections' : endpoint,
-    4000,
-  );
+  const endpoint = connectionUrl(provider);
+  const { data, error, refresh } = useConnection(provider, 4000);
   const [disconnecting, setDisconnecting] = useState(false);
   const [credentialError, setCredentialError] = useState('');
   const [saveError, setSaveError] = useState('');
