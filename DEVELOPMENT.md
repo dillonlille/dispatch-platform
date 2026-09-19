@@ -47,6 +47,11 @@ Shared pieces:
   `bootstrap` with `seed: false`), `serve`, the health wait and `client()` to sign in.
   Pass `env` to change the environment. The smoke check and `npm run dev` start their
   servers through it; the benchmark takes its `prepare()` half and times its own start.
+- `npm run dev` serves the fixtures with live reload at `http://127.0.0.1:5173`. To open
+  them from another machine, name one address of this host, for example its Tailscale
+  address: `DISPATCH_DEV_HOST=100.120.159.116 npm run dev`, then open
+  `http://100.120.159.116:5173/`. Never use `0.0.0.0`: this host has a public address too,
+  and the command refuses it.
 - A browser test asks for `dispatch` to reach its own server (`dispatch.root`,
   `dispatch.client()`, `dispatch.database()`); `page` already points at it. A spec that
   needs another environment sets `test.use({ dispatchOptions: { seed: false, env } })`,
