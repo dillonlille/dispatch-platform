@@ -389,6 +389,7 @@ function LateDas({
       setSaved(
         await api<PaycomSettings>('/api/dsp/paycom/settings', {
           revision: settings!.revision,
+          // The backend requires every stored preference back, including ones not edited here.
           values: { ...settings!.values, late_da_time: time, late_da_departments: departments },
         }),
       );

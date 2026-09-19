@@ -81,17 +81,15 @@ export function Shell({
     navigation.find((item) => item.id === page)?.label ??
     ({
       'paycom-settings': 'Timecard',
-      employees: 'Timecard',
-      timecards: 'Timecard',
-      connections: 'Settings',
       account: 'Settings',
       jobs: 'Diagnostics',
     }[page] ||
       title(page));
   useEffect(() => {
     document.title = `${label} · Dispatch`;
-    setMobile(false);
-  }, [label, page, view?.dsp.id]);
+  }, [label]);
+  // Navigation closes the drawer; a DSP view that finishes loading behind it does not.
+  useEffect(() => setMobile(false), [page, dspId]);
   useEffect(() => {
     if (!mobile) return;
     const before = document.body.style.overflow;
@@ -169,11 +167,7 @@ export function Shell({
               href={`#${dspId ? `dsp/${dspId}/` : ''}${id}`}
               className="nav-item"
               aria-current={
-                page === id ||
-                (id === 'paycom' && ['employees', 'timecards', 'paycom-settings'].includes(page)) ||
-                (id === 'settings' && page === 'connections')
-                  ? 'page'
-                  : undefined
+                page === id || (id === 'paycom' && page === 'paycom-settings') ? 'page' : undefined
               }
               onClick={() => setMobile(false)}
             >

@@ -2,7 +2,7 @@ import type { Job } from '../../shared/contracts/index.js';
 
 export const providerName = (kind: Job['kind']) =>
   kind === 'paycom.collect' ? 'Paycom' : 'Cortex';
-export function median(values: number[]) {
+function median(values: number[]) {
   if (!values.length) return null;
   const sorted = values.toSorted((a, b) => a - b),
     middle = Math.floor(sorted.length / 2);

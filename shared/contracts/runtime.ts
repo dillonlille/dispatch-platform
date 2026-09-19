@@ -12,7 +12,7 @@ const connectionStatus = z.enum([
   'needs_verification',
   'error',
 ]);
-export const userSchema = z.object({
+const userSchema = z.object({
   id: text.min(1),
   email: text.min(1),
   firstName: text,
@@ -76,7 +76,7 @@ const pageRead = z.object({
   pendingRequests: count.nullable().optional(),
   documentState: z.enum(['loading', 'interactive', 'complete']).nullable().optional(),
 });
-export const metricsSchema = z.object({
+const metricsSchema = z.object({
   attempt: count,
   startedAt: text,
   finishedAt: text.nullable(),
@@ -117,7 +117,7 @@ export const metricsSchema = z.object({
     })
     .optional(),
 }) satisfies z.ZodType<JobMetrics>;
-export const jobStatusSchema = z.enum([
+const jobStatusSchema = z.enum([
   'queued',
   'running',
   'waiting_verification',

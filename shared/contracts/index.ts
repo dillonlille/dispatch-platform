@@ -1,4 +1,4 @@
-export type Environment = 'production' | 'preview';
+type Environment = 'production' | 'preview';
 export const permissions = [
   'timecard.view',
   'timecard.manage',
@@ -19,14 +19,9 @@ export interface Role {
   members: number;
   invitations: number;
 }
-export type DspStatus = 'provisioning' | 'active' | 'suspended' | 'failed';
-export type ConnectionStatus =
-  | 'not_connected'
-  | 'ready'
-  | 'signing_in'
-  | 'needs_verification'
-  | 'error';
-export type JobStatus =
+type DspStatus = 'provisioning' | 'active' | 'suspended' | 'failed';
+type ConnectionStatus = 'not_connected' | 'ready' | 'signing_in' | 'needs_verification' | 'error';
+type JobStatus =
   | 'queued'
   | 'running'
   | 'waiting_verification'
@@ -40,7 +35,7 @@ export interface User {
   lastName: string;
   platformOwner: boolean;
 }
-export interface Dsp {
+interface Dsp {
   id: string;
   name: string;
   environment: Environment;
@@ -50,7 +45,7 @@ export interface Dsp {
   revision: number;
   createdAt: string;
 }
-export interface DspProfile {
+interface DspProfile {
   abbreviation: string;
   stationCode: string;
   setupRequired: boolean;
@@ -105,7 +100,7 @@ export interface Connection {
   lastVerifiedAt: string | null;
   accountLabel: string | null;
 }
-export interface PageRead {
+interface PageRead {
   ordinal: number;
   attempt: number;
   stage: 'navigation' | 'content' | 'extraction';
@@ -198,13 +193,6 @@ export interface Timecard {
   // The employee's Paycom timecard page for the pay period containing `date`.
   // Absent on rows still being collected; null before links were retained.
   sourceUrl?: string | null;
-}
-export interface Workforce {
-  employees: Employee[];
-  timecards: Timecard[];
-  collectedAt: string;
-  from: string;
-  to: string;
 }
 export interface AuditEvent {
   id: number;

@@ -16,7 +16,6 @@ import type { DspSummary, DspView, SessionView } from '../../shared/contracts/in
 import { api, credentials, ApiError } from './api.js';
 import { AuthScreen } from './auth.js';
 import { DspList, AuditPage, ReleasesPage, DiagnosticsPage, type Perform } from './platform.js';
-import { EmployeesPage, TimecardsPage, ConnectionsPage } from './dsp.js';
 import { Badge, Header, Loading, ErrorBox, can } from './ui.js';
 import './styles.css';
 import { DspOnboarding } from './onboarding.js';
@@ -267,16 +266,6 @@ function App() {
               <PaycomSettingsPage dspId={view.dsp.id} />
             ) : page === 'team' && canTeam ? (
               <TeamPage view={view} perform={perform} reopen={reopen} />
-            ) : page === 'employees' && canViewTimecard ? (
-              <EmployeesPage />
-            ) : page === 'timecards' && canViewTimecard ? (
-              <TimecardsPage timezone={view.dsp.timezone} />
-            ) : page === 'connections' && can(view, 'connections.manage') ? (
-              <ConnectionsPage
-                perform={perform}
-                development={session.providerMode === 'fixture'}
-                timezone={view.dsp.timezone}
-              />
             ) : page === 'settings' ? (
               <SettingsPage session={session} view={view} perform={perform} />
             ) : (

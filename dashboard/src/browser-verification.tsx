@@ -39,9 +39,7 @@ export function BrowserVerification({
     setError(error.message);
     if (
       error instanceof ApiError &&
-      ['verification_expired', 'permission_denied', 'view_changed', 'stale_view'].includes(
-        error.code,
-      )
+      ['verification_expired', 'permission_denied'].includes(error.code)
     ) {
       setExpired(true);
       blocked.current = true;

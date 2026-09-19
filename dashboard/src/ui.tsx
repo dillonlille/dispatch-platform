@@ -104,25 +104,6 @@ export function ErrorBox({ message }: { message: string }) {
     </div>
   ) : null;
 }
-export function Section({
-  title: label,
-  children,
-  action,
-}: {
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <section className="panel">
-      <div className="panel-heading">
-        <h2>{label}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
 export function Modal({
   title: label,
   children,

@@ -13,11 +13,7 @@ const choices: { value: Theme; label: string; description: string }[] = [
 
 function ThemePreview({ mode }: { mode: 'light' | 'dark' }) {
   return (
-    <span
-      className="theme-preview-ui theme-preview-scope"
-      data-theme={mode}
-      data-theme-pack="precision"
-    >
+    <span className="theme-preview-ui theme-preview-scope" data-theme={mode}>
       <span className="theme-preview-sidebar">
         <i />
         <i />

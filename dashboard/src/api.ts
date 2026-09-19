@@ -47,8 +47,6 @@ const labels: Record<string, string> = {
   sign_in_with_existing_password: 'Use your existing Dispatch password to accept this invitation.',
   invalid_login: 'The email or password is incorrect.',
   permission_denied: 'Your role does not allow this action.',
-  view_changed: 'Your DSP access changed. Reopen the DSP to continue.',
-  stale_view: 'Your DSP access changed. Reopen the DSP to continue.',
   connection_required: 'Connect Paycom before starting a collection.',
   last_owner_required: 'Keep at least one DSP owner.',
   dsp_view_expired: 'Your DSP access changed. Refreshing your view…',

@@ -483,7 +483,7 @@ export function MealBreaksPage({
           .includes(query.toLowerCase()),
     )
     .sort((a, b) => (descending ? -1 : 1) * name(a.row).localeCompare(name(b.row)));
-  const pageSize = preferences.rows_per_page;
+  const pageSize = 100;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
   const visible = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
   const unlinked = data?.drivers.filter((d) => d.matchType === 'unmatched').length ?? 0;
@@ -506,7 +506,6 @@ export function MealBreaksPage({
         <PaycomDateControls
           date={date}
           today={today}
-          compact
           onChange={(value) => {
             onDateChange(value);
             setPage(0);

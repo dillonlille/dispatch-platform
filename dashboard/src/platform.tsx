@@ -197,23 +197,10 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
                       {!dsp.permanent &&
                         !dsp.profile.removed &&
                         ['active', 'suspended'].includes(dsp.status) && (
-                          <button
-                            onClick={(event) => {
-                              event.currentTarget.closest('details')?.removeAttribute('open');
-                              setRemoving(dsp);
-                            }}
-                          >
-                            Remove DSP
-                          </button>
+                          <button onClick={() => setRemoving(dsp)}>Remove DSP</button>
                         )}
                       {dsp.status === 'active' && !dsp.permanent && (
-                        <button
-                          className="danger"
-                          onClick={(event) => {
-                            event.currentTarget.closest('details')?.removeAttribute('open');
-                            setSuspending(dsp);
-                          }}
-                        >
+                        <button className="danger" onClick={() => setSuspending(dsp)}>
                           Suspend DSP
                         </button>
                       )}
@@ -385,17 +372,7 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
     </>
   );
 }
-export function JobTable({
-  jobs,
-  perform,
-  refresh,
-  cancel = false,
-}: {
-  jobs: Job[];
-  perform: Perform;
-  refresh: () => void;
-  cancel?: boolean;
-}) {
+function JobTable({ jobs }: { jobs: Job[] }) {
   return jobs.length ? (
     <div className="table-wrap">
       <table className="collection-table">
@@ -407,7 +384,6 @@ export function JobTable({
             <th>Requested</th>
             <th>Attempt</th>
             <th>Performance</th>
-            {cancel && <th>Action</th>}
           </tr>
         </thead>
         <tbody>
@@ -436,23 +412,6 @@ export function JobTable({
               <td>
                 <JobPerformance metrics={job.metrics} />
               </td>
-              {cancel && (
-                <td>
-                  {['queued', 'running', 'waiting_verification'].includes(job.status) && (
-                    <button
-                      className="text-button"
-                      onClick={() =>
-                        void perform(async () => {
-                          await api(`/api/dsp/jobs/${job.id}/cancel`, {});
-                          refresh();
-                        }, 'Collection cancelled')
-                      }
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </td>
-              )}
             </tr>
           ))}
         </tbody>
@@ -593,7 +552,7 @@ export function DiagnosticsPage({ perform }: { perform: Perform }) {
         {jobs.data ? (
           <>
             <CollectionHistory jobs={jobs.data} />
-            <JobTable jobs={jobs.data} perform={perform} refresh={jobs.refresh} />
+            <JobTable jobs={jobs.data} />
           </>
         ) : (
           <Loading />
