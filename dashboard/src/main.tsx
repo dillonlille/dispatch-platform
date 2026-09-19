@@ -6,51 +6,16 @@ import { api, credentials, ApiError } from './app/api.js';
 import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
 import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
 import { Page, findRoute, navigation, routeLabel } from './app/routes.js';
-import { AuthScreen } from './features/auth/AuthScreen.js';
+import { AuthScreen, DspOnboarding } from './features/auth/index.js';
 import { messageOf } from './lib/errors.js';
 import { Loading } from './ui/index.js';
 import { can } from './app/permissions.js';
 import './styles.css';
-import { DspOnboarding } from './features/auth/Onboarding.js';
 import { Shell } from './shell/Shell.js';
 type Session = SessionView;
 import { readAppearance, applyAppearance } from './app/appearance.js';
 import { leavePresence, usePresence } from './app/presence.js';
-// The role a platform owner looks through survives a reload of this tab and is
-// forgotten once they leave the DSP.
-const VIEW_ROLE = 'dispatch-view-role';
-let viewRole: string | null | undefined;
-function savedRole(dspId: string) {
-  if (viewRole === undefined)
-    try {
-      viewRole = sessionStorage.getItem(VIEW_ROLE);
-    } catch {
-      viewRole = null;
-    }
-  const [dsp, role] = viewRole?.split(' ') ?? [];
-  return dsp === dspId ? role : undefined;
-}
-function saveRole(dspId?: string, roleId?: string) {
-  viewRole = dspId && roleId ? `${dspId} ${roleId}` : null;
-  try {
-    if (viewRole) sessionStorage.setItem(VIEW_ROLE, viewRole);
-    else sessionStorage.removeItem(VIEW_ROLE);
-  } catch {
-    /* The role still applies until the page reloads. */
-  }
-}
-async function openView(session: Session, dspId: string) {
-  const roleId = session.user.platformOwner ? savedRole(dspId) : undefined;
-  if (!roleId) return api<DspView>('/api/session/dsp', { dspId });
-  try {
-    return await api<DspView>('/api/session/dsp', { dspId, roleId });
-  } catch (error) {
-    // The DSP deleted the role being looked through; owner access remains.
-    if (!(error instanceof ApiError) || error.code !== 'dsp_view_expired') throw error;
-    saveRole();
-    return api<DspView>('/api/session/dsp', { dspId });
-  }
-}
+import { openView, saveRole } from './app/session.js';
 function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),

@@ -1,41 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Menu, X, Check, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
+import { Menu, X, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { Brand } from '../app/Brand.js';
 import { Popover, useFocusTrap } from '../ui/index.js';
 import { dspHash, platformHash } from '../app/navigation.js';
 import type { DspRouteId, PlatformRouteId } from '../app/routes.js';
-
-// Lets a platform owner look through any role the DSP has, custom ones included.
-function ViewRoleMenu({ view, viewAs }: { view: DspView; viewAs: (roleId?: string) => void }) {
-  const current = (role: { id: string; owner: boolean }) =>
-    view.role.owner ? role.owner : role.id === view.role.id;
-  return (
-    <Popover
-      className="view-role-menu"
-      label="View as role"
-      trigger={
-        <>
-          {view.roles?.find(current)?.name ?? view.role.name}
-          <ChevronDown aria-hidden="true" />
-        </>
-      }
-    >
-      {view.roles?.map((role) => (
-        <button
-          key={role.id}
-          aria-current={current(role) || undefined}
-          onClick={() => {
-            if (!current(role)) viewAs(role.owner ? undefined : role.id);
-          }}
-        >
-          <span>{role.name}</span>
-          {current(role) && <Check size={16} aria-hidden="true" />}
-        </button>
-      ))}
-    </Popover>
-  );
-}
+import { ViewRoleMenu } from './ViewRoleMenu.js';
 
 export function Shell({
   session,
