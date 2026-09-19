@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 /** A `<details>` menu that closes on Escape, on a press outside it, and once an item is chosen. */
 export function Popover({
@@ -44,31 +44,38 @@ export function Popover({
         below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 4);
       Object.assign(menu.style, { left: `${left}px`, top: `${top}px`, visibility: 'visible' });
     };
-    const dismiss = (event: PointerEvent) => {
-      if (!element.contains(event.target as Node)) element.open = false;
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      element.open = false;
-      summary.focus();
-    };
     if (anchored) {
       place();
       window.addEventListener('resize', place);
       window.addEventListener('scroll', place, { capture: true, passive: true });
     }
-    document.addEventListener('pointerdown', dismiss);
-    document.addEventListener('keydown', escape);
     return () => {
       if (anchored) {
         menu.style.visibility = 'hidden';
         window.removeEventListener('resize', place);
         window.removeEventListener('scroll', place, true);
       }
+    };
+  }, [open, anchored]);
+  // The browser opens the menu before its toggle event reaches React, so these listen from
+  // the start and read the element: a key pressed in that gap still closes it.
+  useEffect(() => {
+    const element = details.current!;
+    const dismiss = (event: PointerEvent) => {
+      if (element.open && !element.contains(event.target as Node)) element.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !element.open) return;
+      element.open = false;
+      element.querySelector('summary')!.focus();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => {
       document.removeEventListener('pointerdown', dismiss);
       document.removeEventListener('keydown', escape);
     };
-  }, [open, anchored]);
+  }, []);
   return (
     <details
       ref={details}
