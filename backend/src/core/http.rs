@@ -704,9 +704,6 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
                 db.provision(parts[3])?;
                 return Ok(Reply::json(db.get_dsp(parts[3])?));
             }
-            if write && parts.get(2) == Some(&"releases") {
-                return Err(Error::new("github_manages_updates", 409));
-            }
             Err(Error::new("not_found", 404))
         }
     }
@@ -729,11 +726,10 @@ fn tenant_permission(endpoint: &str, detail: Option<&str>, write: bool) -> &'sta
         ("roles", _, true) => "roles.manage",
         ("members" | "roles", _, false) => TEAM,
         ("audit", ..) => "audit.view",
-        ("settings", ..) | ("profile", _, true) => "settings.manage",
+        ("profile", _, true) => "settings.manage",
         ("paycom" | "schedule", _, true) | ("schedules", ..) => "timecard.manage",
         ("jobs", Some("meal-breaks"), false) => "timecard.view",
         ("jobs", ..) | ("cortex", _, true) => "collections.run",
-        ("overview", ..) => roles::ACCESS,
         _ => "timecard.view",
     }
 }
@@ -761,7 +757,6 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
             let publication = db.collector(id,super::collectors::Provider::Paycom)?.one("SELECT collected_at FROM publications WHERE active=1",[])?;
             Ok(Reply::json(json!({"connection":connection()?,"schedule":db.schedule(id)?,"workforce":{"collectedAt":publication.map(|p|p["collected_at"].clone())}})))
         },
-        ("GET","/api/dsp/overview")=>{let jobs=if c.can("collections.run"){db.recent_jobs(Some(id),8)?}else{json!([])};let workforce=if c.can("timecard.view"){db.employees(id,"",0,5,false)?}else{Value::Null};let audit=if c.can("audit.view"){db.audits(Some(id),10)?}else{json!([])};Ok(Reply::json(json!({"dsp":c.dsp,"connection":connection()?,"schedule":db.schedule(id)?,"jobs":jobs,"workforce":workforce,"audit":audit})))},
         ("GET","/api/dsp/connections")=>Ok(Reply::json(connection()?)),
         ("GET","/api/dsp/jobs")=>Ok(Reply::json(db.list_jobs(Some(id))?)),
         ("POST","/api/dsp/jobs")=>{let request=CollectionRequest::parse(b,false)?;let job=if let Some(date)=&request.date {db.enqueue_paycom_date(id,Some(actor),&request.request_id,date)?}else{db.enqueue(id,Some(actor),&request.request_id)?};db.audit(Some(actor),Some(id),"collection.requested",request.date.as_deref().unwrap_or(""))?;Ok(Reply::status(job,202))},
@@ -795,7 +790,6 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audit_page(&audit_query(&i.query,Some(id))?)?)),
         ("POST","/api/dsp/audit/export")=>Ok(Reply::json(db.audit_export(actor,audit_query(b,Some(id))?)?)),
-        ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
             if write && endpoint=="schedules" {
                 let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;

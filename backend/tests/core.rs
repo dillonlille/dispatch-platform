@@ -20,6 +20,14 @@ fn store() -> (tempfile::TempDir, Store) {
     let store = Store::initialize(config).unwrap();
     (root, store)
 }
+fn audits(db: &Store, dsp: Option<&str>) -> dispatch_backend::core::Result<Value> {
+    let mut page = db.audit_page(&db::AuditQuery {
+        dsp,
+        limit: 200,
+        ..db::AuditQuery::default()
+    })?;
+    Ok(page["events"].take())
+}
 #[test]
 fn startup_removes_owned_browseros_runs_and_rejects_unknown_entries() {
     let (_root, db) = store();
@@ -531,17 +539,17 @@ fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
 }
 
 #[test]
-fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
+fn listed_jobs_respect_the_cap_scope_names_and_attempt_order() {
     let (_root, db) = store();
     operations::seed(&db).unwrap();
     let dsps = db
         .platform
         .all("SELECT id,name FROM dsps ORDER BY id", [])
         .unwrap();
-    for index in 0..12 {
+    for index in 0..204 {
         let dsp = &dsps[index % dsps.len()];
         let job = format!("job-{index}");
-        db.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,?,'preview','paycom.collect','succeeded',0,?,'test',1,?)",rusqlite::params![job,s(dsp,"id"),format!("2026-09-{:02}",index+1),job]).unwrap();
+        db.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,connection_revision,idempotency_key) VALUES (?,?,'preview','paycom.collect','succeeded',0,?,'test',1,?)",rusqlite::params![job,s(dsp,"id"),format!("2026-09-01T{index:04}"),job]).unwrap();
         for attempt in [2, 1] {
             db.jobs
                 .exec(
@@ -551,21 +559,17 @@ fn recent_jobs_respect_limits_scope_names_and_attempt_order() {
                 .unwrap();
         }
     }
-    let recent = db.recent_jobs(None, 8).unwrap();
-    assert_eq!(recent.as_array().unwrap().len(), 8);
-    assert_eq!(recent[0]["id"], "job-11");
+    let recent = db.list_jobs(None).unwrap();
+    assert_eq!(recent.as_array().unwrap().len(), 200);
+    assert_eq!(recent[0]["id"], "job-203");
     assert_eq!(recent[0]["metrics"], json!([{"attempt":1},{"attempt":2}]));
     let dsp = &dsps[0];
-    for row in db
-        .recent_jobs(Some(s(dsp, "id")), 200)
-        .unwrap()
-        .as_array()
-        .unwrap()
-    {
+    let scoped = db.list_jobs(Some(s(dsp, "id"))).unwrap();
+    assert_eq!(scoped.as_array().unwrap().len(), 68);
+    for row in scoped.as_array().unwrap() {
         assert_eq!(row["dspId"], dsp["id"]);
         assert_eq!(row["dspName"], dsp["name"]);
     }
-    assert_eq!(db.recent_jobs(None, 0).unwrap(), json!([]));
 }
 
 #[test]
@@ -680,7 +684,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     db.audit(None, Some(id), "collection.completed", "")
         .unwrap();
     let actions = |dsp| -> Vec<String> {
-        db.audits(dsp, 200)
+        audits(&db, dsp)
             .unwrap()
             .as_array()
             .unwrap()
@@ -713,7 +717,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
             "schedule.updated"
         ]
     );
-    let log = db.audits(Some(id), 200).unwrap();
+    let log = audits(&db, Some(id)).unwrap();
     assert_eq!(s(&log[0], "actorName"), "Platform support");
     assert!(log[0]["actorId"].is_null());
     assert!(!log.to_string().contains(owner_id));
@@ -732,7 +736,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
             .contains(&json!({"id":"support","name":"Platform support"}))
     );
     // The platform's own log keeps the real name.
-    let named = db.audits(None, 200).unwrap();
+    let named = audits(&db, None).unwrap();
     assert_ne!(s(&named[0], "actorName"), "Platform support");
     db.set_profile(id, json!({"supportVisible":false})).unwrap();
     db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
@@ -1060,7 +1064,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         one("SELECT created_by FROM invitations").unwrap()["created_by"],
         owner["id"]
     );
-    let log = db.audits(Some(dsp), 200).unwrap();
+    let log = audits(&db, Some(dsp)).unwrap();
     let event = log
         .as_array()
         .unwrap()
@@ -1069,7 +1073,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
         .unwrap();
     assert_eq!(s(event, "actorName"), "Jordan Ellis");
     assert!(event["actorId"].is_null());
-    let platform = db.audits(None, 200).unwrap();
+    let platform = audits(&db, None).unwrap();
     let removal = platform
         .as_array()
         .unwrap()

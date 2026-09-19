@@ -514,14 +514,6 @@ impl Store {
         self.profile(dsp)
             .is_ok_and(|profile| flag(&profile, "supportVisible"))
     }
-    pub fn audits(&self, dsp: Option<&str>, limit: i64) -> Result<Value> {
-        let mut page = self.audit_page(&AuditQuery {
-            dsp,
-            limit,
-            ..AuditQuery::default()
-        })?;
-        Ok(page["events"].take())
-    }
     // A DSP's log lists its members' and the system's actions. A platform owner's
     // appear only where the DSP shows Platform support, and never under their name.
     pub fn audit_page(&self, query: &AuditQuery) -> Result<Value> {

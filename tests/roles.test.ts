@@ -100,7 +100,10 @@ test('custom roles gate tenant APIs and never grant more than the actor holds', 
   );
   view = await member.select(north.id);
   assert.deepEqual(view.permissions, []);
-  assert.equal((await member.get('/api/dsp/overview')).status, 200);
+  assert.equal(
+    (await member.post('/api/dsp/presence', { tab: 'roles', state: 'active' })).status,
+    200,
+  );
   assert.equal((await member.get('/api/dsp/employees')).status, 403);
   assert.equal((await member.get('/api/dsp/roles')).status, 403);
 

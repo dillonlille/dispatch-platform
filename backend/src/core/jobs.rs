@@ -43,19 +43,14 @@ impl Store {
         )
     }
     pub fn list_jobs(&self, id: Option<&str>) -> Result<Value> {
-        self.recent_jobs(id, 200)
-    }
-    pub fn recent_jobs(&self, id: Option<&str>, limit: usize) -> Result<Value> {
-        let limit = limit.min(200) as i64;
         let rows = match id {
             Some(id) => self.jobs.all(
-                "SELECT * FROM jobs WHERE dsp_id=? ORDER BY created_at DESC LIMIT ?",
-                params![id, limit],
+                "SELECT * FROM jobs WHERE dsp_id=? ORDER BY created_at DESC LIMIT 200",
+                [id],
             )?,
-            None => self.jobs.all(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
-                [limit],
-            )?,
+            None => self
+                .jobs
+                .all("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 200", [])?,
         };
         if rows.is_empty() {
             return Ok(json!([]));
@@ -163,7 +158,7 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         self.jobs.transaction(|| requests.iter().zip(&connections).map(|((key,provider,request),connection)| {
-            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind().unwrap() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
+            if let Some(row)=self.jobs.one("SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",[id,key])? {ensure(s(&row,"kind")==provider.job_kind() && serde_json::from_str::<Value>(s(&row,"request"))? == *request,"idempotency_conflict",409)?;return self.public_job(&row);}
             ensure(n(&self.jobs.one("SELECT count(*) count FROM jobs WHERE dsp_id=? AND status IN ('queued','running','waiting_verification')",[id])?.unwrap(),"count")<5,"queue_full",429)?;
             let job=crypto::id("job")?;
             self.jobs.exec("INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,release,actor_id,connection_revision,idempotency_key,request) VALUES (?,?,?,?,'queued',?,?,?,?,?,?,?)",params![job,id,self.config.environment,provider.job_kind(),now(),iso(),self.config.release,actor,n(connection,"revision"),key,serde_json::to_string(request)?])?;

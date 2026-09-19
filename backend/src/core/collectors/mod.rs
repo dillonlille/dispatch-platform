@@ -33,17 +33,17 @@ impl Provider {
             Self::Cortex => "cortex",
         }
     }
-    pub fn job_kind(self) -> Option<&'static str> {
+    pub fn job_kind(self) -> &'static str {
         match self {
-            Self::Paycom => Some("paycom.collect"),
-            Self::Cortex => Some("cortex.meal_breaks.collect"),
+            Self::Paycom => "paycom.collect",
+            Self::Cortex => "cortex.meal_breaks.collect",
         }
     }
     pub fn from_job_kind(kind: &str) -> Result<Self> {
         Self::ALL
             .iter()
             .copied()
-            .find(|p| p.job_kind() == Some(kind))
+            .find(|p| p.job_kind() == kind)
             .ok_or_else(|| super::Error::new("unsupported_collector", 409))
     }
     fn schema(self) -> &'static str {
