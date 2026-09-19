@@ -288,8 +288,16 @@ test('the account menu closes on a press outside it and on Escape', async ({ pag
 test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(page.getByText('First name', { exact: true })).toBeVisible();
-  await expect(page.getByText('Last name', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Profile', exact: true })).toBeVisible();
+  const badge = page.locator('.profile-badge');
+  await expect(badge.getByRole('heading', { name: 'Platform Owner' })).toBeVisible();
+  await expect(badge).toContainText(demo.email);
+  // A phone shows the card alone: no lanyard, and nothing to swing.
+  await expect(page.locator('.profile-straps')).toBeVisible();
+  await page.setViewportSize({ width: 400, height: 900 });
+  await expect(page.locator('.profile-straps')).toBeHidden();
+  await expect(page.locator('.profile-hang')).not.toHaveAttribute('style', /transform/);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

@@ -4,6 +4,7 @@ export { DataState } from './DataState.js';
 export { DataTable, TablePagination } from './DataTable.js';
 export { DateField } from './DateField.js';
 export { DetailList } from './DetailList.js';
+export { DspAvatar, dspTone } from './DspAvatar.js';
 export { Empty } from './Empty.js';
 export { ErrorBox } from './ErrorBox.js';
 export { Header } from './Header.js';

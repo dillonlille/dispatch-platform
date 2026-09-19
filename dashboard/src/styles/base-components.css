@@ -332,6 +332,240 @@
   overflow-wrap: anywhere;
 }
 
+/* Settings profile tab: an ID badge hanging from a lanyard */
+/* Registered as angles so that the hover tilt can ease while the sway is written every frame. */
+@property --tilt-x {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --tilt-y {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+/* A swung badge must not give the page a horizontal scrollbar. */
+.page-container:has(.profile-stage) {
+  overflow-x: clip;
+}
+.profile-stage {
+  justify-content: center;
+  max-width: 900px;
+  margin-top: -8px;
+  padding-bottom: 72px;
+  /* Hide only what swings above the tab rule. */
+  clip-path: inset(0 -100vw -100vh -100vw);
+  display: flex;
+  perspective: 1200px;
+}
+.profile-rig,
+.profile-hang {
+  flex-direction: column;
+  align-items: center;
+  display: flex;
+}
+.profile-hang {
+  transform-origin: 50% 0;
+  margin-top: -8px;
+}
+.profile-straps,
+.profile-clip {
+  filter: drop-shadow(0 3px 3px var(--shadow-color));
+  display: block;
+  overflow: visible;
+}
+.profile-straps {
+  pointer-events: none;
+}
+.profile-strap-cloth {
+  fill: color-mix(in srgb, var(--primary) 72%, #141b33);
+}
+/* The stitching along each edge. */
+.profile-strap path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1px;
+  stroke-dasharray: 3.5 2.5;
+  opacity: 0.4;
+}
+.profile-clip {
+  z-index: 2;
+  margin-bottom: -23px;
+  pointer-events: none;
+  position: relative;
+}
+.profile-badge {
+  --identity-surface: var(--muted);
+  border: 1px solid var(--border);
+  background: linear-gradient(170deg, var(--identity-surface), var(--card) 55%);
+  width: 340px;
+  min-height: 540px;
+  transform-origin: 50% 0;
+  transform: rotate(var(--sway, 0rad)) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition:
+    --tilt-x 0.25s ease-out,
+    --tilt-y 0.25s ease-out;
+  cursor: grab;
+  touch-action: pan-y;
+  box-shadow:
+    inset 0 1px 0 #ffffff14,
+    0 1px 2px var(--shadow-color),
+    0 14px 28px -10px var(--shadow-color),
+    0 40px 60px -30px var(--shadow-color);
+  border-radius: 20px;
+  flex-direction: column;
+  padding: 64px 28px 28px;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+/* The sheen of the plastic sleeve; it slides with the tilt. */
+.profile-badge::after {
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent 32%,
+    #ffffff0d 46%,
+    #ffffff03 54%,
+    transparent 66%
+  );
+  transform: translateX(var(--sheen, 0%));
+  position: absolute;
+  inset: 0;
+}
+.profile-badge.held {
+  cursor: grabbing;
+  user-select: none;
+}
+/* Slate unless the DSP's name selects another tone, as on its avatar. */
+.profile-badge.tinted {
+  --identity-surface: var(--slate-surface);
+}
+.profile-badge.tone-1 {
+  --identity-surface: var(--sage-surface);
+}
+.profile-badge.tone-2 {
+  --identity-surface: var(--violet-surface);
+}
+.profile-badge.tone-4 {
+  --identity-surface: var(--steel-surface);
+}
+.profile-punch {
+  background: var(--background);
+  width: 58px;
+  height: 12px;
+  box-shadow:
+    inset 0 2px 3px #0008,
+    0 1px 0 #ffffff12;
+  border-radius: 7px;
+  margin-left: -29px;
+  position: absolute;
+  top: 11px;
+  left: 50%;
+}
+.profile-badge h2 {
+  letter-spacing: -1.8px;
+  overflow-wrap: anywhere;
+  font-size: 40px;
+  font-weight: 650;
+  line-height: 1.02;
+}
+.profile-badge h2 span {
+  display: block;
+}
+.profile-email {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.role-badge {
+  background: var(--selection);
+  color: var(--primary);
+  border-radius: 999px;
+  align-self: flex-start;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+}
+.profile-facts {
+  border-top: 1px solid var(--border);
+  grid-template-columns: 1fr 1fr;
+  gap: 24px 18px;
+  margin-top: 32px;
+  padding-top: 26px;
+  font-size: 14px;
+  display: grid;
+}
+.profile-facts dt {
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.profile-facts dd small {
+  color: var(--muted-foreground);
+  margin-top: 3px;
+  font-size: 12px;
+  display: block;
+}
+.profile-facts .profile-station {
+  letter-spacing: -0.5px;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+.profile-facts .status-indicator {
+  font-size: inherit;
+}
+.profile-org {
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 32px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+}
+.profile-org .dsp-avatar {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+}
+.settings-section:last-child {
+  border-bottom: 0;
+}
+/* Nothing moves on a phone or for anyone who asks for less motion, and a phone shows the card alone. */
+@media (max-width: 700px), (prefers-reduced-motion: reduce) {
+  .profile-badge {
+    cursor: auto;
+    touch-action: auto;
+    transform: none;
+  }
+}
+@media (max-width: 700px) {
+  .profile-stage {
+    margin-top: 16px;
+    padding-bottom: 24px;
+  }
+  .profile-straps,
+  .profile-clip,
+  .profile-punch {
+    display: none;
+  }
+  .profile-hang {
+    margin-top: 0;
+  }
+  .profile-badge {
+    width: min(340px, 100%);
+    padding-top: 36px;
+  }
+}
+
 /* Side sheets and permission rows */
 /* also styled in styles.css and timecard-schedules.css */
 .panel-body {
