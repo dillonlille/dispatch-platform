@@ -1,4 +1,4 @@
-import { test, expect, demo, login } from './fixtures.js';
+import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
 import type { Page } from '@playwright/test';
 
 async function loginWithClock(page: Page) {
@@ -157,7 +157,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
   }, dsp.id);
   await expect(page.getByRole('heading', { name: 'Timecard', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-  await page.getByLabel('Paycom date').fill('2026-09-15');
+  await setDate(page, '2026-09-15');
   await page.getByLabel('Search meal break employees').fill('Avery');
   await page.evaluate(() => window.scrollTo(0, 200));
   const scroll = await page.evaluate(() => window.scrollY);
@@ -178,7 +178,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
     'aria-selected',
     'true',
   );
-  await expect(page.getByLabel('Paycom date')).toHaveValue('2026-09-15');
+  await expectDate(page, '2026-09-15');
   await expect(page.getByLabel('Search meal break employees')).toHaveValue('Avery');
   await expect
     .poll(async () => {

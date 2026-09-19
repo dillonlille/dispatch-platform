@@ -767,7 +767,7 @@ td small {
   flex-wrap: wrap;
 }
 .paycom-date-controls .date-field {
-  width: 165px;
+  width: 124px;
   font-size: 13px;
 }
 .paycom-source-note {
@@ -866,7 +866,7 @@ td small {
     flex-wrap: nowrap;
   }
   .paycom-date-controls .date-field {
-    width: 148px;
+    width: 124px;
   }
 }
 @media (max-width: 600px) {
@@ -1492,7 +1492,7 @@ td small {
   flex-wrap: nowrap;
 }
 .paycom-date-controls-compact .date-field {
-  width: 165px;
+  width: 124px;
   min-width: 0;
 }
 .paycom-date-controls-compact input {

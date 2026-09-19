@@ -1,24 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   addDays,
   addMonths,
   clampDay,
   dayLabel,
+  displayDay,
   monthLabel,
   monthOf,
   monthWeeks,
+  parseDay,
   sameDayOf,
   weekdayOf,
 } from '../lib/calendar.js';
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-// A phone's own date picker suits a touch screen better than a small grid.
-const touch = () => matchMedia('(pointer: coarse)').matches;
-
 /**
  * A date that can be typed, or chosen from a calendar that opens from anywhere on the field.
  * Days are `YYYY-MM-DD`; `today` is the caller's idea of the current day, not the device's.
+ * The field is plain text: a browser's own date field adds icons and selects part of the
+ * date on a press, neither of which can be styled away everywhere.
  */
 export function DateField({
   label,
@@ -42,6 +43,8 @@ export function DateField({
   // The day the arrow keys are on. Its month is the month in view.
   const [active, setActive] = useState(value);
   const [entered, setEntered] = useState(false);
+  // What is being typed, until Enter or leaving the field commits or discards it.
+  const [draft, setDraft] = useState<string>();
   const month = monthOf(active);
 
   const show = (enter: boolean) => {
@@ -52,6 +55,11 @@ export function DateField({
   const close = (refocus: boolean) => {
     setOpen(false);
     if (refocus) input.current?.focus();
+  };
+  const commit = () => {
+    const day = draft === undefined ? undefined : parseDay(draft);
+    setDraft(undefined);
+    if (day && day >= min && day <= max && day !== value) onChange(day);
   };
   const move = (day: string) => setActive(clampDay(day, min, max));
 
@@ -124,30 +132,50 @@ export function DateField({
     >
       <input
         ref={input}
-        type="date"
+        type="text"
+        // The calendar is the way to choose on a touch screen, so no keyboard slides up.
+        inputMode="none"
+        autoComplete="off"
+        spellCheck={false}
         aria-label={label}
         aria-haspopup="dialog"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onClick={(event) => {
-          if (touch()) return;
-          // Some browsers open their own picker on a click; this calendar replaces it.
+        // Until someone types, the field only shows the date: no text cursor and no selection.
+        data-typing={draft === undefined ? undefined : ''}
+        value={draft ?? displayDay(value)}
+        onChange={(event) => setDraft(event.target.value)}
+        onSelect={({ currentTarget: field }) => {
+          if (draft === undefined && field.selectionStart !== field.selectionEnd)
+            field.setSelectionRange(field.value.length, field.value.length);
+        }}
+        onPaste={(event) => {
+          if (draft !== undefined) return;
           event.preventDefault();
+          setDraft(event.clipboardData.getData('text'));
+        }}
+        onBlur={commit}
+        onClick={() => {
           if (open) setOpen(false);
           else show(false);
         }}
         onKeyDown={(event) => {
-          if (touch()) return;
-          if (event.key === 'Escape' && open) close(false);
-          else if (event.key === 'Enter' || (event.altKey && event.key === 'ArrowDown')) {
+          if (event.key === 'Escape') {
+            setDraft(undefined);
+            if (open) close(false);
+          } else if (event.key === 'Enter' && draft !== undefined) {
+            commit();
+            setOpen(false);
+          } else if (event.key === 'Enter' || event.key === 'ArrowDown') {
             event.preventDefault();
             show(true);
+          } else if (draft === undefined && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            // With no cursor to aim, the first keystroke starts the date over.
+            const erase = event.key === 'Backspace' || event.key === 'Delete';
+            if (!erase && event.key.length !== 1) return;
+            event.preventDefault();
+            setDraft(erase ? '' : event.key);
           }
         }}
       />
-      <CalendarDays className="date-field-icon" size={16} aria-hidden="true" />
       {open && (
         <div
           ref={panel}
@@ -198,6 +226,7 @@ export function DateField({
                         aria-pressed={day === value}
                         disabled={day < min || day > max}
                         onClick={() => {
+                          setDraft(undefined);
                           onChange(day);
                           close(true);
                         }}

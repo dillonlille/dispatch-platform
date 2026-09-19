@@ -1,12 +1,18 @@
-import { test, expect, login, openDsp } from './fixtures.js';
-import { addDays, dayLabel, monthLabel, monthOf } from '../../dashboard/src/lib/calendar.js';
+import { test, expect, login, openDsp, expectDate, setDate } from './fixtures.js';
+import {
+  addDays,
+  dayLabel,
+  monthLabel,
+  monthOf,
+  parseDay,
+} from '../../dashboard/src/lib/calendar.js';
 
 test('the date opens a calendar that picks past days and refuses future ones', async ({ page }) => {
   await login(page);
   await openDsp(page, 'Northline Logistics');
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   const field = page.getByLabel('Paycom date');
-  const today = await field.inputValue();
+  const today = parseDay(await field.inputValue())!;
   const calendar = page.getByRole('dialog', { name: 'Choose paycom date' });
   const day = (value: string) =>
     calendar.getByRole('button', { name: dayLabel(value), exact: true });
@@ -28,7 +34,7 @@ test('the date opens a calendar that picks past days and refuses future ones', a
   await expect(calendar.getByText(monthLabel(monthOf(earlier)), { exact: true })).toBeVisible();
   await day(earlier).click();
   await expect(calendar).toHaveCount(0);
-  await expect(field).toHaveValue(earlier);
+  await expectDate(page, earlier);
   await expect(field).toBeFocused();
 
   // Reopening starts from the chosen day, and a press outside closes it.
@@ -37,9 +43,45 @@ test('the date opens a calendar that picks past days and refuses future ones', a
   await page.getByRole('heading', { name: 'Timecard', exact: true }).click();
   await expect(calendar).toHaveCount(0);
 
-  // Typing a date still works.
-  await field.fill(today);
-  await expect(field).toHaveValue(today);
+  // A plain field: no browser date control, so no icons and nothing selected by a press.
+  await expect(field).toHaveAttribute('type', 'text');
+  expect(
+    await field.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
+  ).toBe(0);
+  await expect(page.locator('.date-field svg')).toHaveCount(0);
+  // Nor a text cursor, until typing begins; the first keystroke then starts the date over.
+  const caret = () =>
+    page.locator('.date-field input').evaluate((el) => getComputedStyle(el).caretColor);
+  expect(await caret()).toBe('rgba(0, 0, 0, 0)');
+  // The calendar is open from here on, and its label also contains the field's.
+  const input = page.locator('.date-field input');
+  await input.click();
+  await page.keyboard.press('Control+a');
+  expect(
+    await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
+  ).toBe(0);
+  const typed = addDays(today, -2);
+  await page.keyboard.type(
+    `${Number(typed.slice(5, 7))}/${Number(typed.slice(8))}/${typed.slice(0, 4)}`,
+  );
+  expect(await caret()).not.toBe('rgba(0, 0, 0, 0)');
+  await page.keyboard.press('Enter');
+  await expectDate(page, typed);
+  expect(await caret()).toBe('rgba(0, 0, 0, 0)');
+
+  // Typing a date still works, in either form, and only real days up to today are taken.
+  await setDate(page, today);
+  await expectDate(page, today);
+  const yesterday = addDays(today, -1);
+  await setDate(
+    page,
+    `${Number(yesterday.slice(5, 7))}/${Number(yesterday.slice(8))}/${yesterday.slice(0, 4)}`,
+  );
+  await expectDate(page, yesterday);
+  await setDate(page, addDays(today, 1));
+  await expectDate(page, yesterday);
+  await setDate(page, 'not a date');
+  await expectDate(page, yesterday);
 });
 
 test('the calendar can be driven from the keyboard', async ({ page }) => {
@@ -47,7 +89,7 @@ test('the calendar can be driven from the keyboard', async ({ page }) => {
   await openDsp(page, 'Northline Logistics');
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   const field = page.getByLabel('Paycom date');
-  const today = await field.inputValue();
+  const today = parseDay(await field.inputValue())!;
   const calendar = page.getByRole('dialog', { name: 'Choose paycom date' });
   const day = (value: string) =>
     calendar.getByRole('button', { name: dayLabel(value), exact: true });
@@ -67,11 +109,11 @@ test('the calendar can be driven from the keyboard', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(calendar).toHaveCount(0);
   await expect(field).toBeFocused();
-  await expect(field).toHaveValue(today);
+  await expectDate(page, today);
 
   await page.keyboard.press('Enter');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Enter');
   await expect(calendar).toHaveCount(0);
-  await expect(field).toHaveValue(addDays(today, -1));
+  await expectDate(page, addDays(today, -1));
 });

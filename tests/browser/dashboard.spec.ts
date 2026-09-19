@@ -1,4 +1,4 @@
-import { test, expect, demo, login, openDsp } from './fixtures.js';
+import { test, expect, demo, login, openDsp, setDate } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
 test('owner dashboard, search, workforce, timecards, connection verification and collection', async ({
   page,
@@ -78,7 +78,7 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   // Fixture meal timestamps describe a complete business day.
-  await page.getByLabel('Paycom date').fill('2026-01-11');
+  await setDate(page, '2026-01-11');
   await page.getByRole('button', { name: 'Sync now', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
     'Paycom synced',
