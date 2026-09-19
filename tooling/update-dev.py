@@ -4,29 +4,21 @@
 import argparse
 from datetime import datetime, timezone
 import fcntl
-import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import shutil
-import subprocess
-import tarfile
+import sys
 import tempfile
 import time
 import urllib.request
-import zipfile
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import (MAX_BYTES, REPOSITORY, command, private_directory, require,
-                              safe_path, unpack, verify_artifact, write_json)
+from runtime_artifact import (REPOSITORY, command, download_run_artifact, github, latest_run, passed,
+                              private_directory, require, verify_artifact, write_json)
 
 PRIVATE_PATHS = ("config", "data", "dsps", ".platform.lock")
-
-
-def github(endpoint):
-    return json.loads(command("gh", "api", f"repos/{REPOSITORY}/{endpoint}"))
 
 
 def install_management(live):
@@ -54,18 +46,15 @@ class DevUpdater:
         require(self.root.name == "dev" and self.root.resolve() == self.root,
                 "Updater requires a real dev environment directory")
         private_directory(self.root)
-        # Accept the old layout during migration; new installations use dev/.
-        self.live = self.root if (self.root / ".git").is_dir() else self.root / "live"
-        require(self.live.resolve() == self.live and (self.live / ".git").is_dir(),
-                "Dev requires its persistent repository checkout")
-        if self.live == self.root:
-            # These exclusions survive rollback to commits predating this layout.
-            exclude = self.live / ".git/info/exclude"
-            existing = exclude.read_text().splitlines() if exclude.exists() else []
-            missing = [f"/{name}" for name in PRIVATE_PATHS if f"/{name}" not in existing]
-            if missing:
-                with exclude.open("a") as out:
-                    out.write("\n# Private Dev environment; preserve across updates.\n" + "\n".join(missing) + "\n")
+        self.live = self.root
+        require((self.live / ".git").is_dir(), "Dev requires its persistent repository checkout")
+        # Local exclusions keep private state ignored after rollback to an older .gitignore.
+        exclude = self.live / ".git/info/exclude"
+        existing = exclude.read_text().splitlines() if exclude.exists() else []
+        missing = [f"/{name}" for name in PRIVATE_PATHS if f"/{name}" not in existing]
+        if missing:
+            with exclude.open("a") as out:
+                out.write("\n# Private Dev environment; preserve across updates.\n" + "\n".join(missing) + "\n")
         self.platform = private_directory(self.root / "data/platform")
         self.runtime = private_directory(self.live / ".runtime")
         self.receipt = self.platform / "dev-activation.json"
@@ -170,8 +159,6 @@ class DevUpdater:
             raise
 
     def update(self):
-        require(not (self.runtime / "rust-reset-receipt.json").exists(),
-                "Recover the interrupted Rust fresh-state cutover first")
         self.recover()
         self.clean_checkout()
         self.git("fetch", "origin", "dev")
@@ -180,36 +167,15 @@ class DevUpdater:
         if commit == current:
             return
         runs = github(f"actions/workflows/checks.yml/runs?branch=dev&event=push&head_sha={commit}&per_page=20")["workflow_runs"]
-        runs = [r for r in runs if r["head_sha"] == commit and r["head_branch"] == "dev"
-                and r["event"] == "push" and r["head_repository"]["full_name"] == REPOSITORY]
-        if not runs:
-            self.status("waiting_for_checks", current)
-            return
-        run = max(runs, key=lambda r: r["id"])
-        if run["status"] != "completed" or run["conclusion"] != "success":
-            self.status("checks_failed" if run["status"] == "completed" else "waiting_for_checks", current)
+        run = latest_run(runs, commit, "push", "dev")
+        if not passed(run):
+            self.status("checks_failed" if run and run["status"] == "completed" else "waiting_for_checks", current)
             return
         artifacts = github(f"actions/runs/{run['id']}/artifacts")["artifacts"]
         artifacts = [a for a in artifacts if a["name"] == f"dispatch-dev-{commit}" and not a["expired"]]
         require(len(artifacts) == 1, "Verified Dev artifact unavailable")
-        artifact = artifacts[0]
-        require(artifact["size_in_bytes"] <= MAX_BYTES, "Download is too large")
         with tempfile.TemporaryDirectory(prefix="update-", dir=self.runtime) as temporary:
-            temporary = Path(temporary)
-            download = temporary / "artifact.zip"
-            with download.open("xb") as output:
-                subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
-                               stdout=output, stderr=subprocess.PIPE, check=True, timeout=180)
-            expected = artifact.get("digest")
-            require(expected and expected == "sha256:" + hashlib.sha256(download.read_bytes()).hexdigest(),
-                    "GitHub artifact digest mismatch")
-            with zipfile.ZipFile(download) as bundle:
-                require(bundle.namelist() == ["dispatch-dev.tar.gz"], "Unexpected artifact package")
-                require(bundle.getinfo("dispatch-dev.tar.gz").file_size <= MAX_BYTES, "Package is too large")
-                with bundle.open("dispatch-dev.tar.gz") as source, (temporary / "build.tar.gz").open("xb") as target:
-                    shutil.copyfileobj(source, target)
-            candidate = temporary / "candidate"
-            unpack(temporary / "build.tar.gz", candidate)
+            candidate, _manifest = download_run_artifact(artifacts[0], temporary, commit)
             # Fetch/check again so a superseded build never replaces a newer Dev head.
             self.git("fetch", "origin", "dev")
             if self.git("rev-parse", "origin/dev") != commit:
@@ -233,7 +199,7 @@ def main():
         return
     if args.verify:
         updater.clean_checkout()
-        manifest = verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
+        verify_artifact(updater.live / ".build", updater.git("rev-parse", "HEAD"))
         (updater.live / ".build/services/rust/dispatch-backend").chmod(0o700)
         return
     with (updater.platform / "dev-update.lock").open("a") as lock:

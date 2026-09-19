@@ -14,6 +14,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location("update_dev", Path(__file__).parents[1] / "tooling/update-dev.py")
 updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
+import runtime_artifact as runtime
 
 
 def artifact(root, commit, marker="candidate"):
@@ -39,16 +40,12 @@ def artifact(root, commit, marker="candidate"):
 
 
 class DevUpdaterTests(unittest.TestCase):
-    flat = False
-
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="dispatch-dev-updater-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "dev"
         self.root.mkdir(mode=0o700)
-        self.live = self.root if self.flat else self.root / "live"
-        if not self.flat:
-            self.live.mkdir(mode=0o700)
+        self.live = self.root
         for name in ["config", "data", "data/platform"]:
             (self.root / name).mkdir(mode=0o700)
         self.git("init", "-b", "dev")
@@ -83,7 +80,7 @@ class DevUpdaterTests(unittest.TestCase):
             self.instance.activate(self.candidate, self.new)
         self.assertEqual(actions, ["stop", "start"])
         self.assertEqual(self.git("rev-parse", "HEAD"), self.new)
-        self.assertEqual(updater.verify_artifact(self.live / ".build", self.new)["digest"], self.manifest["digest"])
+        self.assertEqual(runtime.verify_artifact(self.live / ".build", self.new)["digest"], self.manifest["digest"])
         self.assertEqual((self.root / "data/private-sentinel").read_text(), "retained")
         self.assertFalse(self.instance.receipt.exists())
 
@@ -93,17 +90,17 @@ class DevUpdaterTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "New Dev build"):
                 self.instance.activate(self.candidate, self.new)
         self.assertEqual(self.git("rev-parse", "HEAD"), self.old)
-        self.assertEqual(updater.verify_artifact(self.live / ".build", self.old)["digest"], self.old_artifact["digest"])
+        self.assertEqual(runtime.verify_artifact(self.live / ".build", self.old)["digest"], self.old_artifact["digest"])
         self.assertEqual(json.loads(self.instance.status_file.read_text())["status"], "rolled_back")
         self.assertEqual((self.root / "data/private-sentinel").read_text(), "retained")
 
     def test_interrupt_after_rename_recovers_on_next_run(self):
-        updater.write_json(self.instance.receipt, {"commit": self.new, "oldCommit": self.old,
+        runtime.write_json(self.instance.receipt, {"commit": self.new, "oldCommit": self.old,
                            "oldDigest": self.old_artifact["digest"], "previous": "previous"})
         (self.live / ".build").rename(self.instance.runtime / "previous")
         with patch.object(self.instance, "service"), patch.object(self.instance, "healthy", return_value=True):
             self.instance.recover()
-        updater.verify_artifact(self.live / ".build", self.old)
+        runtime.verify_artifact(self.live / ".build", self.old)
         self.assertFalse(self.instance.receipt.exists())
 
     def test_dirty_checkout_is_never_overwritten(self):
@@ -131,17 +128,17 @@ class DevUpdaterTests(unittest.TestCase):
 
     def test_inventory_rejects_changed_files_and_wrong_source(self):
         with self.assertRaisesRegex(RuntimeError, "another commit"):
-            updater.verify_artifact(self.candidate, self.old)
+            runtime.verify_artifact(self.candidate, self.old)
         (self.candidate / "services/rust/dispatch-backend").write_text("tampered")
         with self.assertRaisesRegex(RuntimeError, "verification failed"):
-            updater.verify_artifact(self.candidate, self.new)
+            runtime.verify_artifact(self.candidate, self.new)
 
     def test_archive_rejects_traversal_links_and_duplicate_files(self):
         for number, mode in enumerate(["traversal", "link", "duplicate"]):
             with self.subTest(mode=mode):
                 package = self.root / f"{number}.tar.gz"
                 with tarfile.open(package, "w:gz") as bundle:
-                    entry = tarfile.TarInfo("../outside" if mode == "traversal" else "api/main.js")
+                    entry = tarfile.TarInfo("../outside" if mode == "traversal" else "dashboard/main.js")
                     if mode == "link":
                         entry.type, entry.linkname = tarfile.SYMTYPE, "/etc/passwd"
                     else:
@@ -150,7 +147,7 @@ class DevUpdaterTests(unittest.TestCase):
                     if mode == "duplicate":
                         bundle.addfile(entry, io.BytesIO(b"test"))
                 with self.assertRaises(RuntimeError):
-                    updater.unpack(package, self.root / f"unpacked-{number}")
+                    runtime.unpack(package, self.root / f"unpacked-{number}")
         self.assertFalse((self.root / "outside").exists())
 
     def test_activate_restores_executable_bit_from_untrusted_archive_modes(self):
@@ -159,42 +156,37 @@ class DevUpdaterTests(unittest.TestCase):
             self.instance.activate(self.candidate, self.new)
         self.assertEqual((self.live / ".build/services/rust/dispatch-backend").stat().st_mode & 0o777, 0o700)
 
-    def test_rust_inventory_rejects_retired_core_even_with_valid_hash(self):
-        target = self.candidate / "api/main.js"
-        target.parent.mkdir()
-        target.write_text("retired Node core")
-        manifest = json.loads((self.candidate / "release.json").read_text())
-        manifest.pop("digest")
-        manifest["files"].append({"path": "api/main.js", "size": target.stat().st_size,
-                                  "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
-        manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
-        (self.candidate / "release.json").write_text(json.dumps(manifest))
-        with self.assertRaisesRegex(RuntimeError, "retired runtime files"):
-            updater.verify_artifact(self.candidate, self.new)
-
-    def test_runtime_payload_is_rejected_even_with_valid_inventory(self):
-        target = self.candidate / "node_modules/unused/index.js"
-        target.parent.mkdir(parents=True)
-        target.write_text("unused runtime")
-        manifest = json.loads((self.candidate / "release.json").read_text())
-        manifest.pop("digest")
-        manifest["files"].append({"path": "node_modules/unused/index.js", "size": target.stat().st_size,
-                                  "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
-        manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
-        (self.candidate / "release.json").write_text(json.dumps(manifest))
-        with self.assertRaisesRegex(RuntimeError, "retired runtime files"):
-            updater.verify_artifact(self.candidate, self.new)
+    def test_inventory_rejects_retired_runtime_files_even_with_valid_hashes(self):
+        for number, (name, reason) in enumerate([("api/main.js", "outside managed code"),
+                                                 ("node_modules/unused/index.js", "outside managed code"),
+                                                 ("package.json", "outside managed code"),
+                                                 ("services/runtime/main.js", "retired runtime files"),
+                                                 ("tooling/cli.js", "retired runtime files")]):
+            with self.subTest(name=name):
+                candidate = self.instance.runtime / f"retired-{number}"
+                artifact(candidate, self.new)
+                target = candidate / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("retired Node runtime")
+                manifest = json.loads((candidate / "release.json").read_text())
+                manifest.pop("digest")
+                manifest["files"].append({"path": name, "size": target.stat().st_size,
+                                          "sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+                manifest["digest"] = hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
+                (candidate / "release.json").write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(RuntimeError, reason):
+                    runtime.verify_artifact(candidate, self.new)
+        (self.candidate / "shared").mkdir()
+        with self.assertRaisesRegex(RuntimeError, "outside managed code"):
+            runtime.verify_artifact(self.candidate, self.new)
 
     def test_retired_artifact_formats_are_rejected(self):
         for format in [1, 2]:
             manifest = dict(self.manifest, format=format)
             (self.candidate / "release.json").write_text(json.dumps(manifest))
             with self.assertRaisesRegex(RuntimeError, "Unsupported artifact format/schema"):
-                updater.verify_artifact(self.candidate, self.new)
+                runtime.verify_artifact(self.candidate, self.new)
 
-
-class FlatDevUpdaterTests(DevUpdaterTests):
-    flat = True
 
     def test_private_state_is_ignored_even_with_an_old_gitignore(self):
         self.assertEqual(self.instance.live, self.root)

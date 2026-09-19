@@ -26,8 +26,7 @@ python3 tooling/update-dev.py --root /home/thepickle/dispatch-platform/dev --ins
 
 The service units execute the installed copy in `.runtime/management/`, so a source
 rollback cannot restore old path assumptions. Host-updater changes require this
-explicit installation step. Private state paths and the Cloudflare tunnel
-configuration do not change when moving an older `dev/live` checkout into `dev`.
+explicit installation step.
 
 Verify the checkout and installed runtime with:
 

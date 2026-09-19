@@ -1,4 +1,7 @@
-"""Shared runtime inventory verification and safe extraction; no environment mutations."""
+"""Shared GitHub access, runtime inventory verification and safe extraction.
+
+Installed beside the host updaters, so it imports only the standard library.
+"""
 
 import hashlib
 import json
@@ -9,11 +12,16 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 
 REPOSITORY = "dillonlille/dispatch-platform"
-MANAGED = {"api", "dashboard", "services", "integrations", "shared", "tooling",
-           "node_modules", "package.json", "package-lock.json", "release.json"}
+# Top-level names an artifact may contain; tooling/artifact.ts builds from the same list.
+MANAGED = {"dashboard", "services", "tooling", "release.json"}
 MAX_BYTES = 1024 * 1024 * 1024
+STABLE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+# Both trusted branches retain the historical package name so an already
+# installed Dev updater continues to work unchanged.
+PACKAGE = "dispatch-dev.tar.gz"
 
 
 def require(value, message):
@@ -21,10 +29,36 @@ def require(value, message):
         raise RuntimeError(message)
 
 
-def command(*args, cwd=None, timeout=120):
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout)
-    require(result.returncode == 0, f"Command failed: {args[0]} {args[1] if len(args) > 1 else ''}")
-    return result.stdout.strip()
+def command(*args, cwd=None, timeout=120, binary=False):
+    result = subprocess.run(args, cwd=cwd, text=not binary, capture_output=True, timeout=timeout)
+    if result.returncode:
+        problem = result.stderr if isinstance(result.stderr, str) else result.stderr.decode(errors="replace")
+        raise RuntimeError(f"{' '.join(args[:3])} failed: {problem.strip()[-600:]}")
+    return result.stdout if binary else result.stdout.strip()
+
+
+def github(endpoint, *args, binary=False, timeout=120):
+    """Authenticated repository API through the GitHub CLI."""
+    data = command("gh", "api", f"repos/{REPOSITORY}/{endpoint}", *args, binary=binary, timeout=timeout)
+    return data if binary else json.loads(data)
+
+
+def latest_run(runs, sha, event, branch=None, skipped=False):
+    """The newest run of this repository for the commit, whatever its outcome.
+
+    A newer failed or pending rerun always replaces an older success. A skipped run
+    checked nothing, so it neither passes nor fails the commit; callers that must
+    not look past one (a PR returned to draft) count it with skipped=True.
+    """
+    runs = [r for r in runs if r.get("head_sha") == sha and r.get("event") == event
+            and (skipped or r.get("conclusion") != "skipped")
+            and (branch is None or r.get("head_branch") == branch)
+            and (r.get("head_repository") or {}).get("full_name") == REPOSITORY]
+    return max(runs, key=lambda r: (r["id"], r.get("run_attempt", 1)), default=None)
+
+
+def passed(run):
+    return bool(run) and run.get("status") == "completed" and run.get("conclusion") == "success"
 
 
 def private_directory(directory):
@@ -139,3 +173,29 @@ def verify_artifact(directory, commit=None):
         require(metadata["commit"] == commit, "Artifact belongs to another commit")
     return manifest
 
+
+def download_run_artifact(artifact, directory, commit, package=None):
+    """Fetch one Actions artifact and return its verified, unpacked runtime.
+
+    GitHub's recorded size and digest must describe the downloaded bytes. The inner
+    package is kept at `package` when given. Returns the candidate directory inside
+    the caller's private temporary `directory` and its manifest.
+    """
+    directory = Path(directory)
+    require(0 < artifact["size_in_bytes"] <= MAX_BYTES, "Invalid artifact size")
+    download = directory / "artifact.zip"
+    with download.open("xb") as output:
+        subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
+                       stdout=output, stderr=subprocess.PIPE, check=True, timeout=180)
+    require(download.stat().st_size == artifact["size_in_bytes"] and
+            artifact.get("digest") == "sha256:" + hashlib.sha256(download.read_bytes()).hexdigest(),
+            "GitHub artifact digest mismatch")
+    package = Path(package) if package else directory / "build.tar.gz"
+    with zipfile.ZipFile(download) as bundle:
+        require(bundle.namelist() == [PACKAGE], "Unexpected artifact package")
+        require(bundle.getinfo(PACKAGE).file_size <= MAX_BYTES, "Package is too large")
+        with bundle.open(PACKAGE) as source, package.open("xb") as target:
+            shutil.copyfileobj(source, target)
+    candidate = directory / "candidate"
+    unpack(package, candidate)
+    return candidate, verify_artifact(candidate, commit)

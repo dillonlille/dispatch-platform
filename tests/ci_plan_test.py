@@ -141,9 +141,14 @@ class CiPlanTests(unittest.TestCase):
                           {"artifacts": [{**artifact, "expired": True}]}]):
             self.assertIsNone(ci.validated_run(self.context))
 
-    def test_newer_failed_run_cannot_reuse_older_success(self):
-        with patch.object(ci, "github", return_value={"workflow_runs": [self.run,
-                          {**self.run, "id": 18, "conclusion": "failure"}]}):
+    def test_newer_failed_pending_or_skipped_run_cannot_reuse_older_success(self):
+        # A PR returned to draft skips every check; its older green run is not revived.
+        for newer in [{"conclusion": "failure"}, {"status": "in_progress", "conclusion": None},
+                      {"conclusion": "skipped"}]:
+            with self.subTest(newer=newer), patch.object(ci, "github", return_value={"workflow_runs": [
+                    self.run, {**self.run, "id": 18, **newer}]}):
+                self.assertIsNone(ci.validated_run(self.context))
+        with patch.object(ci, "github", return_value={"workflow_runs": []}):
             self.assertIsNone(ci.validated_run(self.context))
 
     def test_push_reuses_validation_but_api_failure_runs_normal_checks(self):

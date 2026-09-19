@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import (MAX_BYTES, REPOSITORY, command, private_directory,
+from runtime_artifact import (MAX_BYTES, REPOSITORY, STABLE, command, private_directory,
                               require, unpack, verify_artifact, write_json)
 
 API = f"https://api.github.com/repos/{REPOSITORY}/"
@@ -28,6 +28,7 @@ FULL_CHECK_SECONDS = 600
 
 
 def github(endpoint):
+    """Anonymous by design: Production holds no GitHub credentials or CLI."""
     request = urllib.request.Request(API + endpoint, headers={
         "Accept": "application/vnd.github+json", "User-Agent": "dispatch-production-updater",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -58,8 +59,7 @@ def latest_tag():
 
 
 def version(value):
-    require(isinstance(value, str) and re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", value),
-            "Stable semantic version required")
+    require(isinstance(value, str) and re.fullmatch(STABLE, value), "Stable semantic version required")
     return tuple(map(int, value.split(".")))
 
 
