@@ -319,32 +319,38 @@ select {
   gap: 30px;
   width: 100%;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  height: 43px;
+  margin-bottom: 8px;
   overflow-x: auto;
 }
 .restored-tabs button {
   flex-shrink: 0;
-  min-height: 48px;
-  padding: 0 0 15px;
+  min-height: 0;
+  height: 100%;
+  padding: 0 0 14px;
   border: 0;
   border-radius: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 450;
   color: var(--muted-foreground);
 }
 .restored-tabs button[aria-selected='true'] {
   border-color: var(--primary);
   color: var(--primary);
-  font-weight: 500;
+  font-weight: 550;
+}
+.restored-tabs:has(+ .table-toolbar) {
+  margin-bottom: 0;
 }
 .table-toolbar {
   display: flex;
   gap: 14px;
   align-items: center;
   justify-content: space-between;
-  margin: 20px 0 16px;
+  margin: 0;
+  padding: 19px 0 15px;
 }
 .search {
   position: relative;
@@ -728,39 +734,10 @@ td small {
   align-items: center;
   gap: 12px;
 }
-
-/* Geometry matches the archived line tabs. */
-.restored-tabs {
-  height: 43px;
-  margin-bottom: 8px;
-}
-.restored-tabs button {
-  min-height: 0;
-  height: 100%;
-  padding-bottom: 14px;
-  font-weight: 450;
-}
-.restored-tabs button[aria-selected='true'] {
-  font-weight: 550;
-}
-.restored-tabs:has(+ .table-toolbar) {
-  margin-bottom: 0;
-}
-.table-toolbar {
-  margin: 0;
-  padding: 19px 0 15px;
-}
 .page-container > .restored-tabs + .settings-section {
   margin-top: 8px;
 }
 
-.paycom-data-view {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding-top: 24px;
-  min-width: 0;
-}
 .paycom-day-toolbar {
   display: flex;
   align-items: center;
@@ -864,10 +841,12 @@ td small {
   flex-wrap: wrap;
   gap: 6px 16px;
   margin-top: 12px;
+  margin-bottom: 20px;
   font-size: 13px;
 }
 @media (max-width: 600px) {
   .paycom-date-controls {
+    width: 100%;
     gap: 6px;
     flex-wrap: nowrap;
   }
