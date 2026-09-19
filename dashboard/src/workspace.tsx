@@ -401,7 +401,7 @@ export function TeamPage({
                   <tr>
                     <th style={{ width: '45%' }}>Member</th>
                     <th>Role</th>
-                    <th>Access</th>
+                    <th>Status</th>
                     <th>
                       <span className="sr-only">Actions</span>
                     </th>
@@ -427,7 +427,7 @@ export function TeamPage({
                       </td>
                       <td>{member.role}</td>
                       <td>
-                        <Badge value="active">Active</Badge>
+                        <Badge value={member.status} />
                       </td>
                       <td>
                         {canManage && grantable.some((role) => role.id === member.roleId) && (

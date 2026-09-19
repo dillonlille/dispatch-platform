@@ -434,6 +434,7 @@ td small {
 .status-indicator.error > i {
   background: var(--destructive);
 }
+.status-indicator.idle > i,
 .status-indicator.signing_in > i,
 .status-indicator.queued > i,
 .status-indicator.running > i,
