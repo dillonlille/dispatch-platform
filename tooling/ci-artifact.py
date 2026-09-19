@@ -29,11 +29,15 @@ class ValidationChanged(RuntimeError):
     """A previously green PR no longer authorizes skipping its checks."""
 
 
+def base_ref():
+    return ci.TRUSTED.get(os.environ.get("GITHUB_REF", ""))
+
+
 def require_validation(context):
     if not context or context["commit"] != os.environ.get("GITHUB_SHA"):
-        raise ValidationChanged("Actual merged Dev commit required")
+        raise ValidationChanged("Actual merged commit required")
     try:
-        verified = ci.validated_receipt(context)
+        verified = ci.validated_receipt(context, base_ref() or "dev")
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         raise ValidationChanged("Cannot confirm PR validation; rerun the workflow") from error
     if not verified:
@@ -74,8 +78,8 @@ def warm_rust_cache(candidate, receipt):
 
 
 def restore(destination):
-    runtime.require(os.environ.get("GITHUB_EVENT_NAME") == "push" and
-                    os.environ.get("GITHUB_REF") == "refs/heads/dev", "Dev push required")
+    runtime.require(os.environ.get("GITHUB_EVENT_NAME") == "push" and base_ref(),
+                    "Dev or main push required")
     context = ci.merge_context()
     verified = require_validation(context)
     run, receipt = verified

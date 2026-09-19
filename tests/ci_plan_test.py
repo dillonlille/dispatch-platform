@@ -93,6 +93,20 @@ class CiPlanTests(unittest.TestCase):
                 self.assertFalse(ci.matches(changed, self.run, self.context, "full"))
         self.assertTrue(ci.matches({**self.receipt, "scope": "dashboard"}, self.run, self.context, "dashboard"))
 
+    def test_release_receipt_is_bound_to_main_and_the_full_suite(self):
+        release = {**self.receipt, "baseRef": "main"}
+        self.assertTrue(ci.matches(release, self.run, self.context, "full", "main"))
+        self.assertFalse(ci.matches(self.receipt, self.run, self.context, "full", "main"))
+        self.assertFalse(ci.matches(release, self.run, self.context, "full"))
+        archive, digest = self.archive({**release, "scope": "dashboard"})
+        artifact = {"id": 9, "name": "dispatch-validation-17-2", "expired": False,
+                    "size_in_bytes": len(archive), "digest": digest}
+        # A dashboard-only diff still cannot shrink what a release must have run.
+        with patch.object(ci, "github", side_effect=[{"workflow_runs": [self.run]},
+                          {"artifacts": [artifact]}, archive]), \
+                patch.object(ci, "changes", return_value=["dashboard/src/main.tsx"]):
+            self.assertIsNone(ci.validated_run(self.context, "main"))
+
     def test_wrong_failed_pending_or_fork_runs_are_not_trusted(self):
         for field, value in {"head_sha": "f" * 40, "event": "push", "status": "in_progress",
                              "conclusion": "failure", "path": "other.yml",
@@ -141,11 +155,29 @@ class CiPlanTests(unittest.TestCase):
                 patch.object(ci, "changes", return_value=["api/main.ts"]):
             self.assertEqual(ci.plan("push", "refs/heads/dev", {"before": "a" * 40})[0], "full")
 
-    def test_manual_and_release_checks_always_run_full_suite(self):
-        with patch.object(ci, "validated_run") as reuse:
+    def test_main_reuses_only_its_release_validation_and_never_narrows(self):
+        with patch.object(ci, "merge_context", return_value=self.context), \
+                patch.object(ci, "validated_run", return_value=17) as reuse:
+            self.assertEqual(ci.plan("push", "refs/heads/main", {})[0], "reuse")
+            reuse.assert_called_once_with(self.context, "main")
+        for outcome in [{"return_value": None}, {"side_effect": subprocess.TimeoutExpired("gh", 20)}]:
+            with patch.object(ci, "merge_context", return_value=self.context), \
+                    patch.object(ci, "validated_run", **outcome), \
+                    patch.object(ci, "changes", return_value=["dashboard/src/main.tsx"]):
+                self.assertEqual(ci.plan("push", "refs/heads/main", {"before": "a" * 40})[0], "full")
+        with patch.object(ci, "merge_context", return_value=None), patch.object(ci, "validated_run") as reuse:
+            self.assertEqual(ci.plan("push", "refs/heads/main", {"before": "a" * 40})[0], "full")
+            reuse.assert_not_called()
+
+    def test_manual_scheduled_and_release_pr_checks_always_run_full_suite(self):
+        release = copy.deepcopy(self.event)
+        release["pull_request"]["base"]["ref"] = "main"
+        with patch.object(ci, "validated_run") as reuse, \
+                patch.object(ci, "changes", return_value=["dashboard/src/main.tsx"]):
             self.assertEqual(ci.plan("workflow_dispatch", "refs/heads/dev", {})[0], "full")
-            self.assertEqual(ci.plan("push", "refs/heads/main", {})[0], "full")
+            self.assertEqual(ci.plan("workflow_dispatch", "refs/heads/main", {})[0], "full")
             self.assertEqual(ci.plan("schedule", "refs/heads/dev", {})[0], "full")
+            self.assertEqual(ci.plan("pull_request", "refs/pull/1/merge", release)[0], "full")
             reuse.assert_not_called()
 
     def test_draft_checks_defer_until_ready_and_cannot_publish_validation(self):
@@ -169,6 +201,15 @@ class CiPlanTests(unittest.TestCase):
             with patch.object(ci, "changes", return_value=["api/main.ts"]):
                 with self.assertRaises(ValueError):
                     ci.receipt(self.event, "dashboard")
+            release = copy.deepcopy(self.event)
+            release["pull_request"]["base"]["ref"] = "main"
+            self.assertEqual(ci.receipt(release, "full"), {**self.receipt, "baseRef": "main"})
+            with patch.object(ci, "changes", return_value=["dashboard/src/main.tsx"]):
+                with self.assertRaises(ValueError):
+                    ci.receipt(release, "dashboard")
+            release["pull_request"]["base"]["ref"] = "other"
+            with self.assertRaises(ValueError):
+                ci.receipt(release, "full")
 
 
 if __name__ == "__main__":
