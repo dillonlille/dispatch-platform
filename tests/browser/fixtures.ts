@@ -47,11 +47,12 @@ export async function openDsp(page: Page, name: string) {
 const shown = (day: string) => `${day.slice(5, 7)}/${day.slice(8)}/${day.slice(0, 4)}`;
 /** Type a `YYYY-MM-DD` day into the Timecard date and commit it. */
 export async function setDate(page: Page, day: string) {
-  const field = page.getByLabel('Paycom date');
+  // By role: the open calendar's own label also contains the field's.
+  const field = page.getByRole('textbox', { name: 'Paycom date' });
   await field.fill(day);
   await field.press('Enter');
 }
 /** The Timecard date, within `scope` when a page shows more than one, reads as this day. */
 export async function expectDate(scope: Page | Locator, day: string) {
-  await expect(scope.getByLabel('Paycom date')).toHaveValue(shown(day));
+  await expect(scope.getByRole('textbox', { name: 'Paycom date' })).toHaveValue(shown(day));
 }

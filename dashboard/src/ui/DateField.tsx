@@ -139,8 +139,19 @@ export function DateField({
         spellCheck={false}
         aria-label={label}
         aria-haspopup="dialog"
+        // Until someone types, the field only shows the date: no text cursor and no selection.
+        data-typing={draft === undefined ? undefined : ''}
         value={draft ?? displayDay(value)}
         onChange={(event) => setDraft(event.target.value)}
+        onSelect={({ currentTarget: field }) => {
+          if (draft === undefined && field.selectionStart !== field.selectionEnd)
+            field.setSelectionRange(field.value.length, field.value.length);
+        }}
+        onPaste={(event) => {
+          if (draft !== undefined) return;
+          event.preventDefault();
+          setDraft(event.clipboardData.getData('text'));
+        }}
         onBlur={commit}
         onClick={() => {
           if (open) setOpen(false);
@@ -156,6 +167,12 @@ export function DateField({
           } else if (event.key === 'Enter' || event.key === 'ArrowDown') {
             event.preventDefault();
             show(true);
+          } else if (draft === undefined && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            // With no cursor to aim, the first keystroke starts the date over.
+            const erase = event.key === 'Backspace' || event.key === 'Delete';
+            if (!erase && event.key.length !== 1) return;
+            event.preventDefault();
+            setDraft(erase ? '' : event.key);
           }
         }}
       />

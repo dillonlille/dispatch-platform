@@ -49,6 +49,25 @@ test('the date opens a calendar that picks past days and refuses future ones', a
     await field.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
   ).toBe(0);
   await expect(page.locator('.date-field svg')).toHaveCount(0);
+  // Nor a text cursor, until typing begins; the first keystroke then starts the date over.
+  const caret = () =>
+    page.locator('.date-field input').evaluate((el) => getComputedStyle(el).caretColor);
+  expect(await caret()).toBe('rgba(0, 0, 0, 0)');
+  // The calendar is open from here on, and its label also contains the field's.
+  const input = page.locator('.date-field input');
+  await input.click();
+  await page.keyboard.press('Control+a');
+  expect(
+    await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
+  ).toBe(0);
+  const typed = addDays(today, -2);
+  await page.keyboard.type(
+    `${Number(typed.slice(5, 7))}/${Number(typed.slice(8))}/${typed.slice(0, 4)}`,
+  );
+  expect(await caret()).not.toBe('rgba(0, 0, 0, 0)');
+  await page.keyboard.press('Enter');
+  await expectDate(page, typed);
+  expect(await caret()).toBe('rgba(0, 0, 0, 0)');
 
   // Typing a date still works, in either form, and only real days up to today are taken.
   await setDate(page, today);
