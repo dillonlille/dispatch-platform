@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Job, JobMetrics } from '../shared/contracts/index.js';
-import { collectionHistory, runHistory } from '../dashboard/src/collection-history.js';
+import {
+  collectionHistory,
+  runHistory,
+} from '../dashboard/src/features/platform/collection-history.js';
 
 function job(
   index: number,
