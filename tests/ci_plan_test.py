@@ -38,12 +38,22 @@ class CiPlanTests(unittest.TestCase):
         for paths in [["dashboard/src/styles.css", "dashboard/src/archive/styles.css"],
                       ["dashboard/src/main.tsx"],
                       ["dashboard/src/meal-breaks.tsx", "shared/meal-breaks.ts", "tests/meal-breaks.test.ts"],
-                      ["tests/browser/meal-breaks.spec.ts"]]:
+                      ["tests/browser/meal-breaks.spec.ts"],
+                      ["dashboard/src/lib/format.ts", "tests/dashboard-format.test.ts"],
+                      ["tests/dashboard-structure.test.ts", "tests/collection-history.test.ts"]]:
             with self.subTest(paths=paths):
                 self.assertEqual(ci.scope(paths), "dashboard")
+        # A test file counts as dashboard-only exactly when the dashboard build check runs it.
+        plan = json.loads((Path(__file__).parents[1] / "tooling/test-plan.json").read_text())
+        self.assertEqual(sorted(ci.DASHBOARD_TESTS), sorted(plan["dashboard"]))
+        self.assertIn("...dashboardTests", (Path(__file__).parents[1] / "tooling/checks.ts").read_text())
+        for file in plan["dashboard"]:
+            self.assertEqual(ci.scope([file]), "dashboard", file)
         for paths in [[], ["README.md"], ["styles.css"], ["dashboard/vite.config.ts"],
                       ["shared/contracts/index.ts"], ["shared/paycom.ts"], ["shared/new-helper.ts"],
-                      ["tests/rust-support.ts"], ["tests/rust-core.test.ts"], ["backend/src/main.rs"],
+                      ["tests/support.ts"], ["tests/api-auth.test.ts"], ["backend/src/main.rs"],
+                      ["tooling/test-plan.json"], ["tooling/test-plan.ts"], ["tests/browser/fixtures.ts"],
+                      ["tests/test-plan.test.ts", "dashboard/src/main.tsx"],
                       ["dashboard/src/styles.css", "package-lock.json"],
                       ["dashboard/src/styles.css", ".github/workflows/checks.yml"]]:
             with self.subTest(paths=paths):

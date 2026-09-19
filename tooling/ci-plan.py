@@ -20,6 +20,7 @@ from runtime_artifact import REPOSITORY, latest_run
 WORKFLOW = ".github/workflows/checks.yml"
 # Branches whose merged PR validation may be promoted instead of repeated.
 TRUSTED = {"refs/heads/dev": "dev", "refs/heads/main": "main"}
+DASHBOARD_TESTS = json.loads((Path(__file__).resolve().parent / "test-plan.json").read_text())["dashboard"]
 
 
 def git(*args):
@@ -33,8 +34,8 @@ github = partial(runtime_artifact.github, timeout=20)
 def scope(paths):
     # Renames include both paths. New shared modules, contracts, dependencies,
     # test infrastructure and build configuration deliberately require full CI.
-    dashboard = {"dashboard/index.html", "shared/meal-breaks.ts",
-                 "tests/meal-breaks.test.ts", "tests/collection-history.test.ts"}
+    # The dashboard logic tests are the ones the build check runs in dashboard mode.
+    dashboard = {"dashboard/index.html", "shared/meal-breaks.ts", *DASHBOARD_TESTS}
     allowed = lambda name: (name in dashboard
                             or name.startswith("dashboard/src/")
                             or name.startswith("dashboard/public/")
