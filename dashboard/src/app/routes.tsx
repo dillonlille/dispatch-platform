@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { PaycomSettingsPage } from '../paycom-settings.js';
-import { AuditPage, DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../platform.js';
+import { DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../features/platform/index.js';
+import { AuditPage } from '../features/audit/index.js';
 import { SettingsPage } from '../settings.js';
 import { ErrorBox } from '../ui/index.js';
 import { title } from '../lib/format.js';
