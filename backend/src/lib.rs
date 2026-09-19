@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod audit;
 pub mod browsers;
 pub mod collection_checkpoint;
 pub mod collectors;
