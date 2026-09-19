@@ -279,7 +279,6 @@ export function TimecardsPage({
           <PaycomDateControls
             date={date}
             today={calendarToday}
-            compact
             onChange={(value) => {
               onDateChange(value);
               setOffset(0);

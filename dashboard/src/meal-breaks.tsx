@@ -506,7 +506,6 @@ export function MealBreaksPage({
         <PaycomDateControls
           date={date}
           today={today}
-          compact
           onChange={(value) => {
             onDateChange(value);
             setPage(0);
