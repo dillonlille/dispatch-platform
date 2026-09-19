@@ -61,17 +61,17 @@ impl Driver {
         if let Some(error) = result["error"].as_str() {
             metrics.detail(s(&result, "reason"));
             let allowed = [
-                "cortex_scope_mismatch",
-                "cortex_content_incomplete",
-                "cortex_timezone_mismatch",
-                "cortex_source_too_large",
-                "cortex_invalid_meal_evidence",
-                "cortex_invalid_identity",
-                "cortex_source_changed",
-                "invalid_cortex_scope",
+                crate::Code::CortexScopeMismatch,
+                crate::Code::CortexContentIncomplete,
+                crate::Code::CortexTimezoneMismatch,
+                crate::Code::CortexSourceTooLarge,
+                crate::Code::CortexInvalidMealEvidence,
+                crate::Code::CortexInvalidIdentity,
+                crate::Code::CortexSourceChanged,
+                crate::Code::InvalidCortexScope,
             ];
             return Err(Error::new(
-                if allowed.contains(&error) {
+                if crate::Code::text_is_any(error, &allowed) {
                     error
                 } else {
                     "cortex_content_incomplete"

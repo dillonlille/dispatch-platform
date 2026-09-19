@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    Code,
     job_metrics::Recorder,
     meals::{CollectionRequest, Scope},
 };
@@ -80,16 +81,20 @@ impl Driver {
                 Ok(value) => {
                     let error = s(&value, "error");
                     metrics.detail(s(&value, "reason"));
-                    if ["cortex_timezone_mismatch", "cortex_source_too_large"].contains(&error) {
+                    if Code::text_is_any(
+                        error,
+                        &[Code::CortexTimezoneMismatch, Code::CortexSourceTooLarge],
+                    ) {
                         return Err(Error::new(error, 502));
                     }
-                    last_error = if [
-                        "cortex_station_unavailable",
-                        "cortex_provider_ambiguous",
-                        "cortex_scope_mismatch",
-                    ]
-                    .contains(&error)
-                    {
+                    last_error = if Code::text_is_any(
+                        error,
+                        &[
+                            Code::CortexStationUnavailable,
+                            Code::CortexProviderAmbiguous,
+                            Code::CortexScopeMismatch,
+                        ],
+                    ) {
                         error
                     } else {
                         "cortex_content_incomplete"
