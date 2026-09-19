@@ -197,23 +197,10 @@ export function DspList({ open, perform }: { open: (dsp: DspSummary) => void; pe
                       {!dsp.permanent &&
                         !dsp.profile.removed &&
                         ['active', 'suspended'].includes(dsp.status) && (
-                          <button
-                            onClick={(event) => {
-                              event.currentTarget.closest('details')?.removeAttribute('open');
-                              setRemoving(dsp);
-                            }}
-                          >
-                            Remove DSP
-                          </button>
+                          <button onClick={() => setRemoving(dsp)}>Remove DSP</button>
                         )}
                       {dsp.status === 'active' && !dsp.permanent && (
-                        <button
-                          className="danger"
-                          onClick={(event) => {
-                            event.currentTarget.closest('details')?.removeAttribute('open');
-                            setSuspending(dsp);
-                          }}
-                        >
+                        <button className="danger" onClick={() => setSuspending(dsp)}>
                           Suspend DSP
                         </button>
                       )}
