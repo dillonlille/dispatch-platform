@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { DspView, SessionView } from '../../../../shared/contracts/index.js';
 import { api } from '../../app/api.js';
-import { DetailList, ErrorBox, Header, Tabs } from '../../ui/index.js';
+import { Badge, DetailList, ErrorBox, Header, Tabs } from '../../ui/index.js';
+import { timezoneName } from '../../lib/format.js';
 import { can } from '../../app/permissions.js';
 import { AuditLog } from '../audit/index.js';
 import { ConnectionsPage } from '../connections/index.js';
@@ -32,6 +33,7 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
     ...(!view && session.user.platformOwner ? [['support', 'Platform support']] : []),
   ];
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
+  const role = session.user.platformOwner ? 'Platform owner' : (view?.role.name ?? 'Team member');
   return (
     <>
       <Header title="Settings" />
@@ -46,35 +48,36 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
       />
       {tab === 'general' && (
         <>
-          <section className="settings-section">
+          <div className="settings-identity">
+            <span className="avatar">
+              {session.user.firstName[0]}
+              {session.user.lastName[0]}
+            </span>
             <div>
-              <h2>Account</h2>
+              <strong>
+                {session.user.firstName} {session.user.lastName}
+                <span className="role-badge">{role}</span>
+              </strong>
+              <small>{session.user.email}</small>
             </div>
-            <DetailList
-              items={[
-                ['First name', session.user.firstName],
-                ['Last name', session.user.lastName],
-                ['Email address', session.user.email],
-                [
-                  'Role',
-                  session.user.platformOwner
-                    ? 'Platform owner'
-                    : (view?.role.name ?? 'Team member'),
-                ],
-              ]}
-            />
-          </section>
+          </div>
           {view && (
             <section className="settings-section">
               <div>
                 <h2>Workspace</h2>
               </div>
               <DetailList
+                className="field-grid"
                 items={[
                   ['DSP', view.dsp.name],
                   ['Station', view.profile?.stationCode || '—'],
-                  ['Business timezone', view.dsp.timezone],
-                  ['Status', view.dsp.status],
+                  [
+                    'Business timezone',
+                    <>
+                      {timezoneName(view.dsp.timezone)} <small>{view.dsp.timezone}</small>
+                    </>,
+                  ],
+                  ['Status', <Badge value={view.dsp.status} />],
                 ]}
               />
             </section>

@@ -17,6 +17,18 @@ export const time = (value: string | null | undefined, timeZone: string, empty =
     : empty;
 export const timeOfDay = (value: string, timeZone: string) =>
   dateFormatter('en-US', { hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(value));
+// "Pacific Time" for America/Los_Angeles; the zone ID when the runtime has no name for it.
+export const timezoneName = (timeZone: string) => {
+  try {
+    return (
+      dateFormatter('en-US', { timeZone, timeZoneName: 'longGeneric' })
+        .formatToParts(new Date())
+        .find((part) => part.type === 'timeZoneName')?.value ?? timeZone
+    );
+  } catch {
+    return timeZone;
+  }
+};
 export const title = (value: string) =>
   value
     .replaceAll('_', ' ')

@@ -332,6 +332,78 @@
   overflow-wrap: anywhere;
 }
 
+/* Settings general tab: identity header and label-over-value fields */
+.settings-identity {
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  gap: 16px;
+  max-width: 900px;
+  padding: 24px 0 28px;
+  display: flex;
+}
+.settings-identity .avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 17px;
+}
+.settings-identity strong {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+}
+.settings-identity small {
+  color: var(--muted-foreground);
+  margin-top: 4px;
+  font-size: 13px;
+  display: block;
+}
+.role-badge {
+  background: var(--selection);
+  color: var(--primary);
+  border-radius: 999px;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+}
+.settings-identity:last-child,
+.settings-section:last-child {
+  border-bottom: 0;
+}
+.field-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 24px 40px;
+  font-size: 13.5px;
+  display: grid;
+}
+.field-grid dt {
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.field-grid dd {
+  overflow-wrap: anywhere;
+}
+.field-grid dd small {
+  color: var(--muted-foreground);
+  margin-left: 4px;
+  font-size: 12px;
+}
+.field-grid .status-indicator {
+  font-size: inherit;
+}
+@media (max-width: 700px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+}
+
 /* Side sheets and permission rows */
 /* also styled in styles.css and timecard-schedules.css */
 .panel-body {
