@@ -250,7 +250,7 @@ impl Store {
                 )?
                 .ok_or_else(|| Error::new("member_not_found", 404))?;
             let name = |role: &Value| s(role, "name").to_owned();
-            self.audit_with(
+            self.audit_ref(
                 Some(s(&c.auth.user, "id")),
                 Some(dsp),
                 if next.is_some() {
@@ -265,6 +265,7 @@ impl Store {
                     Some(name(&self.role(dsp, &current.id)?)),
                     next.as_ref().map(name),
                 )],
+                Some(("member", s(&row, "user_id"))),
             )?;
             if next.is_none() {
                 self.delete_account(s(&row, "user_id"), s(&c.auth.user, "id"))?;
@@ -300,5 +301,5 @@ impl Store {
     }
 }
 pub fn profile_default() -> Value {
-    json!({"abbreviation":"","stationCode":"","setupRequired":false,"removed":false})
+    json!({"abbreviation":"","stationCode":"","setupRequired":false,"removed":false,"supportVisible":false})
 }

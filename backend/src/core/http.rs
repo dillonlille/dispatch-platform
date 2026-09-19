@@ -556,9 +556,9 @@ fn synchronous(db: &Store, i: &Input, state: &State) -> Result<Reply> {
                 a.preview = Some(v::text(b, "roleId", 1, 100)?.to_owned());
             }
             let c = db.context(&a, v::text(b, "dspId", 1, 100)?, roles::ACCESS)?;
-            db.audit(
-                Some(s(&a.user, "id")),
-                Some(s(&c.dsp, "id")),
+            db.audit_visit(
+                s(&a.user, "id"),
+                s(&c.dsp, "id"),
                 if platform {
                     "dsp.owner_view_opened"
                 } else {
@@ -650,6 +650,9 @@ fn platform(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Repl
         ("GET", "/api/platform/jobs") => Ok(Reply::json(db.list_jobs(None)?)),
         ("GET", "/api/platform/audit") => {
             Ok(Reply::json(db.audit_page(&audit_query(&i.query, None)?)?))
+        }
+        ("POST", "/api/platform/audit/export") => {
+            Ok(Reply::json(db.audit_export(actor, audit_query(b, None)?)?))
         }
         ("GET", "/api/platform/health") => {
             let counts: HashMap<String, Value> = db
@@ -768,12 +771,12 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("GET","/api/dsp/cortex/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_publications(id,v::text(&i.query,"date",10,10)?)?))},
         ("GET","/api/dsp/schedules")=>Ok(Reply::json(db.collection_schedules(id)?)),
         ("POST","/api/dsp/schedules/preview")=>Ok(Reply::json(db.preview_schedule(id,b)?)),
-        ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit(Some(actor),Some(id),"schedule.created",s(&result,"name"))?;Ok(Reply::status(result,201))},
+        ("POST","/api/dsp/schedules")=>{let result=db.save_collection_schedule(id,None,b)?;db.audit_ref(Some(actor),Some(id),"schedule.created",s(&result,"name"),Some(s(&result,"name")),&[],Some(("schedule",s(&result,"id"))))?;Ok(Reply::status(result,201))},
         ("GET","/api/dsp/schedule")=>Ok(Reply::json(db.schedule(id)?)),
-        ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit(Some(actor),Some(id),"schedule.updated","")?;Ok(Reply::json(result))},
+        ("POST","/api/dsp/schedule")=>{v::fields(b,&["enabled","localTime"])?;let before=db.schedule(id)?;let result=db.set_schedule(id,v::boolean(b,"enabled")?,v::text(b,"localTime",5,5)?,s(&c.dsp,"timezone"))?;db.audit_with(Some(actor),Some(id),"schedule.updated","",None,&super::schedules::schedule_changes(&before,&result))?;Ok(Reply::json(result))},
         ("POST","/api/dsp/profile")=>{
             v::fields(b,&["name","timezone","abbreviation","stationCode"])?;let name=v::name(b,"name",100)?;let tz=v::timezone(b,"timezone")?;let abbreviation=v::text(b,"abbreviation",0,16)?.trim();let station=v::text(b,"stationCode",3,8)?;ensure(station.bytes().all(|b|b.is_ascii_alphanumeric()),"invalid_input",400)?;
-            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("abbreviation",None,Some(abbreviation.to_owned())),("station",None,Some(station.to_uppercase()))])?;Ok(Reply::ok())
+            db.update_dsp(&c,&name,&tz)?;db.set_profile(id,json!({"abbreviation":abbreviation,"stationCode":station.to_uppercase(),"setupRequired":false}))?;db.audit_with(Some(actor),Some(id),"dsp.profile_completed","",None,&[("station",None,Some(station.to_uppercase())),("abbreviation",None,Some(abbreviation.to_owned()))])?;Ok(Reply::ok())
         },
         ("GET","/api/dsp/paycom/settings")=>{let mut value=db.preferences(id)?;if !c.can("timecard.manage"){value["history"]=json!([]);}Ok(Reply::json(value))},
         ("GET","/api/dsp/paycom/meal-breaks")=>{v::fields(&i.query,&["date"])?;Ok(Reply::json(db.meal_comparison(id,v::text(&i.query,"date",10,10)?,s(&c.dsp,"timezone"))?))},
@@ -791,13 +794,14 @@ fn tenant(db: &Store, i: &Input, state: &State, parts: &[&str]) -> Result<Reply>
         ("POST","/api/dsp/invitations/revoke")=>{v::fields(b,&["email"])?;let email=v::email(b,"email")?;db.platform.exec("DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",[id,&email])?;db.audit(Some(actor),Some(id),"invitation.revoked",&email)?;Ok(Reply::ok())},
         ("POST","/api/dsp/members/invite")=>{v::fields(b,&["email","role"])?;let email=v::email(b,"email")?;let role=db.role(id,v::text(b,"role",1,100)?)?;db.platform.transaction(|| {let raw=db.invite(&c.auth,id,&email,s(&role,"id"))?;db.invitation_mail(&c.auth,&email,s(&c.dsp,"name"),s(&role,"name"),&raw,flag(&role,"system") && flag(&db.profile(id)?,"setupRequired"))})?;Ok(Reply::json(json!({"invitation":{"email":email,"status":"queued"}})))},
         ("GET","/api/dsp/audit")=>Ok(Reply::json(db.audit_page(&audit_query(&i.query,Some(id))?)?)),
+        ("POST","/api/dsp/audit/export")=>Ok(Reply::json(db.audit_export(actor,audit_query(b,Some(id))?)?)),
         ("POST","/api/dsp/settings")=>{v::fields(b,&["name","timezone"])?;Ok(Reply::json(db.update_dsp(&c,&v::name(b,"name",100)?,&v::timezone(b,"timezone")?)?))},
         _=>{
             if write && endpoint=="schedules" {
                 let key=*parts.get(3).ok_or_else(||Error::new("not_found",404))?;
-                if parts.len()==4 { let before=db.collection_schedule(id,key)?;let result=db.save_collection_schedule(id,Some(key),b)?;db.audit_with(Some(actor),Some(id),"schedule.updated",s(&result,"name"),Some(s(&before,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="enabled" { let before=db.collection_schedule(id,key)?;let result=db.enable_collection_schedule(id,key,b)?;db.audit_with(Some(actor),Some(id),"schedule.toggled",s(&result,"name"),Some(s(&result,"name")),&super::schedules::schedule_changes(&before,&result))?;return Ok(Reply::json(result)); }
-                if parts.len()==5 && parts[4]=="remove" { let before=db.collection_schedule(id,key)?;db.delete_collection_schedule(id,key,b)?;db.audit(Some(actor),Some(id),"schedule.deleted",s(&before,"name"))?;return Ok(Reply::ok()); }
+                if parts.len()==4 { let before=db.collection_schedule(id,key)?;let result=db.save_collection_schedule(id,Some(key),b)?;db.audit_ref(Some(actor),Some(id),"schedule.updated",s(&result,"name"),Some(s(&before,"name")),&super::schedules::schedule_changes(&before,&result),Some(("schedule",key)))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="enabled" { let before=db.collection_schedule(id,key)?;let result=db.enable_collection_schedule(id,key,b)?;db.audit_ref(Some(actor),Some(id),"schedule.toggled",s(&result,"name"),Some(s(&result,"name")),&super::schedules::schedule_changes(&before,&result),Some(("schedule",key)))?;return Ok(Reply::json(result)); }
+                if parts.len()==5 && parts[4]=="remove" { let before=db.collection_schedule(id,key)?;db.delete_collection_schedule(id,key,b)?;db.audit_ref(Some(actor),Some(id),"schedule.deleted",s(&before,"name"),Some(s(&before,"name")),&[],Some(("schedule",key)))?;return Ok(Reply::ok()); }
             }
             if !write&&endpoint=="employees"&&parts.len()==4{return Ok(Reply::json(db.employee(id,parts[3])?));}
             if write&&endpoint=="members"&&parts.len()==4{v::fields(b,&["role"])?;let role=if b["role"].is_null(){None}else{Some(v::text(b,"role",1,100)?)};db.set_role(&c,parts[3],role)?;return Ok(Reply::ok());}
@@ -828,7 +832,12 @@ fn direction(q: &Value) -> Result<bool> {
         == "desc")
 }
 fn audit_query<'a>(q: &'a Value, dsp: Option<&'a str>) -> Result<super::db::AuditQuery<'a>> {
-    v::fields(q, &["area", "actor", "q", "from", "before", "limit"])?;
+    v::fields(
+        q,
+        &[
+            "area", "actor", "q", "from", "before", "limit", "dsp", "subject", "named",
+        ],
+    )?;
     let text = |key, max| {
         q.get(key)
             .map(|_| v::text(q, key, 0, max))
@@ -861,6 +870,10 @@ fn audit_query<'a>(q: &'a Value, dsp: Option<&'a str>) -> Result<super::db::Audi
         from: text("from", 40)?,
         before: query_number(q, "before", 0, 0, usize::MAX >> 1)? as i64,
         limit: query_number(q, "limit", 50, 1, 5000)? as i64,
+        // A DSP's own log is already one DSP's; only the platform narrows further.
+        within: if dsp.is_none() { text("dsp", 100)? } else { "" },
+        subject: text("subject", 200)?,
+        named: text("named", 200)?,
     })
 }
 fn query_number(q: &Value, key: &str, default: usize, min: usize, max: usize) -> Result<usize> {
@@ -881,7 +894,7 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
         && parts.len() == 5
         && parts[1] == "platform"
         && parts[2] == "dsps"
-        && ["status", "remove", "restore"].contains(&parts[4])
+        && ["status", "remove", "restore", "support-visibility"].contains(&parts[4])
     {
         let id = parts[3].to_owned();
         let action = parts[4].to_owned();
@@ -901,6 +914,19 @@ async fn asynchronous(state: &Arc<State>, i: &Input) -> Result<Option<Reply>> {
                             db.cancel_dsp(&tenant)?;
                         }
                         Ok(dsp)
+                    }
+                    "support-visibility" => {
+                        v::fields(b, &["visible"])?;
+                        let visible = v::boolean(b, "visible")?;
+                        db.get_dsp(&tenant)?;
+                        db.set_profile(&tenant, json!({"supportVisible":visible}))?;
+                        db.audit(
+                            Some(actor),
+                            Some(&tenant),
+                            "dsp.support_visibility_changed",
+                            if visible { "shown" } else { "hidden" },
+                        )?;
+                        Ok(json!({"ok":true}))
                     }
                     "remove" => {
                         v::fields(b, &[])?;

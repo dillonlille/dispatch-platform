@@ -3,7 +3,7 @@ use super::{
     Error, Result, State,
     contracts::{ActiveJobStatus, PublicJob},
     crypto,
-    db::{Store, flag, iso, n, now, s},
+    db::{AuditChange, Store, flag, iso, n, now, s},
     ensure,
     job_metrics::{self, Metrics, Phase, Recorder},
 };
@@ -311,6 +311,44 @@ impl Store {
         }
         Ok(())
     }
+    // What an outcome's log entry says beyond pass or fail: the schedule that
+    // queued it, and the provider, collected date and run time.
+    pub fn outcome_facts(&self, dsp: &str, job: &Value) -> (Option<String>, Vec<AuditChange>) {
+        let schedule = s(job, "idempotency_key")
+            .strip_prefix("schedule:")
+            .and_then(|key| key.split(':').next())
+            .and_then(|id| self.collection_schedule(dsp, id).ok())
+            .map(|row| s(&row, "name").to_owned());
+        let provider = if s(job, "kind") == "paycom.collect" {
+            "paycom"
+        } else {
+            "cortex"
+        };
+        let mut facts = vec![("provider", None, Some(provider.to_owned()))];
+        if n(job, "attempt") > 1 || n(job, "max_attempts") > 1 {
+            facts.push((
+                "attempt",
+                None,
+                Some(format!(
+                    "{} of {}",
+                    n(job, "attempt"),
+                    n(job, "max_attempts")
+                )),
+            ));
+        }
+        let request = serde_json::from_str::<Value>(s(job, "request")).unwrap_or_default();
+        if let Some(date) = request["date"].as_str() {
+            facts.push(("date", None, Some(date.to_owned())));
+        }
+        if let Some(started) = job["started_at"]
+            .as_str()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        {
+            let seconds = (now() - started.timestamp_millis()).max(0) / 1000;
+            facts.push(("duration", None, Some(seconds.to_string())));
+        }
+        (schedule, facts)
+    }
     pub fn schedule(&self, id: &str) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
         let r = db
@@ -352,6 +390,8 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
     let mut refreshed = 0;
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut checkpoint_cleanup = tokio::time::interval(Duration::from_secs(60));
+    // A year's retention does not need checking every minute.
+    let mut audit_pruned = 0;
     loop {
         tokio::select! {
             _=super::cancelled(&mut stop)=>break,
@@ -359,7 +399,12 @@ pub async fn start(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<boo
                 match result {Some(Ok(dsp))=>{running_dsps.remove(&dsp);},Some(Err(_))=>return Err(Error::new("collector_task_failed",500)),None=>{}}
             },
             _=checkpoint_cleanup.tick()=>{
-                let result = state.run(|db| {
+                let prune_audit = now()-audit_pruned >= 24*60*60*1000;
+                if prune_audit { audit_pruned = now(); }
+                let result = state.run(move |db| {
+                    if prune_audit {
+                        db.prune_audit()?;
+                    }
                     // Expired access tokens have no remaining authentication purpose.
                     db.platform.transaction(|| {
                         db.platform.exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
@@ -590,15 +635,27 @@ async fn execute(state: Arc<State>, job: Value, owner: String) {
                     db.finish(&id, &owner, Some(error))
                 })?;
             }
-            db.audit(
+            // Cancelling is recorded by whoever cancelled; it is not a failure.
+            if error.as_deref() == Some("job_cancelled") {
+                return Ok(());
+            }
+            let (schedule, facts) = db.outcome_facts(&dsp, &job);
+            // An attempt that will run again is not yet the collection's outcome.
+            let retrying = s(&db.job(&id, None)?, "status") == "queued";
+            db.audit_ref(
                 actor.as_deref(),
                 Some(&dsp),
-                if error.is_some() {
+                if retrying {
+                    "collection.retrying"
+                } else if error.is_some() {
                     "collection.failed"
                 } else {
                     "collection.completed"
                 },
                 error.as_deref().unwrap_or(""),
+                schedule.as_deref(),
+                &facts,
+                Some(("job", &id)),
             )
         })
         .await;

@@ -552,8 +552,12 @@ td small {
   padding: 24px;
   max-width: 680px;
 }
-.settings-section > form {
+.settings-section > form,
+.support-visibility {
   max-width: 448px;
+}
+.support-visibility {
+  margin-top: 0;
 }
 .settings-section > form > button {
   margin-top: 24px;

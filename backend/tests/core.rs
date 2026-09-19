@@ -696,6 +696,68 @@ fn dsp_audit_log_hides_platform_owner_actions() {
     let platform = actions(None);
     assert!(platform.contains(&"collection.requested".to_owned()));
     assert!(platform.contains(&"development.fixtures_loaded".to_owned()));
+
+    // Once the DSP shows Platform support, later owner actions appear there
+    // without a name. Earlier ones, and managing the DSP itself, stay out.
+    db.set_profile(id, json!({"supportVisible":true})).unwrap();
+    let owner_id = s(&owner, "id");
+    db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
+        .unwrap();
+    db.audit(Some(owner_id), Some(id), "dsp.suspended", "")
+        .unwrap();
+    assert_eq!(
+        actions(Some(id)),
+        [
+            "dsp.owner_view_opened",
+            "collection.completed",
+            "schedule.updated"
+        ]
+    );
+    let log = db.audits(Some(id), 200).unwrap();
+    assert_eq!(s(&log[0], "actorName"), "Platform support");
+    assert!(log[0]["actorId"].is_null());
+    assert!(!log.to_string().contains(owner_id));
+    let page = db
+        .audit_page(&dispatch_backend::core::db::AuditQuery {
+            dsp: Some(id),
+            actor: "support",
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(page["total"], 1);
+    assert!(
+        page["actors"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"id":"support","name":"Platform support"}))
+    );
+    // The platform's own log keeps the real name.
+    let named = db.audits(None, 200).unwrap();
+    assert_ne!(s(&named[0], "actorName"), "Platform support");
+    db.set_profile(id, json!({"supportVisible":false})).unwrap();
+    db.audit(Some(owner_id), Some(id), "dsp.owner_view_opened", "")
+        .unwrap();
+    assert_eq!(actions(Some(id)).len(), 3);
+}
+#[test]
+fn collection_outcomes_record_their_schedule_provider_date_and_duration() {
+    let (_root, db) = store();
+    let started = db::at(db::now() - 108_000);
+    let job = json!({"kind":"paycom.collect","idempotency_key":"manual","request":"{\"date\":\"2026-09-18\"}","started_at":started});
+    let (schedule, facts) = db.outcome_facts("missing", &job);
+    assert!(schedule.is_none());
+    assert_eq!(
+        facts,
+        [
+            ("provider", None, Some("paycom".to_owned())),
+            ("date", None, Some("2026-09-18".to_owned())),
+            ("duration", None, Some("108".to_owned())),
+        ]
+    );
+    let job = json!({"kind":"cortex.meal_breaks.collect","idempotency_key":"schedule:gone:2026:flex:0","request":"{}","started_at":null});
+    let (schedule, facts) = db.outcome_facts("missing", &job);
+    assert!(schedule.is_none());
+    assert_eq!(facts, [("provider", None, Some("cortex".to_owned()))]);
 }
 #[test]
 fn audit_log_filters_pages_and_counts_by_area() {
@@ -825,6 +887,120 @@ fn audit_log_filters_pages_and_counts_by_area() {
         })),
         ["schedule.created"]
     );
+    // A subject gathers its events by reference, and older ones by the name they kept.
+    db.audit_ref(
+        Some(member),
+        Some(dsp),
+        "role.updated",
+        "Leads",
+        Some("Dispatcher"),
+        &[],
+        Some(("role", "role_1")),
+    )
+    .unwrap();
+    db.audit_with(
+        Some(member),
+        Some(dsp),
+        "role.deleted",
+        "Leads",
+        Some("Leads"),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        actions(&page(AuditQuery {
+            subject: "role:role_1",
+            named: "Leads",
+            ..AuditQuery::default()
+        })),
+        ["role.deleted", "role.updated"]
+    );
+    assert_eq!(
+        actions(&page(AuditQuery {
+            subject: "role:role_1",
+            ..AuditQuery::default()
+        })),
+        ["role.updated"]
+    );
+    let referenced = page(AuditQuery {
+        subject: "role:role_1",
+        ..AuditQuery::default()
+    });
+    assert_eq!(
+        referenced["events"][0]["ref"],
+        json!({"kind":"role","id":"role_1"})
+    );
+    // The platform's log narrows to one DSP; a DSP's own log ignores the filter.
+    let everywhere = db.audit_page(&AuditQuery::default()).unwrap();
+    let narrowed = db
+        .audit_page(&AuditQuery {
+            within: dsp,
+            ..AuditQuery::default()
+        })
+        .unwrap();
+    assert!(narrowed["total"].as_i64() < everywhere["total"].as_i64());
+    assert!(
+        narrowed["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| s(e, "dspId") == dsp)
+    );
+    assert!(
+        everywhere["dsps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| s(d, "id") == dsp)
+    );
+
+    // Reopening a DSP within half an hour adds nothing; a year-old event is pruned.
+    let visits = || {
+        page(AuditQuery {
+            q: "view_opened",
+            ..AuditQuery::default()
+        })["total"]
+            .clone()
+    };
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    assert_eq!(visits(), 1);
+    db.platform
+        .exec(
+            "UPDATE audit SET at=? WHERE action='dsp.view_opened'",
+            [db::at(db::now() - 31 * 60 * 1000)],
+        )
+        .unwrap();
+    db.audit_visit(member, dsp, "dsp.view_opened", "").unwrap();
+    assert_eq!(visits(), 2);
+    db.platform
+        .exec(
+            "UPDATE audit SET at=? WHERE action='schedule.created'",
+            [db::at(db::now() - 366 * 24 * 60 * 60 * 1000)],
+        )
+        .unwrap();
+    assert_eq!(db.prune_audit().unwrap(), 1);
+
+    // An export returns what the filters match, then records that it was taken.
+    let before = page(AuditQuery::default())["total"].as_i64().unwrap();
+    let exported = db
+        .audit_export(
+            member,
+            AuditQuery {
+                dsp: Some(dsp),
+                area: "team",
+                limit: 1,
+                ..AuditQuery::default()
+            },
+        )
+        .unwrap();
+    let rows = exported["events"].as_array().unwrap();
+    assert!(rows.len() > 1 && rows.iter().all(|e| s(e, "area") == "team"));
+    let after = page(AuditQuery::default());
+    assert_eq!(after["total"].as_i64().unwrap(), before + 1);
+    assert_eq!(s(&after["events"][0], "action"), "audit.exported");
+    assert_eq!(s(&after["events"][0], "detail"), rows.len().to_string());
+
     let actors: Vec<_> = all["actors"]
         .as_array()
         .unwrap()

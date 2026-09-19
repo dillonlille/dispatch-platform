@@ -10,6 +10,7 @@ import {
   Users,
   X,
   FlaskConical,
+  ScrollText,
 } from 'lucide-react';
 import type { DspSummary, DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, credentials, ApiError } from './api.js';
@@ -217,6 +218,7 @@ function App() {
           ? [
               { id: 'releases', label: 'Updates', icon: ArrowUpFromLine },
               { id: 'jobs', label: 'Diagnostics', icon: FlaskConical },
+              { id: 'audit', label: 'Audit log', icon: ScrollText },
               { id: 'account', label: 'Settings', icon: Settings },
             ]
           : []),

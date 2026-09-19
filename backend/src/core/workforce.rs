@@ -1,7 +1,7 @@
 use super::collectors::Provider;
 use super::{
     Error, Result, crypto,
-    db::{Db, Store, at, boolean, flag, iso, n, now, s},
+    db::{AuditChange, Db, Store, at, boolean, flag, iso, n, now, s},
     ensure, validate as v,
 };
 use rusqlite::params;
@@ -169,6 +169,43 @@ fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
     }
     Ok(rows)
 }
+// The settings a member can change, compared for the audit log. An unset
+// filter means "All", and an empty list "None".
+fn preference_changes(before: &Value, after: &Value) -> Vec<AuditChange> {
+    const FIELDS: [(&str, &str); 12] = [
+        ("automatic_sync", "paycom.automatic_sync"),
+        ("sync_interval_seconds", "paycom.sync_interval_seconds"),
+        ("opening_page", "paycom.opening_page"),
+        ("rows_per_page", "paycom.rows_per_page"),
+        ("name_order", "paycom.name_order"),
+        ("default_sort", "paycom.default_sort"),
+        ("department", "paycom.department"),
+        ("station", "paycom.station"),
+        ("columns", "paycom.columns"),
+        ("driver_departments", "paycom.driver_departments"),
+        ("late_da_time", "paycom.late_da_time"),
+        ("late_da_departments", "paycom.late_da_departments"),
+    ];
+    let text = |value: &Value| match value {
+        Value::Null => "All".to_owned(),
+        Value::String(text) => text.clone(),
+        Value::Array(items) if items.is_empty() => "None".to_owned(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map_or_else(|| item.to_string(), str::to_owned)
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        other => other.to_string(),
+    };
+    FIELDS
+        .iter()
+        .filter(|(key, _)| before[key] != after[key])
+        .map(|(key, field)| (*field, Some(text(&before[key])), Some(text(&after[key]))))
+        .collect()
+}
 impl Store {
     pub fn preferences(&self, id: &str) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
@@ -243,11 +280,13 @@ impl Store {
         if sync_changed {
             self.import_legacy_schedule(id, true)?;
         }
-        self.audit(
+        self.audit_with(
             Some(actor),
             Some(id),
             "paycom.settings_updated",
             &format!("Revision {}", revision + 1),
+            None,
+            &preference_changes(&previous["values"], values),
         )?;
         self.preferences(id)
     }
