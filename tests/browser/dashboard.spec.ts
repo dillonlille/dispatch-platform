@@ -290,6 +290,7 @@ test('archived account tabs preserve names and appearance preferences', async ({
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByText('First name', { exact: true })).toBeVisible();
   await expect(page.getByText('Last name', { exact: true })).toBeVisible();
+  await expect(page.locator('.settings-identity')).toContainText(demo.email);
   await page.getByRole('tab', { name: 'Theme', exact: true }).click();
   await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
