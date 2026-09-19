@@ -6,6 +6,20 @@ use std::{
     future::Future,
     sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
 };
+// A timecard page that is still rendering reads as one of these; wait for it to settle.
+const UNSETTLED_PAGE: &[crate::Code] = &[
+    crate::Code::TimecardExtractionFailed,
+    crate::Code::InvalidTimecardHours,
+    crate::Code::ProviderHoursMismatch,
+    crate::Code::BrowserNavigationPending,
+];
+// A page read that failed with one of these is read once more.
+const PAGE_RETRY: &[crate::Code] = &[
+    crate::Code::ProviderNavigationTimeout,
+    crate::Code::ProviderContentTimeout,
+    crate::Code::ProviderContentMissing,
+    crate::Code::BrowserNavigationPending,
+];
 const API: &str = "https://time-and-attendance.paycomonline.net/api/cl/timecard-search/employees";
 const FIELDS: &[&str] = &[
     "allocationCategories",
@@ -640,15 +654,10 @@ async fn read_rendered(
                 result.as_ref().err().map(|error| error.code.as_str()),
             );
         }
-        let retry = result.as_ref().err().is_some_and(|error| {
-            [
-                "provider_navigation_timeout",
-                "provider_content_timeout",
-                "provider_content_missing",
-                "browser_navigation_pending",
-            ]
-            .contains(&error.code.as_str())
-        });
+        let retry = result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.is_any(PAGE_RETRY));
         if attempt == 2 || !retry {
             return result;
         }
@@ -804,7 +813,7 @@ async fn read_once(
                                 }
                             }
                             Err(error) if value["complete"] == true => return Err(error),
-                            Err(error) if ["timecard_extraction_failed","invalid_timecard_hours","provider_hours_mismatch","browser_navigation_pending"].contains(&error.code.as_str()) => {candidate=None;}
+                            Err(error) if error.is_any(UNSETTLED_PAGE) => {candidate=None;}
                             Err(error) => return Err(error),
                         }
                     } else { candidate = None; }
@@ -813,7 +822,7 @@ async fn read_once(
                         ensure(missing.elapsed() < Duration::from_secs(3), "provider_content_missing", 502)?;
                     } else { missing_since = None; }
                 }
-                Err(error) if error.code == "browser_navigation_pending" => (),
+                Err(error) if error.is(crate::Code::BrowserNavigationPending) => (),
                 Err(error) => return Err(error),
             }
         }
@@ -833,7 +842,7 @@ async fn extract(
         .evaluate(&call(include_str!("timecard.js"), &config))
         .await
         .map_err(|error| {
-            if error.code == "browser_script_failed" {
+            if error.is(crate::Code::BrowserScriptFailed) {
                 Error::new("timecard_extraction_failed", 502)
             } else {
                 error

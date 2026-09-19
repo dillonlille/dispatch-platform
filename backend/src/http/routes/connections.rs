@@ -18,12 +18,6 @@ use std::sync::Arc;
 
 const MANAGE: Dsp = Dsp("connections.manage");
 // Failures a member can recover from in the same browser session.
-const RECOVERABLE: &[&str] = &[
-    "verification_incomplete",
-    "invalid_verification_code",
-    "connection_busy",
-];
-
 pub fn routes() -> Vec<Route> {
     vec![
         read("/api/dsp/connections", MANAGE, connection),
@@ -227,7 +221,7 @@ async fn step(state: Arc<State>, input: Input, access: Dsp, step: Step) -> Resul
     let value = match result {
         Ok(value) => value,
         Err(error) => {
-            if !RECOVERABLE.contains(&error.code.as_str()) {
+            if !error.is_any(crate::Code::RECOVERABLE) {
                 state.browsers.revoke_current(&session).await;
             }
             return Err(error);

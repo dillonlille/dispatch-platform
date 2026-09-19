@@ -27,7 +27,7 @@ pub mod tenants;
 pub mod validate;
 pub mod workforce;
 
-pub use error::{Error, Result, ensure};
+pub use error::{Code, Error, Result, ensure};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Semaphore;
 

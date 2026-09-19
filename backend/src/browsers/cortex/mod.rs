@@ -11,6 +11,12 @@ use crate::{Error, Result, db::s, ensure};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 use tokio::time::{Instant, sleep};
+// The page is between documents or still loading its scripts; ask it again.
+const PAGE_NOT_READY: &[crate::Code] = &[
+    crate::Code::BrowserNavigationPending,
+    crate::Code::BrowserScriptFailed,
+    crate::Code::ManualVerificationRequired,
+];
 const ORIGIN: &str = "https://logistics.amazon.com";
 const ORIGINS: &[&str] = &[ORIGIN, "https://www.amazon.com", "https://amazon.com"];
 const LANDING: &str = "/dspconsolev2";
@@ -68,14 +74,7 @@ impl Driver {
                     return Ok(value);
                 }
                 Ok(_) => (),
-                Err(error)
-                    if [
-                        "browser_navigation_pending",
-                        "browser_script_failed",
-                        "manual_verification_required",
-                    ]
-                    .contains(&error.code.as_str()) =>
-                {
+                Err(error) if error.is_any(PAGE_NOT_READY) => {
                     let frame = self.page.frame().await?;
                     ensure(
                         s(&frame, "url") == "about:blank" || self.page.trusted(s(&frame, "url")),
@@ -176,7 +175,7 @@ impl Driver {
         .await;
         if let Err(error) = &result {
             self.attempts.failed(&error.code)?;
-            if error.code != "invalid_verification_code" {
+            if !error.is(crate::Code::InvalidVerificationCode) {
                 self.credentials = Value::Null;
             }
         }

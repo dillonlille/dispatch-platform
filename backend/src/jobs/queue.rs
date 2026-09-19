@@ -260,20 +260,8 @@ impl Store {
         {
             return Ok(());
         }
-        let retry = error.is_some_and(|e| {
-            [
-                "browser_lost",
-                "browser_closed",
-                "browser_command_timeout",
-                "provider_timeout",
-                "provider_unavailable",
-                "provider_navigation_timeout",
-                "provider_content_timeout",
-                "cortex_source_changed",
-                "cortex_content_incomplete",
-            ]
-            .contains(&e)
-        }) && n(&row, "attempt") < n(&row, "max_attempts");
+        let retry = error.is_some_and(|e| crate::Code::text_is_any(e, crate::Code::RETRYABLE))
+            && n(&row, "attempt") < n(&row, "max_attempts");
         self.jobs.exec("UPDATE jobs SET status=?,progress=?,message=?,error=?,completed_at=?,available_at=?,lease_owner=NULL,lease_until=NULL WHERE id=?",params![if retry{"queued"}else if error.is_some(){"failed"}else{"succeeded"},if error.is_some(){n(&row,"progress")}else{100},if retry{"Retry scheduled"}else if error.is_some(){"Collection could not finish"}else{"Collection completed"},error,if retry{None}else{Some(iso())},now()+retry_delay(id,n(&row,"attempt")),id])?;
         let provider = Provider::from_job_kind(s(&row, "kind"))?;
         self.clear_live(s(&row, "dsp_id"), provider, Some(id))?;

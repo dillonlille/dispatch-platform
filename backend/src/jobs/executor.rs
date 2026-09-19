@@ -103,9 +103,11 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
     drop(task);
     // A settings-page browser or another just-claimed job may win admission.
     // Put this job back without consuming a provider attempt or retry history.
-    if result.as_ref().err().is_some_and(|e| {
-        ["browser_memory_busy", "browser_capacity_busy"].contains(&e.code.as_str())
-    }) {
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|e| e.is_any(crate::Code::ADMISSION_BUSY))
+    {
         let jid = id.clone();
         let worker = owner.clone();
         let attempt = n(&job, "attempt");
@@ -125,15 +127,7 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
             .await
             .unwrap_or(false);
         metrics.finish(
-            if cancelled
-                || [
-                    "job_cancelled",
-                    "permission_denied",
-                    "connection_changed",
-                    "dsp_unavailable",
-                ]
-                .contains(&error.code.as_str())
-            {
+            if cancelled || error.is_any(crate::Code::WITHDRAWN) {
                 "cancelled"
             } else {
                 "failed"
@@ -168,7 +162,10 @@ pub(super) async fn execute(state: Arc<State>, job: Value, owner: String) {
                 })?;
             }
             // Cancelling is recorded by whoever cancelled; it is not a failure.
-            if error.as_deref() == Some("job_cancelled") {
+            if error
+                .as_deref()
+                .is_some_and(|e| crate::Code::text_is_any(e, &[crate::Code::JobCancelled]))
+            {
                 return Ok(());
             }
             let (schedule, facts) = db.outcome_facts(&dsp, &job);

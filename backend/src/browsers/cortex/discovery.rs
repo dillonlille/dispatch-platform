@@ -3,6 +3,12 @@ use crate::{
     job_metrics::Recorder,
     meals::{CollectionRequest, Scope},
 };
+// The page is between documents or signing in again; ask it again.
+const PAGE_NOT_READY: &[crate::Code] = &[
+    crate::Code::BrowserNavigationPending,
+    crate::Code::BrowserScriptFailed,
+    crate::Code::VerificationRequired,
+];
 
 const DISCOVER: &str = include_str!("discovery.js");
 
@@ -90,14 +96,7 @@ impl Driver {
                     }
                     .into();
                 }
-                Err(error)
-                    if [
-                        "browser_navigation_pending",
-                        "browser_script_failed",
-                        "verification_required",
-                    ]
-                    .contains(&error.code.as_str()) =>
-                {
+                Err(error) if error.is_any(PAGE_NOT_READY) => {
                     metrics.detail(&error.code);
                     last_error = error.code
                 }

@@ -9,6 +9,14 @@ use std::{
     collections::{BTreeMap, HashSet},
     future::Future,
 };
+// The route's content has not settled yet; read it again.
+const CONTENT_NOT_READY: &[crate::Code] = &[
+    crate::Code::CortexContentIncomplete,
+    crate::Code::BrowserNavigationPending,
+    crate::Code::BrowserScriptFailed,
+    crate::Code::CortexScopeMismatch,
+    crate::Code::VerificationRequired,
+];
 const EXTRACT: &str = include_str!("meal.js");
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -108,19 +116,10 @@ impl Driver {
                         return Ok(value);
                     }
                 }
-                Err(error)
-                    if [
-                        "cortex_content_incomplete",
-                        "browser_navigation_pending",
-                        "browser_script_failed",
-                        "cortex_scope_mismatch",
-                        "verification_required",
-                    ]
-                    .contains(&error.code.as_str()) =>
-                {
+                Err(error) if error.is_any(CONTENT_NOT_READY) => {
                     last = None;
                     stable = 0;
-                    if error.code == "cortex_scope_mismatch"
+                    if error.is(crate::Code::CortexScopeMismatch)
                         && reload.is_some_and(|at| Instant::now() >= at)
                     {
                         reload = None;
@@ -220,7 +219,7 @@ impl Driver {
                     }
                     // A meal swipe landed after the list was read. Finish the other
                     // routes; the next pass re-reads this one at its new revision.
-                    Err(error) if error.code == "cortex_source_changed" => {
+                    Err(error) if error.is(crate::Code::CortexSourceChanged) => {
                         records.remove(&candidate.id);
                     }
                     Err(error) => return Err(error),

@@ -92,7 +92,7 @@ impl Page {
         if result
             .as_ref()
             .err()
-            .is_some_and(|error| error.code == "browser_command_timeout")
+            .is_some_and(|error| error.is(crate::Code::BrowserCommandTimeout))
         {
             super::super::observability::event(
                 "warn",
@@ -230,7 +230,7 @@ impl Page {
             .await
         {
             Ok(_) => (),
-            Err(error) if error.code == "browser_navigation_pending" => (),
+            Err(error) if error.is(crate::Code::BrowserNavigationPending) => (),
             Err(error) => return Err(error),
         }
         Ok(s(&current, "loaderId").to_owned())

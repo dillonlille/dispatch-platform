@@ -567,14 +567,9 @@ impl State {
         let dsp = session.dsp.clone();
         let revision = session.revision;
         let provider = session.provider;
-        let recoverable = result.as_ref().is_err_and(|e| {
-            [
-                "invalid_verification_code",
-                "verification_incomplete",
-                "connection_busy",
-            ]
-            .contains(&e.code.as_str())
-        });
+        let recoverable = result
+            .as_ref()
+            .is_err_and(|e| e.is_any(crate::Code::RECOVERABLE));
         let status = if result.is_ok() || recoverable {
             if session.ready() {
                 "ready"

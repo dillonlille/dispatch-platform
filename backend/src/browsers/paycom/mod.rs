@@ -18,6 +18,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{path::Path, time::Duration};
 use tokio::time::{Instant, sleep};
+// The page is between documents or still loading its scripts; ask it again.
+const PAGE_NOT_READY: &[crate::Code] = &[
+    crate::Code::BrowserNavigationPending,
+    crate::Code::BrowserScriptFailed,
+    crate::Code::ManualVerificationRequired,
+];
 
 const LANDING: &str = "/v4/cl/web.php/client-landing/arc";
 const SEARCH: &str = "/v4/cl/web.php/timecardsearch/index?from=main_menu";
@@ -95,14 +101,7 @@ impl Driver {
                     }
                     last = value;
                 }
-                Err(e)
-                    if [
-                        "browser_script_failed",
-                        "browser_navigation_pending",
-                        "manual_verification_required",
-                    ]
-                    .contains(&e.code.as_str()) =>
-                {
+                Err(e) if e.is_any(PAGE_NOT_READY) => {
                     let frame = self.page.frame().await?;
                     if s(&frame, "url") != "about:blank" && !self.page.trusted(s(&frame, "url")) {
                         return Err(e);
