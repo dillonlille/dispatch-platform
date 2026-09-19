@@ -1,4 +1,6 @@
-@import './base.css';
+@import './styles/tokens.css';
+@import './styles/reset.css';
+@import './styles/base-components.css';
 @import './paycom-workforce.css';
 
 /* Shared native controls. */
