@@ -4,13 +4,13 @@ import { Ellipsis, Plus, RefreshCw, Eye } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
 import { useAction } from '../../app/useAction.js';
 import { api } from '../../app/api.js';
-import { DspAvatar } from './DspAvatar.js';
 import {
   Badge,
   ConfirmDialog,
   DataState,
   DataTable,
   DetailList,
+  DspAvatar,
   Empty,
   ErrorBox,
   Header,

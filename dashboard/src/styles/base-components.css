@@ -438,15 +438,15 @@
   cursor: grabbing;
   user-select: none;
 }
+/* Slate unless the DSP's name selects another tone, as on its avatar. */
+.profile-badge.tinted {
+  --identity-surface: var(--slate-surface);
+}
 .profile-badge.tone-1 {
   --identity-surface: var(--sage-surface);
 }
 .profile-badge.tone-2 {
   --identity-surface: var(--violet-surface);
-}
-.profile-badge.tone-0,
-.profile-badge.tone-3 {
-  --identity-surface: var(--slate-surface);
 }
 .profile-badge.tone-4 {
   --identity-surface: var(--steel-surface);

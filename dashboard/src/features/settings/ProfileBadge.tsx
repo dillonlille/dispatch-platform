@@ -1,8 +1,7 @@
 import { useEffect, useRef, type PointerEvent, type RefObject } from 'react';
 import type { DspView, SessionView } from '../../../../shared/contracts/index.js';
 import { timezoneName } from '../../lib/format.js';
-import { Badge } from '../../ui/index.js';
-import { DspAvatar, dspTone } from '../platform/DspAvatar.js';
+import { Badge, DspAvatar, dspTone } from '../../ui/index.js';
 
 // Nothing moves on a phone or for anyone who asks for less motion: see the same query in the CSS.
 const STILL = '(max-width: 700px), (prefers-reduced-motion: reduce)';
@@ -265,7 +264,7 @@ export function ProfileBadge({ session, view }: { session: SessionView; view?: D
         <div className="profile-hang" ref={hang}>
           <Clip />
           <section
-            className={`profile-badge ${view ? dspTone(view.dsp.name) : ''}`}
+            className={`profile-badge ${view ? `tinted ${dspTone(view.dsp.name)}` : ''}`}
             ref={badge}
             onPointerDown={(event) => grab.current(event)}
             onPointerMove={tilt}

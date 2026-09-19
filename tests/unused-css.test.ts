@@ -34,7 +34,7 @@ function classes(css: string): Set<string> {
 }
 
 const dynamicClasses = new Set([
-  // features/platform/DspAvatar.tsx: tone-${tone}, where tone is a hash modulo five.
+  // ui/DspAvatar.tsx: tone-${tone}, where tone is a hash modulo five.
   'tone-1',
   'tone-2',
   'tone-3',
