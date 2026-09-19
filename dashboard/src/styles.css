@@ -511,12 +511,13 @@ td small {
   font-size: 12px;
 }
 .column-menu label {
-  display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
   border-radius: 4px;
   font-size: 13px;
+  font-weight: 400;
   cursor: pointer;
 }
 .column-menu label:hover {

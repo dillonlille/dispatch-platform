@@ -137,6 +137,17 @@ export function MealBreaksPage({
             setLinking(false);
           }}
         />
+        <div className="table-tools">
+          <ColumnMenu table={table} />
+          <button
+            className="icon-button"
+            aria-label="Export meal breaks"
+            disabled={!filtered.length}
+            onClick={() => downloadTable(table, `meal-breaks-${shownDate}.csv`)}
+          >
+            <Download size={16} />
+          </button>
+        </div>
       </header>
       <div className="meal-toolbar">
         <SearchInput
@@ -179,15 +190,6 @@ export function MealBreaksPage({
           onClick={request.refresh}
         >
           <RefreshCw size={16} />
-        </button>
-        <ColumnMenu table={table} />
-        <button
-          className="icon-button"
-          aria-label="Export meal breaks"
-          disabled={!filtered.length}
-          onClick={() => downloadTable(table, `meal-breaks-${shownDate}.csv`)}
-        >
-          <Download size={16} />
         </button>
       </div>
       <ErrorBox message={request.error} />
