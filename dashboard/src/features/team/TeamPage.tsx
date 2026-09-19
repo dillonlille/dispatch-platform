@@ -11,6 +11,7 @@ import {
   ErrorBox,
   Header,
   Modal,
+  Popover,
   SearchInput,
   Tabs,
   useDataTable,
@@ -39,7 +40,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
   const [search, setSearch] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
-  const [removing, setRemoving] = useState(false);
+  const [removing, setRemoving] = useState<Membership>();
   const [revoking, setRevoking] = useState<Invitation>();
   const revoke = useAction(
     async (invitation: Invitation) => {
@@ -63,6 +64,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     async (member: Membership, role: FormDataEntryValue | null) => {
       await setMemberRole(member.id, role === null ? null : String(role));
       setEditing(undefined);
+      setRemoving(undefined);
       await reopen();
       refresh();
     },
@@ -107,19 +109,21 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     {
       id: 'actions',
       header: actions,
+      className: 'cell-end',
       cell: (member) =>
         canManage &&
         grantable.some((role) => role.id === member.roleId) && (
-          <button
-            className="icon-button"
-            aria-label={`Edit ${member.name}`}
-            onClick={() => {
-              setRemoving(false);
-              setEditing(member);
-            }}
+          <Popover
+            className="row-menu"
+            label={`Actions for ${member.name}`}
+            trigger={<Ellipsis size={18} />}
+            anchored
           >
-            <Ellipsis size={18} />
-          </button>
+            <button onClick={() => setEditing(member)}>Change role</button>
+            <button className="danger" onClick={() => setRemoving(member)}>
+              Remove member
+            </button>
+          </Popover>
         ),
     },
   ];
@@ -314,7 +318,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
         </Modal>
       )}
       {editing && (
-        <Modal variant="sheet" title={`Edit ${editing.name}`} onClose={() => setEditing(undefined)}>
+        <Modal title={`Change role for ${editing.name}`} onClose={() => setEditing(undefined)}>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -331,30 +335,26 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
                 ))}
               </select>
             </label>
-            {removing ? (
-              <div className="form-actions" role="group" aria-label="Remove member confirmation">
-                <span>Remove {editing.name} and delete their account?</span>
-                <button type="button" onClick={() => setRemoving(false)}>
-                  Keep member
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => void assign.run(editing, null)}
-                >
-                  Remove member
-                </button>
-              </div>
-            ) : (
-              <div className="form-actions">
-                <button type="button" className="danger" onClick={() => setRemoving(true)}>
-                  Remove member
-                </button>
-                <button className="primary">Save role</button>
-              </div>
-            )}
+            <div className="form-actions">
+              <button type="button" onClick={() => setEditing(undefined)}>
+                Cancel
+              </button>
+              <button className="primary">Save role</button>
+            </div>
           </form>
         </Modal>
+      )}
+      {removing && (
+        <ConfirmDialog
+          title="Remove member"
+          confirm="Remove member"
+          tone="danger"
+          busy={assign.busy}
+          onConfirm={() => void assign.run(removing, null)}
+          onCancel={() => setRemoving(undefined)}
+        >
+          Remove {removing.name} and delete their account?
+        </ConfirmDialog>
       )}
     </>
   );
