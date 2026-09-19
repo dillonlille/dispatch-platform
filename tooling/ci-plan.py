@@ -2,6 +2,7 @@
 """Choose conservative checks and reuse validation only for the identical merge tree."""
 
 import argparse
+from functools import partial
 import hashlib
 import io
 import json
@@ -9,9 +10,13 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import sys
 import zipfile
 
-REPOSITORY = "dillonlille/dispatch-platform"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import runtime_artifact
+from runtime_artifact import REPOSITORY, latest_run
+
 WORKFLOW = ".github/workflows/checks.yml"
 # Branches whose merged PR validation may be promoted instead of repeated.
 TRUSTED = {"refs/heads/dev": "dev", "refs/heads/main": "main"}
@@ -21,11 +26,8 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
-def github(endpoint, binary=False):
-    data = subprocess.check_output(
-        ["gh", "api", f"repos/{REPOSITORY}/{endpoint}"], timeout=20,
-        stderr=subprocess.DEVNULL)
-    return data if binary else json.loads(data)
+# The plan job has three minutes; an unreachable API must leave time for the normal plan.
+github = partial(runtime_artifact.github, timeout=20)
 
 
 def scope(paths):
@@ -101,11 +103,10 @@ def matches(receipt, run, context, expected_scope, base_ref="dev"):
 
 def validated_receipt(context, base_ref="dev"):
     runs = github(f"actions/workflows/checks.yml/runs?event=pull_request&head_sha={context['head']}&per_page=5")["workflow_runs"]
-    # Never revive an older green run after a newer failed/pending rerun.
-    if not runs:
-        return None
-    run = max(runs, key=lambda item: item["id"])
-    if not trusted_run(run, context["head"]):
+    # Never revive an older green run after a newer failed/pending rerun, nor after
+    # the PR returned to draft, where the newest run skipped every check.
+    run = latest_run(runs, context["head"], "pull_request", skipped=True)
+    if not run or not trusted_run(run, context["head"]):
         return None
     name = f"dispatch-validation-{run['id']}-{run.get('run_attempt', 1)}"
     artifacts = github(f"actions/runs/{run['id']}/artifacts")["artifacts"]
@@ -137,7 +138,8 @@ def plan(event_name, ref, event):
                 run = validated_run(context, TRUSTED[ref])
                 if run:
                     return "reuse", f"Identical base, head and source tree validated by PR run {run}"
-            except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, zipfile.BadZipFile,
+                    subprocess.SubprocessError):
                 print("Validation receipt unavailable; running checks normally.")
         if ref != "refs/heads/dev":
             return "full", "Full validation for a release without a reusable PR validation"

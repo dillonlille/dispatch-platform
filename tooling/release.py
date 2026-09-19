@@ -19,32 +19,21 @@ import time
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from runtime_artifact import REPOSITORY, require, unpack, write_json
+from runtime_artifact import REPOSITORY, STABLE, command, github, latest_run, passed, require, unpack, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = ROOT.parent
 PRODUCTION = "https://dispatch.dillonlille.com"
 ASSETS = ("release.json", "provenance.json", "SHA256SUMS")
 VERSIONED = ("package.json", "package-lock.json", "backend/Cargo.toml", "Cargo.lock")
-STABLE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
 
 
 def say(message):
     print(f"[release] {message}", flush=True)
 
 
-def command(*args, cwd=None, timeout=120):
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout)
-    require(result.returncode == 0, f"{' '.join(args[:3])} failed: {result.stderr.strip()[-600:]}")
-    return result.stdout.strip()
-
-
 def succeeds(*args, cwd=None):
     return subprocess.run(args, cwd=cwd or ROOT, capture_output=True).returncode == 0
-
-
-def github(endpoint, *args):
-    return json.loads(command("gh", "api", f"repos/{REPOSITORY}/{endpoint}", *args))
 
 
 def git(*args, cwd=None, timeout=120):
@@ -89,15 +78,6 @@ def merged_changes(log):
         if match:
             changes.append(f"- #{match.group(1)} {body.strip().splitlines()[0] if body.strip() else ''}".rstrip())
     return changes
-
-
-def latest_run(runs, sha, event, branch=None):
-    # A skipped run checked nothing, so it neither passes nor fails the commit.
-    runs = [r for r in runs if r["head_sha"] == sha and r["event"] == event and r.get("conclusion") != "skipped"
-            and (branch is None or r["head_branch"] == branch)
-            and (r.get("head_repository") or {}).get("full_name") == REPOSITORY]
-    # A newer failed or pending rerun always replaces an older success.
-    return max(runs, key=lambda r: (r["id"], r.get("run_attempt", 1)), default=None)
 
 
 def wait_for_checks(sha, event, branch=None, timeout=1800):
@@ -178,7 +158,7 @@ class Release:
                              *(f":(exclude){name}" for name in VERSIONED)), "Dev has nothing new to release")
         dev_run = latest_run(github(f"actions/workflows/checks.yml/runs?event=push&head_sha={commit}&per_page=30")
                              ["workflow_runs"], commit, "push", "dev")
-        require(dev_run and dev_run["status"] == "completed" and dev_run["conclusion"] == "success",
+        require(passed(dev_run),
                 f"Dev checks have not passed for {commit}")
         self.checkout(self.worktree, self.branch, commit)
         self.merge_main(self.worktree, f"Merge main into the v{self.version} release")

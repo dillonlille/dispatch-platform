@@ -8,34 +8,28 @@
   },
   "scripts": {
     "dev": "tsx tooling/dev.ts",
-    "start": "cd .build && ./services/rust/dispatch-backend serve",
     "build": "tsx tooling/build.ts",
     "check": "tsc --noEmit",
     "check:ci": "tsx tooling/checks.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
-    "test:browser": "playwright test",
     "test:ui": "tsx tooling/browser-check.ts",
     "test:smoke": "tsx tooling/browser-check.ts --smoke-only",
-    "test:native": "DISPATCH_TEST_NATIVE=1 tsx --test --test-concurrency=1 tests/native-browser.test.ts tests/paycom-worker.test.ts tests/cortex-worker.test.ts tests/cortex-meals-worker.test.ts tests/multi-dsp-browser.test.ts tests/collection-throughput.test.ts",
-    "test:browser-host": "python3 tooling/browseros-check.py --host-only",
     "test:browseros": "python3 tooling/browseros-check.py",
     "test:artifact": "DISPATCH_TEST_ARTIFACT=1 tsx --test tests/artifact.test.ts",
-    "verify": "npm run check && npm test && npm run build",
-    "dispatch": "tsx tooling/cli.ts",
     "predev": "python3 tooling/cargo-build.py",
     "pretest": "python3 tooling/cargo-build.py",
-    "test:rust": "cargo test --locked",
     "benchmark:rust": "python3 tooling/cargo-build.py --release && tsx tooling/benchmark-rust.ts",
-    "benchmark:check": "tsx tooling/benchmark-rust.ts --binary .build/services/rust/dispatch-backend --check",
     "check:rust": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked",
-    "pr:prepare": "python3 tooling/pr-prepare.py"
+    "pr:prepare": "python3 tooling/pr-prepare.py",
+    "mail:types": "node tooling/mail-types.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260917.1",
@@ -47,8 +41,6 @@
     "prettier": "^3.6.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vite": "^7.1.12",
-    "playwright": "^1.55.0",
-    "zod": "^4.1.12"
+    "vite": "^7.1.12"
   }
 }

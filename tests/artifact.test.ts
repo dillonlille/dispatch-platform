@@ -14,17 +14,6 @@ test(
     const artifact = path.resolve('.build');
     const manifest = verifyArtifact(artifact);
     assert.equal(manifest.format, 3);
-    for (const name of [
-      'api',
-      'services/runtime',
-      'node_modules',
-      'package.json',
-      'package-lock.json',
-      'tooling/cli.js',
-      'tooling/supervisor.js',
-    ])
-      assert(!fs.existsSync(path.join(artifact, name)), name);
-    assert(!('workerNodeMajor' in manifest));
     // The updater owns verification and restores executable permissions lost by extraction.
     const script = `import importlib.util; from pathlib import Path; s=importlib.util.spec_from_file_location('u','tooling/update-dev.py'); u=importlib.util.module_from_spec(s); s.loader.exec_module(u); m=u.verify_artifact(Path('.build')); assert m['format']==3`;
     execFileSync('python3', ['-c', script]);

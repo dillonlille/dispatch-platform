@@ -1,9 +1,15 @@
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-development-'));
 const binary = path.resolve('target/debug/dispatch-backend');
+// The live Dev service already holds the backend's default port on this host.
+const listener = net.createServer();
+await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+const port = String((listener.address() as net.AddressInfo).port);
+await new Promise<void>((resolve) => listener.close(() => resolve()));
 const env = {
   ...process.env,
   NODE_ENV: 'development',
@@ -13,6 +19,8 @@ const env = {
   DISPATCH_DEV_MAIL_MODE: 'capture',
   DISPATCH_PROVIDER_MODE: 'fixture',
   DISPATCH_ORIGIN: 'http://127.0.0.1:5173',
+  PORT: port,
+  DISPATCH_DEV_API_PORT: port,
 };
 execFileSync(binary, ['seed'], { env, stdio: 'inherit' });
 const api = spawn(binary, ['serve'], { stdio: 'inherit', env });

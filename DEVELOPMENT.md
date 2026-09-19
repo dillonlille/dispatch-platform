@@ -71,4 +71,3 @@ scroll position survive the refresh. Only explicit navigation state is retained;
 passwords, verification input and form drafts are never serialized. Failed checks
 clear the pending update; a per-build five-minute guard prevents reload loops.
 Storage-blocked browsers skip automatic refresh to preserve state and loop safety.
-Existing tabs need one initial manual refresh to load this feature.
