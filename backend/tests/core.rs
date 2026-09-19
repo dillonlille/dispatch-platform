@@ -4,7 +4,7 @@ use dispatch_backend::core::{
     config::Config,
     crypto,
     db::{self, Store, s},
-    jobs, operations, workforce,
+    operations, schedules, workforce,
 };
 use serde_json::{Value, json};
 use std::os::unix::fs::{PermissionsExt, symlink};
@@ -247,7 +247,6 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         .unwrap();
     let mut values = db.preferences(id).unwrap()["values"].clone();
     values["driver_departments"] = json!([]);
-    values["automatic_sync"] = json!(false);
     db.save_preferences(id, s(&actor, "id"), 0, &values)
         .unwrap();
     let day = workforce::fixture("UTC").unwrap()["to"]
@@ -264,6 +263,44 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         db.save_preferences(id, s(&actor, "id"), 1, &values)
             .is_err()
     );
+}
+#[test]
+fn retired_sync_preferences_are_not_returned_and_open_dashboards_may_still_send_them() {
+    let (_root, db) = store();
+    operations::seed(&db).unwrap();
+    let dsp = db
+        .platform
+        .one("SELECT id FROM dsps WHERE permanent=1", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&dsp, "id");
+    let actor = db
+        .platform
+        .one("SELECT id FROM users WHERE platform_owner=1", [])
+        .unwrap()
+        .unwrap();
+    // Preferences as v0.0.9 stored them.
+    let mut older = workforce::defaults();
+    older["automatic_sync"] = json!(true);
+    older["sync_interval_seconds"] = json!(3600);
+    db.collector(id, Provider::Paycom)
+        .unwrap()
+        .set(
+            "paycom.preferences",
+            &json!({"revision":4,"values":older,"history":[]}),
+        )
+        .unwrap();
+    let values = db.preferences(id).unwrap()["values"].clone();
+    assert_eq!(values, workforce::defaults());
+    let saved = db.save_preferences(id, s(&actor, "id"), 4, &older).unwrap();
+    assert_eq!(saved["revision"], 5);
+    assert_eq!(saved["values"], workforce::defaults());
+    let stored = db
+        .collector(id, Provider::Paycom)
+        .unwrap()
+        .setting("paycom.preferences", Value::Null)
+        .unwrap();
+    assert_eq!(stored["values"], workforce::defaults());
 }
 #[test]
 fn late_da_settings_default_for_older_preferences_and_validate() {
@@ -324,14 +361,14 @@ fn schedule_handles_dst_gaps_and_repeated_minutes() {
             .timestamp_millis()
     };
     assert_eq!(
-        jobs::next_occurrence("02:30", "America/Chicago", parse("2026-03-08T07:59:00Z")).unwrap(),
+        schedules::next_daily("02:30", "America/Chicago", parse("2026-03-08T07:59:00Z")).unwrap(),
         "2026-03-09T07:30:00.000Z"
     );
     assert_eq!(
-        jobs::next_occurrence("01:30", "America/Chicago", parse("2026-11-01T06:30:00Z")).unwrap(),
+        schedules::next_daily("01:30", "America/Chicago", parse("2026-11-01T06:30:00Z")).unwrap(),
         "2026-11-02T07:30:00.000Z"
     );
-    assert!(jobs::next_occurrence("25:99", "UTC", 0).is_err());
+    assert!(schedules::next_daily("25:99", "UTC", 0).is_err());
 }
 #[test]
 fn private_storage_rejects_links_and_world_readable_files() {
@@ -582,14 +619,20 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
         .unwrap()
         .unwrap();
     let id = s(&dsp, "id");
-    db.set_schedule(id, false, "06:00", "UTC").unwrap();
     assert!(
         !db.schedule_deadlines()
             .unwrap()
             .iter()
             .any(|(d, _)| d == id)
     );
-    db.set_schedule(id, true, "06:00", "UTC").unwrap();
+    let schedule = db
+        .save_collection_schedule(
+            id,
+            None,
+            &json!({"name":"Morning","collection":"paycom","cadence":"daily","intervalMinutes":null,"localTime":"06:00","enabled":true}),
+        )
+        .unwrap();
+    let key = s(&schedule, "id");
     assert!(
         db.schedule_deadlines()
             .unwrap()
@@ -606,8 +649,19 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
     assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
     assert!(db.schedule_due(id).unwrap().unwrap() > db::now());
     assert_eq!(db.list_jobs(Some(id)).unwrap().as_array().unwrap().len(), 1);
-    db.set_schedule(id, false, "06:00", "UTC").unwrap();
+    db.enable_collection_schedule(
+        id,
+        key,
+        &json!({"revision":schedule["revision"],"enabled":false}),
+    )
+    .unwrap();
     assert_eq!(db.schedule_due(id).unwrap(), None);
+    assert!(
+        !db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(d, _)| d == id)
+    );
 }
 
 #[tokio::test]

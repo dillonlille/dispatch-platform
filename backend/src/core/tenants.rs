@@ -59,6 +59,8 @@ impl Store {
                 "INSERT OR IGNORE INTO connections(provider,updated_at) VALUES ('paycom',?)",
                 [iso()],
             )?;
+            // v0.0.9 reads this row on every Paycom status request. Drop it, and the
+            // table, once a release without that reader has shipped.
             db.exec(
                 "INSERT OR IGNORE INTO schedules(provider,timezone) VALUES ('paycom',?)",
                 [s(&dsp, "timezone")],
@@ -179,8 +181,6 @@ impl Store {
             [name, timezone, id],
         )?;
         if s(&c.dsp, "timezone") != timezone {
-            self.collector(id, Provider::Paycom)?
-                .exec("UPDATE schedules SET timezone=?,next_run=NULL", [timezone])?;
             self.retime_schedules(id, timezone)?;
         }
         let changes: Vec<_> = [("name", name), ("timezone", timezone)]

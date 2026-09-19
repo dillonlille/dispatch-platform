@@ -344,28 +344,6 @@ impl Store {
         }
         (schedule, facts)
     }
-    pub fn schedule(&self, id: &str) -> Result<Value> {
-        let db = self.collector(id, Provider::Paycom)?;
-        let r = db
-            .one("SELECT * FROM schedules WHERE provider='paycom'", [])?
-            .unwrap();
-        let mut value = json!({"enabled":flag(&r,"enabled"),"localTime":r["local_time"],"timezone":r["timezone"],"nextRun":r["next_run"]});
-        let interval = db.setting("paycom.syncIntervalSeconds", Value::Null)?;
-        if !interval.is_null() {
-            value["intervalSeconds"] = interval;
-        }
-        Ok(value)
-    }
-    pub fn set_schedule(&self, id: &str, enabled: bool, time: &str, tz: &str) -> Result<Value> {
-        let next = next_occurrence(time, tz, now())?;
-        let db = self.collector(id, Provider::Paycom)?;
-        db.transaction(||{db.exec("DELETE FROM settings WHERE key='paycom.syncIntervalSeconds'",[])?;db.exec("UPDATE schedules SET enabled=?,local_time=?,timezone=?,next_run=? WHERE provider='paycom'",params![enabled,time,tz,if enabled{Some(next)}else{None}])?;Ok(())})?;
-        self.import_legacy_schedule(id, true)?;
-        self.schedule(id)
-    }
-}
-pub fn next_occurrence(time: &str, tz: &str, after: i64) -> Result<String> {
-    super::schedules::next_daily(time, tz, after)
 }
 // Stable per-job jitter survives restarts and disperses DSP retries. No secret
 // material or provider identity participates in the delay.

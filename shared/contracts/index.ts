@@ -174,13 +174,6 @@ export interface Job {
   actorId: string | null;
   metrics: JobMetrics[];
 }
-export interface Schedule {
-  intervalSeconds?: number;
-  enabled: boolean;
-  localTime: string;
-  timezone: string;
-  nextRun: string | null;
-}
 export interface Employee {
   code: string;
   name: string;
