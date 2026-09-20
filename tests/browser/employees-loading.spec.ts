@@ -54,21 +54,20 @@ for (const width of [1280, 390]) {
     );
     let failHistory = true;
     await page.route('**/api/dsp/employees/*', async (route) => {
-      const response = await route.fetch();
       const url = new URL(route.request().url());
       const key = url.pathname.split('/').at(-1)! + (url.search ? ':period' : '');
       const pause = holds.get(key);
+      const failed = key === 'E001:period' && failHistory;
       if (pause) {
         pause.waiting = true;
         await pause.promise;
       }
-      if (key === 'E001:period' && failHistory) {
-        failHistory = false;
+      if (failed) {
         await route.fulfill({
           status: 400,
           json: { error: 'timecard_unavailable', message: 'Timecard could not be loaded.' },
         });
-      } else await route.fulfill({ response });
+      } else await route.continue();
     });
     await login(page);
     await openDsp(page, 'Northline Logistics');
@@ -140,6 +139,7 @@ for (const width of [1280, 390]) {
       expect(detail.getByRole('alert')).toContainText('Timecard could not be loaded.'),
     );
     holds.set('E001:period', holdResponse());
+    failHistory = false;
     await switchWithDelay(detail.getByRole('button', { name: 'Try again' }), 'E001:period', () =>
       expect(rows).toHaveCount(14),
     );
