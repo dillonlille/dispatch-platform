@@ -77,7 +77,7 @@ pub async fn pipeline(
     let development = state.config.development;
     let csp = format!(
         "default-src 'self'; script-src 'self'{}; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; connect-src 'self'{}; font-src 'self'; object-src 'none'; \
+         img-src 'self' data: blob:; connect-src 'self' blob:{}; font-src 'self'; object-src 'none'; \
          base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         if development { " 'unsafe-inline'" } else { "" },
         if development { " ws:" } else { "" }

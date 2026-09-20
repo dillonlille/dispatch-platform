@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { Brand } from '../../app/Brand.js';
+import { AuthLayout } from './AuthLayout.js';
+import { AuthPasswordField } from './AuthPasswordField.js';
 import { api, useData } from '../../app/api.js';
 import { OwnerOnboarding } from './OwnerOnboarding.js';
 import { ErrorBox, Loading } from '../../ui/index.js';
@@ -35,7 +37,11 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     setBusy(true);
     try {
       if (mode === 'login') {
-        await api('/api/auth/login', { email, password });
+        await api('/api/auth/login', {
+          email,
+          password,
+          rememberMe: form.get('rememberMe') === 'on',
+        });
         await onLogin();
         if (!window.location.hash.startsWith('#dsp/')) navigate(platformHash());
       }
@@ -70,10 +76,8 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   }
   if (mode === 'invite' && !invitation.data && !invitation.error)
     return (
-      <main className="auth-layout">
-        <div className="auth-brand">
-          <Brand />
-        </div>
+      <main className="auth-loading">
+        <Brand />
         <Loading />
       </main>
     );
@@ -82,19 +86,15 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       <OwnerOnboarding key={token} token={token} email={invitation.data.email} onLogin={onLogin} />
     );
   const heading = {
-    login: 'Sign in to Dispatch',
+    login: 'Sign in',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
     invite: invitation.data?.onboarding ? 'DSP onboarding' : 'Join your team',
   }[mode];
   return (
-    <main className="auth-layout">
-      <div className="auth-brand">
-        <Brand />
-      </div>
-      <section className="auth-panel">
-        <h1>{heading}</h1>
-
+    <AuthLayout>
+      <section className="auth-panel" aria-labelledby="auth-title">
+        <h1 id="auth-title">{heading}</h1>
         <ErrorBox message={error || (mode === 'invite' ? invitation.error : '')} />
         {notice && (
           <div className="notice" role="status">
@@ -105,7 +105,13 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           {(mode === 'login' || mode === 'forgot') && (
             <label>
               Email address
-              <input name="email" type="email" autoComplete="email" required />
+              <input
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@company.com"
+                required
+              />
             </label>
           )}
           {mode === 'invite' && (
@@ -125,56 +131,51 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
             </>
           )}
           {mode !== 'forgot' && (
-            <label>
-              Password
-              <input
-                name="password"
-                type="password"
-                minLength={mode === 'login' ? 1 : 8}
-                maxLength={128}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                required
-              />
-            </label>
+            <AuthPasswordField
+              key={mode}
+              current={mode === 'login'}
+              action={
+                mode === 'login' ? (
+                  <button
+                    type="button"
+                    className="auth-forgot"
+                    onClick={() => {
+                      setMode('forgot');
+                      setError('');
+                      setNotice('');
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                ) : undefined
+              }
+            />
           )}
           {(mode === 'invite' || mode === 'reset') && (
-            <label>
-              Confirm password
-              <input
-                name="confirmPassword"
-                type="password"
-                minLength={8}
-                maxLength={128}
-                autoComplete="new-password"
-                required
-              />
-            </label>
+            <AuthPasswordField name="confirmPassword" label="Confirm password" />
           )}
           {mode === 'login' && (
-            <button
-              type="button"
-              className="auth-forgot"
-              onClick={() => {
-                setMode('forgot');
-                setError('');
-              }}
-            >
-              Forgot password?
-            </button>
+            <label className="auth-remember">
+              <input name="rememberMe" type="checkbox" />
+              Remember me for 7 days
+            </label>
           )}
           <button
-            className="primary full"
+            className="primary full auth-submit"
             disabled={busy || (mode === 'invite' && !invitation.data)}
           >
-            {busy
-              ? 'Please wait…'
-              : mode === 'login'
-                ? 'Sign in'
-                : mode === 'forgot'
-                  ? 'Send reset link'
-                  : mode === 'invite'
-                    ? 'Accept invitation'
-                    : 'Update password'}
+            <span>
+              {busy
+                ? 'Please wait…'
+                : mode === 'login'
+                  ? 'Sign in'
+                  : mode === 'forgot'
+                    ? 'Send reset link'
+                    : mode === 'invite'
+                      ? 'Accept invitation'
+                      : 'Update password'}
+            </span>
+            <ArrowRight size={20} aria-hidden="true" />
           </button>
         </form>
         {mode !== 'login' && (
@@ -190,8 +191,8 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
             Back to sign in
           </button>
         )}
+        <p className="auth-footer">Access is by invitation.</p>
       </section>
-      <p className="auth-footer">Access is by invitation.</p>
-    </main>
+    </AuthLayout>
   );
 }

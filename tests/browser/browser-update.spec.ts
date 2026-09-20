@@ -124,10 +124,11 @@ test('unavailable update check does not refresh or interrupt sign in', async ({ 
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ status: 503, body: 'Restarting' }),
   );
-  await page.clock.install();
+  // Freeze before navigation so animation frames cannot advance past a wall-clock target.
+  await page.clock.install({ time: new Date('2026-09-20T12:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-09-20T12:01:00Z'));
   await page.goto('/');
   await page.getByLabel('Email address').fill(demo.email);
-  await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.clock.runFor(10000);
   expect(loads).toBe(1);
   await expect(page.getByLabel('Email address')).toHaveValue(demo.email);

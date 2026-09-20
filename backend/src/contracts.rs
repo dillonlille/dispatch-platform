@@ -126,10 +126,12 @@ text_enum! {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    #[serde(default)]
+    pub remember_me: bool,
 }
 impl LoginRequest {
     pub fn parse(value: &Value) -> Result<Self> {

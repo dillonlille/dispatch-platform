@@ -1,5 +1,5 @@
 //! What a handler receives and what it answers with.
-use crate::{Error, Result, ensure, validate as v};
+use crate::{Error, Result, accounts::SessionLifetime, ensure, validate as v};
 use axum::{
     Json,
     http::{HeaderMap, Method, StatusCode},
@@ -75,10 +75,11 @@ impl Reply {
         }
     }
     /// `{"ok":true}` that also starts the browser's session.
-    pub fn signed_in(raw: &str, development: bool) -> Self {
+    pub fn signed_in(raw: &str, development: bool, lifetime: SessionLifetime) -> Self {
         let secure = if development { "" } else { "; Secure" };
         Self::ok().cookie(format!(
-            "dispatch_session={raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800{secure}"
+            "dispatch_session={raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
+            lifetime.seconds()
         ))
     }
     /// `{"ok":true}` that also ends the browser's session.
