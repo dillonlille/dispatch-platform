@@ -9,6 +9,21 @@ use super::{
 };
 use rusqlite::params;
 use serde_json::{Value, json};
+/// One fixed lifetime drives both the server deadline and the browser cookie.
+#[derive(Clone, Copy)]
+pub enum SessionLifetime {
+    Standard,
+    Remembered,
+}
+impl SessionLifetime {
+    pub fn seconds(self) -> i64 {
+        match self {
+            Self::Standard => 8 * 60 * 60,
+            Self::Remembered => 7 * 24 * 60 * 60,
+        }
+    }
+}
+
 const INVITATION_TTL: i64 = 7 * 86400000;
 const SESSION_USER: &str = "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id \
     WHERE s.hash=? AND s.expires_at>? AND s.user_version=u.version AND u.status='active'";
@@ -591,6 +606,7 @@ impl super::State {
         email: String,
         password: String,
         ip: String,
+        lifetime: SessionLifetime,
     ) -> Result<String> {
         let permit = self
             .password_slots
@@ -632,6 +648,7 @@ impl super::State {
                 401,
             )?;
             let raw = crypto::token()?;
+            let created_at = now();
             db.platform.transaction(|| {
                 db.platform
                     .exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
@@ -641,8 +658,8 @@ impl super::State {
                         crypto::sha(&raw),
                         row.user.id,
                         row.version,
-                        now() + 8 * 3600000,
-                        now()
+                        created_at + lifetime.seconds() * 1000,
+                        created_at
                     ],
                 )?;
                 db.audit(Some(&row.user.id), None, "account.signed_in", "")

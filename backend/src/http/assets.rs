@@ -102,7 +102,7 @@ pub fn assets(root: &std::path::Path, release: &str) -> Result<HashMap<String, A
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .as_bytes();
-        let hashed = ["js", "css", "svg"].contains(&extension)
+        let hashed = ["js", "css", "svg", "glb", "png"].contains(&extension)
             && stem.len() > 9
             && stem[stem.len() - 9] == b'-'
             && stem[stem.len() - 8..]
@@ -114,6 +114,7 @@ pub fn assets(root: &std::path::Path, release: &str) -> Result<HashMap<String, A
             "css" => "text/css; charset=utf-8",
             "svg" => "image/svg+xml",
             "png" => "image/png",
+            "glb" => "model/gltf-binary",
             "woff2" => "font/woff2",
             _ => "application/octet-stream",
         };

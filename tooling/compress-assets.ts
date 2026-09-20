@@ -11,7 +11,7 @@ export async function compressAssets(directory: string) {
   const files = await fs.readdir(directory);
   await Promise.all(
     files
-      .filter((name) => /\.(?:js|css|svg)$/.test(name))
+      .filter((name) => /\.(?:js|css|svg|glb)$/.test(name))
       .map(async (name) => {
         const file = path.join(directory, name),
           bytes = await fs.readFile(file);
