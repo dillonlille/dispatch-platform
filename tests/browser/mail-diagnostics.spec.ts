@@ -56,6 +56,7 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   await expect(page).toHaveTitle('Dispatch');
   await signIn(page);
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  await page.getByRole('tab', { name: /^Email/ }).click();
   const mail = page.getByRole('region', { name: 'Email delivery', exact: true });
   const field = (label: string) =>
     mail.getByText(label, { exact: true }).locator('..').locator('dd');

@@ -96,29 +96,25 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   });
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  await page.getByRole('tab', { name: /^Collections/ }).click();
+  const sources = page.getByRole('navigation', { name: 'Collection sources' });
+  await sources.getByRole('button', { name: /Paycom/ }).click();
   const history = page.getByRole('region', { name: 'Collection performance history' });
-  await expect(history).toContainText('Last successful collection');
   await expect(history).toContainText('Median collection time');
-  await expect(history.getByLabel('Collection source')).toBeVisible();
+  await expect(history).toContainText('Full runs measured');
   await expect(history).toContainText('Needs 5 full runs');
-  const collection = page
-    .getByRole('row')
-    .filter({ hasText: 'Collection completed' })
-    .filter({ hasText: 'Paycom' })
-    .first();
-  await collection.getByText('Attempt details', { exact: true }).click();
-  await expect(collection.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
+  const collections = page.getByRole('region', { name: 'Platform collections' });
+  await collections.getByRole('row').filter({ hasText: 'Succeeded' }).getByRole('button').click();
+  await expect(collections.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
     '12 employees · 84 daily records',
   );
-  await expect(collection).toContainText('Queue wait');
-  await expect(collection).toContainText('Not sampled');
+  await expect(collections).toContainText('Queue wait');
+  await expect(collections).toContainText('Not sampled');
   await page.screenshot({
     path: test.info().outputPath('dispatch-job-metrics.png'),
     fullPage: true,
   });
-  await expect(page.getByRole('region', { name: 'Platform collections' })).toContainText(
-    'Attempt details',
-  );
+  await expect(collections).toContainText('Where the time went');
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -418,10 +414,10 @@ test('archived Diagnostics creates a synthetic DSP and excludes Plugins and Back
   await login(page);
   await expect(page.getByRole('link', { name: /Plugins|Backups/ })).toHaveCount(0);
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Runtime health', exact: true })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Runtime health', exact: true })).toContainText(
-    'MiB needed',
+  await expect(page.getByRole('region', { name: 'Browsers', exact: true })).toContainText(
+    'per browser',
   );
+  await page.getByRole('tab', { name: 'Test DSPs', exact: true }).click();
   await page.getByRole('button', { name: 'Deploy test DSP', exact: true }).click();
   await expect(
     page.getByText('Synthetic data prepared · Available', { exact: true }),

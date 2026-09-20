@@ -5,17 +5,12 @@ import { useData } from '../../app/api.js';
 import { usePlatformJobs } from '../../app/endpoints.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
 import { collectionHistory } from './collection-history.js';
+import type { Diagnostics } from './diagnostics.js';
 import { DiagnosticsCollections } from './DiagnosticsCollections.js';
 import { DiagnosticsEmail } from './DiagnosticsEmail.js';
 import { DiagnosticsOverview } from './DiagnosticsOverview.js';
 import { DiagnosticsTestDsps } from './DiagnosticsTestDsps.js';
 
-export interface Diagnostics {
-  enabled: boolean;
-  storageAvailableBytes: number;
-  runtime: { name: string; status: string; memoryBytes: number; browsers: number };
-  dsps: { id: string; name: string; status: string }[];
-}
 const tabs = ['overview', 'collections', 'email', 'test-dsps'];
 function addressed() {
   const query = hashQuery();

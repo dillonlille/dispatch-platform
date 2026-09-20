@@ -4,7 +4,7 @@ import type { Job, PlatformHealth } from '../../../../shared/contracts/index.js'
 import { Badge, DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
 import { bytes, deviceTimezone, duration, time } from '../../lib/format.js';
 import { providerName, type collectionHistory } from './collection-history.js';
-import type { Diagnostics } from './DiagnosticsPage.js';
+import type { Diagnostics } from './diagnostics.js';
 import { memory } from './RunDetail.js';
 
 type Source = ReturnType<typeof collectionHistory>[number];
