@@ -169,22 +169,35 @@
 .employee-detail-heading .status-indicator {
   font-size: 12px;
 }
-.employee-detail > h3 {
+.employee-identity {
+  height: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.employee-identity h3 {
   font-size: 20px;
+  line-height: 1.35;
   font-weight: 600;
   letter-spacing: -0.3px;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .employee-position {
   color: var(--muted-foreground);
   font-size: 13px;
   margin-top: 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .employee-timecard-section {
   margin-top: 26px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
-  min-height: 330px;
 }
 .employee-timecard-heading {
   justify-content: space-between;
@@ -206,6 +219,7 @@
   grid-template-columns: 36px minmax(0, 1fr) 36px;
   gap: 10px;
   align-items: center;
+  height: 44px;
   margin-bottom: 14px;
 }
 .employee-period-controls > span {
@@ -214,9 +228,27 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.employee-timecard-body {
+  position: relative;
+}
+.employee-timecard-scroll {
+  height: 384px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.employee-timecard-state {
+  position: absolute;
+  inset: 44px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 16px;
+}
 .employee-period-table {
   width: 100%;
-  min-width: 480px;
+  min-width: 460px;
   table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
@@ -231,6 +263,10 @@
 .employee-period-table th {
   color: var(--muted-foreground);
   font-weight: 400;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
 }
 .employee-period-table th:first-child,
 .employee-period-table td:first-child {
@@ -244,8 +280,8 @@
   font-weight: 500;
 }
 .employee-timecard-total {
-  justify-content: space-between;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 12px;
   border-top: 1px solid var(--border);
   margin-top: 14px;
@@ -264,6 +300,8 @@
   font-size: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  min-width: 8ch;
+  text-align: right;
 }
 .employees-pagination {
   justify-content: space-between;
@@ -323,11 +361,17 @@
   .employee-detail {
     padding: 20px;
   }
-  .employee-detail > h3 {
+  .employee-identity h3 {
     font-size: 19px;
   }
   .employee-period-controls > span {
     font-size: 13px;
+  }
+}
+@media (max-width: 400px) {
+  .employee-timecard-total {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 }
 @media (pointer: coarse) {
