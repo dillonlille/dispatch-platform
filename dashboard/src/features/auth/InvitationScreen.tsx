@@ -12,7 +12,7 @@ export function InvitationScreen({
   token: string;
   onLogin: () => Promise<void>;
 }) {
-  const invitation = useData<{ email: string; onboarding: boolean }>(
+  const invitation = useData<{ email: string; dspName: string; role: string; onboarding: boolean }>(
     `/api/invitations/${encodeURIComponent(token)}`,
   );
   if (!invitation.data && !invitation.error)
@@ -29,8 +29,9 @@ export function InvitationScreen({
     <MemberProfileCreation
       token={token}
       email={invitation.data?.email}
+      dspName={invitation.data?.dspName}
+      role={invitation.data?.role}
       invitationError={invitation.error}
-      onLogin={onLogin}
     />
   );
 }

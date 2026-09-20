@@ -3,9 +3,15 @@ import { Brand } from '../../../app/Brand.js';
 import { LoginArtwork } from './LoginArtwork.js';
 import './sign-in.css';
 
-export function SignInLayout({ children }: { children: ReactNode }) {
+export function SignInLayout({
+  children,
+  enter = false,
+}: {
+  children: ReactNode;
+  enter?: boolean;
+}) {
   return (
-    <main className="auth-layout">
+    <main className="auth-layout" data-enter={enter}>
       <LoginArtwork />
       <div className="auth-content">
         <div className="auth-brand">

@@ -1,0 +1,164 @@
+/* Private desktop completion artwork. Card dimensions and materials are adjusted here. */
+.member-completion {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  overflow: clip;
+  pointer-events: none;
+  color: var(--foreground);
+}
+.member-completion-size {
+  transform: scale(var(--viewport-fit, 1));
+  transform-origin: center;
+  perspective: 1200px;
+}
+.member-completion-rig,
+.member-completion-hang {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.member-completion-rig {
+  transform: translateY(calc(-100% - 100vh));
+}
+.member-completion-hang {
+  transform-origin: 50% 0;
+  margin-top: -8px;
+}
+.member-lanyard-straps,
+.member-lanyard-clip {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 3px 3px var(--shadow-color));
+}
+.member-lanyard-cloth {
+  fill: color-mix(in srgb, var(--primary) 72%, #141b33);
+}
+.member-lanyard-strap path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1px;
+  stroke-dasharray: 3.5 2.5;
+  opacity: 0.4;
+}
+.member-lanyard-clip {
+  position: relative;
+  z-index: 2;
+  margin-bottom: -23px;
+}
+.member-completion-badge {
+  --member-identity-surface: var(--slate-surface);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-height: 480px;
+  padding: 64px 28px 28px;
+  overflow: hidden;
+  transform-origin: 50% 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: linear-gradient(170deg, var(--member-identity-surface), var(--card) 55%);
+  box-shadow:
+    inset 0 1px 0 #ffffff14,
+    0 1px 2px var(--shadow-color),
+    0 14px 28px -10px var(--shadow-color),
+    0 40px 60px -30px var(--shadow-color);
+}
+.member-completion-badge.tone-1 {
+  --member-identity-surface: var(--sage-surface);
+}
+.member-completion-badge.tone-2 {
+  --member-identity-surface: var(--violet-surface);
+}
+.member-completion-badge.tone-4 {
+  --member-identity-surface: var(--steel-surface);
+}
+.member-completion-punch {
+  position: absolute;
+  top: 11px;
+  left: calc(50% - 29px);
+  width: 58px;
+  height: 12px;
+  border-radius: 7px;
+  background: var(--background);
+  box-shadow:
+    inset 0 2px 3px #0008,
+    0 1px 0 #ffffff12;
+}
+.member-completion-badge h2 {
+  font-size: 40px;
+  font-weight: 650;
+  line-height: 1.02;
+  letter-spacing: -1.8px;
+  overflow-wrap: anywhere;
+}
+.member-completion-badge h2 span {
+  display: block;
+}
+.member-completion-email {
+  margin: 16px 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.member-completion-role {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--selection);
+  color: var(--primary);
+  font-size: 11.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.member-completion-confirmed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.member-completion-confirmed svg {
+  color: var(--primary);
+}
+.member-completion-org {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 32px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.member-completion-org .dsp-avatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+}
+.member-completion-sheen {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(
+    112deg,
+    transparent 25%,
+    #ffffff18 46%,
+    #ffffff04 54%,
+    transparent 75%
+  );
+}
+@media (max-width: 700px), (prefers-reduced-motion: reduce) {
+  .member-completion {
+    display: none;
+  }
+}

@@ -6,11 +6,13 @@ export function SignInPasswordField({
   label = 'Password',
   current = false,
   action,
+  autoFocus = false,
 }: {
   name?: string;
   label?: string;
   current?: boolean;
   action?: ReactNode;
+  autoFocus?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   const Icon = visible ? EyeOff : Eye;
@@ -24,6 +26,7 @@ export function SignInPasswordField({
         <input
           id={name}
           name={name}
+          autoFocus={autoFocus}
           type={visible ? 'text' : 'password'}
           minLength={current ? 1 : 8}
           maxLength={128}

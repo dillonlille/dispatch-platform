@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { SignInLayout } from './SignInLayout.js';
 import { SignInPasswordField } from './SignInPasswordField.js';
@@ -6,14 +6,17 @@ import { api } from '../../../app/api.js';
 import { ErrorBox } from '../../../ui/index.js';
 import { messageOf } from '../../../lib/errors.js';
 import { hashQuery, navigate, platformHash, signInHash } from '../../../app/navigation.js';
+import { clearSignInHandoff, getSignInHandoff } from '../../../app/sign-in-handoff.js';
 export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
+  const [handoff] = useState(getSignInHandoff);
+  useEffect(clearSignInHandoff, []);
   const hash = window.location.hash.slice(1),
     token = hashQuery().get('token');
   const initial = hash.startsWith('reset?') ? 'reset' : 'login';
   const [mode, setMode] = useState(initial),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [notice, setNotice] = useState('');
+    [notice, setNotice] = useState(handoff ? 'Profile created. Sign in to continue.' : '');
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -58,7 +61,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
     reset: 'Choose a new password',
   }[mode];
   return (
-    <SignInLayout>
+    <SignInLayout enter={handoff?.animate}>
       <section className="auth-panel" aria-labelledby="auth-title">
         <h1 id="auth-title">{heading}</h1>
         <ErrorBox message={error} />
@@ -76,6 +79,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
                 type="email"
                 autoComplete="email"
                 placeholder="you@company.com"
+                defaultValue={handoff?.email}
                 required
               />
             </label>
@@ -84,6 +88,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
             <SignInPasswordField
               key={mode}
               current={mode === 'login'}
+              autoFocus={Boolean(handoff) && mode === 'login'}
               action={
                 mode === 'login' ? (
                   <button

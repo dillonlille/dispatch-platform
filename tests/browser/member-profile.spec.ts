@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect, demo, login, openDsp } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
+import type { fixture } from '../support.js';
 
 async function inviteMember(page: Page, root: string) {
   await login(page);
@@ -43,6 +44,10 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   const url = await inviteMember(page, dispatch.root);
   await context.clearCookies();
   const errors: string[] = [];
+  const logins: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/auth/login')) logins.push(request.url());
+  });
   const assets: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('request', (request) => assets.push(request.url()));
@@ -53,22 +58,6 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   await expect(page.getByLabel('Email address')).toHaveAttribute('readonly', '');
   await expect(page.getByLabel('DSP name', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('list', { name: 'Onboarding progress' })).toHaveCount(0);
-  for (const colorScheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme });
-    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
-    for (const [width, height] of [
-      [1440, 1000],
-      [1280, 800],
-      [1024, 600],
-      [700, 700],
-      [390, 844],
-      [320, 568],
-      [568, 320],
-    ]) {
-      await page.setViewportSize({ width: width!, height: height! });
-      await fits(page);
-    }
-  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByLabel('First name', { exact: true }).fill('New');
   await page.getByLabel('Last name', { exact: true }).fill('Member');
@@ -82,6 +71,13 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   await fits(page);
   await page.getByLabel('Confirm password', { exact: true }).fill(demo.password);
   await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+  await expect(page).toHaveURL(/#signin$/);
+  await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
+  await expect(page.getByLabel('Password', { exact: true })).toBeFocused();
+  expect(logins).toEqual([]);
+  expect((await page.request.get('/api/session')).status()).toBe(401);
+  await page.getByLabel('Password', { exact: true }).fill(demo.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(/#dsp\/[^/]+\//);
   await expect(page.locator('.member-profile-page')).toHaveCount(0);
   const session = await (await page.request.get('/api/session')).json();
@@ -108,4 +104,151 @@ test('member profile handles an invalid invitation and returns to the separate s
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(page.locator('.member-profile-page, .onboarding-page')).toHaveCount(0);
   await expect(page.locator('.auth-layout')).toBeVisible();
+});
+
+// Exercise the full owner UI above; completion variants use the same real invitation API.
+async function apiInvitation(dispatch: Awaited<ReturnType<typeof fixture>>) {
+  const owner = await dispatch.client();
+  const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+  const view = await owner.select(dsp.id);
+  const role = view.roles.find((r: { name: string }) => r.name === 'Member');
+  const result = await owner.post('/api/dsp/members/invite', {
+    email: 'new-member@dispatch.test',
+    role: role.id,
+  });
+  expect(result.status).toBe(200);
+  const mail = await capturedMail(dispatch.root, 'new-member@dispatch.test');
+  return `/#invite?token=${/token=([A-Za-z0-9_-]{43})/.exec(mail.text)![1]}`;
+}
+
+test('member profile fits desktop and phone sizes in both themes', async ({ page, dispatch }) => {
+  await page.goto(await apiInvitation(dispatch));
+  await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    for (const [width, height] of [
+      [1440, 1000],
+      [1280, 800],
+      [1024, 600],
+      [700, 700],
+      [390, 844],
+      [320, 568],
+      [568, 320],
+    ]) {
+      await page.setViewportSize({ width: width!, height: height! });
+      await fits(page);
+    }
+  }
+});
+
+async function fillMemberProfile(page: Page) {
+  await page.getByLabel('First name', { exact: true }).fill('Jamie');
+  await page.getByLabel('Last name', { exact: true }).fill('Morgan');
+  await page.getByLabel('Password', { exact: true }).fill(demo.password);
+  await page.getByLabel('Confirm password', { exact: true }).fill(demo.password);
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`desktop member completion shows a personalized badge then requires sign-in (${colorScheme})`, async ({
+    page,
+    dispatch,
+    context,
+  }) => {
+    const url = await apiInvitation(dispatch);
+    await context.clearCookies();
+    await page.emulateMedia({ colorScheme, reducedMotion: 'no-preference' });
+    const logins: string[] = [];
+    const errors: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/auth/login')) logins.push(request.url());
+    });
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(url);
+    await fillMemberProfile(page);
+    await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+    const completion = page.getByRole('status', { name: 'Profile created' });
+    await expect(completion).toBeVisible();
+    await expect(completion).toContainText('JamieMorgan');
+    await expect(completion).toContainText('Northline Logistics');
+    await expect(completion.locator('.member-completion-role')).toHaveText('Member');
+    await expect(page.locator('.member-profile-page')).toHaveAttribute('inert', '');
+    await expect(page).toHaveURL(/#signin$/);
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
+    await expect(page.getByLabel('Password', { exact: true })).toBeFocused();
+    await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
+    await expect(
+      page.locator('.member-completion, .member-profile-page, .onboarding-page'),
+    ).toHaveCount(0);
+    expect((await page.request.get('/api/session')).status()).toBe(401);
+    expect(logins).toEqual([]);
+    expect(errors).toEqual([]);
+    await page.getByLabel('Password', { exact: true }).fill(demo.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page).toHaveURL(/#dsp\/[^/]+\//);
+    expect(logins).toHaveLength(1);
+    const session = await (await page.request.get('/api/session')).json();
+    expect(session.user.email).toBe('new-member@dispatch.test');
+    expect(session.dsps).toHaveLength(1);
+  });
+}
+
+for (const variant of ['phone', 'reduced motion', 'unavailable artwork'] as const) {
+  test(`member completion goes directly to sign-in with ${variant}`, async ({
+    page,
+    dispatch,
+    context,
+  }) => {
+    const url = await apiInvitation(dispatch);
+    await context.clearCookies();
+    await page.setViewportSize(
+      variant === 'phone' ? { width: 390, height: 844 } : { width: 1280, height: 800 },
+    );
+    await page.emulateMedia({
+      reducedMotion: variant === 'reduced motion' ? 'reduce' : 'no-preference',
+    });
+    if (variant === 'unavailable artwork')
+      await page.route('**/MemberProfileCompletion-*.js', (route) => route.abort());
+    const assets: string[] = [];
+    page.on('request', (request) => assets.push(request.url()));
+    await page.goto(url);
+    await fillMemberProfile(page);
+    // A failed save must leave the form usable, without a success animation or navigation.
+    await page.route('**/api/invitations/*/accept', (route) => route.abort(), { times: 1 });
+    await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.locator('.member-completion')).toHaveCount(0);
+    await expect(page).toHaveURL(/#invite\?/);
+    await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+    await expect(page).toHaveURL(/#signin$/);
+    await expect(page.getByRole('status')).toContainText('Profile created');
+    await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
+    await expect(page.locator('.auth-layout')).toHaveAttribute('data-enter', 'false');
+    expect((await page.request.get('/api/session')).status()).toBe(401);
+    if (variant !== 'unavailable artwork')
+      expect(assets.filter((url) => /MemberProfileCompletion-/.test(url))).toEqual([]);
+    if (variant === 'phone')
+      expect(
+        assets.filter((url) => /member-profile-map|login-van|renderer-.*\.js/.test(url)),
+      ).toEqual([]);
+  });
+}
+
+test('resizing to a phone during member completion finishes the handoff immediately', async ({
+  page,
+  dispatch,
+  context,
+}) => {
+  const url = await apiInvitation(dispatch);
+  await context.clearCookies();
+  await page.goto(url);
+  await fillMemberProfile(page);
+  await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Profile created' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page).toHaveURL(/#signin$/);
+  await expect(page.locator('.auth-layout')).toHaveAttribute('data-enter', 'false');
+  await expect(page.locator('.member-completion')).toHaveCount(0);
+  expect((await page.request.get('/api/session')).status()).toBe(401);
 });

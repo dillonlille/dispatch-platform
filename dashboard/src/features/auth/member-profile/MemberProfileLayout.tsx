@@ -1,15 +1,30 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { Brand } from '../../../app/Brand.js';
 import { useViewportFit } from '../../../ui/useViewportFit.js';
 import { MemberProfileMap } from './MemberProfileMap.js';
 import { useMemberProfileMap } from './member-profile-map-asset.js';
 import './member-profile.css';
 
-export function MemberProfileLayout({ children }: { children: ReactNode }) {
+export function MemberProfileLayout({
+  children,
+  ref,
+  completing = false,
+}: {
+  children: ReactNode;
+  ref?: Ref<HTMLDivElement>;
+  completing?: boolean;
+}) {
   const fit = useViewportFit();
   const { desktop, ready } = useMemberProfileMap();
   return (
-    <div className="member-profile-page" data-ready={ready} aria-busy={!ready}>
+    <div
+      ref={ref}
+      className="member-profile-page"
+      data-ready={ready}
+      aria-busy={!ready}
+      inert={completing}
+      aria-hidden={completing || undefined}
+    >
       <MemberProfileMap desktop={desktop} />
       <header className="member-profile-brand">
         <Brand />
