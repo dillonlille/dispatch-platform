@@ -4,6 +4,114 @@ use dispatch_backend::{collectors::Provider, db::s, workforce};
 use serde_json::{Value, json};
 
 #[test]
+fn employee_timecards_use_period_order_and_the_latest_revision_within_each_period() {
+    use dispatch_backend::contracts::EmployeeTimecardPeriod;
+    let (_root, db, id) = bootstrapped();
+    let period_data = |date: &str, collected: &str, hours: f64| {
+        let mut data = workforce::fixture_date("UTC", Some(date.parse().unwrap())).unwrap();
+        data["collectedAt"] = json!(collected);
+        data["timecards"][0]["hours"] = json!(hours);
+        data
+    };
+    let old = period_data("2026-09-05", "2026-09-06T00:00:00Z", 5.0);
+    let middle = period_data("2026-09-12", "2026-09-13T00:00:00Z", 6.0);
+    let current = period_data("2026-09-19", "2026-09-20T00:00:00Z", 7.0);
+    for data in [&old, &middle, &current] {
+        db.publish(&id, data).unwrap();
+    }
+    // A later sync of an older period must update that period, not replace Latest.
+    let mut revision = period_data("2026-09-12", "2026-09-21T00:00:00Z", 9.0);
+    revision["employees"][0]["name"] = json!("Old employee name");
+    db.publish(&id, &revision).unwrap();
+    let latest = db.employee_timecard(&id, "E001", None).unwrap();
+    assert_eq!(latest.period.to, "2026-09-19");
+    assert_eq!(latest.employee["name"], "Avery Morgan");
+    assert!(latest.next_period.is_none());
+    let previous = db
+        .employee_timecard(&id, "E001", latest.previous_period.as_ref())
+        .unwrap();
+    assert_eq!(previous.period.to, "2026-09-12");
+    assert_eq!(previous.next_period, Some(latest.period.clone()));
+    assert_eq!(previous.timecards.last().unwrap()["hours"], 9.0);
+    let first = db
+        .employee_timecard(&id, "E001", previous.previous_period.as_ref())
+        .unwrap();
+    assert_eq!(first.period.to, "2026-09-05");
+    assert!(first.previous_period.is_none());
+    assert_eq!(first.next_period, Some(previous.period));
+    let missing = EmployeeTimecardPeriod {
+        from: "2025-01-01".into(),
+        to: "2025-01-07".into(),
+    };
+    assert_eq!(
+        db.employee_timecard(&id, "E001", Some(&missing))
+            .err()
+            .unwrap()
+            .code,
+        "employee_timecard_not_found"
+    );
+    assert_eq!(
+        db.employee_timecard(&id, "UNKNOWN", None)
+            .err()
+            .unwrap()
+            .code,
+        "employee_not_found"
+    );
+    // Period history is scoped to the employee, even when their code exists elsewhere.
+    revision["employees"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|e| e["code"] != "E002");
+    revision["timecards"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|e| e["employeeCode"] != "E002");
+    revision["collectedAt"] = json!("2026-09-22T00:00:00Z");
+    db.publish(&id, &revision).unwrap();
+    assert_eq!(
+        db.employee_timecard(&id, "E002", None).unwrap().period.to,
+        "2026-09-19"
+    );
+}
+
+#[test]
+fn employee_status_filter_applies_before_counting_and_pagination() {
+    let (_root, db, id) = bootstrapped();
+    let mut data = workforce::fixture("UTC").unwrap();
+    data["employees"][1]["active"] = json!(false);
+    data["employees"][4]["active"] = json!(false);
+    db.publish(&id, &data).unwrap();
+    let inactive = db
+        .employees_filtered(&id, "", 0, 1, false, Some(false))
+        .unwrap();
+    assert_eq!(inactive["total"], 2);
+    assert_eq!(inactive["employees"].as_array().unwrap().len(), 1);
+    assert_eq!(inactive["employees"][0]["active"], false);
+    let next = db
+        .employees_filtered(&id, "", 1, 1, false, Some(false))
+        .unwrap();
+    assert_ne!(
+        inactive["employees"][0]["code"],
+        next["employees"][0]["code"]
+    );
+    assert_eq!(
+        db.employees_filtered(&id, "", 0, 100, false, Some(true))
+            .unwrap()["total"],
+        10
+    );
+    assert_eq!(
+        db.employees_filtered(&id, "Jordan", 0, 100, false, Some(false))
+            .unwrap()["total"],
+        1
+    );
+    assert_eq!(
+        db.employees_filtered(&id, "Jordan", 0, 100, false, Some(true))
+            .unwrap()["total"],
+        0
+    );
+}
+
+#[test]
 fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
     let (_root, db, id) = bootstrapped();
     let id = id.as_str();

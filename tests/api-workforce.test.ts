@@ -31,12 +31,42 @@ test('Rust workforce settings enforce revisions, filter employees and timecards,
   const detail = (await owner.get('/api/dsp/employees/E002')).value;
   assert.equal(detail.employee.name, 'Ellis, Jordan');
   assert.equal(detail.timecards.length, 7);
+  assert.equal(detail.period.to, detail.timecards[0].date);
+  assert.equal(detail.nextPeriod, null);
+  const same = await owner.get(
+    `/api/dsp/employees/E002?from=${detail.period.from}&to=${detail.period.to}`,
+  );
+  assert.deepEqual(same.value, detail);
+  for (const query of [
+    'from=2026-02-30&to=2026-03-01',
+    'from=2026-01-01',
+    'to=2026-01-01',
+    'from=2026-09-20&to=2026-09-01',
+    'unknown=1',
+  ])
+    assert.equal((await owner.get(`/api/dsp/employees/E002?${query}`)).status, 400);
+  assert.equal(
+    (await owner.get('/api/dsp/employees/E002?from=2020-01-01&to=2020-01-07')).status,
+    404,
+  );
+  assert.equal((await owner.get('/api/dsp/employees?status=invalid')).status, 400);
+  assert.equal((await owner.get('/api/dsp/employees?status=inactive')).value.total, 0);
+  assert.equal((await owner.get('/api/dsp/employees?status=active')).value.total, 11);
   const date = detail.timecards[0].date;
   const daily = await owner.get(`/api/dsp/timecards?date=${date}&sort=totalHours&direction=desc`);
   assert.equal(daily.value.rows.length, 11);
   assert.equal((await owner.get('/api/dsp/timecards?date=2026-02-30')).status, 400);
   const member = await f.client('member@dispatch.test');
   await member.select(north.id);
+  assert.equal((await member.get('/api/dsp/employees/E002')).status, 200);
+  const summit = owner.session.dsps.find((d: { name: string }) => d.name === 'Summit Delivery');
+  await owner.select(summit.id);
+  assert.equal(
+    (await owner.get(`/api/dsp/employees/E002?from=${detail.period.from}&to=${detail.period.to}`))
+      .status,
+    404,
+  );
+  await owner.select(north.id);
   assert.deepEqual((await member.get('/api/dsp/paycom/settings')).value.history, []);
   assert.equal((await owner.get('/api/dsp/paycom/settings')).value.history.length, 1);
 });

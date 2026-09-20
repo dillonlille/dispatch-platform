@@ -3,6 +3,7 @@ use super::connections;
 use crate::{
     Result,
     collectors::Provider,
+    contracts::EmployeeTimecardPeriod,
     db::Store,
     http::{
         input::{Input, Reply, descending, optional, optional_text, query_number},
@@ -45,17 +46,45 @@ pub fn routes() -> Vec<Route> {
 
 fn employees(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let q = &input.query;
-    v::fields(q, &["q", "direction", "offset", "limit"])?;
+    v::fields(q, &["q", "direction", "offset", "limit", "status"])?;
     let query = optional_text(q, "q", 100)?;
     let desc = descending(q)?;
     let offset = query_number(q, "offset", 0, 0, 100000)?;
     let limit = query_number(q, "limit", 50, 1, 100)?;
-    let page = db.employees(c.dsp_id(), query, offset, limit, desc)?;
+    let status = optional(q, "status", |q, key| {
+        v::choice(q, key, &["all", "active", "inactive"])
+    })?
+    .unwrap_or("all");
+    let active = match status {
+        "active" => Some(true),
+        "inactive" => Some(false),
+        _ => None,
+    };
+    let page = db.employees_filtered(c.dsp_id(), query, offset, limit, desc, active)?;
     Ok(Reply::json(page))
 }
 
 fn employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.employee(c.dsp_id(), input.param("code"))?))
+    let q = &input.query;
+    v::fields(q, &["from", "to"])?;
+    let period = if q.get("from").is_some() || q.get("to").is_some() {
+        let from = v::text(q, "from", 10, 10)?;
+        let to = v::text(q, "to", 10, 10)?;
+        v::date(from)?;
+        v::date(to)?;
+        crate::ensure(from <= to, "invalid_period", 400)?;
+        Some(EmployeeTimecardPeriod {
+            from: from.into(),
+            to: to.into(),
+        })
+    } else {
+        None
+    };
+    Ok(Reply::json(serde_json::to_value(db.employee_timecard(
+        c.dsp_id(),
+        input.param("code"),
+        period.as_ref(),
+    )?)?))
 }
 
 fn timecards(db: &Store, c: &Member, input: &Input) -> Result<Reply> {

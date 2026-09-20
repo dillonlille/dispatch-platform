@@ -132,29 +132,7 @@ export function PaycomPage({ view }: { view: DspView }) {
         ]}
         label="Timecard"
       />
-      {!daily && (
-        <section className="paycom-workspace-controls" aria-label="Date and sync">
-          <div className="paycom-controls-row">{syncButton}</div>
-          {canCollect && (
-            <div className="paycom-sync-status">
-              <SourceSyncStatus
-                name="Paycom"
-                source={sourceState?.paycom}
-                timezone={view.dsp.timezone}
-              />
-              {sourceState?.flex.active && (
-                <SourceSyncStatus
-                  name="Flex"
-                  source={sourceState.flex}
-                  timezone={view.dsp.timezone}
-                />
-              )}
-              {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
-            </div>
-          )}
-        </section>
-      )}
-      {daily && canCollect && syncUnavailable && (
+      {canCollect && syncUnavailable && (
         <p className="paycom-sync-unavailable muted">{syncUnavailable}</p>
       )}
       {tab === 'meal-breaks' ? (
@@ -180,7 +158,29 @@ export function PaycomPage({ view }: { view: DspView }) {
       ) : (
         <div className="embedded-page">
           {tab === 'employees' ? (
-            <EmployeesPage />
+            <EmployeesPage
+              refreshKey={refreshKey}
+              actions={
+                <>
+                  {canCollect && (
+                    <SourceSyncStatus
+                      name="Paycom"
+                      source={sourceState?.paycom}
+                      timezone={view.dsp.timezone}
+                      compact
+                    />
+                  )}
+                  {canCollect && sourceState?.flex.active && (
+                    <SourceSyncStatus
+                      name="Flex"
+                      source={sourceState.flex}
+                      timezone={view.dsp.timezone}
+                    />
+                  )}
+                  {syncButton}
+                </>
+              }
+            />
           ) : (
             <TimecardsPage
               date={date}

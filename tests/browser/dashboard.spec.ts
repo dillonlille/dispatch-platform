@@ -48,10 +48,10 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Avery Morgan' })).toBeVisible();
   await page.getByLabel('Search employees').fill('Avery');
-  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.getByLabel('Employee directory').getByRole('button')).toHaveCount(1);
   await page.getByRole('button', { name: 'Avery Morgan' }).click();
-  await expect(page.getByRole('heading', { name: 'Employee timecard', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Back to employees' }).click();
+  await expect(page.getByRole('table', { name: 'Employee timecard', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Search employees')).toBeVisible();
   await page.getByRole('tab', { name: 'Timecard', exact: true }).click();
   await expect(page.getByRole('button', { name: /View punches for/ })).toHaveCount(12);
   await page

@@ -161,7 +161,7 @@ pub(crate) fn compare(a: &str, b: &str) -> Ordering {
         .compare(a, b)
 }
 
-fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
+pub(crate) fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
     let mut rows = db.all(sql, p)?;
     for row in &mut rows {
         row["punches"] = serde_json::from_str(s(row, "punches"))?;
@@ -367,6 +367,17 @@ impl Store {
         limit: usize,
         desc: bool,
     ) -> Result<Value> {
+        self.employees_filtered(id, query, offset, limit, desc, None)
+    }
+    pub fn employees_filtered(
+        &self,
+        id: &str,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        desc: bool,
+        active: Option<bool>,
+    ) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let p = &settings["values"];
@@ -380,7 +391,8 @@ impl Store {
         let publication_id = s(&publication, "id");
         let direction = if desc { "DESC" } else { "ASC" };
         let condition = "publication_id=?1 AND (?2='' OR department=?2) AND (?3='' OR \
-            station=?3) AND (?4='' OR instr(dispatch_lower(dispatch_name(name,?5)||' '||code),?4)>0)";
+            station=?3) AND (?4='' OR instr(dispatch_lower(dispatch_name(name,?5)||' '||code),?4)>0) \
+            AND (?6 IS NULL OR active=?6)";
         let total = db.count(
             &format!("SELECT count(*) FROM employees WHERE {condition}"),
             params![
@@ -388,7 +400,8 @@ impl Store {
                 s(p, "department"),
                 s(p, "station"),
                 query.to_lowercase(),
-                s(p, "name_order")
+                s(p, "name_order"),
+                active
             ],
         )?;
         let mut rows = db.all(
@@ -396,8 +409,8 @@ impl Store {
                 "SELECT code,dispatch_name(name,?5) \
             name,department,position,station,active FROM employees WHERE {condition} ORDER \
             BY name COLLATE dispatch_unicode {direction},code COLLATE dispatch_unicode \
-            {direction} LIMIT ?6 OFFSET \
-            ?7"
+            {direction} LIMIT ?7 OFFSET \
+            ?8"
             ),
             params![
                 publication_id,
@@ -405,6 +418,7 @@ impl Store {
                 s(p, "station"),
                 query.to_lowercase(),
                 s(p, "name_order"),
+                active,
                 limit as i64,
                 offset as i64
             ],
@@ -413,34 +427,6 @@ impl Store {
             boolean(row, &["active"]);
         }
         Ok(json!({"employees":rows,"total":total,"collectedAt":publication["collected_at"]}))
-    }
-    pub fn employee(&self, id: &str, code: &str) -> Result<Value> {
-        v::code(code)?;
-        let db = self.collector(id, Provider::Paycom)?;
-        let settings = preferences(&db)?;
-        let mut row = db
-            .one(
-                "SELECT e.* FROM employees e JOIN publications p ON \
-            p.id=e.publication_id WHERE e.code=? ORDER BY p.collected_at DESC LIMIT \
-            1",
-                [code],
-            )?
-            .ok_or_else(|| Error::new("employee_not_found", 404))?;
-        let timecards = cards(
-            &db,
-            "SELECT t.employee_code employeeCode,t.date,t.hours,t.status,t.punches,u.url \
-                sourceUrl FROM timecards t LEFT JOIN timecard_sources u ON \
-                u.publication_id=t.publication_id AND u.employee_code=t.employee_code WHERE \
-                t.publication_id=? AND t.employee_code=? ORDER BY t.date DESC",
-            [s(&row, "publication_id"), code],
-        )?;
-        row.as_object_mut().unwrap().remove("publication_id");
-        boolean(&mut row, &["active"]);
-        row["name"] = json!(display_name(
-            s(&row, "name"),
-            s(&settings["values"], "name_order")
-        ));
-        Ok(json!({"employee":row,"timecards":timecards}))
     }
     /// Overlay only completed employee pages from the current guarded attempt.
     pub fn daily_source(
