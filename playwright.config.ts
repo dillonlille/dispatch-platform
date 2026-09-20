@@ -6,7 +6,7 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   reporter: 'list',
-  outputDir: process.env.DISPATCH_TEST_OUTPUT || '/tmp/dispatch-browser-test-results',
+  outputDir: process.env.DISPATCH_TEST_OUTPUT || './test-results',
   use: {
     viewport: { width: 1440, height: 1000 },
     // Default device matches the seeded DSP; timezone regressions override this.

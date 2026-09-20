@@ -6,6 +6,7 @@ import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.j
 import { api, useData } from '../../app/api.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
+import { randomId } from '../../lib/random-id.js';
 import { EmployeesPage } from './EmployeesPage.js';
 import { TimecardsPage } from './TimecardsPage.js';
 import { MealBreaksPage } from './meal-breaks/MealBreaksPage.js';
@@ -60,7 +61,7 @@ export function PaycomPage({ view }: { view: DspView }) {
     async () => {
       try {
         await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-          requestId: crypto.randomUUID(),
+          requestId: randomId(),
           ...(tab !== 'employees' ? { date } : {}),
         });
       } finally {
