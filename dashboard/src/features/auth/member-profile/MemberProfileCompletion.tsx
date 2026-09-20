@@ -3,7 +3,11 @@ import { Check } from 'lucide-react';
 import { DspAvatar, dspTone } from '../../../ui/DspAvatar.js';
 import { useViewportFit } from '../../../ui/useViewportFit.js';
 import { MemberLanyardClip, MemberLanyardStraps } from './MemberProfileLanyard.js';
-import { MEMBER_COMPLETION_MEDIA, MEMBER_COMPLETION_TIMING } from './member-completion-motion.js';
+import {
+  MEMBER_COMPLETION_MEDIA,
+  MEMBER_COMPLETION_TIMING,
+  MEMBER_COMPLETION_SWAY,
+} from './member-completion-motion.js';
 import './member-profile-completion.css';
 
 export type MemberIdentity = {
@@ -84,14 +88,13 @@ export function MemberProfileCompletion({
     );
     const sway = animate(
       hang.current,
-      [
-        { transform: 'rotate(7deg)' },
-        { transform: 'rotate(-4deg)', offset: 0.35 },
-        { transform: 'rotate(1.5deg)', offset: 0.7 },
-        { transform: 'rotate(0deg)' },
-      ],
+      MEMBER_COMPLETION_SWAY.angles.map((angle) => ({
+        transform: `rotate(${angle}deg)`,
+        easing: MEMBER_COMPLETION_SWAY.easing,
+      })),
       drop * 0.3 + settle,
       fade + drop * 0.7,
+      'linear',
     );
     // Hold the starting tilt during the drop, avoiding a sudden rotation when sway begins.
     sway.effect!.updateTiming({ fill: 'both' });

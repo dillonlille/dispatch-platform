@@ -16,7 +16,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const [mode, setMode] = useState(initial),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [notice, setNotice] = useState(handoff ? 'Profile created. Sign in to continue.' : '');
+    [notice, setNotice] = useState('');
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');

@@ -173,11 +173,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(completion).toContainText('Northline Logistics');
     await expect(completion.locator('.member-completion-role')).toHaveText('Member');
     await expect(page.locator('.member-profile-page')).toHaveAttribute('inert', '');
-    // The badge remains readable during its brief hold after settling.
-    await page.waitForTimeout(2600);
+    // The badge remains readable during its two-second hold after settling.
+    await page.waitForTimeout(3600);
     await expect(completion.locator('.member-completion-badge')).toBeVisible();
     await expect(page).toHaveURL(/#signin$/);
     await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.locator('.auth-panel .notice')).toHaveCount(0);
     await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
     await expect(page.getByLabel('Password', { exact: true })).toBeFocused();
     await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
@@ -225,7 +226,7 @@ for (const variant of ['phone', 'reduced motion', 'unavailable artwork'] as cons
     await expect(page).toHaveURL(/#invite\?/);
     await page.getByRole('button', { name: 'Create profile', exact: true }).click();
     await expect(page).toHaveURL(/#signin$/);
-    await expect(page.getByRole('status')).toContainText('Profile created');
+    await expect(page.locator('.auth-panel .notice')).toHaveCount(0);
     await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
     await expect(page.locator('.auth-layout')).toHaveAttribute('data-enter', 'false');
     expect((await page.request.get('/api/session')).status()).toBe(401);
