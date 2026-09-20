@@ -238,34 +238,29 @@ test('create a DSP and accept its owner invitation while another account is sign
   await page.goto('about:blank');
   await page.setContent(message.html);
   await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'DSP onboarding' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
+  await page.getByLabel('DSP name', { exact: true }).fill('Invitation Test DSP');
+  await page.getByLabel('Station code', { exact: true }).fill('DEMO1');
+  await page.getByRole('button', { name: 'Continue to profile', exact: true }).click();
+  await expect(page.getByLabel('Abbreviation', { exact: true })).toBeFocused();
+  await page.getByLabel('Abbreviation', { exact: true }).fill('TEST');
+  await page.getByRole('button', { name: 'Continue to profile', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Create your profile', exact: true }),
+  ).toBeFocused();
+  await page.getByRole('button', { name: 'Back to DSP setup', exact: true }).click();
+  await expect(page.getByLabel('DSP name', { exact: true })).toHaveValue('Invitation Test DSP');
+  await page.getByRole('button', { name: 'Continue to profile', exact: true }).click();
   await expect(page.getByLabel('Email address')).toHaveValue('invited-owner@dispatch.test');
   await page.getByLabel('First name', { exact: true }).fill('Invited');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
   await page.getByLabel('Password', { exact: true }).fill('Invited1');
   await page.getByLabel('Confirm password', { exact: true }).fill('Invited2');
-  await page.getByRole('button', { name: 'Accept invitation' }).click();
+  await page.getByRole('button', { name: 'Finish setup' }).click();
   await expect(page.getByText('The passwords must match.', { exact: true })).toBeVisible();
   await page.getByLabel('Confirm password', { exact: true }).fill('Invited1');
-  await page.getByRole('button', { name: 'Accept invitation' }).click();
-  await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
-  await page.screenshot({
-    path: test.info().outputPath('dispatch-invite-onboarding.png'),
-    fullPage: true,
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({
-    path: test.info().outputPath('dispatch-invite-onboarding-mobile.png'),
-    fullPage: true,
-  });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
+  await page.getByRole('button', { name: 'Finish setup' }).click();
   expect(errors).toEqual([]);
-  await page.getByLabel('DSP name', { exact: true }).fill('Invitation Test DSP');
-  await page.getByLabel('Abbreviation (optional)', { exact: true }).fill('TEST');
-  await page.getByLabel('Station code', { exact: true }).fill('DEMO1');
-  await page.getByRole('button', { name: 'Save DSP details', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();

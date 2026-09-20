@@ -33,12 +33,25 @@ test('an existing account opens its newly invited DSP instead of another members
   await page.goto('about:blank');
   await page.setContent(message.html);
   await page.getByRole('link', { name: 'Start DSP onboarding', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'DSP onboarding', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
+  await page.getByLabel('DSP name', { exact: true }).fill('New invited DSP');
+  await page.getByLabel('Abbreviation', { exact: true }).fill('NIDS');
+  await page.getByLabel('Station code', { exact: true }).fill('DOT4');
+  await page.getByRole('button', { name: 'Continue to profile', exact: true }).click();
   await page.getByLabel('First name', { exact: true }).fill('Existing');
   await page.getByLabel('Last name', { exact: true }).fill('Member');
   await page.getByLabel('Password', { exact: true }).fill(demo.password);
   await page.getByLabel('Confirm password', { exact: true }).fill(demo.password);
-  await page.getByRole('button', { name: 'Accept invitation', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
-  await expect(page.getByLabel('DSP name', { exact: true })).toHaveValue('');
+  await page.getByRole('button', { name: 'Finish setup', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Currently under development', exact: true }),
+  ).toBeVisible();
+  const current = await (await page.request.get(`${origin}/api/session`)).json();
+  const joined = current.dsps.find((dsp: { name: string }) => dsp.name === 'New invited DSP');
+  expect(joined.profile).toMatchObject({
+    abbreviation: 'NIDS',
+    stationCode: 'DOT4',
+    setupRequired: false,
+  });
+  await expect(page).toHaveURL(new RegExp(`#dsp/${joined.id}/`));
 });

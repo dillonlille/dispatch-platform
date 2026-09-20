@@ -35,16 +35,53 @@ test(
     assert.equal(html.headers.get('cache-control'), 'no-store');
     const asset = document.match(/src="(\.?\/assets\/[^"]+\.js)"/)![1]!;
     const url = new URL(asset, f.env.DISPATCH_ORIGIN!);
-    const get = await fetch(url);
+    const get = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
     const bytes = await get.arrayBuffer();
     assert.equal(get.headers.get('cache-control'), 'public, max-age=31536000, immutable');
-    const head = await fetch(url, { method: 'HEAD' });
+    const head = await fetch(url, { method: 'HEAD', headers: { 'accept-encoding': 'identity' } });
     assert.equal(head.headers.get('etag'), get.headers.get('etag'));
     assert.equal(Number(head.headers.get('content-length')), bytes.byteLength);
     assert.equal((await head.arrayBuffer()).byteLength, 0);
-    const cached = await fetch(url, { headers: { 'if-none-match': get.headers.get('etag')! } });
+    const cached = await fetch(url, {
+      headers: { 'if-none-match': get.headers.get('etag')!, 'accept-encoding': 'identity' },
+    });
     assert.equal(cached.status, 304);
     assert.equal((await cached.arrayBuffer()).byteLength, 0);
+    for (const encoding of ['br', 'gzip']) {
+      const compressed = await fetch(url, { headers: { 'accept-encoding': encoding } });
+      assert.equal(compressed.headers.get('content-encoding'), encoding);
+      assert.equal(compressed.headers.get('vary'), 'Accept-Encoding');
+      assert.deepEqual(Buffer.from(await compressed.arrayBuffer()), Buffer.from(bytes));
+      assert(Number(compressed.headers.get('content-length')) < bytes.byteLength);
+      assert.notEqual(compressed.headers.get('etag'), get.headers.get('etag'));
+      const conditional = await fetch(url, {
+        method: 'HEAD',
+        headers: {
+          'accept-encoding': encoding,
+          'if-none-match': compressed.headers.get('etag')!,
+        },
+      });
+      assert.equal(conditional.status, 304);
+      assert.equal(conditional.headers.get('content-encoding'), encoding);
+    }
+    const noCompression = await fetch(url, {
+      headers: { 'accept-encoding': '*;q=1, gzip;q=0, br;q=0' },
+    });
+    assert.equal(noCompression.headers.get('content-encoding'), null);
+    const mapFile = manifest.files.find((file) =>
+      /dashboard\/assets\/onboarding-map-.*\.svg$/.test(file.path),
+    )!;
+    assert(mapFile, 'onboarding map is shipped as an independent vector asset');
+    const map = await fetch(f.env.DISPATCH_ORIGIN + mapFile.path.replace('dashboard', ''), {
+      headers: { 'accept-encoding': 'br' },
+    });
+    assert.equal(map.headers.get('content-type'), 'image/svg+xml');
+    assert.equal(map.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(map.headers.get('content-encoding'), 'br');
+    assert(
+      Number(map.headers.get('content-length')) < 900_000,
+      'compressed vector map stays within its initial-load budget',
+    );
     const font = await fetch(f.env.DISPATCH_ORIGIN + '/assets/inter.woff2');
     assert.equal(font.headers.get('cache-control'), 'public, no-cache');
     assert.equal((await f.request('/api/session')).headers.get('cache-control'), 'no-store');

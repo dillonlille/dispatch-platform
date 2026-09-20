@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { build as viteBuild } from 'vite';
 import { writeManifest } from './artifact.js';
+import { compressAssets } from './compress-assets.js';
 import { replaceBuild } from './build-output.js';
 
 const root = process.cwd(),
@@ -24,6 +25,7 @@ const manifest = await replaceBuild(out, async (staging) => {
     path.join(staging, 'services/rust/dispatch-backend'),
   );
   await viteBuild({ build: { outDir: path.join(staging, 'dashboard') } });
+  await compressAssets(path.join(staging, 'dashboard/assets'));
   fs.mkdirSync(path.join(staging, 'tooling'));
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   fs.writeFileSync(

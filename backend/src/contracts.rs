@@ -145,6 +145,7 @@ pub struct InvitationRequest {
     pub first_name: String,
     pub last_name: String,
     pub password: String,
+    pub dsp_profile: Option<DspSetupRequest>,
 }
 impl InvitationRequest {
     pub fn parse(value: &Value) -> Result<Self> {
@@ -152,6 +153,33 @@ impl InvitationRequest {
         input.first_name = v::name(value, "firstName", 100)?;
         input.last_name = v::name(value, "lastName", 100)?;
         v::text(value, "password", 8, 128)?;
+        if input.dsp_profile.is_some() {
+            input.dsp_profile = Some(DspSetupRequest::parse(&value["dspProfile"])?);
+        }
+        Ok(input)
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DspSetupRequest {
+    pub name: String,
+    pub abbreviation: String,
+    pub station_code: String,
+    pub timezone: String,
+}
+impl DspSetupRequest {
+    pub fn parse(value: &Value) -> Result<Self> {
+        let mut input: Self = request(value)?;
+        input.name = v::name(value, "name", 100)?;
+        input.abbreviation = v::name(value, "abbreviation", 16)?;
+        input.timezone = v::timezone(value, "timezone")?;
+        let station = v::text(value, "stationCode", 3, 8)?;
+        ensure(
+            station.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "invalid_input",
+            400,
+        )?;
+        input.station_code = station.to_uppercase();
         Ok(input)
     }
 }
