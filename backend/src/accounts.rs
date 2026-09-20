@@ -1,6 +1,6 @@
 use super::{
     Error, Result,
-    contracts::{Dsp, DspStatus, PublicUser, UserStatus},
+    contracts::{Dsp, DspSetupRequest, DspStatus, PublicUser, UserStatus},
     crypto,
     db::{Db, FromRow, Row, Store, flag, iso, now, s},
     ensure,
@@ -492,6 +492,7 @@ impl super::State {
         first: String,
         last: String,
         password: String,
+        dsp_profile: Option<DspSetupRequest>,
     ) -> Result<Value> {
         let token = raw.clone();
         let (invite, existing) = self
@@ -501,6 +502,11 @@ impl super::State {
                 Ok((invite, existing))
             })
             .await?;
+        ensure(
+            dsp_profile.is_none() || flag(&invite, "onboarding"),
+            "permission_denied",
+            403,
+        )?;
         let expected = existing.clone();
         let encoded = self
             .password_work(move || {
@@ -572,6 +578,9 @@ impl super::State {
                     &changes,
                     Some(("member", &id)),
                 )?;
+                if let Some(profile) = &dsp_profile {
+                    db.complete_dsp_profile(dsp, &id, profile)?;
+                }
                 Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
             })
         })

@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Brand } from '../../app/Brand.js';
 import { api, useData } from '../../app/api.js';
-import { ErrorBox } from '../../ui/index.js';
+import { OwnerOnboarding } from './OwnerOnboarding.js';
+import { ErrorBox, Loading } from '../../ui/index.js';
 import { messageOf } from '../../lib/errors.js';
 import { dspHash, hashQuery, navigate, platformHash, signInHash } from '../../app/navigation.js';
 export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
@@ -67,6 +68,19 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
       setBusy(false);
     }
   }
+  if (mode === 'invite' && !invitation.data && !invitation.error)
+    return (
+      <main className="auth-layout">
+        <div className="auth-brand">
+          <Brand />
+        </div>
+        <Loading />
+      </main>
+    );
+  if (mode === 'invite' && invitation.data?.onboarding && token)
+    return (
+      <OwnerOnboarding key={token} token={token} email={invitation.data.email} onLogin={onLogin} />
+    );
   const heading = {
     login: 'Sign in to Dispatch',
     forgot: 'Reset your password',

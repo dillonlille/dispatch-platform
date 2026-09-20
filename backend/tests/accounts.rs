@@ -130,6 +130,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
             "Riley".into(),
             "Shaw".into(),
             "a-brand-new-password".into(),
+            None,
         )
         .await
         .unwrap();

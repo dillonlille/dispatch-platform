@@ -157,9 +157,15 @@ async fn accept_invitation(state: Arc<State>, input: Input, _: Public) -> Result
     let key = format!("invite:{}", input.ip);
     state.run(move |db| db.throttle(&key, 20, 3600000)).await?;
     let token = input.param("token").to_owned();
+    let setup = request.dsp_profile.is_some();
     let (first, last) = (request.first_name, request.last_name);
     let joined = state
-        .accept_invitation(token, first, last, request.password)
+        .accept_invitation(token, first, last, request.password, request.dsp_profile)
         .await?;
+    if setup {
+        state
+            .schedule_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
     Ok(Reply::json(joined))
 }
