@@ -7,8 +7,7 @@
 .employees-toolbar,
 .employee-detail-heading,
 .employee-timecard-heading,
-.employees-pagination,
-.employee-timecard-total {
+.employees-pagination {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -232,6 +231,7 @@
   position: relative;
 }
 .employee-timecard-scroll {
+  /* Reserve the same space for loading, empty, short and long timecards. */
   height: 384px;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -282,6 +282,7 @@
 .employee-timecard-total {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-items: center;
   gap: 12px;
   border-top: 1px solid var(--border);
   margin-top: 14px;

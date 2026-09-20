@@ -52,19 +52,14 @@ export function EmployeeTimecard({
   const table = useDataTable({ columns, rows: records, rowId: (card) => card.date });
   const minutes = records.reduce((total, card) => total + Math.round(card.hours * 60), 0);
   const period = requestedPeriod ?? data?.period;
+  let status = data?.nextPeriod ? 'Previous timecard' : 'Latest';
+  if (busy) status = 'Loading…';
+  if (error) status = 'Unavailable';
   return (
     <>
       <div className="employee-timecard-heading">
         <h4>Timecard</h4>
-        <span className={data?.nextPeriod ? 'muted' : 'employee-latest'}>
-          {busy
-            ? 'Loading…'
-            : error
-              ? 'Unavailable'
-              : data?.nextPeriod
-                ? 'Previous timecard'
-                : 'Latest'}
-        </span>
+        <span className={data?.nextPeriod ? 'muted' : 'employee-latest'}>{status}</span>
       </div>
       <nav className="employee-period-controls" aria-label="Timecard navigation">
         <button
