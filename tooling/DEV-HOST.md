@@ -10,6 +10,8 @@ gets its own port, fixture data and session cookie. Bind only to the Tailscale
 address or loopback. Set `DISPATCH_DEV_PORT` to reuse a port across restarts;
 an occupied explicit port fails without replacing its server. Stop only the
 preview belonging to the worktree you are closing.
+Browser checks write to the worktree's `test-results/`, so concurrent checks do not
+clear another worktree's traces.
 
 - `.build/`: verified compiled runtime serving https://dispatchdev.dillonlille.com.
 - `config/`, `data/`, `dsps/`: private environment configuration and persistent state.
