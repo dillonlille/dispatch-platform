@@ -40,8 +40,16 @@ export function MemberProfileCompletion({
       finish();
       return;
     }
-    const { fade, drop, settle, lift } = MEMBER_COMPLETION_TIMING;
-    const exitAt = fade + drop + settle;
+    const { fade, drop, settle, hold, lift } = MEMBER_COMPLETION_TIMING;
+    const exitAt = fade + drop + settle + hold;
+    const sceneElement = scene.current!;
+    const previousVisibility = sceneElement.style.visibility;
+    // Start just above the viewport, accounting for the fitted badge's scale.
+    // Measure once, before any animation; nothing reads layout during the drop.
+    const panel = fit.panel.current!;
+    const bounds = panel.getBoundingClientRect();
+    const scale = bounds.height / panel.offsetHeight || 1;
+    const aboveViewport = `translate3d(0, ${-Math.ceil((bounds.bottom + 32) / scale)}px, 0)`;
     const animations: Animation[] = [];
     function animate(
       element: HTMLElement | null,
@@ -55,20 +63,26 @@ export function MemberProfileCompletion({
       return animation;
     }
     // Composited transforms and opacity only; no React renders or layout reads per frame.
-    animate(scene.current, [{ opacity: 1 }, { opacity: 0 }], fade, 0, 'ease-out');
+    const fadeOut = animate(sceneElement, [{ opacity: 1 }, { opacity: 0 }], fade, 0, 'ease-out');
+    void fadeOut.finished.then(
+      () => {
+        if (!finished) sceneElement.style.visibility = 'hidden';
+      },
+      () => {},
+    );
     animate(
       rig.current,
       [
-        { transform: 'translateY(calc(-100% - 100vh))', easing: 'cubic-bezier(.55,0,.85,.4)' },
-        { transform: 'translateY(14px)', offset: 0.72, easing: 'ease-out' },
-        { transform: 'translateY(-5px)', offset: 0.88, easing: 'ease-in-out' },
-        { transform: 'translateY(0)' },
+        { transform: aboveViewport, easing: 'cubic-bezier(.22,.1,.25,1)' },
+        { transform: 'translate3d(0, 10px, 0)', offset: 0.78, easing: 'ease-out' },
+        { transform: 'translate3d(0, -3px, 0)', offset: 0.92, easing: 'ease-in-out' },
+        { transform: 'translate3d(0, 0, 0)' },
       ],
       drop,
       fade,
       'linear',
     );
-    animate(
+    const sway = animate(
       hang.current,
       [
         { transform: 'rotate(7deg)' },
@@ -79,6 +93,8 @@ export function MemberProfileCompletion({
       drop * 0.3 + settle,
       fade + drop * 0.7,
     );
+    // Hold the starting tilt during the drop, avoiding a sudden rotation when sway begins.
+    sway.effect!.updateTiming({ fill: 'both' });
     animate(
       sheen.current,
       [
@@ -124,8 +140,9 @@ export function MemberProfileCompletion({
       media.removeEventListener('change', changed);
       document.removeEventListener('visibilitychange', changed);
       animations.forEach((animation) => animation.cancel());
+      sceneElement.style.visibility = previousVisibility;
     };
-  }, [onComplete, scene]);
+  }, [onComplete, scene, fit.panel]);
   return (
     <main ref={fit.frame} className="member-completion" role="status" aria-label="Profile created">
       <span className="sr-only">Profile created. Taking you to Sign In.</span>

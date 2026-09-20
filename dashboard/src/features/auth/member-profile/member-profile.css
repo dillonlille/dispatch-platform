@@ -391,6 +391,11 @@ body:has(.member-profile-page) {
   visibility: hidden;
 }
 
+/* Freeze the map before fading it, so it does not repaint behind the falling badge. */
+.member-profile-page[inert] .member-profile-map {
+  --map-motion-state: paused;
+}
+
 .member-profile-password {
   display: flex;
   flex-direction: column;

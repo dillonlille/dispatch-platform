@@ -13,13 +13,13 @@
 .member-completion-size {
   transform: scale(var(--viewport-fit, 1));
   transform-origin: center;
-  perspective: 1200px;
 }
 .member-completion-rig,
 .member-completion-hang {
   display: flex;
   flex-direction: column;
   align-items: center;
+  will-change: transform;
 }
 .member-completion-rig {
   transform: translateY(calc(-100% - 100vh));
@@ -32,7 +32,6 @@
 .member-lanyard-clip {
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 3px 3px var(--shadow-color));
 }
 .member-lanyard-cloth {
   fill: color-mix(in srgb, var(--primary) 72%, #141b33);
@@ -48,6 +47,8 @@
   position: relative;
   z-index: 2;
   margin-bottom: -23px;
+  /* Keep the small metal shadow; filtering the full overflowing straps is expensive. */
+  filter: drop-shadow(0 3px 3px var(--shadow-color));
 }
 .member-completion-badge {
   --member-identity-surface: var(--slate-surface);
@@ -59,6 +60,7 @@
   padding: 64px 28px 28px;
   overflow: hidden;
   transform-origin: 50% 0;
+  will-change: transform;
   border: 1px solid var(--border);
   border-radius: 20px;
   background: linear-gradient(170deg, var(--member-identity-surface), var(--card) 55%);
@@ -149,6 +151,7 @@
   position: absolute;
   inset: 0;
   opacity: 0;
+  will-change: transform, opacity;
   background: linear-gradient(
     112deg,
     transparent 25%,
