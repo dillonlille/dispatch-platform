@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { csrf } from './api.js';
 import { onActivity } from '../lib/activity.js';
+import { randomId } from '../lib/random-id.js';
 
 const BEAT = 30_000;
 const IDLE = 120_000;
@@ -15,7 +16,7 @@ export function usePresence(token: string | undefined) {
   useEffect(() => {
     if (!token) return;
     // Each view reports as its own tab, so a closing view never clears the one replacing it.
-    const tab = crypto.randomUUID();
+    const tab = randomId();
     let lastActivity = performance.now();
     let sent: State | undefined;
     const send = (state: State) => {
