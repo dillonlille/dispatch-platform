@@ -59,6 +59,13 @@
   --steel: #427380;
   --steel-surface: #e9f3f5;
 
+  /* Chart series, in this fixed order. Checked for colour-blind separation on --card. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+
   /* Shadows: used as `box-shadow: <offsets> var(--shadow-color)` */
   --shadow-color: #10182726;
 
@@ -123,6 +130,13 @@
   --slate-surface: #29374b;
   --steel: #9ecad4;
   --steel-surface: #243c44;
+
+  /* Chart series */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
 
   /* Shadows */
   --shadow-color: #0006;

@@ -104,6 +104,8 @@ export function collectionHistory(jobs: Job[]) {
       return {
         key,
         label: `${jobs[0]!.dspName} · ${providerName(jobs[0]!.kind)}`,
+        /** The newest job, finished or not. */
+        newest: sorted[0]!,
         runs,
         latest,
         warnings,
