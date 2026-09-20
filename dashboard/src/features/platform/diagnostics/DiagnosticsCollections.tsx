@@ -1,6 +1,6 @@
 import { AlertTriangle, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useMemo } from 'react';
-import { errorLabel } from '../../app/api.js';
+import { errorLabel } from '../../../app/api.js';
 import {
   Badge,
   DataTable,
@@ -10,15 +10,17 @@ import {
   TablePagination,
   useDataTable,
   type TableColumn,
-} from '../../ui/index.js';
-import { deviceTimezone, duration, time, title } from '../../lib/format.js';
-import { providerName, type collectionHistory } from './collection-history.js';
+} from '../../../ui/index.js';
+import { deviceTimezone, duration, time, title } from '../../../lib/format.js';
+import {
+  isUnderway,
+  providerName,
+  type CollectionRun as Run,
+  type CollectionSource as Source,
+} from './collection-history.js';
 import { memory, RunDetail } from './RunDetail.js';
 import { TrendChart } from './TrendChart.js';
 
-type Source = ReturnType<typeof collectionHistory>[number];
-type Run = Source['runs'][number];
-const active = (status: string) => ['queued', 'running', 'waiting_verification'].includes(status);
 const finished = (run: Run) => run.job.completedAt ?? run.job.createdAt;
 
 const columns: TableColumn<Run>[] = [
@@ -45,7 +47,7 @@ const columns: TableColumn<Run>[] = [
       <>
         <Badge value={job.status} />
         {job.error && <small>{errorLabel(job.error) ?? title(job.error)}</small>}
-        {active(job.status) && (
+        {isUnderway(job.status) && (
           <small>
             {job.progress}% · {job.message}
           </small>
@@ -130,7 +132,7 @@ export function DiagnosticsCollections({
               <strong>{newest.dspName}</strong>
               <small>
                 {providerName(newest.kind)} ·{' '}
-                {active(newest.status)
+                {isUnderway(newest.status)
                   ? `${newest.progress}%`
                   : time(newest.completedAt, deviceTimezone(), '—')}
               </small>

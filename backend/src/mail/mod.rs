@@ -141,35 +141,36 @@ const RECIPIENT: &str = "SELECT COALESCE(i.email,u.email) recipient FROM outbox 
     WHERE o.id=? AND o.status='failed'";
 
 /// Changes a message that ran out of attempts, and records who did it and to whose mail.
-fn change_failed(db: &Store, actor: &str, id: &str, action: &str, sql: &str) -> Result<()> {
+fn change_failed(
+    db: &Store,
+    actor: &str,
+    id: &str,
+    action: &str,
+    change: impl FnOnce() -> Result<usize>,
+) -> Result<()> {
     db.platform.transaction(|| {
         let row = db.platform.one(RECIPIENT, [id])?;
         ensure(row.is_some(), "email_not_failed", 409)?;
         let recipient = row.as_ref().and_then(|r| r["recipient"].as_str());
-        db.platform.exec(sql, params![db::now(), id])?;
+        change()?;
         db.audit_with(Some(actor), None, action, "", recipient, &[])
     })
 }
 
 /// Gives a message that ran out of attempts a fresh set, starting now.
 pub fn retry(db: &Store, actor: &str, id: &str) -> Result<()> {
-    change_failed(
-        db,
-        actor,
-        id,
-        "mail.retried",
-        "UPDATE outbox SET status='pending',attempts=0,available_at=?1,last_error=NULL \
-         WHERE id=?2 AND status='failed'",
-    )
+    change_failed(db, actor, id, "mail.retried", || {
+        db.platform.exec(
+            "UPDATE outbox SET status='pending',attempts=0,available_at=?,last_error=NULL \
+             WHERE id=?",
+            params![db::now(), id],
+        )
+    })
 }
 
 /// Drops a message that ran out of attempts, along with its encrypted content.
 pub fn discard(db: &Store, actor: &str, id: &str) -> Result<()> {
-    change_failed(
-        db,
-        actor,
-        id,
-        "mail.discarded",
-        "DELETE FROM outbox WHERE ?1>0 AND id=?2 AND status='failed'",
-    )
+    change_failed(db, actor, id, "mail.discarded", || {
+        db.platform.exec("DELETE FROM outbox WHERE id=?", [id])
+    })
 }

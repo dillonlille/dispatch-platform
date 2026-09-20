@@ -1,8 +1,7 @@
-import { CircleCheck, CircleDashed, CircleX, RefreshCw } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
-import type { MailMessage, PlatformHealth } from '../../../../shared/contracts/index.js';
-import { discardMail, retryMail, usePlatformMail } from '../../app/endpoints.js';
-import { useAction } from '../../app/useAction.js';
+import { useMemo, useState } from 'react';
+import type { MailMessage, PlatformHealth } from '../../../../../shared/contracts/index.js';
+import { discardMail, retryMail, usePlatformMail } from '../../../app/endpoints.js';
+import { useAction } from '../../../app/useAction.js';
 import {
   Badge,
   ConfirmDialog,
@@ -13,101 +12,9 @@ import {
   TablePagination,
   useDataTable,
   type TableColumn,
-} from '../../ui/index.js';
-import { deviceTimezone, time } from '../../lib/format.js';
-
-function mailFailure(code: string | null): string {
-  if (!code) return '';
-  if (/^email_http_\d{3}$/.test(code)) return `The mail service returned HTTP ${code.slice(-3)}.`;
-  const labels: Record<string, string> = {
-    email_timeout: 'The mail service timed out.',
-    email_connection_failed: 'The mail service could not be reached.',
-    email_transport_configuration_failed: 'The mail transport configuration could not be loaded.',
-    email_smtp_rejected: 'The SMTP server rejected delivery.',
-  };
-  return labels[code] ?? 'Email delivery failed. Check the service logs for details.';
-}
-const at = (value: string | null) => (value ? time(value, deviceTimezone()) : '—');
-
-/** Where a message stands: it has not arrived, the person has yet to act, or it is finished. */
-function stage(message: MailMessage) {
-  if (message.status !== 'sent') return 'undelivered';
-  if (message.kind !== 'invitation') return 'done';
-  if (!message.acceptedAt) return 'waiting';
-  return message.owner && message.setupComplete === false ? 'waiting' : 'done';
-}
-const kindLabel = (message: MailMessage) =>
-  message.kind === 'invitation'
-    ? message.owner
-      ? 'Owner invitation'
-      : `Team invitation${message.role ? ` · ${message.role}` : ''}`
-    : message.kind === 'reset'
-      ? 'Password reset'
-      : 'Email';
-
-function Step({
-  state,
-  label,
-  detail,
-}: {
-  state: 'done' | 'retrying' | 'failed' | 'todo';
-  label: string;
-  detail?: ReactNode;
-}) {
-  const [Icon, tone] = (
-    {
-      done: [CircleCheck, 'mail-step-done'],
-      retrying: [RefreshCw, 'mail-step-retrying'],
-      failed: [CircleX, 'mail-step-failed'],
-      todo: [CircleDashed, 'mail-step-todo'],
-    } as const
-  )[state];
-  return (
-    <li className={`mail-step ${tone}`}>
-      <Icon size={14} aria-hidden="true" />
-      <span>
-        {label}
-        {detail && <small>{detail}</small>}
-      </span>
-    </li>
-  );
-}
-function Progress({ message }: { message: MailMessage }) {
-  const delivery =
-    message.status === 'sent' ? (
-      <Step state="done" label="Sent" detail={at(message.sentAt)} />
-    ) : message.status === 'failed' ? (
-      <Step
-        state="failed"
-        label="Not delivered"
-        detail={mailFailure(message.lastError) || at(message.lastAttemptAt)}
-      />
-    ) : message.attempts ? (
-      <Step
-        state="retrying"
-        label={`Retrying · attempt ${message.attempts + 1} of 5`}
-        detail={`Next ${at(message.nextAttemptAt)}`}
-      />
-    ) : (
-      <Step state="todo" label="Queued" detail={at(message.queuedAt)} />
-    );
-  const invitation = message.kind === 'invitation';
-  return (
-    <ol className="mail-steps">
-      {delivery}
-      {invitation && (
-        <Step
-          state={message.acceptedAt ? 'done' : 'todo'}
-          label={message.owner ? 'Accepted' : 'Joined'}
-          detail={message.acceptedAt ? at(message.acceptedAt) : undefined}
-        />
-      )}
-      {invitation && message.owner && (
-        <Step state={message.setupComplete ? 'done' : 'todo'} label="DSP set up" />
-      )}
-    </ol>
-  );
-}
+} from '../../../ui/index.js';
+import { at, kindLabel, mailFailure, stage } from './mail.js';
+import { MailProgress } from './MailProgress.js';
 
 const filters = [
   ['all', 'All'],
@@ -181,7 +88,7 @@ export function DiagnosticsEmail({
           </>
         ),
     },
-    { id: 'progress', header: 'Progress', cell: (message) => <Progress message={message} /> },
+    { id: 'progress', header: 'Progress', cell: (message) => <MailProgress message={message} /> },
     {
       id: 'actions',
       header: '',
@@ -247,7 +154,7 @@ export function DiagnosticsEmail({
       <section className="diagnostics-card" aria-labelledby="mail-messages">
         <div className="diagnostics-card-heading">
           <h2 id="mail-messages">Messages</h2>
-          <div className="mail-filters" role="group" aria-label="Filter messages">
+          <div className="diagnostics-chips" role="group" aria-label="Filter messages">
             {filters.map(([id, label]) => (
               <button key={id} aria-pressed={filter === id} onClick={() => setFilter(id)}>
                 {label}

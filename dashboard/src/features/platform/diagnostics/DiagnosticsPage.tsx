@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PlatformHealth } from '../../../../shared/contracts/index.js';
-import { hashQuery, replaceHashQuery } from '../../app/navigation.js';
-import { useData } from '../../app/api.js';
-import { usePlatformJobs } from '../../app/endpoints.js';
-import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
+import type { PlatformHealth } from '../../../../../shared/contracts/index.js';
+import { hashQuery, replaceHashQuery } from '../../../app/navigation.js';
+import { useData } from '../../../app/api.js';
+import { usePlatformJobs } from '../../../app/endpoints.js';
+import { ErrorBox, Header, Loading, Tabs } from '../../../ui/index.js';
 import { collectionHistory } from './collection-history.js';
-import type { Diagnostics } from './diagnostics.js';
+import type { Diagnostics } from './types.js';
 import { DiagnosticsCollections } from './DiagnosticsCollections.js';
 import { DiagnosticsEmail } from './DiagnosticsEmail.js';
 import { DiagnosticsOverview } from './DiagnosticsOverview.js';
