@@ -1,7 +1,10 @@
 // The endpoints whose responses are generated from the backend's Rust types: each address
 // is written once, next to the type it answers with. Other endpoints still call `api` and
 // `useData` directly; move one here when its response gains a generated type.
-import { api, useData } from './api.js';
+import { api, useCachedData, useData } from './api.js';
+import { useEffect } from 'react';
+import { prefetchData } from './prefetch.js';
+import { dataCache } from './data-cache.js';
 import type {
   CollectionSchedule,
   CollectionSchedules,
@@ -20,14 +23,30 @@ import type {
 import type { ScheduleInput } from '../../../shared/schedules.js';
 
 export const getSession = () => api<SessionView>('/api/session');
+export const employeeTimecardUrl = (code: string, period?: EmployeeTimecardPeriod | null) =>
+  `/api/dsp/employees/${encodeURIComponent(code)}${period ? `?from=${period.from}&to=${period.to}` : ''}`;
 export const useEmployeeTimecard = (
   code: string,
   period: EmployeeTimecardPeriod | null,
   refreshKey: string,
 ) => {
-  const query = period ? `?from=${period.from}&to=${period.to}` : '';
-  const url = `/api/dsp/employees/${encodeURIComponent(code)}${query}`;
-  return useData<EmployeeTimecardResponse>(url, 0, refreshKey, url);
+  const url = employeeTimecardUrl(code, period);
+  const result = useCachedData<EmployeeTimecardResponse>(url, 0, refreshKey);
+  useEffect(() => {
+    if (!result.data) return;
+    dataCache.alias(url, employeeTimecardUrl(code, result.data.period));
+    if (!result.data.nextPeriod) dataCache.alias(url, employeeTimecardUrl(code));
+  }, [url, code, result.data]);
+  const previous = result.data?.previousPeriod;
+  const next = result.data?.nextPeriod;
+  useEffect(() => {
+    prefetchData(
+      [previous, next]
+        .filter((period) => period != null)
+        .map((period) => employeeTimecardUrl(code, period)),
+    );
+  }, [code, previous?.from, previous?.to, next?.from, next?.to]);
+  return result;
 };
 export const openDsp = (dspId: string, roleId?: string) =>
   api<DspView>('/api/session/dsp', roleId ? { dspId, roleId } : { dspId });

@@ -19,7 +19,10 @@ test('collection metrics survive restart and an additive upgrade preserves old j
     (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
     'ready',
   );
-  const id = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-success' })).value.id;
+  // A completed first week supplies seven records for each of the twelve employees.
+  const id = (
+    await owner.post('/api/dsp/jobs', { requestId: 'metrics-success', date: '2026-01-17' })
+  ).value.id;
   let job: Job;
   await until(async () => {
     job = (await owner.get('/api/dsp/jobs')).value.find((j: Job) => j.id === id);

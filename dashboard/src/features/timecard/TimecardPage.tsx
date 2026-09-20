@@ -1,9 +1,11 @@
 import { useUpdateState } from '../../app/browser-update.js';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, RefreshCw, Settings } from 'lucide-react';
 import type { Connection, DspView } from '../../../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
-import { api, useData } from '../../app/api.js';
+import { api, useCachedData, useData } from '../../app/api.js';
+import { dataCache } from '../../app/data-cache.js';
+import { useCollectionUpdates } from '../../app/live-collection.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
 import { randomId } from '../../lib/random-id.js';
@@ -19,10 +21,11 @@ export function PaycomPage({ view }: { view: DspView }) {
   const canCollect = can(view, 'collections.run');
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
-  const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
+  const preferences = useCachedData<PaycomSettings>('/api/dsp/paycom/settings');
+  useCollectionUpdates();
   const tab = selectedTab ?? 'timecards';
   const [syncRevision, setSyncRevision] = useState(0);
-  const overview = useData<{
+  const overview = useCachedData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
   }>('/api/dsp/paycom/status', 5000);
@@ -42,6 +45,9 @@ export function PaycomPage({ view }: { view: DspView }) {
   const daily = timecards || meals;
   const activeSync = sourceState?.paycom.active || sourceState?.flex.active;
   const collectedAt = overview.data?.workforce.collectedAt;
+  useEffect(() => {
+    if (collectedAt) dataCache.observeVersion('paycom', collectedAt);
+  }, [collectedAt]);
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
   const syncUnavailable = daily
     ? !sourceState

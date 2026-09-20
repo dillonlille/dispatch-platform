@@ -1,25 +1,42 @@
-import { useState, type ReactNode } from 'react';
-import { ArrowDownAZ, ArrowUpAZ, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDownAZ, ArrowUpAZ, ChevronRight } from 'lucide-react';
 import type { Employee } from '../../../../shared/contracts/index.js';
 import { useUpdateState } from '../../app/browser-update.js';
-import { useData } from '../../app/api.js';
-import { useTableState } from '../../app/useTableState.js';
+import { useCachedData } from '../../app/api.js';
+import { employeeTimecardUrl } from '../../app/endpoints.js';
+import { prefetchData } from '../../app/prefetch.js';
 import { DataState, Empty, SearchInput } from '../../ui/index.js';
 import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
 
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
-const pageSize = 8;
 const statuses = ['all', 'active', 'inactive'] as const;
 export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; refreshKey: string }) {
-  const state = useTableState('employee', { id: 'name', desc: false });
+  const [desc, setDesc] = useUpdateState('employee-sort-desc', false);
   const [query, setQuery] = useUpdateState('employee-query', '');
   const [status, setStatus] = useUpdateState<(typeof statuses)[number]>('employee-status', 'all');
   const [selected, setSelected] = useState<string>();
-  const desc = state.sort?.desc ?? false;
-  const url = `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&offset=${state.page * pageSize}&limit=${pageSize}&direction=${desc ? 'desc' : 'asc'}`;
-  const { data, error } = useData<Employees>(url, 0, refreshKey, url);
+  const url = `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${desc ? 'desc' : 'asc'}`;
+  const { data, error } = useCachedData<Employees>(url, 0, refreshKey);
   const employee = data?.employees.find((person) => person.code === selected) ?? data?.employees[0];
+  const directory = useRef<HTMLUListElement>(null);
+  const visibleCodes = data?.employees.map((person) => person.code).join(',');
+  useEffect(() => {
+    const list = directory.current;
+    if (!list) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        prefetchData(
+          entries
+            .filter((entry) => entry.isIntersecting)
+            .map((entry) => employeeTimecardUrl((entry.target as HTMLElement).dataset.employee!)),
+        );
+      },
+      { root: list },
+    );
+    list.querySelectorAll('[data-employee]').forEach((button) => observer.observe(button));
+    return () => observer.disconnect();
+  }, [visibleCodes]);
   return (
     <section className="employees-page" aria-label="Employees">
       <div className="employees-heading">
@@ -37,10 +54,7 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
           label="Search employees"
           placeholder="Search employees…"
           value={query}
-          onChange={(value) => {
-            setQuery(value);
-            state.setPage(0);
-          }}
+          onChange={setQuery}
         />
         <div className="employees-filters" role="group" aria-label="Employee status">
           {statuses.map((value) => (
@@ -48,10 +62,7 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
               key={value}
               type="button"
               aria-pressed={status === value}
-              onClick={() => {
-                setStatus(value);
-                state.setPage(0);
-              }}
+              onClick={() => setStatus(value)}
             >
               {value === 'all' ? 'All' : value === 'active' ? 'Active' : 'Inactive'}
             </button>
@@ -60,10 +71,7 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
         <button
           type="button"
           aria-label={desc ? 'Sort employees A to Z' : 'Sort employees Z to A'}
-          onClick={() => {
-            state.setSort({ id: 'name', desc: !desc });
-            state.setPage(0);
-          }}
+          onClick={() => setDesc(!desc)}
         >
           {desc ? <ArrowUpAZ size={16} /> : <ArrowDownAZ size={16} />}
           {desc ? 'Z–A' : 'A–Z'}
@@ -79,14 +87,17 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
                     <span>Employee</span>
                     <span>{desc ? 'Z–A' : 'A–Z'}</span>
                   </div>
-                  <ul>
+                  <ul ref={directory}>
                     {data.employees.map((person) => (
                       <li key={person.code}>
                         <button
                           type="button"
                           className="employees-person"
+                          data-employee={person.code}
                           aria-pressed={person.code === employee.code}
                           onClick={() => setSelected(person.code)}
+                          onPointerEnter={() => prefetchData([employeeTimecardUrl(person.code)])}
+                          onFocus={() => prefetchData([employeeTimecardUrl(person.code)])}
                         >
                           <EmployeeAvatar name={person.name} />
                           <span>{person.name}</span>
@@ -111,33 +122,6 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
                   : 'Employees will appear after the first collection finishes.'}
               </Empty>
             )}
-            <footer className="employees-pagination">
-              <span aria-live="polite">
-                {data.total
-                  ? `${state.page * pageSize + 1}–${Math.min((state.page + 1) * pageSize, data.total)} of ${data.total} employees`
-                  : '0 employees'}
-              </span>
-              <div>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Previous employees"
-                  disabled={!state.page}
-                  onClick={() => state.setPage(state.page - 1)}
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="Next employees"
-                  disabled={(state.page + 1) * pageSize >= data.total}
-                  onClick={() => state.setPage(state.page + 1)}
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </footer>
           </>
         )}
       </DataState>

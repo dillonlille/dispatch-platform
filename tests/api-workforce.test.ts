@@ -1,7 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { employeeName } from '../shared/paycom.js';
+import { localDate } from '../shared/meal-breaks.js';
 import { fixture } from './support.js';
+
+test('employee directory can load the full roster beyond the API page limit', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const owner = await f.client();
+  const north = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+  await owner.select(north.id);
+  await f.stop();
+  f.collector(north.id, (db) => {
+    const publication = db.prepare('SELECT id FROM publications WHERE active=1').get() as {
+      id: string;
+    };
+    const insert = db.prepare('INSERT INTO employees VALUES (?,?,?,?,?,?,?)');
+    for (let i = 0; i < 125; i++) {
+      const code = `R${String(i).padStart(3, '0')}`;
+      insert.run(publication.id, code, `Roster ${code}`, 'Delivery', 'Driver', '', i % 2);
+    }
+  });
+  await f.start();
+  const all = (await owner.get('/api/dsp/employees?limit=all')).value;
+  assert.equal(all.total, 137);
+  assert.equal(all.employees.length, 137);
+  assert.equal((await owner.get('/api/dsp/employees')).value.employees.length, 50);
+  assert.equal((await owner.get('/api/dsp/employees?limit=100')).value.employees.length, 100);
+  const filtered = (
+    await owner.get('/api/dsp/employees?limit=all&q=Roster&status=inactive&direction=desc')
+  ).value;
+  assert.equal(filtered.total, 63);
+  assert.equal(filtered.employees.length, 63);
+  assert.equal(filtered.employees[0].code, 'R124');
+  assert.equal(filtered.employees.at(-1).code, 'R000');
+  for (const limit of ['0', '101', 'invalid'])
+    assert.equal((await owner.get(`/api/dsp/employees?limit=${limit}`)).status, 400);
+});
 
 test('Rust workforce settings enforce revisions, filter employees and timecards, and retain history', async (t) => {
   const f = await fixture();
@@ -30,8 +65,16 @@ test('Rust workforce settings enforce revisions, filter employees and timecards,
   assert(employees.employees.every((e: { name: string }) => e.name.includes(', ')));
   const detail = (await owner.get('/api/dsp/employees/E002')).value;
   assert.equal(detail.employee.name, 'Ellis, Jordan');
-  assert.equal(detail.timecards.length, 7);
-  assert.equal(detail.period.to, detail.timecards[0].date);
+  const today = localDate('America/Chicago');
+  assert.equal(
+    detail.timecards.length,
+    Math.min(7, (Date.parse(today) - Date.parse(detail.period.from)) / 86400000 + 1),
+  );
+  assert.equal(Date.parse(detail.period.to) - Date.parse(detail.period.from), 13 * 86400000);
+  assert.equal(new Date(detail.period.from).getUTCDay(), 0);
+  assert.equal(new Date(detail.period.to).getUTCDay(), 6);
+  assert.equal(detail.timecards[0].date, today);
+  assert(detail.period.from <= today && today <= detail.period.to);
   assert.equal(detail.nextPeriod, null);
   const same = await owner.get(
     `/api/dsp/employees/E002?from=${detail.period.from}&to=${detail.period.to}`,
