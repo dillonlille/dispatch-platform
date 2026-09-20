@@ -29,7 +29,8 @@
   --map-halo-width: 11;
   --map-halo-opacity: 0.12;
   --map-route-width: 4.5;
-  --map-highlight: #a7c8ff;
+  --map-traveler-core: #2055ed;
+  --map-traveler-outline: #fff;
 }
 [data-theme='dark'] .onboarding-page {
   --map-land: #172030;
@@ -54,7 +55,8 @@
   --map-halo-width: 13;
   --map-halo-opacity: 0.68;
   --map-route-width: 5.5;
-  --map-highlight: #e4edff;
+  --map-traveler-core: #f4f7ff;
+  --map-traveler-outline: #263a6b;
 }
 .onboarding-map {
   position: absolute;
@@ -77,60 +79,113 @@
 .onboarding-page[data-ready='true'] .onboarding-map-motion {
   --map-motion-state: running;
 }
-.onboarding-route-highlight {
-  stroke: var(--map-highlight);
-  stroke-width: 3;
+.onboarding-route-trail,
+.onboarding-traveler {
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 4 100;
-  stroke-dashoffset: 4;
   opacity: 0;
 }
+.onboarding-route-trail {
+  --map-motion-start: 6px;
+  --map-motion-end: -94px;
+  --map-motion-opacity: 0.5;
+  stroke: var(--map-marker);
+  stroke-width: 9;
+  stroke-dasharray: 6 101;
+}
+.onboarding-traveler {
+  --map-motion-start: 0px;
+  --map-motion-end: -100px;
+  --map-motion-opacity: 1;
+  stroke-dasharray: 0.001 101;
+}
+.onboarding-traveler-halo {
+  stroke: var(--map-marker);
+  stroke-width: 30;
+  opacity: 0.2;
+}
+.onboarding-traveler-outline {
+  stroke: var(--map-traveler-outline);
+  stroke-width: 20;
+}
+.onboarding-traveler-core {
+  stroke: var(--map-traveler-core);
+  stroke-width: 12;
+}
+.onboarding-departure-pulse,
 .onboarding-destination-pulse {
   stroke: var(--map-marker);
-  stroke-width: 1.5;
+  stroke-width: 2;
   transform-box: fill-box;
   transform-origin: center;
   opacity: 0;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .onboarding-route-highlight {
-    animation: onboarding-route-travel 9s linear 0.8s infinite;
+  .onboarding-route-trail,
+  .onboarding-traveler {
+    animation: onboarding-marker-travel 10s linear 0.8s infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+  .onboarding-departure-pulse {
+    animation: onboarding-departure 10s ease-out 0.8s infinite;
     animation-play-state: var(--map-motion-state);
   }
   .onboarding-destination-pulse {
-    animation: onboarding-destination-arrival 9s ease-out 0.8s infinite;
+    animation: onboarding-destination-arrival 10s ease-out 0.8s infinite;
     animation-play-state: var(--map-motion-state);
   }
+  .onboarding-destination-echo {
+    animation-delay: 1.25s;
+  }
 }
-@keyframes onboarding-route-travel {
-  0% {
-    stroke-dashoffset: 4;
+@keyframes onboarding-marker-travel {
+  0%,
+  12% {
+    stroke-dashoffset: var(--map-motion-start);
     opacity: 0;
   }
-  5%,
-  62% {
-    opacity: 0.95;
+  14%,
+  60% {
+    opacity: var(--map-motion-opacity);
   }
-  70%,
+  62% {
+    stroke-dashoffset: var(--map-motion-end);
+    opacity: var(--map-motion-opacity);
+  }
+  65%,
   100% {
-    stroke-dashoffset: -100;
+    stroke-dashoffset: var(--map-motion-end);
+    opacity: 0;
+  }
+}
+@keyframes onboarding-departure {
+  0% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  2% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  12%,
+  100% {
+    transform: scale(1.9);
     opacity: 0;
   }
 }
 @keyframes onboarding-destination-arrival {
   0%,
-  66% {
+  61% {
     transform: scale(1);
     opacity: 0;
   }
-  70% {
+  63% {
     transform: scale(1);
-    opacity: 0.4;
+    opacity: 0.65;
   }
-  98%,
+  83%,
   100% {
-    transform: scale(3);
+    transform: scale(3.4);
     opacity: 0;
   }
 }

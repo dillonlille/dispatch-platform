@@ -41,8 +41,21 @@ export function OnboardingMap() {
       </svg>
       {/* Keep animated paint separate from the detailed, static geographic layer. */}
       <svg className="onboarding-map-layer onboarding-map-motion" focusable="false">
-        <use className="onboarding-route-highlight" href={`${mapUrl}#delivery-route`} />
+        <use className="onboarding-departure-pulse" href={`${mapUrl}#departure-pulse`} />
+        <use className="onboarding-route-trail" href={`${mapUrl}#delivery-route`} />
+        {/* A round, near-zero-length dash follows the shared route without a JS frame loop. */}
+        <g className="onboarding-traveler">
+          <use className="onboarding-traveler-halo" href={`${mapUrl}#delivery-route`} />
+          <use className="onboarding-traveler-outline" href={`${mapUrl}#delivery-route`} />
+          <use className="onboarding-traveler-core" href={`${mapUrl}#delivery-route`} />
+        </g>
         <use className="onboarding-destination-pulse" href={`${mapUrl}#delivery-pulse`} />
+        <use
+          className="onboarding-destination-pulse onboarding-destination-echo"
+          href={`${mapUrl}#delivery-pulse`}
+        />
+        {/* The marker emerges from beneath the station instead of covering its logo. */}
+        <use href={`${mapUrl}#delivery-station`} />
       </svg>
     </div>
   ) : null;
