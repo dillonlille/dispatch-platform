@@ -538,6 +538,13 @@
 .settings-section:last-child {
   border-bottom: 0;
 }
+/* Keep the lettering on a stable layer; the moving reflection gets its own. */
+@media (min-width: 701px) and (prefers-reduced-motion: no-preference) {
+  .profile-badge,
+  .profile-badge::after {
+    will-change: transform;
+  }
+}
 /* Nothing moves on a phone or for anyone who asks for less motion, and a phone shows the card alone. */
 @media (max-width: 700px), (prefers-reduced-motion: reduce) {
   .profile-badge {
