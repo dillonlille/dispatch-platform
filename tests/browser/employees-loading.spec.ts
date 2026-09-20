@@ -59,7 +59,7 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     const detail = page.getByRole('region', { name: 'Employee details', exact: true });
     const rows = detail.locator('tbody tr');
-    await expect(rows).toHaveCount(7);
+    await expect(rows).toHaveCount(14);
     const geometry = () =>
       page.evaluate(() => ({
         scrollY,
@@ -71,7 +71,7 @@ for (const width of [1280, 390]) {
           '.employee-period-controls',
           '.employee-timecard-total',
           '.employee-timecard-total > div',
-          '.employees-pagination',
+          '.employees-directory',
         ].map((selector) => {
           const box = document.querySelector(selector)?.getBoundingClientRect();
           return box ? [box.x, box.y, box.width, box.height].map(Math.round) : null;
@@ -114,25 +114,26 @@ for (const width of [1280, 390]) {
       element.scrollTop = element.scrollHeight;
     });
     await expect(rows.last()).toBeInViewport();
-    await switchWithDelay(employee('Morgan Reed'), () =>
-      expect(
-        detail.getByRole('heading', { name: 'No recorded activity in this timecard' }),
-      ).toBeVisible(),
-    );
-    await switchWithDelay(employee('Avery Morgan'), () => expect(rows).toHaveCount(7));
+    await switchWithDelay(employee('Morgan Reed'), async () => {
+      await expect(rows).toHaveCount(14);
+      await expect(detail).toContainText('0 recorded days');
+      await expect(detail.locator('.employee-timecard-total strong')).toHaveText('0h 00m');
+    });
+    await switchWithDelay(employee('Avery Morgan'), () => expect(rows).toHaveCount(14));
     const previous = page.getByRole('button', { name: 'Previous timecard', exact: true });
     const next = page.getByRole('button', { name: 'Next timecard', exact: true });
-    await switchWithDelay(previous, () => expect(rows).toHaveCount(2));
-    await switchWithDelay(next, () => expect(rows).toHaveCount(7));
+    await switchWithDelay(previous, () => expect(rows).toHaveCount(14));
+    await expect(detail).toContainText('2 recorded days');
+    await switchWithDelay(next, () => expect(rows).toHaveCount(14));
     fail = true;
     await switchWithDelay(previous, () =>
       expect(detail.getByRole('alert')).toContainText('Timecard could not be loaded.'),
     );
     await switchWithDelay(detail.getByRole('button', { name: 'Try again' }), () =>
-      expect(rows).toHaveCount(2),
+      expect(rows).toHaveCount(14),
     );
-    await switchWithDelay(employee('Alex Parker'), () => expect(rows).toHaveCount(7));
-    await switchWithDelay(employee('Avery Morgan'), () => expect(rows).toHaveCount(7));
+    await switchWithDelay(employee('Alex Parker'), () => expect(rows).toHaveCount(14));
+    await switchWithDelay(employee('Avery Morgan'), () => expect(rows).toHaveCount(14));
     await expect(detail.getByText('Latest', { exact: true })).toBeVisible();
     await expect(next).toBeDisabled();
     expect(errors).toEqual([]);

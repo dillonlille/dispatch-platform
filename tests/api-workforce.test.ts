@@ -3,6 +3,40 @@ import assert from 'node:assert/strict';
 import { employeeName } from '../shared/paycom.js';
 import { fixture } from './support.js';
 
+test('employee directory can load the full roster beyond the API page limit', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const owner = await f.client();
+  const north = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+  await owner.select(north.id);
+  await f.stop();
+  f.collector(north.id, (db) => {
+    const publication = db.prepare('SELECT id FROM publications WHERE active=1').get() as {
+      id: string;
+    };
+    const insert = db.prepare('INSERT INTO employees VALUES (?,?,?,?,?,?,?)');
+    for (let i = 0; i < 125; i++) {
+      const code = `R${String(i).padStart(3, '0')}`;
+      insert.run(publication.id, code, `Roster ${code}`, 'Delivery', 'Driver', '', i % 2);
+    }
+  });
+  await f.start();
+  const all = (await owner.get('/api/dsp/employees?limit=all')).value;
+  assert.equal(all.total, 137);
+  assert.equal(all.employees.length, 137);
+  assert.equal((await owner.get('/api/dsp/employees')).value.employees.length, 50);
+  assert.equal((await owner.get('/api/dsp/employees?limit=100')).value.employees.length, 100);
+  const filtered = (
+    await owner.get('/api/dsp/employees?limit=all&q=Roster&status=inactive&direction=desc')
+  ).value;
+  assert.equal(filtered.total, 63);
+  assert.equal(filtered.employees.length, 63);
+  assert.equal(filtered.employees[0].code, 'R124');
+  assert.equal(filtered.employees.at(-1).code, 'R000');
+  for (const limit of ['0', '101', 'invalid'])
+    assert.equal((await owner.get(`/api/dsp/employees?limit=${limit}`)).status, 400);
+});
+
 test('Rust workforce settings enforce revisions, filter employees and timecards, and retain history', async (t) => {
   const f = await fixture();
   t.after(f.close);

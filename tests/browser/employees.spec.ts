@@ -46,6 +46,8 @@ test('employee workspace navigates real period history, resets selection, filter
           const date = new Date(`${to}T00:00:00Z`);
           date.setUTCDate(date.getUTCDate() - day);
           const recorded = day < 4 && person.code !== 'E003';
+          // A missing date and a collected blank date must both appear in the timecard.
+          if (!recorded && day === 6) continue;
           const hours = recorded ? (id === 'revised-middle' ? 7 : day === 3 ? 0 : 8.5) : 0;
           let punches: Punch[] = recorded
             ? [
@@ -92,7 +94,13 @@ test('employee workspace navigates real period history, resets selection, filter
   const search = page.getByRole('searchbox', { name: 'Search employees' });
   const previous = page.getByRole('button', { name: 'Previous timecard', exact: true });
   const next = page.getByRole('button', { name: 'Next timecard', exact: true });
-  await expect(directory.getByRole('button')).toHaveCount(8);
+  await expect(directory.getByRole('button')).toHaveCount(12);
+  await expect(page.getByRole('button', { name: 'Next employees', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Previous employees', exact: true })).toHaveCount(
+    0,
+  );
+  await directory.getByRole('button', { name: 'Quinn Foster', exact: true }).click();
+  await expect(detail.getByRole('heading', { name: 'Quinn Foster', exact: true })).toBeVisible();
   await directory.getByRole('button', { name: 'Avery Morgan', exact: true }).click();
   await expect(detail.getByRole('heading', { name: 'Avery Morgan', exact: true })).toBeVisible();
   await expect(detail.getByText('Latest', { exact: true })).toBeVisible();
@@ -107,10 +115,28 @@ test('employee workspace navigates real period history, resets selection, filter
     'Out',
     'Hours',
   ]);
-  await expect(detail.locator('tbody tr')).toHaveCount(4);
+  await expect(detail.locator('tbody tr')).toHaveCount(7);
+  await expect(detail).toContainText('4 recorded days');
   await expect(detail).toContainText('25h 30m');
   const rows = detail.locator('tbody tr');
-  await expect(rows.first().locator('td')).toHaveText([
+  await expect(rows.locator('td:first-child')).toHaveText([
+    'Sun, Sep 13',
+    'Mon, Sep 14',
+    'Tue, Sep 15',
+    'Wed, Sep 16',
+    'Thu, Sep 17',
+    'Fri, Sep 18',
+    'Sat, Sep 19',
+  ]);
+  for (const index of [0, 1, 2])
+    await expect(rows.nth(index).locator('td:not(:first-child)')).toHaveText([
+      '—',
+      '—',
+      '—',
+      '—',
+      '0h 00m',
+    ]);
+  await expect(rows.last().locator('td')).toHaveText([
     'Sat, Sep 19',
     '8:00 AM',
     '12:00 PM',
@@ -118,7 +144,7 @@ test('employee workspace navigates real period history, resets selection, filter
     '5:00 PM',
     '8h 30m',
   ]);
-  await expect(rows.nth(1).locator('td')).toHaveText([
+  await expect(rows.nth(5).locator('td')).toHaveText([
     'Fri, Sep 18',
     '8:00 AM',
     '12:00 PM',
@@ -126,10 +152,10 @@ test('employee workspace navigates real period history, resets selection, filter
     '5:00 PM',
     '8h 30m',
   ]);
-  await expect(rows.nth(2).locator('td').nth(2).locator('div')).toHaveText(['12:00 PM', '2:30 PM']);
-  await expect(rows.nth(2).locator('td').nth(3).locator('div')).toHaveText(['12:15 PM', '2:45 PM']);
+  await expect(rows.nth(4).locator('td').nth(2).locator('div')).toHaveText(['12:00 PM', '2:30 PM']);
+  await expect(rows.nth(4).locator('td').nth(3).locator('div')).toHaveText(['12:15 PM', '2:45 PM']);
   // An isolated OUT LUNCH must not be displayed as the end of the day.
-  await expect(rows.last().locator('td')).toHaveText([
+  await expect(rows.nth(3).locator('td')).toHaveText([
     'Wed, Sep 16',
     '—',
     '12:03 PM',
@@ -148,6 +174,8 @@ test('employee workspace navigates real period history, resets selection, filter
   await expect(next).toBeEnabled();
   await previous.click();
   await expect(page.getByLabel('Timecard navigation')).toContainText('Aug 30');
+  await expect(rows.first().locator('td').first()).toHaveText('Sun, Aug 30');
+  await expect(rows.last().locator('td').first()).toHaveText('Sat, Sep 5');
   await expect(previous).toBeDisabled();
   await next.click();
   await expect(page.getByLabel('Timecard navigation')).toContainText('Sep 6');
@@ -191,10 +219,7 @@ test('employee workspace navigates real period history, resets selection, filter
   await punches.press('ArrowRight');
   await expect.poll(() => punches.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('button', { name: 'Next employees', exact: true }).click();
-  await expect(directory.getByRole('button')).toHaveCount(4);
-  await page.getByRole('button', { name: 'Previous employees', exact: true }).click();
-  await expect(directory.getByRole('button')).toHaveCount(8);
+  await expect(directory.getByRole('button')).toHaveCount(12);
   await page
     .getByRole('group', { name: 'Employee status' })
     .getByRole('button', { name: 'Inactive', exact: true })
@@ -215,9 +240,18 @@ test('employee workspace navigates real period history, resets selection, filter
     .getByRole('button', { name: 'All', exact: true })
     .click();
   await search.fill('Morgan Reed');
-  await expect(
-    detail.getByRole('heading', { name: 'No recorded activity in this timecard' }),
-  ).toBeVisible();
+  await expect(detail.getByRole('heading', { name: 'Morgan Reed', exact: true })).toBeVisible();
+  await expect(rows).toHaveCount(7);
+  await expect(detail).toContainText('0 recorded days');
+  await expect(detail.locator('.employee-timecard-total strong')).toHaveText('0h 00m');
+  await expect(rows.first().locator('td')).toHaveText([
+    'Sun, Sep 13',
+    '—',
+    '—',
+    '—',
+    '—',
+    '0h 00m',
+  ]);
   await expect(previous).toBeDisabled();
   expect(errors).toEqual([]);
 });

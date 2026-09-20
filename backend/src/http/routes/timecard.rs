@@ -50,7 +50,11 @@ fn employees(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     let query = optional_text(q, "q", 100)?;
     let desc = descending(q)?;
     let offset = query_number(q, "offset", 0, 0, 100000)?;
-    let limit = query_number(q, "limit", 50, 1, 100)?;
+    let limit = if q["limit"] == "all" {
+        None
+    } else {
+        Some(query_number(q, "limit", 50, 1, 100)?)
+    };
     let status = optional(q, "status", |q, key| {
         v::choice(q, key, &["all", "active", "inactive"])
     })?

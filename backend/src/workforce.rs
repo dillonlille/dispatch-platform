@@ -364,7 +364,7 @@ impl Store {
         id: &str,
         query: &str,
         offset: usize,
-        limit: usize,
+        limit: Option<usize>,
         desc: bool,
         active: Option<bool>,
     ) -> Result<Value> {
@@ -409,7 +409,7 @@ impl Store {
                 query.to_lowercase(),
                 s(p, "name_order"),
                 active,
-                limit as i64,
+                limit.map_or(-1, |value| value as i64),
                 offset as i64
             ],
         )?;
