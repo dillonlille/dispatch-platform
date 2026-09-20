@@ -8,6 +8,8 @@ import type {
   Connection,
   DspSummary,
   DspView,
+  EmployeeTimecardPeriod,
+  EmployeeTimecardResponse,
   Job,
   MailMessage,
   Membership,
@@ -18,6 +20,15 @@ import type {
 import type { ScheduleInput } from '../../../shared/schedules.js';
 
 export const getSession = () => api<SessionView>('/api/session');
+export const useEmployeeTimecard = (
+  code: string,
+  period: EmployeeTimecardPeriod | null,
+  refreshKey: string,
+) => {
+  const query = period ? `?from=${period.from}&to=${period.to}` : '';
+  const url = `/api/dsp/employees/${encodeURIComponent(code)}${query}`;
+  return useData<EmployeeTimecardResponse>(url, 0, refreshKey, url);
+};
 export const openDsp = (dspId: string, roleId?: string) =>
   api<DspView>('/api/session/dsp', roleId ? { dspId, roleId } : { dspId });
 

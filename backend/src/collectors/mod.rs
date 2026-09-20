@@ -451,7 +451,10 @@ mod tests {
         next["employees"][0]["name"] = json!("New Collection");
         reopened.publish(&id, &next).unwrap();
         assert_eq!(
-            reopened.employee(&id, "E001").unwrap()["employee"]["name"],
+            reopened
+                .employee_timecard(&id, "E001", None)
+                .unwrap()
+                .employee["name"],
             "New Collection"
         );
     }

@@ -7,6 +7,7 @@ import type { Connection as GeneratedConnection } from './generated/Connection';
 import type { DspSummary as GeneratedDspSummary } from './generated/DspSummary';
 import type { DspView as GeneratedDspView } from './generated/DspView';
 import type { Environment } from './generated/Environment';
+import type { EmployeeTimecardResponse as GeneratedEmployeeTimecardResponse } from './generated/EmployeeTimecardResponse';
 import type { PublicJob } from './generated/PublicJob';
 import type { Role as GeneratedRole } from './generated/Role';
 import type { SessionResponse } from './generated/SessionResponse';
@@ -15,6 +16,11 @@ export type { PublicUser as User } from './generated/PublicUser';
 export type { MailMessage } from './generated/MailMessage';
 export type { Member as Membership } from './generated/Member';
 export type { SchedulePreview } from './generated/SchedulePreview';
+export type { EmployeeTimecardPeriod } from './generated/EmployeeTimecardPeriod';
+export type EmployeeTimecardResponse = Narrow<
+  GeneratedEmployeeTimecardResponse,
+  { employee: Employee; timecards: Timecard[] }
+>;
 // A generated shape with some fields given the narrower type the backend really sends.
 // The narrower type must fit the generated one, so a renamed or retyped field fails here.
 type Narrow<T, N extends { [K in keyof N]: K extends keyof T ? T[K] : never }> = Omit<T, keyof N> &

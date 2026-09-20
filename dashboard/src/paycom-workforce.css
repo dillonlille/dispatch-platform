@@ -39,22 +39,3 @@
   color: var(--muted-foreground);
   font-size: 12px;
 }
-.paycom-employee-search {
-  max-width: 360px;
-}
-.paycom-employee-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 18px;
-  padding: 20px;
-  background: var(--muted);
-  border-radius: var(--radius);
-}
-.paycom-employee-details dt {
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.paycom-employee-details dd {
-  margin: 5px 0 0;
-  overflow-wrap: anywhere;
-}

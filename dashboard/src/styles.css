@@ -2,6 +2,7 @@
 @import './styles/reset.css';
 @import './styles/base-components.css';
 @import './paycom-workforce.css';
+@import './employees.css';
 @import './styles/diagnostics.css';
 
 /* Shared native controls. */
@@ -623,21 +624,6 @@ td small {
   height: 100%;
   background: var(--primary);
 }
-.employee-link {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font-weight: 500;
-  text-align: left;
-}
-.employee-link:hover {
-  color: var(--primary);
-  background: transparent;
-}
 .workspace-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -755,13 +741,6 @@ td small {
   margin-top: 8px;
 }
 
-.paycom-day-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-}
 .paycom-date-controls {
   display: flex;
   align-items: flex-end;
@@ -771,11 +750,6 @@ td small {
 .paycom-date-controls .date-field {
   width: 124px;
   font-size: 13px;
-}
-.paycom-source-note {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--muted-foreground);
 }
 .paycom-day-table {
   min-width: 0;
@@ -826,36 +800,6 @@ td small {
 .paycom-data-table th {
   background: var(--muted);
   padding-inline: 18px;
-}
-.paycom-data-table .employee-link {
-  color: var(--primary);
-  min-height: 0;
-}
-.paycom-data-table .employee-link:hover {
-  text-decoration: underline;
-}
-.paycom-workspace-controls {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--border);
-}
-.paycom-controls-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.paycom-controls-row > button {
-  margin-left: auto;
-}
-.paycom-sync-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin-top: 12px;
-  margin-bottom: 20px;
-  font-size: 13px;
 }
 @media (max-width: 600px) {
   .paycom-date-controls {
