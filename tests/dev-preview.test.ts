@@ -67,6 +67,55 @@ test('parallel worktree previews isolate ports, files, fixtures and browser sess
   assert(!sockets[1]!.messages.some((message) => message.type === 'update'));
   for (const { socket } of sockets) socket.close();
 
+  // Entry links establish independent demo sessions in browsers with no cookies.
+  const enter = async (preview: typeof first) => {
+    const response = await fetch(preview.previewUrl, { redirect: 'manual' });
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get('location'), '/');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    const cookie = response.headers.getSetCookie()[0]!;
+    assert(cookie.startsWith(`dispatch_preview_${new URL(preview.origin).port}=`));
+    assert(cookie.includes('HttpOnly'));
+    assert(cookie.includes('SameSite=Strict'));
+    return cookie.split(';')[0]!;
+  };
+  const session = async (preview: typeof first, cookie: string) => {
+    const response = await fetch(preview.origin + '/api/session', { headers: { cookie } });
+    return { status: response.status, value: await response.json() };
+  };
+  const invalid = await fetch(first.origin + new URL(second.previewUrl).pathname);
+  assert.equal(invalid.status, 404);
+  assert.equal(invalid.headers.get('set-cookie'), null);
+  const wrongMethod = await fetch(first.previewUrl, { method: 'POST' });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get('set-cookie'), null);
+  const [firstBrowser, secondBrowser] = await Promise.all([enter(first), enter(first)]);
+  assert.notEqual(firstBrowser, secondBrowser);
+  const firstSession = await session(first, firstBrowser);
+  const secondSession = await session(first, secondBrowser);
+  for (const result of [firstSession, secondSession]) {
+    assert.equal(result.status, 200);
+    assert.equal(result.value.user.email, demo.email);
+    assert.equal(result.value.user.platformOwner, true);
+  }
+  assert.equal((await session(second, firstBrowser)).status, 401);
+  assert.equal((await session(second, await enter(second))).status, 200);
+  const logout = await fetch(first.origin + '/api/auth/logout', {
+    method: 'POST',
+    headers: {
+      origin: first.origin,
+      cookie: firstBrowser,
+      'content-type': 'application/json',
+      'x-csrf-token': firstSession.value.csrf,
+    },
+    body: '{}',
+  });
+  assert.equal(logout.status, 200);
+  assert.equal((await session(first, firstBrowser)).status, 401);
+  assert.equal((await session(first, secondBrowser)).status, 200);
+  assert.equal((await session(first, await enter(first))).status, 200);
+
   // A real browser sends all same-host cookies, regardless of their ports.
   const jar = new Map<string, string>();
   async function request(origin: string, url: string, body?: unknown, csrf?: string) {
