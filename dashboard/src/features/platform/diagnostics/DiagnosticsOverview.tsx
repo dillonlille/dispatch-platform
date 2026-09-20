@@ -1,14 +1,12 @@
 import { AlertTriangle, ChevronRight, CircleX, Cpu, Globe, HardDrive, Mail } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { Job, PlatformHealth } from '../../../../shared/contracts/index.js';
-import { Badge, DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
-import { bytes, deviceTimezone, duration, time } from '../../lib/format.js';
-import { providerName, type collectionHistory } from './collection-history.js';
-import type { Diagnostics } from './diagnostics.js';
+import type { Job, PlatformHealth } from '../../../../../shared/contracts/index.js';
+import { Badge, DataTable, Empty, useDataTable, type TableColumn } from '../../../ui/index.js';
+import { bytes, deviceTimezone, duration, time } from '../../../lib/format.js';
+import { issues } from './attention.js';
+import { isUnderway, providerName, type CollectionSource as Source } from './collection-history.js';
+import type { Diagnostics } from './types.js';
 import { memory } from './RunDetail.js';
-
-type Source = ReturnType<typeof collectionHistory>[number];
-const active = (job: Job) => ['queued', 'running', 'waiting_verification'].includes(job.status);
 
 function Tile({
   icon,
@@ -50,12 +48,13 @@ export function DiagnosticsOverview({
   diagnostics: Diagnostics;
   jobs: Job[];
   sources: Source[];
-  openSource: (key: string) => void;
+  /** Opens a source in Collections, with one of its runs expanded when named. */
+  openSource: (key: string, run?: string) => void;
   openEmail: () => void;
 }) {
   const { browsers, mail } = health;
-  const running = jobs.filter(active);
-  const attention = sources.filter((source) => source.warnings.length);
+  const running = jobs.filter((job) => isUnderway(job.status));
+  const attention = issues(health, diagnostics, sources);
   const columns: TableColumn<Source>[] = [
     {
       id: 'source',
@@ -90,11 +89,11 @@ export function DiagnosticsOverview({
     {
       id: 'open',
       header: '',
-      cell: ({ key, label }) => (
+      cell: ({ key, label, newest }) => (
         <button
           className="icon-button diagnostics-open"
           aria-label={`Open ${label}`}
-          onClick={() => openSource(key)}
+          onClick={() => openSource(key, newest.id)}
         >
           <ChevronRight size={16} />
         </button>
@@ -174,37 +173,40 @@ export function DiagnosticsOverview({
         </section>
         <section className="diagnostics-card" aria-labelledby="diagnostics-attention">
           <h2 id="diagnostics-attention">Needs attention</h2>
-          {attention.map((source) => (
-            <button
-              className="diagnostics-issue"
-              key={source.key}
-              onClick={() => openSource(source.key)}
-            >
-              {source.newest.status === 'failed' ? (
-                <CircleX size={16} className="diagnostics-bad" />
-              ) : (
-                <AlertTriangle size={16} className="diagnostics-warn" />
-              )}
-              <span>
-                <strong>{source.label}</strong>
-                {source.warnings.map((warning) => (
-                  <small key={warning}>{warning}</small>
-                ))}
-              </span>
-            </button>
-          ))}
-          {mail.failed > 0 && (
-            <button className="diagnostics-issue" onClick={openEmail}>
-              <CircleX size={16} className="diagnostics-bad" />
-              <span>
-                <strong>Email</strong>
-                <small>
-                  {mail.failed} failed {mail.failed === 1 ? 'delivery' : 'deliveries'}
-                </small>
-              </span>
-            </button>
-          )}
-          {!attention.length && !mail.failed && <p className="muted">Nothing needs attention.</p>}
+          {attention.map((issue) => {
+            const body = (
+              <>
+                {issue.tone === 'failed' ? (
+                  <CircleX size={16} className="diagnostics-bad" />
+                ) : (
+                  <AlertTriangle size={16} className="diagnostics-warn" />
+                )}
+                <span>
+                  <strong>{issue.title}</strong>
+                  {issue.details.map((detail) => (
+                    <small key={detail}>{detail}</small>
+                  ))}
+                </span>
+              </>
+            );
+            const { open } = issue;
+            return open ? (
+              <button
+                className="diagnostics-issue"
+                key={issue.id}
+                onClick={() =>
+                  open.tab === 'email' ? openEmail() : openSource(open.source, open.run)
+                }
+              >
+                {body}
+              </button>
+            ) : (
+              <div className="diagnostics-issue" key={issue.id}>
+                {body}
+              </div>
+            );
+          })}
+          {!attention.length && <p className="muted">Nothing needs attention.</p>}
         </section>
       </div>
       <section className="diagnostics-card" aria-labelledby="diagnostics-latest">

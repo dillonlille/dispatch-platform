@@ -4,7 +4,7 @@ import type { Job, JobMetrics } from '../shared/contracts/index.js';
 import {
   collectionHistory,
   runHistory,
-} from '../dashboard/src/features/platform/collection-history.js';
+} from '../dashboard/src/features/platform/diagnostics/collection-history.js';
 
 function job(
   index: number,

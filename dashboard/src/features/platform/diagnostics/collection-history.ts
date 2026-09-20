@@ -1,5 +1,8 @@
-import type { Job } from '../../../../shared/contracts/index.js';
+import type { Job } from '../../../../../shared/contracts/index.js';
 
+const finished = ['succeeded', 'failed', 'cancelled'];
+/** Queued, running or waiting for verification. */
+export const isUnderway = (status: Job['status']) => !finished.includes(status);
 export const providerName = (kind: Job['kind']) =>
   kind === 'paycom.collect' ? 'Paycom' : 'Cortex';
 function median(values: number[]) {
@@ -52,9 +55,8 @@ export function collectionHistory(jobs: Job[]) {
         (a, b) =>
           Date.parse(b.completedAt ?? b.createdAt) - Date.parse(a.completedAt ?? a.createdAt),
       );
-      const runs = sorted
-        .filter((j) => ['succeeded', 'failed', 'cancelled'].includes(j.status))
-        .map(runHistory);
+      const runs = sorted.filter((j) => !isUnderway(j.status)).map(runHistory);
+      const underway = sorted.filter((j) => isUnderway(j.status)).map(runHistory);
       const successes = runs.filter((r) => r.job.status === 'succeeded');
       const latest = successes[0];
       const baseline = successes
@@ -106,6 +108,8 @@ export function collectionHistory(jobs: Job[]) {
         label: `${jobs[0]!.dspName} · ${providerName(jobs[0]!.kind)}`,
         /** The newest job, finished or not. */
         newest: sorted[0]!,
+        /** Queued, running or waiting for verification: no part of the statistics. */
+        underway,
         runs,
         latest,
         warnings,
@@ -116,3 +120,6 @@ export function collectionHistory(jobs: Job[]) {
     })
     .sort((a, b) => a.label.localeCompare(b.label));
 }
+
+export type CollectionSource = ReturnType<typeof collectionHistory>[number];
+export type CollectionRun = CollectionSource['runs'][number];

@@ -4,6 +4,7 @@
     "tests/collection-history.test.ts",
     "tests/dashboard-format.test.ts",
     "tests/dashboard-structure.test.ts",
+    "tests/diagnostics.test.ts",
     "tests/meal-breaks.test.ts",
     "tests/unused-css.test.ts"
   ],

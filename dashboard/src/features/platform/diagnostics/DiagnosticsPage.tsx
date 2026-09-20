@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PlatformHealth } from '../../../../shared/contracts/index.js';
-import { hashQuery, replaceHashQuery } from '../../app/navigation.js';
-import { useData } from '../../app/api.js';
-import { usePlatformJobs } from '../../app/endpoints.js';
-import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
+import type { PlatformHealth } from '../../../../../shared/contracts/index.js';
+import { hashQuery, replaceHashQuery } from '../../../app/navigation.js';
+import { useData } from '../../../app/api.js';
+import { usePlatformJobs } from '../../../app/endpoints.js';
+import { ErrorBox, Header, Loading, Tabs } from '../../../ui/index.js';
 import { collectionHistory } from './collection-history.js';
-import type { Diagnostics } from './diagnostics.js';
+import type { Diagnostics } from './types.js';
 import { DiagnosticsCollections } from './DiagnosticsCollections.js';
 import { DiagnosticsEmail } from './DiagnosticsEmail.js';
 import { DiagnosticsOverview } from './DiagnosticsOverview.js';
@@ -15,7 +15,11 @@ const tabs = ['overview', 'collections', 'email', 'test-dsps'];
 function addressed() {
   const query = hashQuery();
   const tab = query.get('tab') ?? '';
-  return { tab: tabs.includes(tab) ? tab : 'overview', source: query.get('source') ?? '' };
+  return {
+    tab: tabs.includes(tab) ? tab : 'overview',
+    source: query.get('source') ?? '',
+    run: query.get('run') ?? '',
+  };
 }
 
 export function DiagnosticsPage() {
@@ -30,9 +34,9 @@ export function DiagnosticsPage() {
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, []);
-  const go = (tab: string, source = place.source) => {
-    setPlace({ tab, source });
-    replaceHashQuery(source ? { tab, source } : { tab });
+  const go = (tab: string, source = place.source, run = '') => {
+    setPlace({ tab, source, run });
+    replaceHashQuery({ tab, ...(source && { source }), ...(run && { run }) });
   };
   const attention = sources.filter((source) => source.warnings.length).length;
   const mailFailed = health.data?.mail.failed ?? 0;
@@ -64,7 +68,7 @@ export function DiagnosticsPage() {
             diagnostics={diagnostics.data}
             jobs={jobs.data}
             sources={sources}
-            openSource={(source) => go('collections', source)}
+            openSource={(source, run) => go('collections', source, run)}
             openEmail={() => go('email')}
           />
         ) : (
@@ -73,15 +77,21 @@ export function DiagnosticsPage() {
       {place.tab === 'collections' &&
         (jobs.data ? (
           <DiagnosticsCollections
+            key={place.run}
             sources={sources}
             selected={place.source}
+            run={place.run}
             onSelect={(source) => go('collections', source)}
           />
         ) : (
           <Loading />
         ))}
       {place.tab === 'email' &&
-        (health.data ? <DiagnosticsEmail mail={health.data.mail} /> : <Loading />)}
+        (health.data ? (
+          <DiagnosticsEmail mail={health.data.mail} onChanged={health.refresh} />
+        ) : (
+          <Loading />
+        ))}
       {place.tab === 'test-dsps' &&
         (diagnostics.data ? (
           <DiagnosticsTestDsps diagnostics={diagnostics.data} refresh={diagnostics.refresh} />

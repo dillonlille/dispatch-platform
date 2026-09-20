@@ -457,7 +457,8 @@ td small {
 .status-indicator.signing_in > i,
 .status-indicator.queued > i,
 .status-indicator.running > i,
-.status-indicator.needs_verification > i {
+.status-indicator.needs_verification > i,
+.status-indicator.waiting_verification > i {
   background: var(--warning);
 }
 .row-menu {
