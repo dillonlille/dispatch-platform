@@ -116,8 +116,20 @@ const filters = [
   ['done', 'Done'],
 ] as const;
 
-export function DiagnosticsEmail({ mail }: { mail: PlatformHealth['mail'] }) {
-  const { data, error, refresh } = usePlatformMail(5000);
+export function DiagnosticsEmail({
+  mail,
+  onChanged,
+}: {
+  mail: PlatformHealth['mail'];
+  /** A retry or discard changed the counts the page holds. */
+  onChanged: () => void;
+}) {
+  const mailLog = usePlatformMail(5000);
+  const { data, error } = mailLog;
+  const refresh = () => {
+    mailLog.refresh();
+    onChanged();
+  };
   const [filter, setFilter] = useState<(typeof filters)[number][0]>('all');
   const [discarding, setDiscarding] = useState<MailMessage>();
   const retry = useAction(

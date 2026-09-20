@@ -87,7 +87,11 @@ export function DiagnosticsPage() {
           <Loading />
         ))}
       {place.tab === 'email' &&
-        (health.data ? <DiagnosticsEmail mail={health.data.mail} /> : <Loading />)}
+        (health.data ? (
+          <DiagnosticsEmail mail={health.data.mail} onChanged={health.refresh} />
+        ) : (
+          <Loading />
+        ))}
       {place.tab === 'test-dsps' &&
         (diagnostics.data ? (
           <DiagnosticsTestDsps diagnostics={diagnostics.data} refresh={diagnostics.refresh} />

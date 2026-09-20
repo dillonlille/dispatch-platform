@@ -90,6 +90,7 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   await expect(mail.getByRole('alert')).toHaveCount(0);
   await expect(field('Failed')).toHaveText('1'); // Previous failures remain accounted for.
   // Retrying hands the failed invitation back to the mailer, which now delivers it.
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await message.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(field('Failed')).toHaveText('0');
   await expect(message).toContainText('Sent', { timeout: 20000 });
