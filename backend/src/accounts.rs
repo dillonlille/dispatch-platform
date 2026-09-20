@@ -22,6 +22,12 @@ const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,r.name ro
     JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL \
     AND i.expires_at>? AND d.status='active' AND d.environment=?";
 
+/// What a queued message is for. Diagnostics joins it back to the invitation or account.
+enum MailContext<'a> {
+    Invitation { hash: &'a str },
+    Reset { user: &'a str },
+}
+
 /// A row of `users`, with the password hash: it never leaves the backend.
 #[derive(Clone)]
 pub struct UserRow {
@@ -342,7 +348,7 @@ impl Store {
                     &user.email,
                     &format!("{}/#reset?token={raw}", self.config.origin),
                 );
-                self.queue_mail(&user.email, &mail.subject, &mail.text, Some(&mail.html))
+                self.queue_mail(&user.email, &mail, MailContext::Reset { user: &user.id })
             })?;
         }
         Ok(())
@@ -373,14 +379,21 @@ impl Store {
             expires_at: now() + INVITATION_TTL,
             onboarding,
         });
-        self.queue_mail(to, &mail.subject, &mail.text, Some(&mail.html))
+        self.queue_mail(
+            to,
+            &mail,
+            MailContext::Invitation {
+                hash: &crypto::sha(raw),
+            },
+        )
     }
-    fn queue_mail(&self, to: &str, subject: &str, text: &str, html: Option<&str>) -> Result<()> {
+    fn queue_mail(&self, to: &str, mail: &email::Message, context: MailContext) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
+        let (text, html) = (&mail.text, Some(&mail.html));
         let subject = if self.config.env().is_preview() {
-            format!("[Dispatch Dev] {subject}")
+            format!("[Dispatch Dev] {}", mail.subject)
         } else {
-            subject.to_owned()
+            mail.subject.clone()
         };
         let id = crypto::id("mail")?;
         let encrypted = crypto::encrypt(
@@ -388,9 +401,14 @@ impl Store {
             &id,
             &json!({"to":to,"subject":subject,"text":text,"html":html,"environment":self.config.environment,"origin":self.config.origin}),
         )?;
+        let (kind, invitation, user) = match context {
+            MailContext::Invitation { hash } => ("invitation", Some(hash), None),
+            MailContext::Reset { user } => ("reset", None, Some(user)),
+        };
         self.platform.exec(
-            "INSERT INTO outbox(id,encrypted_message,available_at,created_at) VALUES (?,?,?3,?3)",
-            params![id, encrypted, now()],
+            "INSERT INTO outbox(id,encrypted_message,available_at,created_at,kind,\
+             invitation_hash,user_id) VALUES (?,?,?3,?3,?,?,?)",
+            params![id, encrypted, now(), kind, invitation, user],
         )?;
         Ok(())
     }

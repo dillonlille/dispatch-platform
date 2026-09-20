@@ -68,7 +68,10 @@ impl Scheduler {
                     for sql in [
                         "DELETE FROM sessions WHERE expires_at<?",
                         "DELETE FROM resets WHERE expires_at<?",
-                        "DELETE FROM invitations WHERE expires_at<?",
+                        // An accepted invitation stays 90 days, so Diagnostics can show
+                        // that it was accepted. It can no longer be used.
+                        "DELETE FROM invitations WHERE expires_at<?1 AND \
+                         (used_at IS NULL OR used_at<?1-7776000000)",
                         "DELETE FROM throttle WHERE reset_at<?",
                     ] {
                         db.platform.exec(sql, [now()])?;

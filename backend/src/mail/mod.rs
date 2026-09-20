@@ -1,11 +1,13 @@
 use crate::{
     Result, State,
-    db::{self, Store, n},
+    contracts::MailMessage,
+    db::{self, Store, flag, n},
     ensure,
 };
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 mod delivery;
 pub mod templates;
@@ -79,4 +81,75 @@ pub fn record_delivery(db: &Store, id: &str, attempts: i64, error: Option<&str>)
         )?
     };
     ensure(changed == 1, "email_delivery_record_missing", 500)
+}
+
+const LOG: &str = "SELECT o.id,o.kind,o.status,o.attempts,o.created_at,o.sent_at,\
+    o.last_attempt_at,o.available_at,o.last_error,COALESCE(i.email,u.email) recipient,\
+    r.name role,COALESCE(r.system,0) owner,d.id dsp_id,d.name dsp_name,i.used_at,\
+    CASE WHEN c.platform_owner=0 THEN c.first_name||' '||c.last_name END invited_by \
+    FROM outbox o LEFT JOIN invitations i ON i.hash=o.invitation_hash \
+    LEFT JOIN users u ON u.id=o.user_id LEFT JOIN dsps d ON d.id=i.dsp_id \
+    LEFT JOIN roles r ON r.id=i.role_id LEFT JOIN users c ON c.id=i.created_by \
+    ORDER BY COALESCE(o.created_at,0) DESC,o.id DESC LIMIT 200";
+
+/// The newest 200 messages, each with what became of the invitation it carried.
+pub fn log(db: &Store) -> Result<Vec<MailMessage>> {
+    let mut setup: HashMap<String, bool> = HashMap::new();
+    db.platform
+        .all(LOG, [])?
+        .into_iter()
+        .map(|row| {
+            let text = |key: &str| row[key].as_str().map(str::to_owned);
+            let at = |key: &str| row[key].as_i64().map(db::at);
+            let owner = row["owner"].as_i64() == Some(1);
+            let setup_complete = match (owner, row["dsp_id"].as_str()) {
+                (true, Some(dsp)) => Some(match setup.get(dsp) {
+                    Some(done) => *done,
+                    None => {
+                        let done = !flag(&db.profile(dsp)?, "setupRequired");
+                        setup.insert(dsp.to_owned(), done);
+                        done
+                    }
+                }),
+                _ => None,
+            };
+            let pending = row["status"] == "pending";
+            Ok(MailMessage {
+                id: text("id").unwrap_or_default(),
+                kind: text("kind"),
+                status: text("status").unwrap_or_default(),
+                attempts: row["attempts"].as_i64().unwrap_or(0),
+                queued_at: at("created_at"),
+                sent_at: text("sent_at"),
+                last_attempt_at: at("last_attempt_at"),
+                next_attempt_at: if pending { at("available_at") } else { None },
+                last_error: text("last_error"),
+                recipient: text("recipient"),
+                role: text("role"),
+                owner,
+                dsp_name: text("dsp_name"),
+                invited_by: text("invited_by"),
+                accepted_at: at("used_at"),
+                setup_complete,
+            })
+        })
+        .collect()
+}
+
+/// Gives a message that ran out of attempts a fresh set, starting now.
+pub fn retry(db: &Store, id: &str) -> Result<()> {
+    let changed = db.platform.exec(
+        "UPDATE outbox SET status='pending',attempts=0,available_at=?,last_error=NULL \
+         WHERE id=? AND status='failed'",
+        params![db::now(), id],
+    )?;
+    ensure(changed == 1, "email_not_failed", 409)
+}
+
+/// Drops a message that ran out of attempts, along with its encrypted content.
+pub fn discard(db: &Store, id: &str) -> Result<()> {
+    let changed = db
+        .platform
+        .exec("DELETE FROM outbox WHERE id=? AND status='failed'", [id])?;
+    ensure(changed == 1, "email_not_failed", 409)
 }

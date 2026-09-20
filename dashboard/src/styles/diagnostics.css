@@ -28,23 +28,20 @@
   margin-top: 20px;
 }
 .diagnostics-tile,
-.diagnostics-facts > div,
 .diagnostics-card,
 .trend-chart {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--card);
 }
-.diagnostics-tile,
-.diagnostics-facts > div {
+.diagnostics-tile {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-height: 104px;
   padding: 20px 22px;
 }
-.diagnostics-tile h2,
-.diagnostics-facts dt {
+.diagnostics-tile h2 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -52,8 +49,7 @@
   font-weight: 400;
   color: var(--muted-foreground);
 }
-.diagnostics-tile-value,
-.diagnostics-facts dd {
+.diagnostics-tile-value {
   margin: 0;
   font-size: 26px;
   font-weight: 600;
@@ -390,20 +386,17 @@
 .phase-publishing {
   background: var(--series-5);
 }
-.run-facts,
-.diagnostics-delivery {
+.run-facts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px 24px;
   margin: 0;
 }
-.run-facts dt,
-.diagnostics-delivery dt {
+.run-facts dt {
   font-size: 12px;
   color: var(--muted-foreground);
 }
-.run-facts dd,
-.diagnostics-delivery dd {
+.run-facts dd {
   margin: 2px 0 0;
   font-variant-numeric: tabular-nums;
 }
@@ -498,13 +491,107 @@
 }
 @media (max-width: 700px) {
   .diagnostics-pair,
-  .run-facts,
-  .diagnostics-delivery {
+  .run-facts {
     grid-template-columns: minmax(0, 1fr);
   }
-  .diagnostics-tile,
-  .diagnostics-facts > div {
+  .diagnostics-tile {
     min-height: 0;
     padding: 16px;
   }
+}
+
+/* Email */
+.mail-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  margin: 20px 0 0;
+  padding: 14px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.mail-strip > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mail-strip dt {
+  font-weight: 500;
+}
+.mail-strip dd {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.mail-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mail-filters button {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.mail-filters button span {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mail-filters button[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 500;
+}
+.mail-table td small {
+  display: block;
+}
+.mail-steps {
+  display: flex;
+  gap: 8px 28px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mail-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  flex: 0 0 180px;
+  font-size: 13px;
+}
+.mail-step svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.mail-step small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mail-step-todo {
+  color: var(--muted-foreground);
+}
+.mail-step-done svg {
+  color: var(--success);
+}
+.mail-step-failed svg {
+  color: var(--destructive);
+}
+.mail-step-retrying svg {
+  color: var(--warning);
+}
+.mail-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.mail-actions button + button {
+  margin-left: 16px;
 }
