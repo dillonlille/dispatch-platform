@@ -176,7 +176,27 @@ test('preloaded employees and pay periods render on the next paint with requests
 
 test('adjacent days render from memory and returning from another Dispatch page retains the cache', async ({
   page,
+  dispatch,
 }) => {
+  // Yesterday may belong to the previous pay period, especially on its opening Sunday.
+  const owner = await dispatch.client();
+  const dsp = owner.session.dsps.find(
+    (item: { name: string }) => item.name === 'Northline Logistics',
+  );
+  await dispatch.stop();
+  dispatch.collector(dsp.id, (db) =>
+    db.exec(`
+    INSERT INTO publications
+      SELECT 'day-history',collected_at,date(period_from,'-14 days'),date(period_to,'-14 days'),0
+      FROM publications WHERE active=1;
+    INSERT INTO employees SELECT 'day-history',code,name,department,position,station,active FROM employees;
+    INSERT INTO timecards
+      SELECT 'day-history',t.employee_code,date(p.period_from,'-1 day'),t.hours,t.status,t.punches
+      FROM timecards t JOIN publications p ON p.id=t.publication_id
+      WHERE p.active=1 AND t.date=(SELECT max(date) FROM timecards);
+  `),
+  );
+  await dispatch.start();
   const finished = new Set<string>();
   page.on('requestfinished', (request) => {
     const url = new URL(request.url());

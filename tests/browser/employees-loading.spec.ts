@@ -23,18 +23,27 @@ for (const width of [1280, 390]) {
       db.exec(`
         UPDATE employees SET position='' WHERE code='E002';
         DELETE FROM timecards WHERE employee_code='E003';
-        INSERT INTO timecards
-          SELECT publication_id,employee_code,date(date,'-7 days'),hours,status,punches
-          FROM timecards WHERE employee_code='E002';
+        WITH RECURSIVE days(date,stop) AS (
+          SELECT period_from,period_to FROM publications WHERE active=1
+          UNION ALL SELECT date(date,'+1 day'),stop FROM days WHERE date<stop
+        )
+        INSERT OR IGNORE INTO timecards
+          SELECT t.publication_id,t.employee_code,days.date,t.hours,t.status,t.punches
+          FROM days CROSS JOIN (
+            SELECT * FROM timecards WHERE employee_code='E002' ORDER BY date DESC LIMIT 1
+          ) t;
         INSERT INTO publications
           SELECT 'employee-history',collected_at,date(period_from,'-14 days'),date(period_to,'-14 days'),0
           FROM publications WHERE active=1;
         INSERT INTO employees
           SELECT 'employee-history',code,name,department,position,station,active
           FROM employees WHERE code='E001';
+        WITH offsets(days) AS (VALUES (0),(1))
         INSERT INTO timecards
-          SELECT 'employee-history',employee_code,date(date,'-14 days'),hours,status,punches
-          FROM timecards WHERE employee_code='E001' ORDER BY date DESC LIMIT 2;
+          SELECT p.id,'E001',date(p.period_to,'-'||offsets.days||' days'),t.hours,t.status,t.punches
+          FROM publications p CROSS JOIN offsets CROSS JOIN (
+            SELECT * FROM timecards WHERE employee_code='E001' ORDER BY date DESC LIMIT 1
+          ) t WHERE p.id='employee-history';
       `);
     });
     await dispatch.start();

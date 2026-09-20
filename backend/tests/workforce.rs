@@ -4,6 +4,26 @@ use dispatch_backend::{collectors::Provider, db::s, workforce};
 use serde_json::{Value, json};
 
 #[test]
+fn demo_periods_follow_the_paycom_cycle_and_never_record_future_punches() {
+    for (day, from, to) in [
+        ("2026-09-05", "2026-08-23", "2026-09-05"),
+        ("2026-09-06", "2026-09-06", "2026-09-19"),
+        ("2026-09-19", "2026-09-06", "2026-09-19"),
+        ("2026-09-20", "2026-09-20", "2026-10-03"),
+        ("2025-12-31", "2025-12-28", "2026-01-10"),
+        ("2026-03-08", "2026-03-08", "2026-03-21"),
+        ("2028-02-29", "2028-02-20", "2028-03-04"),
+    ] {
+        let data = workforce::fixture_date("America/Chicago", Some(day.parse().unwrap())).unwrap();
+        assert_eq!(data["from"], from);
+        assert_eq!(data["to"], to);
+        assert!(data["timecards"].as_array().unwrap().iter().all(|card| {
+            s(card, "date") >= from && s(card, "date") <= day && s(card, "date") <= to
+        }));
+    }
+}
+
+#[test]
 fn employee_timecards_use_period_order_and_the_latest_revision_within_each_period() {
     use dispatch_backend::contracts::EmployeeTimecardPeriod;
     let (_root, db, id) = bootstrapped();
@@ -211,7 +231,7 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     for card in db.employee_timecard(id, "E003", None).unwrap().timecards {
         assert_eq!(card["sourceUrl"], json!(link("E003")));
     }
-    let date = s(&data, "to");
+    let date = s(&data["timecards"][0], "date");
     let (_, _, rows) = db.daily_source(id, date).unwrap();
     assert_eq!(rows.len(), 12);
     for row in rows {
@@ -295,7 +315,7 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
     values["driver_departments"] = json!([]);
     db.save_preferences(id, s(&actor, "id"), 0, &values)
         .unwrap();
-    let day = workforce::fixture("UTC").unwrap()["to"]
+    let day = workforce::fixture("UTC").unwrap()["timecards"][0]["date"]
         .as_str()
         .unwrap()
         .to_owned();

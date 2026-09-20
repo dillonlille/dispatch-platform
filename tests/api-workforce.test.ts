@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { employeeName } from '../shared/paycom.js';
+import { localDate } from '../shared/meal-breaks.js';
 import { fixture } from './support.js';
 
 test('employee directory can load the full roster beyond the API page limit', async (t) => {
@@ -64,9 +65,16 @@ test('Rust workforce settings enforce revisions, filter employees and timecards,
   assert(employees.employees.every((e: { name: string }) => e.name.includes(', ')));
   const detail = (await owner.get('/api/dsp/employees/E002')).value;
   assert.equal(detail.employee.name, 'Ellis, Jordan');
-  assert.equal(detail.timecards.length, 7);
+  const today = localDate('America/Chicago');
+  assert.equal(
+    detail.timecards.length,
+    Math.min(7, (Date.parse(today) - Date.parse(detail.period.from)) / 86400000 + 1),
+  );
   assert.equal(Date.parse(detail.period.to) - Date.parse(detail.period.from), 13 * 86400000);
-  assert.equal(detail.period.to, detail.timecards[0].date);
+  assert.equal(new Date(detail.period.from).getUTCDay(), 0);
+  assert.equal(new Date(detail.period.to).getUTCDay(), 6);
+  assert.equal(detail.timecards[0].date, today);
+  assert(detail.period.from <= today && today <= detail.period.to);
   assert.equal(detail.nextPeriod, null);
   const same = await owner.get(
     `/api/dsp/employees/E002?from=${detail.period.from}&to=${detail.period.to}`,

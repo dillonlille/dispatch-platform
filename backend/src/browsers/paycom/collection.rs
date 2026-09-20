@@ -907,6 +907,29 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn requested_days_keep_the_cycle_observed_in_paycom() -> Result<()> {
+        let mut observed = body();
+        observed["startDate"] = json!("2026-09-06");
+        observed["endDate"] = json!("2026-09-19");
+        for (day, from, to) in [
+            ("2026-09-05", "2026-08-23", "2026-09-05"),
+            ("2026-09-06", "2026-09-06", "2026-09-19"),
+            ("2026-09-19", "2026-09-06", "2026-09-19"),
+            ("2026-09-20", "2026-09-20", "2026-10-03"),
+            ("2025-12-31", "2025-12-28", "2026-01-10"),
+            ("2026-03-08", "2026-03-08", "2026-03-21"),
+            ("2028-02-29", "2028-02-20", "2028-03-04"),
+        ] {
+            let (selected, period, _) = selected_body(&observed, date(day)?)?;
+            assert_eq!(selected["startDate"], from);
+            assert_eq!(selected["endDate"], to);
+            assert_eq!(period["dates"].as_array().unwrap().len(), 14);
+            assert_eq!(period["dates"][0], from);
+            assert_eq!(period["dates"][13], to);
+        }
+        Ok(())
+    }
+    #[test]
     fn projection_reconciles_additional_totals_without_double_counting() -> Result<()> {
         let days = (0..14)
             .map(|i| {
