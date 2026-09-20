@@ -29,6 +29,7 @@
   --map-halo-width: 11;
   --map-halo-opacity: 0.12;
   --map-route-width: 4.5;
+  --map-highlight: #a7c8ff;
 }
 [data-theme='dark'] .onboarding-page {
   --map-land: #172030;
@@ -53,6 +54,7 @@
   --map-halo-width: 13;
   --map-halo-opacity: 0.68;
   --map-route-width: 5.5;
+  --map-highlight: #e4edff;
 }
 .onboarding-map {
   position: absolute;
@@ -61,6 +63,81 @@
   height: 100%;
   z-index: -2;
   pointer-events: none;
+}
+.onboarding-map-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.onboarding-map-motion {
+  fill: none;
+  --map-motion-state: paused;
+}
+.onboarding-page[data-ready='true'] .onboarding-map-motion {
+  --map-motion-state: running;
+}
+.onboarding-route-highlight {
+  stroke: var(--map-highlight);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 4 100;
+  stroke-dashoffset: 4;
+  opacity: 0;
+}
+.onboarding-destination-pulse {
+  stroke: var(--map-marker);
+  stroke-width: 1.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .onboarding-route-highlight {
+    animation: onboarding-route-travel 9s linear 0.8s infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+  .onboarding-destination-pulse {
+    animation: onboarding-destination-arrival 9s ease-out 0.8s infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+}
+@keyframes onboarding-route-travel {
+  0% {
+    stroke-dashoffset: 4;
+    opacity: 0;
+  }
+  5%,
+  62% {
+    opacity: 0.95;
+  }
+  70%,
+  100% {
+    stroke-dashoffset: -100;
+    opacity: 0;
+  }
+}
+@keyframes onboarding-destination-arrival {
+  0%,
+  66% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  98%,
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-map-motion {
+    display: none;
+  }
 }
 .onboarding-brand {
   position: absolute;

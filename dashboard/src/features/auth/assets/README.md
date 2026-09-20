@@ -11,3 +11,6 @@ Source data: OpenFreeMap / OpenMapTiles / [OpenStreetMap contributors](https://w
 - Vite fingerprints it; the build generates Brotli/gzip representations for cached delivery.
 - Desktop preloads the asset alongside the invitation and reveals the complete composition
   once ready. Mobile does not request it. Tests cover both behaviors and the transfer budget.
+- `delivery-route` and `delivery-pulse` provide the geometry for a separate, lightweight
+  animation layer. Adjust its nine-second travel/arrival cycle in `../onboarding.css`.
+  It starts after the map is ready and is disabled for reduced motion; the form stays still.

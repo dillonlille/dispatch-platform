@@ -4,7 +4,7 @@ import { mapUrl } from './map-asset.js';
 /** The geographic asset is requested only when the desktop map is mounted. */
 export function OnboardingMap() {
   const [desktop, setDesktop] = useState(() => matchMedia('(min-width: 701px)').matches);
-  const svg = useRef<SVGSVGElement>(null);
+  const map = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const media = matchMedia('(min-width: 701px)');
     const changed = () => setDesktop(media.matches);
@@ -12,7 +12,7 @@ export function OnboardingMap() {
     return () => media.removeEventListener('change', changed);
   }, []);
   useEffect(() => {
-    const element = svg.current;
+    const element = map.current;
     if (!element) return;
     const resize = () => {
       const { width, height } = element.getBoundingClientRect();
@@ -26,7 +26,8 @@ export function OnboardingMap() {
           mapHeight > 1000 ? (1000 - mapHeight) / 2 : 600 - mapHeight * 0.68,
         ),
       );
-      element.setAttribute('viewBox', `0 ${top} ${mapWidth} ${mapHeight}`);
+      for (const layer of element.querySelectorAll('svg'))
+        layer.setAttribute('viewBox', `0 ${top} ${mapWidth} ${mapHeight}`);
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -34,8 +35,15 @@ export function OnboardingMap() {
     return () => observer.disconnect();
   }, [desktop]);
   return desktop ? (
-    <svg ref={svg} className="onboarding-map" aria-hidden="true" focusable="false">
-      <use href={`${mapUrl}#region`} />
-    </svg>
+    <div ref={map} className="onboarding-map" aria-hidden="true">
+      <svg className="onboarding-map-layer" focusable="false">
+        <use href={`${mapUrl}#region`} />
+      </svg>
+      {/* Keep animated paint separate from the detailed, static geographic layer. */}
+      <svg className="onboarding-map-layer onboarding-map-motion" focusable="false">
+        <use className="onboarding-route-highlight" href={`${mapUrl}#delivery-route`} />
+        <use className="onboarding-destination-pulse" href={`${mapUrl}#delivery-pulse`} />
+      </svg>
+    </div>
   ) : null;
 }
