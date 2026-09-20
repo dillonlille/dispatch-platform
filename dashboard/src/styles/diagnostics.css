@@ -20,6 +20,35 @@
   margin-top: 20px;
 }
 
+/* Pill buttons that pick one of a few: a run's attempts, the mail filters. */
+.diagnostics-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.diagnostics-chips button {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.diagnostics-chips button span {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-chips button[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 500;
+}
+.run-detail > .diagnostics-chips {
+  margin-bottom: 20px;
+}
+
 /* Cards and tiles */
 .diagnostics-tiles {
   display: grid;
@@ -289,6 +318,12 @@
   background: transparent;
   color: var(--primary);
 }
+.run-toggle span {
+  text-align: left;
+}
+.run-toggle small {
+  display: block;
+}
 .run-toggle svg {
   color: var(--muted-foreground);
 }
@@ -312,26 +347,6 @@
 }
 .run-detail section > h3:first-child {
   margin-top: 4px;
-}
-.run-attempts {
-  margin-bottom: 20px;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.run-attempts button {
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.run-attempts button[aria-pressed='true'] {
-  border-color: transparent;
-  background: var(--selection);
-  color: var(--primary);
-  font-weight: 500;
 }
 .run-error {
   margin-top: 14px;
@@ -524,30 +539,6 @@
 .mail-strip dd {
   margin: 0;
   color: var(--muted-foreground);
-}
-.mail-filters {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.mail-filters button {
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.mail-filters button span {
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
-}
-.mail-filters button[aria-pressed='true'] {
-  border-color: transparent;
-  background: var(--selection);
-  color: var(--primary);
-  font-weight: 500;
 }
 .mail-table td small {
   display: block;

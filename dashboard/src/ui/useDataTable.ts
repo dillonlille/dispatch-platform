@@ -81,6 +81,8 @@ export interface DataTableOptions<T> {
   total?: number;
   /** Rows shown beneath an expanded row. They sort and page with their parent. */
   subRows?: (row: T) => T[] | undefined;
+  /** Ids of the rows that start expanded. Read once, when the table is first drawn. */
+  expanded?: string[];
 }
 
 export interface DataTable<T> {
@@ -119,10 +121,13 @@ export function useDataTable<T extends RowData>({
   pageSize = everything,
   total,
   subRows,
+  expanded: startExpanded,
 }: DataTableOptions<T>): DataTable<T> {
   const local = useLocalState();
   const state = given ?? local;
-  const [expanded, setExpanded] = useState<ExpandedState>({});
+  const [expanded, setExpanded] = useState<ExpandedState>(() =>
+    Object.fromEntries((startExpanded ?? []).map((id) => [id, true])),
+  );
   // Pages may rebuild `columns` on every render. The engine only needs new definitions when
   // a column's identity or abilities change, and reads values through the latest columns.
   const latest = useRef(columns);

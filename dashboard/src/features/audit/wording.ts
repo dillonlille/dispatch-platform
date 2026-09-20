@@ -76,6 +76,8 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
   ],
   'dsp.settings_updated': () => ['updated DSP settings'],
   'dsp.profile_completed': () => ['completed the DSP profile'],
+  'mail.retried': (e) => ['retried an email', ...(e.target ? [' to ', strong(e.target)] : [])],
+  'mail.discarded': (e) => ['discarded an email', ...(e.target ? [' to ', strong(e.target)] : [])],
   'dsp.created': (e) => ['created ', strong(e.dspName ?? 'a DSP')],
   'dsp.removed': (e) => ['removed ', strong(e.dspName ?? 'a DSP')],
   'dsp.restored': (e) => ['restored ', strong(e.dspName ?? 'a DSP')],

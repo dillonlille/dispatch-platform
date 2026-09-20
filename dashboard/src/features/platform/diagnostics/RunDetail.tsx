@@ -1,9 +1,9 @@
 import { AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
-import type { Job, JobMetrics } from '../../../../shared/contracts/index.js';
-import { errorLabel } from '../../app/api.js';
-import { DetailList } from '../../ui/index.js';
-import { bytes, duration, title } from '../../lib/format.js';
+import type { Job, JobMetrics } from '../../../../../shared/contracts/index.js';
+import { errorLabel } from '../../../app/api.js';
+import { DetailList } from '../../../ui/index.js';
+import { bytes, duration, title } from '../../../lib/format.js';
 
 export const memory = (value: number | null) =>
   value === null ? 'Not sampled' : bytes(value, 'MiB', 1);
@@ -26,7 +26,7 @@ export function RunDetail({ job }: { job: Job }) {
   return (
     <div className="run-detail">
       {metrics.length > 1 && (
-        <div className="run-attempts" role="group" aria-label="Attempts">
+        <div className="diagnostics-chips" role="group" aria-label="Attempts">
           {metrics.map((m) => (
             <button
               key={m.attempt}

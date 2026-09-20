@@ -100,15 +100,18 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   });
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
-  await page.getByRole('tab', { name: /^Collections/ }).click();
-  const sources = page.getByRole('navigation', { name: 'Collection sources' });
-  await sources.getByRole('button', { name: /Paycom/ }).click();
+  // Overview links to the source's newest run, which arrives expanded.
+  await page.getByRole('button', { name: /^Open .*Paycom/ }).click();
+  await expect(page.getByRole('tab', { name: /^Collections/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  expect(new URL(page.url()).hash).toContain('run=job_');
   const history = page.getByRole('region', { name: 'Collection performance history' });
   await expect(history).toContainText('Median collection time');
   await expect(history).toContainText('Full runs measured');
   await expect(history).toContainText('Needs 5 full runs');
   const collections = page.getByRole('region', { name: 'Platform collections' });
-  await collections.getByRole('row').filter({ hasText: 'Succeeded' }).getByRole('button').click();
   await expect(collections.getByRole('region', { name: 'Attempt 1', exact: true })).toContainText(
     '12 employees · 84 daily records',
   );

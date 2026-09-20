@@ -183,14 +183,14 @@ async fn restore_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> 
 fn mail_log(db: &Store, _: &User, _: &Input) -> Result<Reply> {
     Reply::of(&crate::mail::log(db)?)
 }
-fn retry_mail(db: &Store, _: &User, input: &Input) -> Result<Reply> {
+fn retry_mail(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &[])?;
-    crate::mail::retry(db, input.param("id"))?;
+    crate::mail::retry(db, &owner.user.id, input.param("id"))?;
     Reply::of(&json!({ "ok": true }))
 }
-fn discard_mail(db: &Store, _: &User, input: &Input) -> Result<Reply> {
+fn discard_mail(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &[])?;
-    crate::mail::discard(db, input.param("id"))?;
+    crate::mail::discard(db, &owner.user.id, input.param("id"))?;
     Reply::of(&json!({ "ok": true }))
 }
 fn health(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
