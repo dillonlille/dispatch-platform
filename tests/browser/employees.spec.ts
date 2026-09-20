@@ -90,9 +90,11 @@ test('employee workspace navigates real period history, resets selection, filter
   for (const label of ['Employee code', 'Department', 'Delivery station', 'Source'])
     await expect(detail.getByText(label, { exact: true })).toHaveCount(0);
   await expect(directory).not.toContainText('DEMO1');
-  await previous.click();
+  await previous.focus();
+  await previous.press('Enter');
   await expect(page.getByLabel('Timecard navigation')).toContainText('Sep 6');
   await expect(detail).toContainText('28h 00m');
+  await expect(previous).toBeFocused();
   await expect(next).toBeEnabled();
   await previous.click();
   await expect(page.getByLabel('Timecard navigation')).toContainText('Aug 30');
@@ -123,6 +125,7 @@ test('employee workspace navigates real period history, resets selection, filter
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({
+      animations: 'disabled',
       path: test.info().outputPath(`employees-${theme}-${width}.png`),
       fullPage: true,
     });

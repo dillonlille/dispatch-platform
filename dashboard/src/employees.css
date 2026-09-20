@@ -283,9 +283,6 @@
     gap: 8px;
     padding-inline: 12px;
   }
-  .employees-person .employee-avatar {
-    display: none;
-  }
   .employee-detail {
     padding: 20px;
   }
