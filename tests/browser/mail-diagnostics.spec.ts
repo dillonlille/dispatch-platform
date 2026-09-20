@@ -67,6 +67,10 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   );
   await expect(field('Failed')).toHaveText('1', { timeout: 20000 });
   await expect(field('Pending')).toHaveText('0');
+  const message = mail.getByRole('row').filter({ hasText: 'diagnostics@example.test' });
+  await expect(message).toContainText('Owner invitation');
+  await expect(message).toContainText('Not delivered');
+  await expect(message.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath('dispatch-mail-diagnostics-desktop.png'),
     fullPage: true,

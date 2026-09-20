@@ -12,6 +12,7 @@ import type { Role as GeneratedRole } from './generated/Role';
 import type { SessionResponse } from './generated/SessionResponse';
 
 export type { PublicUser as User } from './generated/PublicUser';
+export type { MailMessage } from './generated/MailMessage';
 export type { Member as Membership } from './generated/Member';
 export type { SchedulePreview } from './generated/SchedulePreview';
 // A generated shape with some fields given the narrower type the backend really sends.

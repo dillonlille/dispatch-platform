@@ -35,6 +35,13 @@ pub fn routes() -> Vec<Route> {
             restore_dsp,
         ),
         read("/api/platform/health", PlatformOwner, health),
+        read("/api/platform/mail", PlatformOwner, mail_log),
+        write("/api/platform/mail/{id}/retry", PlatformOwner, retry_mail),
+        write(
+            "/api/platform/mail/{id}/discard",
+            PlatformOwner,
+            discard_mail,
+        ),
         read("/api/platform/diagnostics", PlatformOwner, diagnostics),
         write("/api/platform/diagnostics", PlatformOwner, load_test_dsp),
         read("/api/platform/releases", PlatformOwner, releases),
@@ -173,6 +180,19 @@ async fn restore_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> 
     .await
 }
 
+fn mail_log(db: &Store, _: &User, _: &Input) -> Result<Reply> {
+    Reply::of(&crate::mail::log(db)?)
+}
+fn retry_mail(db: &Store, _: &User, input: &Input) -> Result<Reply> {
+    v::fields(&input.body, &[])?;
+    crate::mail::retry(db, input.param("id"))?;
+    Reply::of(&json!({ "ok": true }))
+}
+fn discard_mail(db: &Store, _: &User, input: &Input) -> Result<Reply> {
+    v::fields(&input.body, &[])?;
+    crate::mail::discard(db, input.param("id"))?;
+    Reply::of(&json!({ "ok": true }))
+}
 fn health(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
     let state = owner.state;
     let counts: HashMap<String, Value> = db

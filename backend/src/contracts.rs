@@ -254,6 +254,37 @@ pub struct DspSummaryLegacy {
     pub platform_email: Option<String>,
     pub invite_email: Option<String>,
 }
+/// One queued email as platform Diagnostics lists it. What it was for is known only for
+/// mail queued since the outbox recorded it; an invitation's row lasts as long as the
+/// invitation does.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct MailMessage {
+    pub id: String,
+    /// `invitation`, `reset`, or none for older mail.
+    pub kind: Option<String>,
+    /// `pending`, `sent` or `failed`.
+    pub status: String,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub attempts: i64,
+    pub queued_at: Option<String>,
+    pub sent_at: Option<String>,
+    pub last_attempt_at: Option<String>,
+    /// When a pending message is tried next.
+    pub next_attempt_at: Option<String>,
+    pub last_error: Option<String>,
+    pub recipient: Option<String>,
+    pub role: Option<String>,
+    /// The invitation is for the DSP's owner, who also sets the DSP up.
+    pub owner: bool,
+    pub dsp_name: Option<String>,
+    /// Who invited them; none when a platform owner did.
+    pub invited_by: Option<String>,
+    pub accepted_at: Option<String>,
+    /// Owner invitations only: the DSP's setup is finished.
+    pub setup_complete: Option<bool>,
+}
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -638,6 +669,7 @@ mod generated {
             DspView,
             Environment,
             JobStatus,
+            MailMessage,
             Member,
             OwnerStatus,
             Presence,

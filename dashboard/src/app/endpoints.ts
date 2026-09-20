@@ -9,6 +9,7 @@ import type {
   DspSummary,
   DspView,
   Job,
+  MailMessage,
   Membership,
   Permission,
   Role,
@@ -21,6 +22,10 @@ export const openDsp = (dspId: string, roleId?: string) =>
   api<DspView>('/api/session/dsp', roleId ? { dspId, roleId } : { dspId });
 
 export const usePlatformDsps = (poll = 0) => useData<DspSummary[]>('/api/platform/dsps', poll);
+export const usePlatformMail = (poll = 0) => useData<MailMessage[]>('/api/platform/mail', poll);
+/** Gives a failed message a fresh set of attempts, or drops it. */
+export const retryMail = (id: string) => api(`/api/platform/mail/${id}/retry`, {});
+export const discardMail = (id: string) => api(`/api/platform/mail/${id}/discard`, {});
 export const usePlatformJobs = (poll = 0) => useData<Job[]>('/api/platform/jobs', poll);
 
 export const useMembers = (poll = 0) => useData<Membership[]>('/api/dsp/members', poll);
