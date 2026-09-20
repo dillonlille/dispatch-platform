@@ -586,14 +586,14 @@ async fn signing_in_and_out_sets_and_clears_the_session_cookie() {
 }
 
 #[tokio::test]
-async fn remembered_sessions_have_a_fixed_seven_day_deadline() {
+async fn remembered_sessions_have_a_fixed_three_day_deadline() {
     let server = Server::start().await;
     for value in [json!("true"), json!(1), Value::Null] {
         server.expect(Call::post("/api/auth/login", json!({
             "email":"member@dispatch.test", "password":"Dispatch-demo-2026!", "rememberMe":value
         })), 400, "invalid_input").await;
     }
-    for (remember, seconds) in [(false, 28800), (true, 604800)] {
+    for (remember, seconds) in [(false, 28800), (true, 259200)] {
         let login = server.send(Call::post("/api/auth/login", json!({
             "email":"member@dispatch.test", "password":"Dispatch-demo-2026!", "rememberMe":remember
         }))).await;
