@@ -4,6 +4,7 @@ import type {
   EmployeeTimecardResponse,
   Timecard,
 } from '../../../../shared/contracts/index.js';
+import { paycomDay } from '../../../../shared/meal-breaks.js';
 import { DataTable, Empty, Loading, useDataTable, type TableColumn } from '../../ui/index.js';
 import {
   hoursAndMinutes,
@@ -12,10 +13,19 @@ import {
   punchTime,
 } from '../../lib/timecard-format.js';
 
-const columns: TableColumn<Timecard>[] = [
+type EmployeeDay = Timecard & { events: ReturnType<typeof paycomDay>['events'] };
+function punchCell(card: EmployeeDay, kind: string) {
+  const punches = card.events.filter((event) => event.kind === kind);
+  return punches.length
+    ? punches.map((punch, index) => <div key={index}>{punchTime(punch.raw)}</div>)
+    : '—';
+}
+const columns: TableColumn<EmployeeDay>[] = [
   { id: 'date', header: 'Date', cell: (card) => timecardDate(card.date) },
-  { id: 'in', header: 'In', cell: (card) => punchTime(card.punches[0]?.in) },
-  { id: 'out', header: 'Out', cell: (card) => punchTime(card.punches.at(-1)?.out) },
+  { id: 'in', header: 'In', cell: (card) => punchCell(card, 'IN DAY') },
+  { id: 'outLunch', header: 'Out lunch', cell: (card) => punchCell(card, 'OUT LUNCH') },
+  { id: 'inLunch', header: 'In lunch', cell: (card) => punchCell(card, 'IN LUNCH') },
+  { id: 'out', header: 'Out', cell: (card) => punchCell(card, 'OUT DAY') },
   { id: 'hours', header: 'Hours', cell: (card) => hoursAndMinutes(card.hours) },
 ];
 
@@ -31,9 +41,9 @@ export function EmployeeTimecard({
   onPeriodChange: (period: EmployeeTimecardPeriod) => void;
 }) {
   // Paycom includes blank days in a pay period. Keep those out of the recorded-day count.
-  const records = data.timecards.filter(
-    (card) => card.hours > 0 || card.punches.some((punch) => punch.in || punch.out),
-  );
+  const records = data.timecards
+    .filter((card) => card.hours > 0 || card.punches.some((punch) => punch.in || punch.out))
+    .map((card) => ({ ...card, events: paycomDay(card).events }));
   const table = useDataTable({ columns, rows: records, rowId: (card) => card.date });
   const minutes = records.reduce((total, card) => total + Math.round(card.hours * 60), 0);
   const period = busy && requestedPeriod ? requestedPeriod : data.period;
@@ -72,7 +82,9 @@ export function EmployeeTimecard({
         <Loading />
       ) : records.length ? (
         <>
-          <DataTable table={table} className="employee-period-table" label="Employee timecard" />
+          <div className="table-wrap" role="region" aria-label="Timecard punches" tabIndex={0}>
+            <DataTable table={table} className="employee-period-table" label="Employee timecard" />
+          </div>
           <div className="employee-timecard-total">
             <span>
               {records.length} recorded {records.length === 1 ? 'day' : 'days'}

@@ -216,7 +216,7 @@
 }
 .employee-period-table {
   width: 100%;
-  min-width: 0;
+  min-width: 480px;
   table-layout: fixed;
   font-variant-numeric: tabular-nums;
 }
@@ -226,7 +226,7 @@
   background: transparent;
   font-size: 12px;
   text-align: left;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 .employee-period-table th {
   color: var(--muted-foreground);
@@ -235,7 +235,7 @@
 .employee-period-table th:first-child,
 .employee-period-table td:first-child {
   padding-left: 0;
-  width: 31%;
+  width: 21%;
 }
 .employee-period-table th:last-child,
 .employee-period-table td:last-child {
@@ -325,11 +325,6 @@
   }
   .employee-detail > h3 {
     font-size: 19px;
-  }
-  .employee-period-table th,
-  .employee-period-table td {
-    font-size: 11px;
-    padding-inline: 4px;
   }
   .employee-period-controls > span {
     font-size: 13px;

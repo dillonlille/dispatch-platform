@@ -157,7 +157,7 @@ export function cortexClock(value: string | null, date: string, zone: string): C
     detail: `${dateFormatter('en-US', { timeZone: zone, dateStyle: 'medium', timeStyle: 'long' }).format(d)} · ${zone}`,
   };
 }
-export function paycomDay(source: MealEmployee['paycom']) {
+export function paycomDay(source: { status: string; punches: Punch[] } | null) {
   const punches = source?.punches ?? [];
   const typed = punches.some((p) => 'inKind' in p || 'outKind' in p);
   // Historical complete cards support the same one/two-pair layout as Timecard.

@@ -1,4 +1,5 @@
 import { test, expect, login, openDsp } from './fixtures.js';
+import type { Punch } from '../../shared/contracts/index.js';
 
 test('employee workspace navigates real period history, resets selection, filters and fits every theme', async ({
   page,
@@ -46,12 +47,27 @@ test('employee workspace navigates real period history, resets selection, filter
           date.setUTCDate(date.getUTCDate() - day);
           const recorded = day < 4 && person.code !== 'E003';
           const hours = recorded ? (id === 'revised-middle' ? 7 : day === 3 ? 0 : 8.5) : 0;
-          const punches = recorded
+          let punches: Punch[] = recorded
             ? [
-                { in: '08:00', out: day === 3 ? null : '12:00', hours: day === 3 ? null : 4 },
-                ...(day === 3 ? [] : [{ in: '12:30', out: '17:00', hours: 4.5 }]),
+                { in: '08:00', out: '12:00', hours: 4 },
+                { in: '12:30', out: '17:00', hours: 4.5 },
               ]
             : [];
+          if (recorded && day === 2)
+            punches = [
+              { in: '08:00', out: '12:00', hours: 4 },
+              { in: '12:15', out: '14:30', hours: 2.25 },
+              { in: '14:45', out: '17:00', hours: 2.25 },
+            ];
+          // Keep one complete legacy day; other days carry Paycom's explicit labels.
+          if (day !== 1)
+            punches = punches.map((punch, index) => ({
+              ...punch,
+              inKind: index === 0 ? 'IN DAY' : 'IN LUNCH',
+              outKind: index === punches.length - 1 ? 'OUT DAY' : 'OUT LUNCH',
+            }));
+          if (recorded && day === 3)
+            punches = [{ in: null, out: '12:03', hours: null, outKind: 'OUT LUNCH' }];
           card.run(
             id,
             person.code,
@@ -83,10 +99,44 @@ test('employee workspace navigates real period history, resets selection, filter
   await expect(page.getByLabel('Timecard navigation')).toContainText('Sep 13');
   await expect(previous).toBeEnabled();
   await expect(next).toBeDisabled();
-  await expect(detail.getByRole('columnheader')).toHaveText(['Date', 'In', 'Out', 'Hours']);
+  await expect(detail.getByRole('columnheader')).toHaveText([
+    'Date',
+    'In',
+    'Out lunch',
+    'In lunch',
+    'Out',
+    'Hours',
+  ]);
   await expect(detail.locator('tbody tr')).toHaveCount(4);
   await expect(detail).toContainText('25h 30m');
-  await expect(detail.locator('tbody tr').last()).toContainText('—');
+  const rows = detail.locator('tbody tr');
+  await expect(rows.first().locator('td')).toHaveText([
+    'Sat, Sep 19',
+    '8:00 AM',
+    '12:00 PM',
+    '12:30 PM',
+    '5:00 PM',
+    '8h 30m',
+  ]);
+  await expect(rows.nth(1).locator('td')).toHaveText([
+    'Fri, Sep 18',
+    '8:00 AM',
+    '12:00 PM',
+    '12:30 PM',
+    '5:00 PM',
+    '8h 30m',
+  ]);
+  await expect(rows.nth(2).locator('td').nth(2).locator('div')).toHaveText(['12:00 PM', '2:30 PM']);
+  await expect(rows.nth(2).locator('td').nth(3).locator('div')).toHaveText(['12:15 PM', '2:45 PM']);
+  // An isolated OUT LUNCH must not be displayed as the end of the day.
+  await expect(rows.last().locator('td')).toHaveText([
+    'Wed, Sep 16',
+    '—',
+    '12:03 PM',
+    '—',
+    '—',
+    '0h 00m',
+  ]);
   for (const label of ['Employee code', 'Department', 'Delivery station', 'Source'])
     await expect(detail.getByText(label, { exact: true })).toHaveCount(0);
   await expect(directory).not.toContainText('DEMO1');
@@ -124,6 +174,16 @@ test('employee workspace navigates real period history, resets selection, filter
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    if (width <= 700) {
+      const punches = page.getByRole('region', { name: 'Timecard punches' });
+      await punches.focus();
+      await punches.press('ArrowRight');
+      await expect.poll(() => punches.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      await punches.evaluate((element) => {
+        element.scrollLeft = 0;
+        element.blur();
+      });
+    }
     await page.screenshot({
       animations: 'disabled',
       path: test.info().outputPath(`employees-${theme}-${width}.png`),
