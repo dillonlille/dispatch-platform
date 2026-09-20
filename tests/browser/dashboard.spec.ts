@@ -4,6 +4,10 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   page,
   dispatch,
 }) => {
+  // HTTP previews over Tailscale have getRandomValues but no randomUUID.
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined });
+  });
   const owner = await dispatch.client();
   const dsp = owner.session.dsps.find((d: any) => d.name === 'Northline Logistics');
   await owner.select(dsp.id);
