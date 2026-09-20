@@ -377,7 +377,7 @@ async fn the_request_pipeline_checks_host_origin_content_type_and_size() {
         assert_eq!(
             answer.header("content-security-policy"),
             "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' \
-             'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws:; font-src 'self'; \
+             'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob: ws:; font-src 'self'; \
              object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         );
     }
@@ -583,6 +583,88 @@ async fn signing_in_and_out_sets_and_clears_the_session_cookie() {
     server
         .expect(Call::get("/api/session").who(&who), 401, "sign_in_required")
         .await;
+}
+
+#[tokio::test]
+async fn remembered_sessions_have_a_fixed_seven_day_deadline() {
+    let server = Server::start().await;
+    for value in [json!("true"), json!(1), Value::Null] {
+        server.expect(Call::post("/api/auth/login", json!({
+            "email":"member@dispatch.test", "password":"Dispatch-demo-2026!", "rememberMe":value
+        })), 400, "invalid_input").await;
+    }
+    for (remember, seconds) in [(false, 28800), (true, 604800)] {
+        let login = server.send(Call::post("/api/auth/login", json!({
+            "email":"member@dispatch.test", "password":"Dispatch-demo-2026!", "rememberMe":remember
+        }))).await;
+        assert_eq!(login.status, 200, "{}", login.body);
+        let (pair, attributes) = login.header("set-cookie").split_once(';').unwrap();
+        assert_eq!(
+            attributes,
+            format!(" Path=/; HttpOnly; SameSite=Strict; Max-Age={seconds}")
+        );
+        let hash = crypto::sha(pair.strip_prefix("dispatch_session=").unwrap());
+        let query_hash = hash.clone();
+        let (expiry, created): (i64, i64) = server
+            .state
+            .read(move |db| {
+                Ok(db
+                    .platform
+                    .one_as(
+                        "SELECT expires_at,created_at FROM sessions WHERE hash=?",
+                        [&query_hash],
+                    )?
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(expiry - created, seconds * 1000);
+        let who = Who {
+            cookie: pair.to_owned(),
+            csrf: String::new(),
+            view: None,
+        };
+        for _ in 0..2 {
+            let session = server.send(Call::get("/api/session").who(&who)).await;
+            assert_eq!(session.status, 200);
+            assert!(
+                session.header("set-cookie").is_empty(),
+                "activity must not renew the cookie"
+            );
+        }
+        let query_hash = hash.clone();
+        let (unchanged,): (i64,) = server
+            .state
+            .read(move |db| {
+                Ok(db
+                    .platform
+                    .one_as(
+                        "SELECT expires_at FROM sessions WHERE hash=?",
+                        [&query_hash],
+                    )?
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            unchanged, expiry,
+            "activity must not slide the server deadline"
+        );
+        server
+            .state
+            .run(move |db| {
+                db.platform.exec(
+                    "UPDATE sessions SET expires_at=? WHERE hash=?",
+                    rusqlite::params![db::now(), hash],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        server
+            .expect(Call::get("/api/session").who(&who), 401, "sign_in_required")
+            .await;
+    }
 }
 
 #[tokio::test]

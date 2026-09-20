@@ -225,37 +225,6 @@ select {
 .navigation-backdrop {
   display: none;
 }
-.auth-panel form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.auth-panel form > label + label,
-.auth-panel form > button {
-  margin-top: 0;
-}
-.auth-panel label {
-  font-size: 13px;
-  line-height: 18px;
-  gap: 9px;
-}
-.auth-panel button.auth-forgot {
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  justify-content: flex-start;
-  font-weight: 400;
-  color: var(--primary);
-  background: transparent;
-}
-.auth-footer {
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.auth-back {
-  margin-top: 24px;
-}
 .error,
 .notice {
   display: block;
@@ -697,9 +666,6 @@ td small {
   }
   .restored-tabs {
     gap: 24px;
-  }
-  .auth-panel {
-    max-width: calc(100vw - 48px);
   }
   .modal-backdrop {
     padding: 12px;

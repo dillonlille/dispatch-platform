@@ -82,6 +82,32 @@ test(
       Number(map.headers.get('content-length')) < 900_000,
       'compressed vector map stays within its initial-load budget',
     );
+    const vanFile = manifest.files.find((file) =>
+      /dashboard\/assets\/login-van-.*\.glb$/.test(file.path),
+    );
+    assert(vanFile, 'van is a separate desktop-only asset');
+    const van = await fetch(f.env.DISPATCH_ORIGIN + vanFile.path.replace('dashboard', ''), {
+      headers: { 'accept-encoding': 'br' },
+    });
+    assert.equal(van.headers.get('content-type'), 'model/gltf-binary');
+    assert.equal(van.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(van.headers.get('content-encoding'), 'br');
+    assert(
+      Number(van.headers.get('content-length')) < 300_000,
+      'compressed van transfer stays under 300 KB',
+    );
+    const rendererFile = manifest.files.find((file) =>
+      /dashboard\/assets\/renderer-.*\.js$/.test(file.path),
+    );
+    assert(rendererFile, '3D renderer is a deferred chunk');
+    const renderer = await fetch(
+      f.env.DISPATCH_ORIGIN + rendererFile.path.replace('dashboard', ''),
+      { headers: { 'accept-encoding': 'br' } },
+    );
+    assert(
+      Number(renderer.headers.get('content-length')) < 200_000,
+      'deferred renderer transfer stays under 200 KB',
+    );
     const font = await fetch(f.env.DISPATCH_ORIGIN + '/assets/inter.woff2');
     assert.equal(font.headers.get('cache-control'), 'public, no-cache');
     assert.equal((await f.request('/api/session')).headers.get('cache-control'), 'no-store');
