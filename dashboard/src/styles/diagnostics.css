@@ -289,6 +289,12 @@
   background: transparent;
   color: var(--primary);
 }
+.run-toggle span {
+  text-align: left;
+}
+.run-toggle small {
+  display: block;
+}
 .run-toggle svg {
   color: var(--muted-foreground);
 }

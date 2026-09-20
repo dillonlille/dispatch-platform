@@ -55,6 +55,9 @@ export function collectionHistory(jobs: Job[]) {
       const runs = sorted
         .filter((j) => ['succeeded', 'failed', 'cancelled'].includes(j.status))
         .map(runHistory);
+      const underway = sorted
+        .filter((j) => !['succeeded', 'failed', 'cancelled'].includes(j.status))
+        .map(runHistory);
       const successes = runs.filter((r) => r.job.status === 'succeeded');
       const latest = successes[0];
       const baseline = successes
@@ -106,6 +109,8 @@ export function collectionHistory(jobs: Job[]) {
         label: `${jobs[0]!.dspName} · ${providerName(jobs[0]!.kind)}`,
         /** The newest job, finished or not. */
         newest: sorted[0]!,
+        /** Queued, running or waiting for verification: no part of the statistics. */
+        underway,
         runs,
         latest,
         warnings,

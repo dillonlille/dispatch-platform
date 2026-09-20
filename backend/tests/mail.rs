@@ -1,6 +1,6 @@
 //! The platform's mail log: what an email was for, and what became of its invitation.
 mod common;
-use common::seeded;
+use common::{audits, seeded};
 use dispatch_backend::{db::now, mail};
 use rusqlite::params;
 
@@ -36,6 +36,7 @@ fn the_log_follows_an_invitation_and_failed_mail_can_be_retried_or_discarded() {
             )
             .unwrap();
     }
+    let actor = owner["id"].as_str().unwrap();
     let log = mail::log(&db).unwrap();
     let sent = log.iter().find(|m| m.id == "mail_sent").unwrap();
     assert_eq!(sent.recipient.as_deref(), Some("new@example.test"));
@@ -46,16 +47,16 @@ fn the_log_follows_an_invitation_and_failed_mail_can_be_retried_or_discarded() {
     assert!(failed.kind.is_none() && failed.recipient.is_none());
 
     assert_eq!(
-        mail::retry(&db, "mail_sent").unwrap_err().code,
+        mail::retry(&db, actor, "mail_sent").unwrap_err().code,
         "email_not_failed"
     );
-    mail::retry(&db, "mail_failed").unwrap();
+    mail::retry(&db, actor, "mail_failed").unwrap();
     let retried = mail::log(&db).unwrap();
     let retried = retried.iter().find(|m| m.id == "mail_failed").unwrap();
     assert_eq!((retried.status.as_str(), retried.attempts), ("pending", 0));
     assert!(retried.next_attempt_at.is_some());
     assert_eq!(
-        mail::discard(&db, "mail_failed").unwrap_err().code,
+        mail::discard(&db, actor, "mail_failed").unwrap_err().code,
         "email_not_failed"
     );
     db.platform
@@ -64,11 +65,20 @@ fn the_log_follows_an_invitation_and_failed_mail_can_be_retried_or_discarded() {
             [],
         )
         .unwrap();
-    mail::discard(&db, "mail_failed").unwrap();
+    mail::discard(&db, actor, "mail_failed").unwrap();
     assert!(
         mail::log(&db)
             .unwrap()
             .iter()
             .all(|m| m.id != "mail_failed")
     );
+    let recorded: Vec<String> = audits(&db, None)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["action"].as_str().unwrap().to_owned())
+        .filter(|action| action.starts_with("mail."))
+        .collect();
+    assert_eq!(recorded, ["mail.discarded", "mail.retried"]);
 }

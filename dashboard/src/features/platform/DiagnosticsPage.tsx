@@ -15,7 +15,11 @@ const tabs = ['overview', 'collections', 'email', 'test-dsps'];
 function addressed() {
   const query = hashQuery();
   const tab = query.get('tab') ?? '';
-  return { tab: tabs.includes(tab) ? tab : 'overview', source: query.get('source') ?? '' };
+  return {
+    tab: tabs.includes(tab) ? tab : 'overview',
+    source: query.get('source') ?? '',
+    run: query.get('run') ?? '',
+  };
 }
 
 export function DiagnosticsPage() {
@@ -30,9 +34,9 @@ export function DiagnosticsPage() {
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, []);
-  const go = (tab: string, source = place.source) => {
-    setPlace({ tab, source });
-    replaceHashQuery(source ? { tab, source } : { tab });
+  const go = (tab: string, source = place.source, run = '') => {
+    setPlace({ tab, source, run });
+    replaceHashQuery({ tab, ...(source && { source }), ...(run && { run }) });
   };
   const attention = sources.filter((source) => source.warnings.length).length;
   const mailFailed = health.data?.mail.failed ?? 0;
@@ -64,7 +68,7 @@ export function DiagnosticsPage() {
             diagnostics={diagnostics.data}
             jobs={jobs.data}
             sources={sources}
-            openSource={(source) => go('collections', source)}
+            openSource={(source, run) => go('collections', source, run)}
             openEmail={() => go('email')}
           />
         ) : (
@@ -73,8 +77,10 @@ export function DiagnosticsPage() {
       {place.tab === 'collections' &&
         (jobs.data ? (
           <DiagnosticsCollections
+            key={place.run}
             sources={sources}
             selected={place.source}
+            run={place.run}
             onSelect={(source) => go('collections', source)}
           />
         ) : (

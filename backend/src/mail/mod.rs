@@ -136,20 +136,40 @@ pub fn log(db: &Store) -> Result<Vec<MailMessage>> {
         .collect()
 }
 
+const RECIPIENT: &str = "SELECT COALESCE(i.email,u.email) recipient FROM outbox o \
+    LEFT JOIN invitations i ON i.hash=o.invitation_hash LEFT JOIN users u ON u.id=o.user_id \
+    WHERE o.id=? AND o.status='failed'";
+
+/// Changes a message that ran out of attempts, and records who did it and to whose mail.
+fn change_failed(db: &Store, actor: &str, id: &str, action: &str, sql: &str) -> Result<()> {
+    db.platform.transaction(|| {
+        let row = db.platform.one(RECIPIENT, [id])?;
+        ensure(row.is_some(), "email_not_failed", 409)?;
+        let recipient = row.as_ref().and_then(|r| r["recipient"].as_str());
+        db.platform.exec(sql, params![db::now(), id])?;
+        db.audit_with(Some(actor), None, action, "", recipient, &[])
+    })
+}
+
 /// Gives a message that ran out of attempts a fresh set, starting now.
-pub fn retry(db: &Store, id: &str) -> Result<()> {
-    let changed = db.platform.exec(
-        "UPDATE outbox SET status='pending',attempts=0,available_at=?,last_error=NULL \
-         WHERE id=? AND status='failed'",
-        params![db::now(), id],
-    )?;
-    ensure(changed == 1, "email_not_failed", 409)
+pub fn retry(db: &Store, actor: &str, id: &str) -> Result<()> {
+    change_failed(
+        db,
+        actor,
+        id,
+        "mail.retried",
+        "UPDATE outbox SET status='pending',attempts=0,available_at=?1,last_error=NULL \
+         WHERE id=?2 AND status='failed'",
+    )
 }
 
 /// Drops a message that ran out of attempts, along with its encrypted content.
-pub fn discard(db: &Store, id: &str) -> Result<()> {
-    let changed = db
-        .platform
-        .exec("DELETE FROM outbox WHERE id=? AND status='failed'", [id])?;
-    ensure(changed == 1, "email_not_failed", 409)
+pub fn discard(db: &Store, actor: &str, id: &str) -> Result<()> {
+    change_failed(
+        db,
+        actor,
+        id,
+        "mail.discarded",
+        "DELETE FROM outbox WHERE ?1>0 AND id=?2 AND status='failed'",
+    )
 }

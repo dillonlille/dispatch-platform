@@ -8,6 +8,8 @@ import type { Diagnostics } from './diagnostics.js';
 import { memory } from './RunDetail.js';
 
 type Source = ReturnType<typeof collectionHistory>[number];
+// Below this much free disk a collection's publication can fail.
+const lowStorageBytes = 1024 ** 3;
 const active = (job: Job) => ['queued', 'running', 'waiting_verification'].includes(job.status);
 
 function Tile({
@@ -50,12 +52,35 @@ export function DiagnosticsOverview({
   diagnostics: Diagnostics;
   jobs: Job[];
   sources: Source[];
-  openSource: (key: string) => void;
+  /** Opens a source in Collections, with one of its runs expanded when named. */
+  openSource: (key: string, run?: string) => void;
   openEmail: () => void;
 }) {
   const { browsers, mail } = health;
   const running = jobs.filter(active);
   const attention = sources.filter((source) => source.warnings.length);
+  const system: [title: string, detail: string][] = [
+    ...(browsers.memory.canStart
+      ? []
+      : ([
+          [
+            'Browsers',
+            `New browsers are waiting for memory: ${
+              browsers.memory.availableBytes === null
+                ? 'available memory unknown'
+                : `${bytes(browsers.memory.availableBytes, 'MiB')} free`
+            }, ${bytes(browsers.memory.requiredBytes, 'MiB')} needed`,
+          ],
+        ] as [string, string][])),
+    ...(diagnostics.storageAvailableBytes < lowStorageBytes
+      ? ([
+          [
+            'Storage',
+            `Only ${bytes(diagnostics.storageAvailableBytes, 'MiB')} of storage is available`,
+          ],
+        ] as [string, string][])
+      : []),
+  ];
   const columns: TableColumn<Source>[] = [
     {
       id: 'source',
@@ -90,11 +115,11 @@ export function DiagnosticsOverview({
     {
       id: 'open',
       header: '',
-      cell: ({ key, label }) => (
+      cell: ({ key, label, newest }) => (
         <button
           className="icon-button diagnostics-open"
           aria-label={`Open ${label}`}
-          onClick={() => openSource(key)}
+          onClick={() => openSource(key, newest.id)}
         >
           <ChevronRight size={16} />
         </button>
@@ -174,11 +199,20 @@ export function DiagnosticsOverview({
         </section>
         <section className="diagnostics-card" aria-labelledby="diagnostics-attention">
           <h2 id="diagnostics-attention">Needs attention</h2>
+          {system.map(([title, detail]) => (
+            <div className="diagnostics-issue" key={title}>
+              <AlertTriangle size={16} className="diagnostics-warn" />
+              <span>
+                <strong>{title}</strong>
+                <small>{detail}</small>
+              </span>
+            </div>
+          ))}
           {attention.map((source) => (
             <button
               className="diagnostics-issue"
               key={source.key}
-              onClick={() => openSource(source.key)}
+              onClick={() => openSource(source.key, source.runs[0]?.job.id)}
             >
               {source.newest.status === 'failed' ? (
                 <CircleX size={16} className="diagnostics-bad" />
@@ -204,7 +238,9 @@ export function DiagnosticsOverview({
               </span>
             </button>
           )}
-          {!attention.length && !mail.failed && <p className="muted">Nothing needs attention.</p>}
+          {!attention.length && !system.length && !mail.failed && (
+            <p className="muted">Nothing needs attention.</p>
+          )}
         </section>
       </div>
       <section className="diagnostics-card" aria-labelledby="diagnostics-latest">
