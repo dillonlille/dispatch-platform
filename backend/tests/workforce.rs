@@ -81,31 +81,26 @@ fn employee_status_filter_applies_before_counting_and_pagination() {
     data["employees"][1]["active"] = json!(false);
     data["employees"][4]["active"] = json!(false);
     db.publish(&id, &data).unwrap();
-    let inactive = db
-        .employees_filtered(&id, "", 0, 1, false, Some(false))
-        .unwrap();
+    let inactive = db.employees(&id, "", 0, 1, false, Some(false)).unwrap();
     assert_eq!(inactive["total"], 2);
     assert_eq!(inactive["employees"].as_array().unwrap().len(), 1);
     assert_eq!(inactive["employees"][0]["active"], false);
-    let next = db
-        .employees_filtered(&id, "", 1, 1, false, Some(false))
-        .unwrap();
+    let next = db.employees(&id, "", 1, 1, false, Some(false)).unwrap();
     assert_ne!(
         inactive["employees"][0]["code"],
         next["employees"][0]["code"]
     );
     assert_eq!(
-        db.employees_filtered(&id, "", 0, 100, false, Some(true))
-            .unwrap()["total"],
+        db.employees(&id, "", 0, 100, false, Some(true)).unwrap()["total"],
         10
     );
     assert_eq!(
-        db.employees_filtered(&id, "Jordan", 0, 100, false, Some(false))
+        db.employees(&id, "Jordan", 0, 100, false, Some(false))
             .unwrap()["total"],
         1
     );
     assert_eq!(
-        db.employees_filtered(&id, "Jordan", 0, 100, false, Some(true))
+        db.employees(&id, "Jordan", 0, 100, false, Some(true))
             .unwrap()["total"],
         0
     );
@@ -117,7 +112,7 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
     let id = id.as_str();
     let data = workforce::fixture("UTC").unwrap();
     db.publish(id, &data).unwrap();
-    let before = db.employee(id, "E001").unwrap();
+    let before = db.employee_timecard(id, "E001", None).unwrap();
     let mut bad = data.clone();
     bad["employees"][1]["code"] = json!("E001");
     assert_eq!(db.publish(id, &bad).unwrap_err().code, "duplicate_employee");
@@ -133,7 +128,7 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
     bad = data.clone();
     bad["timecards"][0]["date"] = json!("2026-02-30");
     assert!(db.publish(id, &bad).is_err());
-    assert_eq!(db.employee(id, "E001").unwrap(), before);
+    assert_eq!(db.employee_timecard(id, "E001", None).unwrap(), before);
     let mut later = data.clone();
     later["collectedAt"] = json!("2099-01-01T00:00:00.000Z");
     later["employees"].as_array_mut().unwrap().remove(0);
@@ -142,8 +137,11 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
         .unwrap()
         .retain(|r| r["employeeCode"] != "E001");
     db.publish(id, &later).unwrap();
-    assert_eq!(db.employees(id, "", 0, 100, false).unwrap()["total"], 11);
-    assert_eq!(db.employee(id, "E001").unwrap(), before);
+    assert_eq!(
+        db.employees(id, "", 0, 100, false, None).unwrap()["total"],
+        11
+    );
+    assert_eq!(db.employee_timecard(id, "E001", None).unwrap(), before);
 }
 
 #[test]
@@ -154,7 +152,7 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     db.publish(id, &data).unwrap();
     // Publications from before links were retained return none.
     assert_eq!(
-        db.employee(id, "E001").unwrap()["timecards"][0]["sourceUrl"],
+        db.employee_timecard(id, "E001", None).unwrap().timecards[0]["sourceUrl"],
         Value::Null
     );
     let link = |code: &str| {
@@ -202,10 +200,7 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     linked["collectedAt"] = json!("2099-01-02T00:00:00.000Z");
     db.publish(id, &linked).unwrap();
     assert_eq!(count("publications"), 2);
-    for card in db.employee(id, "E003").unwrap()["timecards"]
-        .as_array()
-        .unwrap()
-    {
+    for card in db.employee_timecard(id, "E003", None).unwrap().timecards {
         assert_eq!(card["sourceUrl"], json!(link("E003")));
     }
     let date = s(&data, "to");
@@ -237,7 +232,7 @@ fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
         vec![first.clone()]
     );
     assert_eq!(
-        db.employees(id, "", 0, 100, false).unwrap()["collectedAt"],
+        db.employees(id, "", 0, 100, false, None).unwrap()["collectedAt"],
         data["collectedAt"]
     );
     data["timecards"][0]["hours"] = json!(7.25);
@@ -300,7 +295,10 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         db.daily(id, &day, "name", false).unwrap()["rows"],
         json!([])
     );
-    assert_eq!(db.employees(id, "", 0, 100, false).unwrap()["total"], 12);
+    assert_eq!(
+        db.employees(id, "", 0, 100, false, None).unwrap()["total"],
+        12
+    );
     values["unknown"] = json!(true);
     assert!(
         db.save_preferences(id, s(&actor, "id"), 1, &values)

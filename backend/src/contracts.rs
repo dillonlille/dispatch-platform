@@ -32,7 +32,7 @@ impl FromRow for EmployeeTimecardPeriod {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EmployeeTimecardResponse {

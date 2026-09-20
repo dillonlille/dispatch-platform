@@ -60,7 +60,7 @@ fn employees(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
         "inactive" => Some(false),
         _ => None,
     };
-    let page = db.employees_filtered(c.dsp_id(), query, offset, limit, desc, active)?;
+    let page = db.employees(c.dsp_id(), query, offset, limit, desc, active)?;
     Ok(Reply::json(page))
 }
 

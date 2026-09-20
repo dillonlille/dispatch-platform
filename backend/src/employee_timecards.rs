@@ -8,15 +8,9 @@ use crate::{
     workforce::{cards, display_name},
 };
 use rusqlite::params;
-use serde_json::{Value, json};
+use serde_json::json;
 
 impl Store {
-    pub fn employee(&self, id: &str, code: &str) -> Result<Value> {
-        Ok(serde_json::to_value(
-            self.employee_timecard(id, code, None)?,
-        )?)
-    }
-
     pub fn employee_timecard(
         &self,
         id: &str,

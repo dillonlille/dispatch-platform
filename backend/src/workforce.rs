@@ -366,16 +366,6 @@ impl Store {
         offset: usize,
         limit: usize,
         desc: bool,
-    ) -> Result<Value> {
-        self.employees_filtered(id, query, offset, limit, desc, None)
-    }
-    pub fn employees_filtered(
-        &self,
-        id: &str,
-        query: &str,
-        offset: usize,
-        limit: usize,
-        desc: bool,
         active: Option<bool>,
     ) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
