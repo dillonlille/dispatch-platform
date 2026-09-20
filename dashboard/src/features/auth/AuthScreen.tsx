@@ -157,7 +157,7 @@ export function AuthScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           {mode === 'login' && (
             <label className="auth-remember">
               <input name="rememberMe" type="checkbox" />
-              Remember me for 7 days
+              Remember Me
             </label>
           )}
           <button

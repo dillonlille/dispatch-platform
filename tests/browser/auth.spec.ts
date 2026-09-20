@@ -3,12 +3,12 @@ import { capturedMail } from '../mail-support.js';
 
 test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader'] } });
 
-test('remember me uses seven days and unchecked sign-in keeps eight hours', async ({
+test('remember me uses three days and unchecked sign-in keeps eight hours', async ({
   page,
   context,
 }) => {
   await page.goto('/');
-  const remember = page.getByRole('checkbox', { name: 'Remember me for 7 days' });
+  const remember = page.getByRole('checkbox', { name: 'Remember Me', exact: true });
   await expect(remember).not.toBeChecked();
   await remember.check();
   await signIn(page);
@@ -18,8 +18,8 @@ test('remember me uses seven days and unchecked sign-in keeps eight hours', asyn
   )!;
   expect(cookie.httpOnly).toBe(true);
   expect(cookie.sameSite).toBe('Strict');
-  expect(cookie.expires - Date.now() / 1000).toBeGreaterThan(604_700);
-  expect(cookie.expires - Date.now() / 1000).toBeLessThanOrEqual(604_800);
+  expect(cookie.expires - Date.now() / 1000).toBeGreaterThan(259_100);
+  expect(cookie.expires - Date.now() / 1000).toBeLessThanOrEqual(259_200);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
   await context.clearCookies();
