@@ -1,6 +1,6 @@
 //! Data providers. Each is described once, by a `Collector` in its own module, and
 //! reached through `Provider`. Provider identities and paths are compiled code,
-//! never user-controlled paths. See "Adding a data provider" in DEVELOPMENT.md.
+//! never user-controlled paths.
 mod cortex;
 mod paycom;
 use super::{

@@ -4,7 +4,8 @@
 //! Contract for migration authors: additive only. New tables, new nullable or
 //! defaulted columns, and new indexes. The previous release must keep working on
 //! a database this release has migrated, so never drop, rename or rewrite what
-//! it reads. Anything else needs the two-release change described in RELEASES.md.
+//! it reads. Anything else takes two releases: the first stops using it and ships,
+//! and only the next, whose rollback target no longer needs it, removes it.
 //! Never edit or renumber a migration that has shipped; append a new one.
 //!
 //! A database may record ids this binary does not know. That is a rollback: the
