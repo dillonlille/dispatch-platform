@@ -65,6 +65,7 @@ test('Rust workforce settings enforce revisions, filter employees and timecards,
   const detail = (await owner.get('/api/dsp/employees/E002')).value;
   assert.equal(detail.employee.name, 'Ellis, Jordan');
   assert.equal(detail.timecards.length, 7);
+  assert.equal(Date.parse(detail.period.to) - Date.parse(detail.period.from), 13 * 86400000);
   assert.equal(detail.period.to, detail.timecards[0].date);
   assert.equal(detail.nextPeriod, null);
   const same = await owner.get(

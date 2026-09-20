@@ -106,9 +106,9 @@ test('preloaded employees and pay periods render on the next paint with requests
   await dispatch.stop();
   dispatch.collector(dsp.id, (db) =>
     db.exec(`
-    INSERT INTO publications SELECT 'cache-history',collected_at,date(period_from,'-7 days'),date(period_to,'-7 days'),0 FROM publications WHERE active=1;
+    INSERT INTO publications SELECT 'cache-history',collected_at,date(period_from,'-14 days'),date(period_to,'-14 days'),0 FROM publications WHERE active=1;
     INSERT INTO employees SELECT 'cache-history',code,name,department,position,station,active FROM employees WHERE code='E001';
-    INSERT INTO timecards SELECT 'cache-history',employee_code,date(date,'-7 days'),hours,status,punches FROM timecards WHERE employee_code='E001';
+    INSERT INTO timecards SELECT 'cache-history',employee_code,date(date,'-14 days'),hours,status,punches FROM timecards WHERE employee_code='E001';
   `),
   );
   await dispatch.start();
@@ -129,7 +129,7 @@ test('preloaded employees and pay periods render on the next paint with requests
     await page.getByRole('tab', { name: 'Employees', exact: true }).click();
     const directory = page.getByLabel('Employee directory');
     const detail = page.getByRole('region', { name: 'Employee details', exact: true });
-    await expect(detail.locator('tbody tr')).toHaveCount(7);
+    await expect(detail.locator('tbody tr')).toHaveCount(14);
     // Avery has not been selected yet; the visible-directory preload must finish first.
     await expect.poll(() => [...finished].some((url) => url.endsWith('/E001'))).toBe(true);
     await frame(page);
@@ -293,7 +293,7 @@ test('cached names cannot cross DSPs, even when an older request finishes late',
         json: detail
           ? {
               employee,
-              period: { from: '2026-09-13', to: '2026-09-19' },
+              period: { from: '2026-09-06', to: '2026-09-19' },
               previousPeriod: null,
               nextPeriod: null,
               timecards: [

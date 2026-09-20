@@ -13,30 +13,33 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
         data["timecards"][0]["hours"] = json!(hours);
         data
     };
-    let old = period_data("2026-09-05", "2026-09-06T00:00:00Z", 5.0);
-    let middle = period_data("2026-09-12", "2026-09-13T00:00:00Z", 6.0);
+    let old = period_data("2026-08-22", "2026-08-23T00:00:00Z", 5.0);
+    let middle = period_data("2026-09-05", "2026-09-06T00:00:00Z", 6.0);
     let current = period_data("2026-09-19", "2026-09-20T00:00:00Z", 7.0);
     for data in [&old, &middle, &current] {
         db.publish(&id, data).unwrap();
     }
     // A later sync of an older period must update that period, not replace Latest.
-    let mut revision = period_data("2026-09-12", "2026-09-21T00:00:00Z", 9.0);
+    let mut revision = period_data("2026-09-05", "2026-09-21T00:00:00Z", 9.0);
     revision["employees"][0]["name"] = json!("Old employee name");
     db.publish(&id, &revision).unwrap();
     let latest = db.employee_timecard(&id, "E001", None).unwrap();
+    assert_eq!(latest.period.from, "2026-09-06");
     assert_eq!(latest.period.to, "2026-09-19");
     assert_eq!(latest.employee["name"], "Avery Morgan");
     assert!(latest.next_period.is_none());
     let previous = db
         .employee_timecard(&id, "E001", latest.previous_period.as_ref())
         .unwrap();
-    assert_eq!(previous.period.to, "2026-09-12");
+    assert_eq!(previous.period.from, "2026-08-23");
+    assert_eq!(previous.period.to, "2026-09-05");
     assert_eq!(previous.next_period, Some(latest.period.clone()));
     assert_eq!(previous.timecards.last().unwrap()["hours"], 9.0);
     let first = db
         .employee_timecard(&id, "E001", previous.previous_period.as_ref())
         .unwrap();
-    assert_eq!(first.period.to, "2026-09-05");
+    assert_eq!(first.period.from, "2026-08-09");
+    assert_eq!(first.period.to, "2026-08-22");
     assert!(first.previous_period.is_none());
     assert_eq!(first.next_period, Some(previous.period));
     let missing = EmployeeTimecardPeriod {

@@ -706,7 +706,9 @@ pub fn fixture_date(timezone: &str, selected: Option<chrono::NaiveDate>) -> Resu
         _)|dates.iter().map(move|date|json!({"employeeCode":format!("E{:03}",i+1),"date":date,
         "hours":if i%3==0{8.5}else{8.0},"status":"Complete","punches":[{"in":"08:00","out":"12:00","hours":4},
         {"in":"12:30","out":if i%3==0{"17:00"}else{"16:30"},"hours":if i%3==0{4.5}else{4.0}}]}))).collect();
+    // A full two-week pay period with only one week of recorded punches.
+    let from = (today - chrono::Duration::days(13)).to_string();
     Ok(
-        json!({"employees":employees,"timecards":timecards,"collectedAt":iso(),"from":dates[0],"to":today.to_string()}),
+        json!({"employees":employees,"timecards":timecards,"collectedAt":iso(),"from":from,"to":today.to_string()}),
     )
 }

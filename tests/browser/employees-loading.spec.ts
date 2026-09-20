@@ -21,7 +21,6 @@ for (const width of [1280, 390]) {
     await dispatch.stop();
     dispatch.collector(dsp.id, (db) => {
       db.exec(`
-        UPDATE publications SET period_from=date(period_from,'-7 days');
         UPDATE employees SET position='' WHERE code='E002';
         DELETE FROM timecards WHERE employee_code='E003';
         INSERT INTO timecards
