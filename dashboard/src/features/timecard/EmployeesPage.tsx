@@ -1,8 +1,10 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownAZ, ArrowUpAZ, ChevronRight } from 'lucide-react';
 import type { Employee } from '../../../../shared/contracts/index.js';
 import { useUpdateState } from '../../app/browser-update.js';
-import { useData } from '../../app/api.js';
+import { useCachedData } from '../../app/api.js';
+import { employeeTimecardUrl } from '../../app/endpoints.js';
+import { prefetchData } from '../../app/prefetch.js';
 import { DataState, Empty, SearchInput } from '../../ui/index.js';
 import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
@@ -15,8 +17,26 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
   const [status, setStatus] = useUpdateState<(typeof statuses)[number]>('employee-status', 'all');
   const [selected, setSelected] = useState<string>();
   const url = `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${desc ? 'desc' : 'asc'}`;
-  const { data, error } = useData<Employees>(url, 0, refreshKey, url);
+  const { data, error } = useCachedData<Employees>(url, 0, refreshKey);
   const employee = data?.employees.find((person) => person.code === selected) ?? data?.employees[0];
+  const directory = useRef<HTMLUListElement>(null);
+  const visibleCodes = data?.employees.map((person) => person.code).join(',');
+  useEffect(() => {
+    const list = directory.current;
+    if (!list) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        prefetchData(
+          entries
+            .filter((entry) => entry.isIntersecting)
+            .map((entry) => employeeTimecardUrl((entry.target as HTMLElement).dataset.employee!)),
+        );
+      },
+      { root: list },
+    );
+    list.querySelectorAll('[data-employee]').forEach((button) => observer.observe(button));
+    return () => observer.disconnect();
+  }, [visibleCodes]);
   return (
     <section className="employees-page" aria-label="Employees">
       <div className="employees-heading">
@@ -67,14 +87,17 @@ export function EmployeesPage({ actions, refreshKey }: { actions: ReactNode; ref
                     <span>Employee</span>
                     <span>{desc ? 'Z–A' : 'A–Z'}</span>
                   </div>
-                  <ul>
+                  <ul ref={directory}>
                     {data.employees.map((person) => (
                       <li key={person.code}>
                         <button
                           type="button"
                           className="employees-person"
+                          data-employee={person.code}
                           aria-pressed={person.code === employee.code}
                           onClick={() => setSelected(person.code)}
+                          onPointerEnter={() => prefetchData([employeeTimecardUrl(person.code)])}
+                          onFocus={() => prefetchData([employeeTimecardUrl(person.code)])}
                         >
                           <EmployeeAvatar name={person.name} />
                           <span>{person.name}</span>

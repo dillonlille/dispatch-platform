@@ -1,11 +1,13 @@
 import { beginBrowserWrite } from './browser-update.js';
 import { scheduleIssues } from '../../../shared/schedules.js';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, useSyncExternalStore } from 'react';
 import { parseApiResponse } from '../../../shared/contracts/runtime.js';
 import { backoff } from '../lib/backoff.js';
+import { dataCache } from './data-cache.js';
 export let csrf = '',
   view = '';
 export function credentials(nextCsrf: string, nextView = '') {
+  if (csrf !== nextCsrf || view !== nextView) dataCache.clear();
   csrf = nextCsrf;
   view = nextView;
 }
@@ -71,6 +73,7 @@ export function errorLabel(code: string): string | undefined {
 }
 export async function api<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const finish = body === undefined ? undefined : beginBrowserWrite();
+  const requestView = view;
   try {
     const response = await fetch(url, {
       method: body === undefined ? 'GET' : 'POST',
@@ -96,7 +99,9 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
       );
     }
     try {
-      return parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
+      const parsed = parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
+      if (body !== undefined && requestView === view) dataCache.invalidate();
+      return parsed;
     } catch {
       throw new ApiError(
         'invalid_api_response',
@@ -109,36 +114,69 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
     finish?.();
   }
 }
-export function useData<T>(url: string, poll = 0, refreshKey?: string | null, dataScope?: string) {
-  const [result, setResult] = useState<{ data: T; scope: string | undefined }>(),
+/** Opt in to bounded session memory and background revalidation. */
+export function useCachedData<T>(url: string, poll = 0, refreshKey?: string | null) {
+  return useData<T>(url, poll, refreshKey, url, true);
+}
+
+export function useData<T>(
+  url: string,
+  poll = 0,
+  refreshKey?: string | null,
+  dataScope?: string,
+  cache = false,
+) {
+  const cached = useSyncExternalStore(
+    useCallback(
+      (listener) => (cache ? dataCache.subscribe(url, listener) : () => {}),
+      [cache, url],
+    ),
+    useCallback(() => (cache ? dataCache.peek(url) : undefined), [cache, url]),
+  );
+  const generation = cached?.generation ?? 0;
+  const session = cache ? dataCache.session : 0;
+  const scope = cache ? url : dataScope;
+  const previous = useRef<{ url: string; refreshKey?: string | null; revision: number }>(undefined);
+  const [result, setResult] = useState<{ data: T; scope: string | undefined; session: number }>(),
     [error, setError] = useState(''),
     [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((v) => v + 1), []);
   useEffect(() => {
+    const changed = previous.current;
+    const force =
+      changed?.url === url && (changed.refreshKey !== refreshKey || changed.revision !== revision);
+    previous.current = { url, refreshKey, revision };
     const controller = new AbortController();
     let active = true;
     setError('');
     let reading = false;
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
-    const read = async () => {
+    const read = async (force = false) => {
       if (!url || reading || document.hidden) return;
       reading = true;
       try {
-        const value = await api<T>(url, undefined, controller.signal);
-        if (active) {
-          setResult({ data: value, scope: dataScope });
+        const value = cache
+          ? await dataCache.read(url, (signal) => api<T>(url, undefined, signal), force)
+          : await api<T>(url, undefined, controller.signal);
+        if (active && (!cache || generation === dataCache.generation)) {
+          setResult({ data: value, scope, session });
           setError('');
           failures = 0;
           if (retry) clearTimeout(retry);
         }
       } catch (error) {
-        if (active && error instanceof Error && error.name !== 'AbortError') {
+        if (
+          active &&
+          (!cache || generation === dataCache.generation) &&
+          error instanceof Error &&
+          error.name !== 'AbortError'
+        ) {
           setError(error.message);
           // A missed table response must recover even when no further driver arrives.
           if (!(error instanceof ApiError) || error.status >= 500 || error.status === 429) {
             if (retry) clearTimeout(retry);
-            retry = setTimeout(() => void read(), backoff(failures++));
+            retry = setTimeout(() => void read(true), backoff(failures++));
           }
         }
       } finally {
@@ -146,11 +184,13 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null, da
       }
     };
     const visible = () => {
-      if (!document.hidden) void read();
+      if (!document.hidden) void read(true);
     };
     document.addEventListener('visibilitychange', visible);
-    void read();
-    const timer = poll ? setInterval(() => void read(), poll) : undefined;
+    void read(force);
+    // Active cached views periodically revalidate, including changes made in another browser.
+    const interval = poll || (cache ? dataCache.limits.freshMs : 0);
+    const timer = interval ? setInterval(() => void read(true), interval) : undefined;
     return () => {
       active = false;
       controller.abort();
@@ -158,10 +198,12 @@ export function useData<T>(url: string, poll = 0, refreshKey?: string | null, da
       if (timer) clearInterval(timer);
       if (retry) clearTimeout(retry);
     };
-  }, [url, revision, poll, refreshKey, dataScope]);
+  }, [url, revision, poll, refreshKey, scope, cache, generation, session]);
   // A date-scoped view can keep its controls mounted without showing the previous day's rows.
-  const data = result?.scope === dataScope ? result?.data : undefined;
+  const shown = result?.session === session ? result : undefined;
+  const data =
+    (cached?.data as T | undefined) ?? (shown?.scope === scope ? shown?.data : undefined);
   // The previous scope's value lets a view hold its layout, marked busy, until the new one lands.
-  const stale = data || error ? undefined : result?.data;
+  const stale = data || error ? undefined : shown?.data;
   return { data, stale, error, refresh };
 }

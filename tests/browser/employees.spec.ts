@@ -257,12 +257,6 @@ test('employee workspace navigates real period history, resets selection, filter
 });
 
 test('a delayed employee response cannot overwrite a newer selection', async ({ page }) => {
-  await login(page);
-  await openDsp(page, 'Northline Logistics');
-  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
-  const directory = page.getByLabel('Employee directory');
-  await expect(directory.getByRole('button', { name: 'Avery Morgan', exact: true })).toBeVisible();
   let unblock!: () => void;
   const blocked = new Promise<void>((resolve) => {
     unblock = resolve;
@@ -277,6 +271,12 @@ test('a delayed employee response cannot overwrite a newer selection', async ({ 
     await blocked;
     await route.fulfill({ response });
   });
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
+  const directory = page.getByLabel('Employee directory');
+  await expect(directory.getByRole('button', { name: 'Avery Morgan', exact: true })).toBeVisible();
   await directory.getByRole('button', { name: 'Avery Morgan', exact: true }).click();
   await requested;
   await directory.getByRole('button', { name: 'Alex Parker', exact: true }).click();

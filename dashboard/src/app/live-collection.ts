@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { api, ApiError, view } from './api.js';
 import { backoff } from '../lib/backoff.js';
+import { dataCache } from './data-cache.js';
 
-/** One bounded, sleeping request per visible table. Driver events carry no records. */
-export function useCollectionUpdates(date: string) {
-  const [revision, setRevision] = useState(0);
+/** One sleeping request for the Timecard page, shared across days and tabs. */
+export function useCollectionUpdates() {
   const token = view;
   useEffect(() => {
     let disposed = false;
@@ -13,12 +13,17 @@ export function useCollectionUpdates(date: string) {
     let pending: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;
     let after = '';
-    const refresh = () => {
+    let pendingVersion: string | undefined;
+    const refresh = (version?: string) => {
+      pendingVersion = version;
       if (pending) return;
       // Coalesce closely spaced driver results from the collection lanes.
       pending = setTimeout(() => {
         pending = undefined;
-        if (!disposed) setRevision((value) => value + 1);
+        if (!disposed) {
+          if (pendingVersion === undefined) dataCache.invalidate();
+          else dataCache.observeVersion('collections', pendingVersion);
+        }
       }, 150);
     };
     const listen = async () => {
@@ -34,7 +39,7 @@ export function useCollectionUpdates(date: string) {
           AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
         );
         if (!request.signal.aborted && !disposed) {
-          if (result.revision !== after) refresh();
+          if (result.revision !== after) refresh(result.revision);
           after = result.revision;
           failures = 0;
         }
@@ -70,6 +75,5 @@ export function useCollectionUpdates(date: string) {
       if (pending) clearTimeout(pending);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [date, token]);
-  return revision;
+  }, [token]);
 }

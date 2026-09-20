@@ -1,8 +1,7 @@
 import { useUpdateState } from '../../../app/browser-update.js';
-import { useCollectionUpdates } from '../../../app/live-collection.js';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Download, Globe, Info, Link2, RefreshCw } from 'lucide-react';
-import { useData } from '../../../app/api.js';
+import { useCachedData } from '../../../app/api.js';
 import { useTableState } from '../../../app/useTableState.js';
 import {
   DataState,
@@ -25,6 +24,7 @@ import type { PaycomPreferences } from '../../../../../shared/paycom.js';
 import { PaycomDateControls } from '../DateControls.js';
 import { MealDetail, mealColumns, mealLines } from './mealColumns.js';
 import { LinkEmployees } from './LinkEmployees.js';
+import { useAdjacentDays } from '../useAdjacentDays.js';
 import './meal-breaks.css';
 
 export function MealBreaksPage({
@@ -48,13 +48,9 @@ export function MealBreaksPage({
     [filter, setFilter] = useUpdateState('meal-filter', 'all');
   const state = useTableState('meal', { id: 'employee', desc: false });
   const [linking, setLinking] = useState(false);
-  const liveRevision = useCollectionUpdates(date);
-  const request = useData<MealComparison>(
-    `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`,
-    0,
-    `${refreshKey}:${liveRevision}`,
-    date,
-  );
+  const url = `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
+  const request = useCachedData<MealComparison>(url, 0, refreshKey);
+  useAdjacentDays(url, date, today, request.data);
   const current = request.data?.date === date ? request.data : undefined;
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? request.stale;
