@@ -6,6 +6,6 @@ export const MEMBER_COMPLETION_TIMING = {
   fade: 220,
   drop: 900,
   settle: 1100,
-  hold: 3000,
+  hold: 1000,
   lift: 520,
 };

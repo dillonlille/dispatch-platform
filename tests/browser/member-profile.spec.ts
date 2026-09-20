@@ -173,8 +173,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(completion).toContainText('Northline Logistics');
     await expect(completion.locator('.member-completion-role')).toHaveText('Member');
     await expect(page.locator('.member-profile-page')).toHaveAttribute('inert', '');
-    // The badge remains readable during its extra three-second hold after settling.
-    await page.waitForTimeout(4000);
+    // The badge remains readable during its brief hold after settling.
+    await page.waitForTimeout(2600);
     await expect(completion.locator('.member-completion-badge')).toBeVisible();
     await expect(page).toHaveURL(/#signin$/);
     await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
