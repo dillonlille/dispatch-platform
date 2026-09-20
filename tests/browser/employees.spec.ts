@@ -174,22 +174,22 @@ test('employee workspace navigates real period history, resets selection, filter
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    if (width <= 700) {
-      const punches = page.getByRole('region', { name: 'Timecard punches' });
-      await punches.focus();
-      await punches.press('ArrowRight');
-      await expect.poll(() => punches.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-      await punches.evaluate((element) => {
-        element.scrollLeft = 0;
-        element.blur();
-      });
-    }
+    if (width > 700)
+      expect(
+        await page
+          .getByRole('region', { name: 'Timecard punches' })
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true);
     await page.screenshot({
       animations: 'disabled',
       path: test.info().outputPath(`employees-${theme}-${width}.png`),
       fullPage: true,
     });
   }
+  const punches = page.getByRole('region', { name: 'Timecard punches' });
+  await punches.focus();
+  await punches.press('ArrowRight');
+  await expect.poll(() => punches.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'Next employees', exact: true }).click();
   await expect(directory.getByRole('button')).toHaveCount(4);
