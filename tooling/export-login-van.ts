@@ -29,10 +29,10 @@ try {
     const result = await new GLTFExporter().parseAsync(model, { binary: true, maxTextureSize: 1024 });
     return Array.from(new Uint8Array(result));
   })()`);
-  const file = path.join(root, 'dashboard/src/features/auth/assets/login-van.glb');
+  const file = path.join(root, 'dashboard/src/features/auth/sign-in/assets/login-van.glb');
   await fs.writeFile(file, Buffer.from(bytes));
   const poster = await page.evaluate<string>(`(async () => {
-    const { startVan } = await import('/dashboard/src/features/auth/van/renderer.ts');
+    const { startVan } = await import('/dashboard/src/features/auth/sign-in/van/renderer.ts');
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'width:749px;height:717px';
     document.body.append(canvas);

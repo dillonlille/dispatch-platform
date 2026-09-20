@@ -229,14 +229,6 @@
     font-size: 13px;
   }
 }
-
-/* Invitation lookup stays lightweight before choosing the existing onboarding flow. */
-.auth-loading {
-  min-height: 100dvh;
-  padding: 40px 48px;
-  display: flex;
-  flex-direction: column;
-}
 .auth-loading .loading {
   margin: auto;
 }

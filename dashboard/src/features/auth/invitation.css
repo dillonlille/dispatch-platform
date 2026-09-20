@@ -1,0 +1,6 @@
+.invitation-loading {
+  min-height: 100dvh;
+  padding: 40px 48px;
+  display: flex;
+  flex-direction: column;
+}

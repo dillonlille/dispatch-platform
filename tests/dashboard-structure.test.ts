@@ -36,6 +36,29 @@ const feature = (file: string) =>
   area(file) === 'features' ? file.split(path.sep)[1]! : undefined;
 const edges = modules.flatMap(({ file, imports }) => imports.map((target) => ({ file, target })));
 
+test('sign-in, DSP onboarding and member profiles own their screen dependencies', () => {
+  const auth = path.resolve(source, 'features/auth');
+  const screens = ['sign-in', 'dsp-onboarding', 'member-profile'];
+  for (const screen of screens) {
+    const directory = path.join(auth, screen);
+    const files = walk(directory);
+    assert(files.length > 0, `${screen} must have its own screen directory`);
+    for (const file of files) {
+      const text = fs.readFileSync(file, 'utf8');
+      for (const [, , imported] of text.matchAll(
+        /(?:from\s+|import\s*(?:\(\s*)?)(['"])(\.[^'"]+)\1/g,
+      )) {
+        const target = path.resolve(path.dirname(file), imported!.split('?')[0]!);
+        if (target.startsWith(auth + path.sep))
+          assert(
+            target.startsWith(directory + path.sep),
+            `${file} imports ${imported}; each auth screen owns its forms, layouts, styles and artwork`,
+          );
+      }
+    }
+  }
+});
+
 // ui/ holds building blocks that would make sense unchanged in another app.
 test('ui components know nothing about the product', () => {
   const files = fs.readdirSync(path.join(source, 'ui')).filter((file) => /\.tsx?$/.test(file));

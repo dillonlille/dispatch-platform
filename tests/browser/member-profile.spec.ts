@@ -1,0 +1,111 @@
+import type { Page } from '@playwright/test';
+import { test, expect, demo, login, openDsp } from './fixtures.js';
+import { capturedMail } from '../mail-support.js';
+
+async function inviteMember(page: Page, root: string) {
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('link', { name: 'Team & Roles', exact: true }).click();
+  await page.getByRole('button', { name: 'Invite member', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: 'Invite member' });
+  await sheet.getByLabel('Email address').fill('new-member@dispatch.test');
+  await sheet.getByLabel('Role').selectOption({ label: 'Member' });
+  await sheet.getByRole('button', { name: 'Send invitation' }).click();
+  const mail = await capturedMail(root, 'new-member@dispatch.test');
+  const token = /token=([A-Za-z0-9_-]{43})/.exec(mail.text)![1];
+  return `/#invite?token=${token}`;
+}
+
+async function fits(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const heading = document.querySelector('h1')!.getBoundingClientRect();
+        const back = document.querySelector('.member-profile-back')!.getBoundingClientRect();
+        return (
+          document.documentElement.scrollWidth <= innerWidth &&
+          document.documentElement.scrollHeight <= innerHeight &&
+          heading.top >= 0 &&
+          back.bottom <= innerHeight &&
+          back.left >= 0 &&
+          back.right <= innerWidth
+        );
+      }),
+    )
+    .toBe(true);
+}
+
+test('a DSP member invite creates a profile in its own responsive map screen', async ({
+  page,
+  dispatch,
+  context,
+}) => {
+  const url = await inviteMember(page, dispatch.root);
+  await context.clearCookies();
+  const errors: string[] = [];
+  const assets: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('request', (request) => assets.push(request.url()));
+  await page.goto(url);
+  await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
+  await expect(page.locator('.auth-layout, .onboarding-page')).toHaveCount(0);
+  await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
+  await expect(page.getByLabel('Email address')).toHaveAttribute('readonly', '');
+  await expect(page.getByLabel('DSP name', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Onboarding progress' })).toHaveCount(0);
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    for (const [width, height] of [
+      [1440, 1000],
+      [1280, 800],
+      [1024, 600],
+      [700, 700],
+      [390, 844],
+      [320, 568],
+      [568, 320],
+    ]) {
+      await page.setViewportSize({ width: width!, height: height! });
+      await fits(page);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel('First name', { exact: true }).fill('New');
+  await page.getByLabel('Last name', { exact: true }).fill('Member');
+  await page.getByLabel('Password', { exact: true }).fill(demo.password);
+  await page.getByLabel('Confirm password', { exact: true }).fill('Different-password');
+  await page.getByRole('button', { name: 'Show password', exact: true }).click();
+  await expect(page.getByLabel('Password', { exact: true })).toHaveAttribute('type', 'text');
+  await page.getByRole('button', { name: 'Hide password', exact: true }).click();
+  await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('The passwords must match.');
+  await fits(page);
+  await page.getByLabel('Confirm password', { exact: true }).fill(demo.password);
+  await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+  await expect(page).toHaveURL(/#dsp\/[^/]+\//);
+  await expect(page.locator('.member-profile-page')).toHaveCount(0);
+  const session = await (await page.request.get('/api/session')).json();
+  expect(session.user.email).toBe('new-member@dispatch.test');
+  expect(session.dsps).toHaveLength(1);
+  expect(session.dsps[0].name).toBe('Northline Logistics');
+  expect(assets.filter((url) => /onboarding-map|login-van|renderer-.*\.js/.test(url))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('member profile handles an invalid invitation and returns to the separate sign-in page', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const assets: string[] = [];
+  page.on('request', (request) => assets.push(request.url()));
+  await page.goto('/#invite?token=expired-invitation');
+  await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create profile', exact: true })).toBeDisabled();
+  await fits(page);
+  expect(assets.filter((url) => /(?:onboarding|member-profile)-map.*\.svg/.test(url))).toEqual([]);
+  await page.getByRole('button', { name: 'Back to sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.locator('.member-profile-page, .onboarding-page')).toHaveCount(0);
+  await expect(page.locator('.auth-layout')).toBeVisible();
+});

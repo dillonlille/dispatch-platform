@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
-export function AuthPasswordField({
+export function SignInPasswordField({
   name = 'password',
   label = 'Password',
   current = false,
