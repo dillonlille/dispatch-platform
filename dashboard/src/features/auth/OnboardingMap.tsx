@@ -1,19 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { mapUrl } from './map-asset.js';
+import './onboarding-map.css';
 
 /** The geographic asset is requested only when the desktop map is mounted. */
-export function OnboardingMap() {
-  const [desktop, setDesktop] = useState(() => matchMedia('(min-width: 701px)').matches);
+export function OnboardingMap({ desktop }: { desktop: boolean }) {
   const map = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const media = matchMedia('(min-width: 701px)');
-    const changed = () => setDesktop(media.matches);
-    media.addEventListener('change', changed);
-    return () => media.removeEventListener('change', changed);
-  }, []);
   useEffect(() => {
     const element = map.current;
     if (!element) return;
+    const layers = element.querySelectorAll('svg');
     const resize = () => {
       const { width, height } = element.getBoundingClientRect();
       if (!width || !height) return;
@@ -26,7 +21,7 @@ export function OnboardingMap() {
           mapHeight > 1000 ? (1000 - mapHeight) / 2 : 600 - mapHeight * 0.68,
         ),
       );
-      for (const layer of element.querySelectorAll('svg'))
+      for (const layer of layers)
         layer.setAttribute('viewBox', `0 ${top} ${mapWidth} ${mapHeight}`);
     };
     resize();

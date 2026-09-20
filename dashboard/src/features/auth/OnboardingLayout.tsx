@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useViewportFit } from '../../ui/useViewportFit.js';
 import { Brand } from '../../app/Brand.js';
-import { useOnboardingMapReady } from './map-asset.js';
+import { useOnboardingMap } from './map-asset.js';
 import { OnboardingMap } from './OnboardingMap.js';
 import './onboarding.css';
 
@@ -15,7 +15,7 @@ export function OnboardingLayout({
   children: ReactNode;
 }) {
   const fit = useViewportFit();
-  const ready = useOnboardingMapReady();
+  const { desktop, ready } = useOnboardingMap();
   const heading = useRef<HTMLHeadingElement>(null);
   const previous = useRef(title);
   useEffect(() => {
@@ -24,7 +24,7 @@ export function OnboardingLayout({
   }, [title]);
   return (
     <div className="onboarding-page" data-ready={ready} aria-busy={!ready}>
-      <OnboardingMap />
+      <OnboardingMap desktop={desktop} />
       <header className="onboarding-brand">
         <Brand />
       </header>
