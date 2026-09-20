@@ -14,8 +14,9 @@ export function EmployeeDetail({
 }) {
   // The parent keys this component by employee, so opening anyone starts at their latest period.
   const [period, setPeriod] = useState<EmployeeTimecardPeriod | null>(null);
-  const { data, error } = useEmployeeTimecard(employee.code, period, refreshKey);
-  const person = data?.employee ?? employee;
+  const { data, stale, error } = useEmployeeTimecard(employee.code, period, refreshKey);
+  const shown = data ?? stale;
+  const person = shown?.employee ?? employee;
   return (
     <section className="employee-detail" aria-label="Employee details">
       <div className="employee-detail-heading">
@@ -25,8 +26,15 @@ export function EmployeeDetail({
       <h3>{person.name}</h3>
       {person.position && <div className="employee-position">{person.position}</div>}
       <div className="employee-timecard-section" aria-busy={!data && !error}>
-        <DataState data={data} error={error} failed={!!error}>
-          {(data) => <EmployeeTimecard data={data} onPeriodChange={setPeriod} />}
+        <DataState data={shown} error={error} failed={!!error}>
+          {(data) => (
+            <EmployeeTimecard
+              data={data}
+              busy={!!stale}
+              requestedPeriod={period}
+              onPeriodChange={setPeriod}
+            />
+          )}
         </DataState>
       </div>
     </section>

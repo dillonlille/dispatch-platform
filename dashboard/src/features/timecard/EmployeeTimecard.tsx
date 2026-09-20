@@ -4,7 +4,7 @@ import type {
   EmployeeTimecardResponse,
   Timecard,
 } from '../../../../shared/contracts/index.js';
-import { DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
+import { DataTable, Empty, Loading, useDataTable, type TableColumn } from '../../ui/index.js';
 import {
   hoursAndMinutes,
   timecardDate,
@@ -21,9 +21,13 @@ const columns: TableColumn<Timecard>[] = [
 
 export function EmployeeTimecard({
   data,
+  busy,
+  requestedPeriod,
   onPeriodChange,
 }: {
   data: EmployeeTimecardResponse;
+  busy: boolean;
+  requestedPeriod: EmployeeTimecardPeriod | null;
   onPeriodChange: (period: EmployeeTimecardPeriod) => void;
 }) {
   // Paycom includes blank days in a pay period. Keep those out of the recorded-day count.
@@ -32,12 +36,13 @@ export function EmployeeTimecard({
   );
   const table = useDataTable({ columns, rows: records, rowId: (card) => card.date });
   const minutes = records.reduce((total, card) => total + Math.round(card.hours * 60), 0);
+  const period = busy && requestedPeriod ? requestedPeriod : data.period;
   return (
     <>
       <div className="employee-timecard-heading">
         <h4>Timecard</h4>
         <span className={data.nextPeriod ? 'muted' : 'employee-latest'}>
-          {data.nextPeriod ? 'Previous timecard' : 'Latest'}
+          {busy ? 'Loading…' : data.nextPeriod ? 'Previous timecard' : 'Latest'}
         </span>
       </div>
       <nav className="employee-period-controls" aria-label="Timecard navigation">
@@ -46,22 +51,26 @@ export function EmployeeTimecard({
           className="icon-button"
           aria-label="Previous timecard"
           disabled={!data.previousPeriod}
-          onClick={() => data.previousPeriod && onPeriodChange(data.previousPeriod)}
+          aria-disabled={busy || !data.previousPeriod}
+          onClick={() => !busy && data.previousPeriod && onPeriodChange(data.previousPeriod)}
         >
           <ChevronLeft size={16} />
         </button>
-        <span aria-live="polite">{timecardPeriod(data.period.from, data.period.to)}</span>
+        <span aria-live="polite">{timecardPeriod(period.from, period.to)}</span>
         <button
           type="button"
           className="icon-button"
           aria-label="Next timecard"
           disabled={!data.nextPeriod}
-          onClick={() => data.nextPeriod && onPeriodChange(data.nextPeriod)}
+          aria-disabled={busy || !data.nextPeriod}
+          onClick={() => !busy && data.nextPeriod && onPeriodChange(data.nextPeriod)}
         >
           <ChevronRight size={16} />
         </button>
       </nav>
-      {records.length ? (
+      {busy ? (
+        <Loading />
+      ) : records.length ? (
         <>
           <DataTable table={table} className="employee-period-table" label="Employee timecard" />
           <div className="employee-timecard-total">
