@@ -1,8 +1,39 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { createServer, type ProxyOptions, type ViteDevServer } from 'vite';
-import { fixture } from './fixture-server.js';
+import { demo, fixture } from './fixture-server.js';
+
+const previewCookie = (value: string, port: number) =>
+  value.replace(/^dispatch_session=/, `dispatch_preview_${port}=`);
+
+async function enterDemo(
+  app: Awaited<ReturnType<typeof fixture>>,
+  response: http.ServerResponse,
+  port: number,
+) {
+  try {
+    const login = await app.request('/api/auth/login', {
+      email: demo.email,
+      password: demo.password,
+    });
+    const cookies = login.headers.getSetCookie();
+    if (login.status !== 200 || !cookies.some((value) => value.startsWith('dispatch_session=')))
+      throw new Error('Demo sign-in failed');
+    response.writeHead(303, {
+      // The browser retains the entry link's fragment, such as #account.
+      location: '/',
+      'set-cookie': cookies.map((value) => previewCookie(value, port)),
+      'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer',
+    });
+    response.end();
+  } catch {
+    response.writeHead(502, { 'content-type': 'text/plain', 'cache-control': 'no-store' });
+    response.end('Unable to sign in to the demo preview. Try opening the preview link again.');
+  }
+}
 
 // Cookies ignore ports. Only this preview's cookie may reach its fixture backend;
 // the backend and published application keep their normal session cookie name.
@@ -23,9 +54,7 @@ function sessionProxy(target: string, port: number): ProxyOptions {
       proxy.on('proxyRes', (response) => {
         const cookies = response.headers['set-cookie'];
         if (cookies)
-          response.headers['set-cookie'] = cookies.map((value) =>
-            value.replace(/^dispatch_session=/, `${cookie}=`),
-          );
+          response.headers['set-cookie'] = cookies.map((value) => previewCookie(value, port));
       });
     },
   };
@@ -35,7 +64,8 @@ export async function startPreview({
   cwd = process.cwd(),
   host = process.env.DISPATCH_DEV_HOST || '127.0.0.1',
   port = Number(process.env.DISPATCH_DEV_PORT || 0),
-} = {}) {
+  binary,
+}: { cwd?: string; host?: string; port?: number; binary?: string } = {}) {
   if (['0.0.0.0', '::', '[::]', '*'].includes(host))
     throw new Error(`DISPATCH_DEV_HOST must name one address, not ${host}`);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -43,13 +73,27 @@ export async function startPreview({
 
   let ui: ViteDevServer | undefined;
   let app: Awaited<ReturnType<typeof fixture>> | undefined;
+  const entryPath = `/__preview/${randomUUID()}`;
   // Bind once and retain the socket. Concurrent worktrees cannot claim the same
   // free port between discovery and startup, and HMR shares this exact server.
   const server = http.createServer((request, response) => {
-    if (ui) ui.middlewares(request, response);
-    else {
+    const pathname = (request.url ?? '/').split('?')[0]!;
+    if (!ui || !app) {
       response.writeHead(503, { 'content-type': 'text/plain', 'retry-after': '1' });
       response.end('Preview starting');
+    } else if (pathname.startsWith('/__preview/')) {
+      if (pathname !== entryPath) {
+        response.writeHead(404, { 'cache-control': 'no-store' });
+        response.end();
+      } else if (request.method !== 'GET') {
+        response.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' });
+        response.end();
+      } else {
+        const address = server.address();
+        if (address && typeof address !== 'string') void enterDemo(app, response, address.port);
+      }
+    } else {
+      ui.middlewares(request, response);
     }
   });
   let closing: Promise<void> | undefined;
@@ -71,6 +115,7 @@ export async function startPreview({
     if (!address || typeof address === 'string') throw new Error('Preview has no TCP address');
     const origin = `http://${isIP(host) === 6 ? `[${host}]` : host}:${address.port}`;
     app = await fixture({
+      binary,
       env: { DISPATCH_ORIGIN: origin },
       output: 'inherit',
     });
@@ -88,7 +133,7 @@ export async function startPreview({
     });
     const exited = app.exited();
     void exited.then(close);
-    return { origin, root: app.root, close, exited };
+    return { origin, previewUrl: origin + entryPath, root: app.root, close, exited };
   } catch (error) {
     await close();
     throw error;
