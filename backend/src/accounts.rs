@@ -19,7 +19,7 @@ impl SessionLifetime {
     pub fn seconds(self) -> i64 {
         match self {
             Self::Standard => 8 * 60 * 60,
-            Self::Remembered => 7 * 24 * 60 * 60,
+            Self::Remembered => 3 * 24 * 60 * 60,
         }
     }
 }

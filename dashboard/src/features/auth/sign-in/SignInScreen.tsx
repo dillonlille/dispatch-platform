@@ -107,7 +107,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
           {mode === 'login' && (
             <label className="auth-remember">
               <input name="rememberMe" type="checkbox" />
-              Remember me for 7 days
+              Remember me
             </label>
           )}
           <button className="primary full auth-submit" disabled={busy}>
