@@ -39,7 +39,9 @@ export function useCollectionUpdates() {
           AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
         );
         if (!request.signal.aborted && !disposed) {
-          if (result.revision !== after) refresh(result.revision);
+          // Record the baseline before a fast first update can coalesce with it.
+          if (after === '') dataCache.observeVersion('collections', result.revision);
+          else if (result.revision !== after) refresh(result.revision);
           after = result.revision;
           failures = 0;
         }
