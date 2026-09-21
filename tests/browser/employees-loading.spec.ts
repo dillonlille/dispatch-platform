@@ -9,7 +9,7 @@ function holdResponse() {
   return { promise, release, waiting: false };
 }
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 390, 320]) {
   test(`employee and period changes keep the layout and scroll position at ${width}px`, async ({
     page,
     dispatch,
@@ -77,6 +77,13 @@ for (const width of [1280, 390]) {
     const detail = page.getByRole('region', { name: 'Employee details', exact: true });
     const rows = detail.locator('tbody tr');
     await expect(rows).toHaveCount(14);
+    expect(
+      await detail.locator('.employee-period-controls > span').evaluate((element) => {
+        const date = element.getBoundingClientRect();
+        const panel = element.closest('.employee-detail')!.getBoundingClientRect();
+        return Math.abs(date.x + date.width / 2 - (panel.x + panel.width / 2));
+      }),
+    ).toBeLessThan(1);
     const geometry = () =>
       page.evaluate(() => ({
         scrollY,
@@ -86,6 +93,9 @@ for (const width of [1280, 390]) {
           '.employees-workspace',
           '.employee-detail',
           '.employee-period-controls',
+          '.employee-period-controls > button:first-child',
+          '.employee-period-controls > span',
+          '.employee-period-controls > button:last-child',
           '.employee-timecard-total',
           '.employee-timecard-total > div',
           '.employees-directory',
