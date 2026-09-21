@@ -87,8 +87,6 @@ const INVENTORY: &[Row] = &[
     ("POST", "/api/dsp/roles", Dsp("roles.manage"), Write, false),
     ("POST", "/api/dsp/roles/{id}", Dsp("roles.manage"), Write, false),
     ("POST", "/api/dsp/roles/{id}/remove", Dsp("roles.manage"), Write, false),
-    ("GET", "/api/dsp/audit", Dsp("audit.view"), Read, false),
-    ("POST", "/api/dsp/audit/export", Dsp("audit.view"), Write, false),
     ("GET", "/api/dsp/connections", Dsp("connections.manage"), Read, false),
     ("GET", "/api/dsp/connections/{provider}", Dsp("connections.manage"), Async, false),
     ("POST", "/api/dsp/connections/{provider}", Dsp("connections.manage"), Async, false),

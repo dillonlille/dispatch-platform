@@ -315,7 +315,7 @@ async fn unmatched_paths_and_methods_answer_as_they_always_have() {
     let call = Call::get("/api/dsp/connections/paycom/check").who(&member);
     server.expect(call, 403, "permission_denied").await;
     let call = Call::get("/api/dsp/audit/nope").who(&member);
-    server.expect(call, 403, "permission_denied").await;
+    server.expect(call, 404, "not_found").await;
     let call = Call::post("/api/dsp/nope", json!({}))
         .who(&member)
         .without_csrf();
@@ -445,7 +445,6 @@ async fn every_access_kind_refuses_and_admits_the_right_callers() {
         )
         .await;
     for path in [
-        "/api/dsp/audit",
         "/api/dsp/jobs",
         "/api/dsp/schedules",
         "/api/dsp/connections",
@@ -467,7 +466,6 @@ async fn every_access_kind_refuses_and_admits_the_right_callers() {
         ("/api/dsp/roles", json!({})),
         ("/api/dsp/members/invite", json!({})),
         ("/api/dsp/members/mem_x", json!({})),
-        ("/api/dsp/audit/export", json!({})),
         ("/api/dsp/connections/paycom/check", json!({})),
         ("/api/dsp/cortex/meal-breaks/collect", json!({})),
     ] {

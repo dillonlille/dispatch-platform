@@ -1,5 +1,5 @@
 import { useBrowserUpdate } from './app/browser-update.js';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, credentials, ApiError } from './app/api.js';
@@ -14,7 +14,7 @@ import { can } from './app/permissions.js';
 import './styles.css';
 import { Shell } from './shell/Shell.js';
 type Session = SessionView;
-import { readAppearance, applyAppearance } from './app/appearance.js';
+import { restoreAppearance } from './app/appearance.js';
 import { leavePresence, usePresence } from './app/presence.js';
 import { openView, saveRole } from './app/session.js';
 import { getSession } from './app/endpoints.js';
@@ -24,9 +24,15 @@ function App() {
     [address, setAddress] = useState(() => parseHash(window.location.hash)),
     [switching, setSwitching] = useState(false);
   const { perform, fail } = useFeedback();
-  useEffect(() => {
-    const id = session?.user.id ?? 'signed-out';
-    const apply = () => applyAppearance(readAppearance(id));
+  const setupRequired = Boolean(view?.profile?.setupRequired && can(view, 'settings.manage'));
+  const showAuth =
+    session === null ||
+    address.route === 'signin' ||
+    address.route.startsWith('invite?') ||
+    address.route.startsWith('reset?');
+  const onboarding = address.route.startsWith('invite?') || (!showAuth && setupRequired);
+  useLayoutEffect(() => {
+    const apply = () => restoreAppearance(session?.user.id, onboarding ? 'light' : undefined);
     const media = matchMedia('(prefers-color-scheme: dark)');
     apply();
     media.addEventListener('change', apply);
@@ -35,7 +41,7 @@ function App() {
       media.removeEventListener('change', apply);
       window.removeEventListener('dispatch-appearance', apply);
     };
-  }, [session?.user.id]);
+  }, [session?.user.id, onboarding]);
   const load = useCallback(
     async (afterLogin = false) => {
       try {
@@ -126,14 +132,8 @@ function App() {
         <FeedbackMessages />
       </>
     );
-  if (
-    session === null ||
-    route === 'signin' ||
-    route.startsWith('invite?') ||
-    route.startsWith('reset?')
-  )
-    return <AuthScreen key={route} onLogin={() => load(true)} />;
-  if (view?.profile?.setupRequired && can(view, 'settings.manage'))
+  if (showAuth) return <AuthScreen key={route} onLogin={() => load(true)} />;
+  if (setupRequired)
     return (
       <DspOnboarding
         complete={async () => {

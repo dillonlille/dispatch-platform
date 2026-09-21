@@ -121,12 +121,15 @@ async function apiInvitation(dispatch: Awaited<ReturnType<typeof fixture>>) {
   return `/#invite?token=${/token=([A-Za-z0-9_-]{43})/.exec(mail.text)![1]}`;
 }
 
-test('member profile fits desktop and phone sizes in both themes', async ({ page, dispatch }) => {
+test('member profile stays light and fits desktop and phone sizes in either device theme', async ({
+  page,
+  dispatch,
+}) => {
   await page.goto(await apiInvitation(dispatch));
   await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
-    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     for (const [width, height] of [
       [1440, 1000],
       [1280, 800],
@@ -158,6 +161,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     const url = await apiInvitation(dispatch);
     await context.clearCookies();
     await page.emulateMedia({ colorScheme, reducedMotion: 'no-preference' });
+    await page.addInitScript((theme) => {
+      localStorage.setItem('dispatch-appearance:signed-out', theme);
+    }, colorScheme);
     const logins: string[] = [];
     const errors: string[] = [];
     page.on('request', (request) => {
@@ -166,9 +172,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(url);
     await fillMemberProfile(page);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await page.getByRole('button', { name: 'Create profile', exact: true }).click();
     const completion = page.getByRole('status', { name: 'Profile created' });
     await expect(completion).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await expect(completion).toContainText('JamieMorgan');
     await expect(completion).toContainText('Northline Logistics');
     await expect(completion.locator('.member-completion-role')).toHaveText('Member');
@@ -182,6 +190,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(completion.locator('.member-completion-badge')).toBeVisible();
     await expect(page).toHaveURL(/#signin$/);
     await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
     await expect(page.locator('.auth-panel .notice')).toHaveCount(0);
     await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
     await expect(page.getByLabel('Password', { exact: true })).toBeFocused();

@@ -3,12 +3,10 @@ import type { DspView, SessionView } from '../../../../shared/contracts/index.js
 import { api } from '../../app/api.js';
 import { ErrorBox, Header, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
-import { AuditLog } from '../audit/index.js';
 import { ConnectionsPage } from '../connections/index.js';
 import { useAction } from '../../app/useAction.js';
 import { ThemeSection } from './ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from '../../app/navigation.js';
-import { SupportVisibility } from './SupportVisibility.js';
 import { ProfileBadge } from './ProfileBadge.js';
 
 export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
@@ -30,8 +28,6 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
     ['security', 'Security'],
     ...(connections ? [['connections', 'Connections']] : []),
     ['theme', 'Theme'],
-    ...(can(view, 'audit.view') ? [['audit', 'Audit log']] : []),
-    ...(!view && session.user.platformOwner ? [['support', 'Platform support']] : []),
   ];
   const tab = tabs.some(([id]) => id === requestedTab) ? requestedTab : 'general';
   return (
@@ -117,8 +113,6 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
         </div>
       )}
       {tab === 'theme' && <ThemeSection userId={session.user.id} />}
-      {tab === 'audit' && view && <AuditLog view={view} />}
-      {tab === 'support' && <SupportVisibility />}
     </>
   );
 }
