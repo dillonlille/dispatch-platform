@@ -5,6 +5,7 @@ pub mod artifact;
 mod cli;
 pub mod io;
 mod management;
+mod release;
 mod releases;
 pub mod updater;
 
