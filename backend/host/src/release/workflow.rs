@@ -1,11 +1,12 @@
 use super::*;
 use std::io::Write;
 
-const VERSIONED: [&str; 5] = [
+const VERSIONED: [&str; 6] = [
     "package.json",
     "package-lock.json",
     "backend/Cargo.toml",
     "backend/host/Cargo.toml",
+    "backend/ci/Cargo.toml",
     "Cargo.lock",
 ];
 
@@ -44,6 +45,16 @@ fn set_versions(root: &Path, version: &str) -> Result<()> {
         (
             "Cargo.lock",
             r#"(\[\[package\]\]\nname = "dispatch-host"\nversion = ")[^"]+(")"#.to_string(),
+            1,
+        ),
+        (
+            "backend/ci/Cargo.toml",
+            r#"(\A\[package\]\nname = "dispatch-ci"\nversion = ")[^"]+(")"#.to_string(),
+            1,
+        ),
+        (
+            "Cargo.lock",
+            r#"(\[\[package\]\]\nname = "dispatch-ci"\nversion = ")[^"]+(")"#.to_string(),
             1,
         ),
     ];
@@ -545,7 +556,7 @@ mod tests {
             fs::copy(source.join(name), temp.path().join(name)).unwrap();
         }
         set_versions(temp.path(), "9.8.7").unwrap();
-        for (name, count) in VERSIONED.into_iter().zip([1, 2, 1, 1, 2]) {
+        for (name, count) in VERSIONED.into_iter().zip([1, 2, 1, 1, 1, 3]) {
             let before = fs::read_to_string(source.join(name)).unwrap();
             let after = fs::read_to_string(temp.path().join(name)).unwrap();
             assert_eq!(before.lines().count(), after.lines().count());

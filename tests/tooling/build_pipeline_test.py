@@ -19,7 +19,6 @@ def module(name, path):
 
 cache = module("cargo_build", "tooling/cargo-build.py")
 prepare = module("pr_prepare", "tooling/ci/pr-prepare.py")
-gate = module("ci_gate", "tooling/ci-gate.py")
 collectors = module("browseros_check", "tooling/browseros-check.py")
 
 
@@ -47,6 +46,11 @@ class PipelineTests(unittest.TestCase):
             (root / "backend/host").mkdir()
             host_manifest = root / "backend/host/Cargo.toml"
             host_manifest.write_text('[package]\nname = "dispatch-host"\n')
+            self.assertTrue(cache.cache_eligible(root, env))
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["backend", "backend/host", "backend/ci"]\n')
+            (root / "backend/ci").mkdir()
+            (root / "backend/ci/Cargo.toml").write_text('[package]\nname = "dispatch-ci"\n')
+            host_manifest.write_text('[dependencies]\ndispatch-ci = { path = "../ci" }\n')
             self.assertTrue(cache.cache_eligible(root, env))
             host_manifest.write_text('[dependencies]\nexternal = { path = "../../../outside" }\n')
             self.assertFalse(cache.cache_eligible(root, env))
@@ -91,24 +95,6 @@ class PipelineTests(unittest.TestCase):
                     cache.build(release=True)
                 self.assertEqual(len(builds), 3)
 
-    def test_gate_requires_every_job_and_rejects_failure_cancellation_and_wrong_skips(self):
-        jobs = {name: {"result": "success"} for name in ["plan", "build", "core", "collectors", "rust-advisories"]}
-        jobs["plan"]["outputs"] = {"mode": "full"}
-        self.assertEqual(gate.validate(jobs), "full")
-        for name in jobs:
-            for result in ["failure", "cancelled", "skipped", ""]:
-                with self.subTest(name=name, result=result), self.assertRaises(ValueError):
-                    gate.validate({**jobs, name: {**jobs[name], "result": result}})
-            with self.assertRaises(ValueError):
-                gate.validate({key: value for key, value in jobs.items() if key != name})
-        for mode in ["dashboard", "reuse"]:
-            lighter = {**jobs, "plan": {"result": "success", "outputs": {"mode": mode}},
-                       "core": {"result": "skipped"}, "collectors": {"result": "skipped"}}
-            self.assertEqual(gate.validate(lighter), mode)
-            with self.assertRaises(ValueError):
-                gate.validate({**lighter, "build": {"result": "failure"}})
-        with self.assertRaises(ValueError):
-            gate.validate({**jobs, "plan": {"result": "success", "outputs": {"mode": "unknown"}}})
 
     def test_local_cache_follows_all_rust_inputs_but_not_dashboard_changes(self):
         with tempfile.TemporaryDirectory(prefix="dispatch-cache-test-") as temp:
@@ -125,6 +111,9 @@ class PipelineTests(unittest.TestCase):
                 (root / "backend/host/src").mkdir(parents=True)
                 (root / "backend/host/Cargo.toml").write_text("host manifest")
                 (root / "backend/host/src/lib.rs").write_text("host policy")
+                (root / "backend/ci/src").mkdir(parents=True)
+                (root / "backend/ci/Cargo.toml").write_text("CI manifest")
+                (root / "backend/ci/src/lib.rs").write_text("CI policy")
             key = lambda root, profile="release", compiler="rust-cc", env={}: cache.fingerprint(root, profile, compiler, env)
             first = key(roots[0])
             self.assertEqual(first, key(roots[1]), "Separate worktrees share identical code")
@@ -132,7 +121,8 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(first, key(roots[1]))
             for file in ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "backend/src/main.rs",
                          "backend/src/provider.js", "backend/src/schema.sql",
-                         "backend/host/Cargo.toml", "backend/host/src/lib.rs"]:
+                         "backend/host/Cargo.toml", "backend/host/src/lib.rs",
+                         "backend/ci/Cargo.toml", "backend/ci/src/lib.rs"]:
                 path = roots[1] / file
                 original = path.read_text()
                 path.write_text(original + "changed")

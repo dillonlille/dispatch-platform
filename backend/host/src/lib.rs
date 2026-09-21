@@ -2,6 +2,7 @@
 //! The installed copy survives application/source rollback and verifies candidates
 //! before any candidate executable is started.
 pub mod artifact;
+mod ci;
 mod cli;
 pub mod io;
 mod management;
