@@ -191,7 +191,17 @@ test('employee workspace navigates real period history, resets selection, filter
   await expect(rows).toHaveCount(14);
   await expect(rows.first().locator('td').first()).toHaveText('Sun, Aug 9');
   await expect(rows.last().locator('td').first()).toHaveText('Sat, Aug 22');
-  await expect(previous).toBeDisabled();
+  await expect(previous).toBeEnabled();
+  await previous.click();
+  await expect(page.getByLabel('Timecard navigation')).toContainText('Jul 26');
+  await expect(detail.getByText('Not collected', { exact: true })).toBeVisible();
+  await expect(
+    detail.getByRole('heading', { name: 'This pay period has not been collected' }),
+  ).toBeVisible();
+  await expect(detail.locator('.employee-timecard-total strong')).toHaveText('—');
+  await expect(rows).toHaveCount(0);
+  await next.click();
+  await expect(page.getByLabel('Timecard navigation')).toContainText('Aug 9');
   await next.click();
   await expect(page.getByLabel('Timecard navigation')).toContainText('Aug 23');
   await next.click();
@@ -260,7 +270,7 @@ test('employee workspace navigates real period history, resets selection, filter
   await expect(detail).toContainText('0 recorded days');
   await expect(detail.locator('.employee-timecard-total strong')).toHaveText('0h 00m');
   await expect(rows.first().locator('td')).toHaveText(['Sun, Sep 6', '—', '—', '—', '—', '0h 00m']);
-  await expect(previous).toBeDisabled();
+  await expect(previous).toBeEnabled();
   expect(errors).toEqual([]);
 });
 
@@ -294,4 +304,51 @@ test('a delayed employee response cannot overwrite a newer selection', async ({ 
   unblock();
   await page.unrouteAll({ behavior: 'wait' });
   await expect(detail.getByRole('heading', { name: 'Alex Parker', exact: true })).toBeVisible();
+});
+
+test('Sync now collects the selected employee and the displayed uncollected period', async ({
+  page,
+  dispatch,
+}) => {
+  const owner = await dispatch.client();
+  const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+  await owner.select(dsp.id);
+  const latest = (await owner.get('/api/dsp/employees/E002')).value;
+  const period = latest.previousPeriod;
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST') requests.push(new URL(request.url()).pathname);
+  });
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('link', { name: 'Timecard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Employees', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Employee directory' })
+    .getByRole('button', { name: 'Jordan Ellis', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Previous timecard', exact: true }).click();
+  const detail = page.getByRole('region', { name: 'Employee details', exact: true });
+  await expect(detail.getByText('Not collected', { exact: true })).toBeVisible();
+  const sync = page.getByRole('button', { name: 'Sync now', exact: true });
+  await expect(sync).toHaveAttribute('title', /Sync Jordan Ellis/);
+  const request = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && request.url().endsWith('/api/dsp/employees/E002/sync'),
+  );
+  await sync.click();
+  const body = (await request).postDataJSON();
+  expect(body).toEqual({ requestId: expect.any(String), ...period });
+  await expect(detail.getByText('Not collected', { exact: true })).toHaveCount(0);
+  await expect(detail.locator('tbody tr')).toHaveCount(14);
+  await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
+    'Paycom synced',
+  );
+  expect(
+    requests.filter((url) => url === '/api/dsp/jobs' || url === '/api/dsp/jobs/meal-breaks'),
+  ).toEqual([]);
+  await expect(page.getByLabel('Employee count')).toHaveText('12');
+  const other = (await owner.get(`/api/dsp/employees/E001?from=${period.from}&to=${period.to}`))
+    .value;
+  expect(other.collectedAt).toBeNull();
 });

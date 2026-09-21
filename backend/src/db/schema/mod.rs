@@ -46,11 +46,18 @@ pub const DSP: &[Migration] = &[Migration {
     name: "baseline",
     apply: Sql(include_str!("dsp/0001_baseline.sql")),
 }];
-pub const PAYCOM: &[Migration] = &[Migration {
-    id: 1,
-    name: "baseline",
-    apply: Sql(include_str!("paycom/0001_baseline.sql")),
-}];
+pub const PAYCOM: &[Migration] = &[
+    Migration {
+        id: 1,
+        name: "baseline",
+        apply: Sql(include_str!("paycom/0001_baseline.sql")),
+    },
+    Migration {
+        id: 2,
+        name: "employee_timecard_syncs",
+        apply: Sql(include_str!("paycom/0002_employee_timecard_syncs.sql")),
+    },
+];
 pub const CORTEX: &[Migration] = &[Migration {
     id: 1,
     name: "baseline",

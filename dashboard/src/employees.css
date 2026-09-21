@@ -222,13 +222,19 @@
 }
 .employee-period-controls {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
+  /* Keep the arrows fixed when the date label changes. */
+  max-width: 320px;
   height: 44px;
+  margin-inline: auto;
   margin-bottom: 14px;
 }
 .employee-period-controls > span {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
   text-align: center;
   font-size: 14px;
   font-weight: 500;
@@ -377,9 +383,6 @@
 @media (pointer: coarse) {
   .employees-filters > button {
     min-height: 44px;
-  }
-  .employee-period-controls {
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
   }
   .employee-period-controls > button {
     width: 44px;

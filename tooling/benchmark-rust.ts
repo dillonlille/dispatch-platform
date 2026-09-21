@@ -20,8 +20,11 @@ const { values } = parseArgs({
   },
 });
 const employees = 3000,
-  days = 30,
+  periodDays = 14,
+  days = periodDays * 3,
   requests = 240;
+const benchmarkDate = (offset: number) =>
+  new Date(Date.UTC(2026, 6, 26 + offset)).toISOString().slice(0, 10);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function rss(pid: number): number {
   // Synthetic collectors stay inside the core. Native browser memory is checked
@@ -43,32 +46,40 @@ function dataset(root: string) {
     const db = new DatabaseSync(collectorDatabase(root, dsp.id, 'paycom'));
     try {
       db.exec('BEGIN; DELETE FROM timecards; DELETE FROM employees; DELETE FROM publications;');
-      const publication = 'pub_' + '0'.repeat(32);
-      db.prepare(
-        'INSERT INTO publications(id,collected_at,period_from,period_to,active) VALUES (?,?,?,?,1)',
-      ).run(publication, '2026-09-01T00:00:00.000Z', '2026-08-01', '2026-08-30');
+      const publication = db.prepare('INSERT INTO publications VALUES (?,?,?,?,?)');
       const employee = db.prepare('INSERT INTO employees VALUES (?,?,?,?,?,?,?)');
       const card = db.prepare('INSERT INTO timecards VALUES (?,?,?,?,?,?)');
-      for (let i = 0; i < employees; i++) {
-        const code = `E${String(i).padStart(5, '0')}`;
-        employee.run(
-          publication,
-          code,
-          `Driver ${String(employees - i).padStart(5, '0')}`,
-          'Delivery',
-          'Driver',
-          `DSP${index}`,
-          1,
+      // Keep a large history using complete Paycom periods, not one synthetic month.
+      for (let offset = 0; offset < days; offset += periodDays) {
+        const id = `pub_${String(offset).padStart(32, '0')}`;
+        publication.run(
+          id,
+          '2026-09-06T00:00:00.000Z',
+          benchmarkDate(offset),
+          benchmarkDate(offset + periodDays - 1),
+          Number(offset + periodDays === days),
         );
-        for (let day = 1; day <= days; day++)
-          card.run(
-            publication,
+        for (let i = 0; i < employees; i++) {
+          const code = `E${String(i).padStart(5, '0')}`;
+          employee.run(
+            id,
             code,
-            `2026-08-${String(day).padStart(2, '0')}`,
-            8,
-            'Complete',
-            '[{"in":"08:00","out":"16:00","hours":8}]',
+            `Driver ${String(employees - i).padStart(5, '0')}`,
+            'Delivery',
+            'Driver',
+            `DSP${index}`,
+            1,
           );
+          for (let day = 0; day < periodDays; day++)
+            card.run(
+              id,
+              code,
+              benchmarkDate(offset + day),
+              8,
+              'Complete',
+              '[{"in":"08:00","out":"16:00","hours":8}]',
+            );
+        }
       }
       db.exec(
         'UPDATE schedules SET enabled=0,next_run=NULL; COMMIT; PRAGMA wal_checkpoint(TRUNCATE)',
@@ -159,6 +170,7 @@ async function run(app: Awaited<ReturnType<typeof prepare>>) {
       clients.map(async (c) => {
         assert.equal((await json(routes[0]!, undefined, c)).total, employees);
         assert.equal((await json(routes[3]!, undefined, c)).rows.length, employees);
+        assert.equal((await json(routes[2]!, undefined, c)).timecards.length, periodDays);
         return Promise.all(
           routes.map(async (route) => stable(route, await json(route, undefined, c))),
         );

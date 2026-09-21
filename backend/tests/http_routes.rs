@@ -57,6 +57,7 @@ const INVENTORY: &[Row] = &[
     ("POST", "/api/dsp/presence", Dsp("access"), Async, false),
     ("GET", "/api/dsp/employees", Dsp("timecard.view"), Read, false),
     ("GET", "/api/dsp/employees/{code}", Dsp("timecard.view"), Read, false),
+    ("POST", "/api/dsp/employees/{code}/sync", Dsp("collections.run"), Write, false),
     ("GET", "/api/dsp/timecards", Dsp("timecard.view"), Read, false),
     ("GET", "/api/dsp/paycom/status", Dsp("timecard.view"), Read, false),
     ("GET", "/api/dsp/paycom/settings", Dsp("timecard.view"), Read, false),

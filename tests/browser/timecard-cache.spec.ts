@@ -19,18 +19,23 @@ const frame = (page: Page) =>
 async function clickAndPaint(control: Locator) {
   return control.evaluate((element) => {
     const start = performance.now();
-    (element as HTMLElement).click();
-    return new Promise<{ busy: string | null; text: string; ms: number }>((resolve) =>
-      requestAnimationFrame(() => {
-        const results = document.querySelector('.employee-timecard-section, .paycom-day-results');
-        resolve({
-          busy: results?.getAttribute('aria-busy') ?? null,
-          text:
-            document.querySelector('.employee-detail')?.textContent ?? results?.textContent ?? '',
-          ms: performance.now() - start,
+    return new Promise<{ busy: string | null; text: string; ms: number }>((resolve) => {
+      const paint = () =>
+        requestAnimationFrame(() => {
+          const results = document.querySelector('.employee-timecard-section, .paycom-day-results');
+          resolve({
+            busy: results?.getAttribute('aria-busy') ?? null,
+            text:
+              document.querySelector('.employee-detail')?.textContent ?? results?.textContent ?? '',
+            ms: performance.now() - start,
+          });
         });
-      }),
-    );
+      // Links dispatch hashchange asynchronously; measure the first paint after routing.
+      const navigation = element instanceof HTMLAnchorElement;
+      if (navigation) window.addEventListener('hashchange', paint, { once: true });
+      (element as HTMLElement).click();
+      if (!navigation) paint();
+    });
   });
 }
 const finishedEmployee = (url: string) => new URL(url).pathname.startsWith('/api/dsp/employees/');
@@ -229,6 +234,7 @@ test('adjacent days render from memory and returning from another Dispatch page 
     expect(newer.busy).toBe('false');
     expect(newer.text).toContain(current);
     await page.getByRole('link', { name: 'Home Page', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Currently under development' })).toBeVisible();
     const returned = await clickAndPaint(page.getByRole('link', { name: 'Timecard', exact: true }));
     expect(returned.busy).toBe('false');
     expect(returned.text).toContain(current);
@@ -314,6 +320,8 @@ test('cached names cannot cross DSPs, even when an older request finishes late',
           ? {
               employee,
               period: { from: '2026-09-06', to: '2026-09-19' },
+              collectedAt: '2026-09-20T00:00:00Z',
+              syncStatus: null,
               previousPeriod: null,
               nextPeriod: null,
               timecards: [

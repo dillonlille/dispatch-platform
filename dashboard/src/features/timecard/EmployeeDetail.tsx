@@ -1,21 +1,22 @@
-import { useState } from 'react';
 import type { Employee, EmployeeTimecardPeriod } from '../../../../shared/contracts/index.js';
-import { useEmployeeTimecard } from '../../app/endpoints.js';
+import type { useEmployeeTimecard } from '../../app/endpoints.js';
 import { Badge } from '../../ui/index.js';
 import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeTimecard } from './EmployeeTimecard.js';
 
 export function EmployeeDetail({
   employee,
-  refreshKey,
+  period,
+  onPeriodChange,
+  timecard,
 }: {
   employee: Employee;
-  refreshKey: string;
+  period: EmployeeTimecardPeriod | null;
+  onPeriodChange: (period: EmployeeTimecardPeriod) => void;
+  timecard: ReturnType<typeof useEmployeeTimecard>;
 }) {
-  // The parent keys this component by employee, so opening anyone starts at their latest period.
-  const [period, setPeriod] = useState<EmployeeTimecardPeriod | null>(null);
-  const { data, stale, error, refresh } = useEmployeeTimecard(employee.code, period, refreshKey);
-  const shown = data ?? stale;
+  const { data, stale, error, refresh } = timecard;
+  const shown = data ?? (stale?.employee.code === employee.code ? stale : undefined);
   const person = shown?.employee ?? employee;
   return (
     <section className="employee-detail" aria-label="Employee details">
@@ -35,7 +36,7 @@ export function EmployeeDetail({
           busy={!data && !error}
           error={error}
           requestedPeriod={period}
-          onPeriodChange={setPeriod}
+          onPeriodChange={onPeriodChange}
           onRetry={refresh}
         />
       </div>
