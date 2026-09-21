@@ -1,3 +1,4 @@
+import { assessTimecards } from '../support/assessment.js';
 import type { Locator, Page } from '@playwright/test';
 import { test, expect, login, openDsp } from './fixtures.js';
 import { addDays, parseDay } from '../../dashboard/src/lib/calendar.js';
@@ -324,7 +325,7 @@ test('cached names cannot cross DSPs, even when an older request finishes late',
               syncStatus: null,
               previousPeriod: null,
               nextPeriod: null,
-              timecards: [
+              timecards: assessTimecards([
                 {
                   employeeCode: employee.code,
                   date: '2026-09-13',
@@ -332,7 +333,7 @@ test('cached names cannot cross DSPs, even when an older request finishes late',
                   status: 'Complete',
                   punches: [],
                 },
-              ],
+              ]),
             }
           : { employees: [employee], total: 1, collectedAt: null },
       })

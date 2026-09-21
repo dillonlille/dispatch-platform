@@ -2,9 +2,9 @@ import { PaycomDateControls } from './DateControls.js';
 import { localDate } from '../../lib/meal-breaks.js';
 import { useMemo, useState } from 'react';
 import { Download, Globe, Info } from 'lucide-react';
-import type { Timecard } from '../../../../shared/contracts/index.js';
+import type { DailyTimecard } from '../../../../shared/contracts/index.js';
 import type { PaycomPreferences } from '../../../../shared/contracts/paycom.js';
-import { useCachedData } from '../../app/api.js';
+import { dailyTimecardsUrl, useDailyTimecards } from '../../app/endpoints.js';
 import { useTableState } from '../../app/useTableState.js';
 import {
   DataState,
@@ -21,12 +21,7 @@ import { punchColumns } from './punchColumns.js';
 import { pageSize } from './pageSize.js';
 import { useAdjacentDays } from './useAdjacentDays.js';
 
-type Card = Timecard & { name: string };
-type Daily = {
-  rows: Card[];
-  collectedAt: string | null;
-  available: boolean;
-};
+type Card = DailyTimecard;
 type Punch = Card['punches'][number];
 const none: Card[] = [];
 const noPunches: Punch[] = [];
@@ -52,8 +47,8 @@ export function TimecardsPage({
   const sort = state.sort!;
   const calendarToday = localDate(timezone);
   const [selectedCode, setSelectedCode] = useState<string>();
-  const url = `/api/dsp/timecards?date=${date}&sort=${sort.id}&direction=${sort.desc ? 'desc' : 'asc'}`;
-  const { data: current, stale, error } = useCachedData<Daily>(url, 0, refreshKey);
+  const url = dailyTimecardsUrl(date, sort.id, sort.desc);
+  const { data: current, stale, error } = useDailyTimecards(date, sort.id, sort.desc, refreshKey);
   useAdjacentDays(url, date, calendarToday, current);
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? stale;

@@ -13,7 +13,8 @@ Run commands from the repository root.
 | `tests/`                                      | API, dashboard, provider, tooling and browser checks; fixtures in `support/` |
 | `tooling/`                                    | Build, CI, preview, test, benchmark and asset helpers                        |
 
-Backend domain folders expose their entry points through `mod.rs`. Dashboard features
+Backend domain folders expose their entry points through `mod.rs`. Rust owns punch
+interpretation and meal assessment; the dashboard formats typed assessment results. Dashboard features
 expose theirs through `index.ts`. Styles live with their owner; `dashboard/src/styles.css`
 sets the global import order. Shared contracts and tooling never import dashboard code.
 

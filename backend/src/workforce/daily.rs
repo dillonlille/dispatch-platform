@@ -2,6 +2,7 @@ use super::{compare, display_name, preferences::preferences};
 use crate::{
     Result,
     collectors::Provider,
+    contracts::DailyTimecards,
     db::{Db, Store, s},
     validate as v,
 };
@@ -101,7 +102,7 @@ impl Store {
             rows.into_values().collect(),
         ))
     }
-    pub fn daily(&self, id: &str, date: &str, sort: &str, desc: bool) -> Result<Value> {
+    pub fn daily(&self, id: &str, date: &str, sort: &str, desc: bool) -> Result<DailyTimecards> {
         v::date(date)?;
         let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
@@ -127,9 +128,9 @@ impl Store {
             (if desc { ord.reverse() } else { ord })
                 .then_with(|| compare(s(a, "employeeCode"), s(b, "employeeCode")))
         });
-        Ok(
+        Ok(serde_json::from_value(
             json!({"rows":rows,"collectedAt":publication.map(|p|p["collected_at"].clone()),"available":available}),
-        )
+        )?)
     }
 }
 fn sort_key<'a>(row: &'a Value, sort: &str) -> &'a Value {

@@ -1,4 +1,5 @@
 //! Workforce preferences, employees, timecards and collection publication.
+pub mod assessment;
 mod daily;
 mod employees;
 mod fixtures;

@@ -46,7 +46,7 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
     let latest = db.employee_timecard(&id, "E001", None).unwrap();
     assert_eq!(latest.period.from, "2026-09-06");
     assert_eq!(latest.period.to, "2026-09-19");
-    assert_eq!(latest.employee["name"], "Avery Morgan");
+    assert_eq!(latest.employee.name, "Avery Morgan");
     assert!(latest.next_period.is_none());
     let previous = db
         .employee_timecard(&id, "E001", latest.previous_period.as_ref())
@@ -54,7 +54,7 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
     assert_eq!(previous.period.from, "2026-08-23");
     assert_eq!(previous.period.to, "2026-09-05");
     assert_eq!(previous.next_period, Some(latest.period.clone()));
-    assert_eq!(previous.timecards.last().unwrap()["hours"], 9.0);
+    assert_eq!(previous.timecards.last().unwrap().card.hours, 9.0);
     let first = db
         .employee_timecard(&id, "E001", previous.previous_period.as_ref())
         .unwrap();
@@ -113,12 +113,14 @@ fn employee_status_filter_applies_before_counting_and_pagination() {
     db.publish(&id, &data).unwrap();
     let inactive = db
         .employees(&id, "", 0, Some(1), false, Some(false))
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap();
     assert_eq!(inactive["total"], 2);
     assert_eq!(inactive["employees"].as_array().unwrap().len(), 1);
     assert_eq!(inactive["employees"][0]["active"], false);
     let next = db
         .employees(&id, "", 1, Some(1), false, Some(false))
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap();
     assert_ne!(
         inactive["employees"][0]["code"],
@@ -126,16 +128,19 @@ fn employee_status_filter_applies_before_counting_and_pagination() {
     );
     assert_eq!(
         db.employees(&id, "", 0, Some(100), false, Some(true))
+            .map(|value| serde_json::to_value(value).unwrap())
             .unwrap()["total"],
         10
     );
     assert_eq!(
         db.employees(&id, "Jordan", 0, Some(100), false, Some(false))
+            .map(|value| serde_json::to_value(value).unwrap())
             .unwrap()["total"],
         1
     );
     assert_eq!(
         db.employees(&id, "Jordan", 0, Some(100), false, Some(true))
+            .map(|value| serde_json::to_value(value).unwrap())
             .unwrap()["total"],
         0
     );
@@ -173,7 +178,9 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
         .retain(|r| r["employeeCode"] != "E001");
     db.publish(id, &later).unwrap();
     assert_eq!(
-        db.employees(id, "", 0, Some(100), false, None).unwrap()["total"],
+        db.employees(id, "", 0, Some(100), false, None)
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["total"],
         11
     );
     assert_eq!(db.employee_timecard(id, "E001", None).unwrap(), before);
@@ -187,8 +194,10 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     db.publish(id, &data).unwrap();
     // Publications from before links were retained return none.
     assert_eq!(
-        db.employee_timecard(id, "E001", None).unwrap().timecards[0]["sourceUrl"],
-        Value::Null
+        db.employee_timecard(id, "E001", None).unwrap().timecards[0]
+            .card
+            .source_url,
+        None
     );
     let link = |code: &str| {
         format!(
@@ -236,7 +245,7 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     db.publish(id, &linked).unwrap();
     assert_eq!(count("publications"), 2);
     for card in db.employee_timecard(id, "E003", None).unwrap().timecards {
-        assert_eq!(card["sourceUrl"], json!(link("E003")));
+        assert_eq!(card.card.source_url, Some(link("E003")));
     }
     let date = s(&data["timecards"][0], "date");
     let (_, _, rows) = db.daily_source(id, date).unwrap();
@@ -267,7 +276,9 @@ fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
         vec![first.clone()]
     );
     assert_eq!(
-        db.employees(id, "", 0, Some(100), false, None).unwrap()["collectedAt"],
+        db.employees(id, "", 0, Some(100), false, None)
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["collectedAt"],
         data["collectedAt"]
     );
     data["timecards"][0]["hours"] = json!(7.25);
@@ -327,11 +338,15 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         .unwrap()
         .to_owned();
     assert_eq!(
-        db.daily(id, &day, "name", false).unwrap()["rows"],
+        db.daily(id, &day, "name", false)
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["rows"],
         json!([])
     );
     assert_eq!(
-        db.employees(id, "", 0, Some(100), false, None).unwrap()["total"],
+        db.employees(id, "", 0, Some(100), false, None)
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["total"],
         12
     );
     values["unknown"] = json!(true);

@@ -3,6 +3,7 @@
 use crate::{
     Result,
     collectors::Provider,
+    contracts::{LateRule, MealComparison, MealSource},
     db::{Store, n, s},
     ensure, validate as v, workforce,
 };
@@ -267,7 +268,7 @@ impl Store {
         Ok(result)
     }
 
-    pub fn meal_comparison(&self, id: &str, date: &str, timezone: &str) -> Result<Value> {
+    pub fn meal_comparison(&self, id: &str, date: &str, timezone: &str) -> Result<MealComparison> {
         v::date(date)?;
         let cortex = self.collector(id, Provider::Cortex)?;
         let links = self.employee_links(id)?;
@@ -420,9 +421,27 @@ impl Store {
             .or(publications.first().or(latest_zone.as_ref()))
             .map(|p| s(p, "timezone"))
             .unwrap_or(timezone);
-        Ok(json!({"date":date,"timezone":zone,"rows":rows,
-                "paycomCollectedAt":publication.map(|p|p["collected_at"].clone()),
-                "cortexPublications":publications,"employees":roster,"drivers":drivers.into_values().collect::<Vec<_>>(),"links":links}))
+        let preferences = self.preferences(id)?;
+        let late = LateRule {
+            time: s(&preferences["values"], "late_da_time").into(),
+            departments: serde_json::from_value(
+                preferences["values"]["late_da_departments"].clone(),
+            )?,
+        };
+        let rows = rows
+            .into_iter()
+            .map(|row| Ok(serde_json::from_value::<MealSource>(row)?.assessed(date, Some(&late))))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(MealComparison {
+            date: date.into(),
+            timezone: zone.into(),
+            rows,
+            paycom_collected_at: publication.map(|p| s(&p, "collected_at").into()),
+            cortex_publications: serde_json::from_value(json!(publications))?,
+            employees: serde_json::from_value(json!(roster))?,
+            drivers: serde_json::from_value(json!(drivers.into_values().collect::<Vec<_>>()))?,
+            links: serde_json::from_value(links)?,
+        })
     }
 }
 

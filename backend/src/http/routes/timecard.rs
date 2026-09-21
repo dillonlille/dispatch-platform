@@ -70,7 +70,7 @@ fn employees(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
         _ => None,
     };
     let page = db.employees(c.dsp_id(), query, offset, limit, desc, active)?;
-    Ok(Reply::json(page))
+    Ok(Reply::json(serde_json::to_value(page)?))
 }
 
 fn employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -101,12 +101,12 @@ fn timecards(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(q, &["date", "sort", "direction"])?;
     let sort = optional(q, "sort", |q, key| v::choice(q, key, SORTS))?.unwrap_or("name");
     let date = v::text(q, "date", 10, 10)?;
-    Ok(Reply::json(db.daily(
+    Ok(Reply::json(serde_json::to_value(db.daily(
         c.dsp_id(),
         date,
         sort,
         descending(q)?,
-    )?))
+    )?)?))
 }
 
 fn sync_employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -163,7 +163,7 @@ fn meal_comparison(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(&input.query, &["date"])?;
     let date = v::text(&input.query, "date", 10, 10)?;
     let comparison = db.meal_comparison(c.dsp_id(), date, c.dsp.timezone.as_str())?;
-    Ok(Reply::json(comparison))
+    Ok(Reply::json(serde_json::to_value(comparison)?))
 }
 
 fn save_employee_links(db: &Store, c: &Member, input: &Input) -> Result<Reply> {

@@ -4,7 +4,7 @@ import type {
   EmployeeTimecardResponse,
   Timecard,
 } from '../../../../shared/contracts/index.js';
-import { paycomDay } from '../../lib/meal-breaks.js';
+import type { PunchEvent } from '../../../../shared/contracts/workforce.js';
 import { addDays } from '../../lib/calendar.js';
 import { DataState, DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
 import {
@@ -14,7 +14,7 @@ import {
   punchTime,
 } from '../../lib/timecard-format.js';
 
-type EmployeeDay = Timecard & { events: ReturnType<typeof paycomDay>['events'] };
+type EmployeeDay = Timecard & { events: PunchEvent[] };
 function periodDays(data: EmployeeTimecardResponse | undefined): EmployeeDay[] {
   if (!data?.collectedAt) return [];
   const byDate = new Map(data.timecards.map((card) => [card.date, card]));
@@ -26,8 +26,9 @@ function periodDays(data: EmployeeTimecardResponse | undefined): EmployeeDay[] {
       hours: 0,
       status: '',
       punches: [],
+      assessment: { events: [] },
     };
-    days.push({ ...card, events: paycomDay(card).events });
+    days.push({ ...card, events: card.assessment.events });
   }
   return days;
 }
