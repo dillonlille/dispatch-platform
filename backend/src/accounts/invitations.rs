@@ -41,8 +41,8 @@ impl Store {
         let owner = flag(&invitation, "owner");
         invitation.as_object_mut().unwrap().remove("owner");
         let profile = self.profile(s(&invitation, "dspId"))?;
-        invitation["onboarding"] = json!(owner && flag(&profile, "setupRequired"));
-        invitation["stationCode"] = profile["stationCode"].clone();
+        invitation["onboarding"] = json!(owner && profile.setup_required);
+        invitation["stationCode"] = json!(profile.station_code);
         Ok(invitation)
     }
     pub fn invitation_mail(

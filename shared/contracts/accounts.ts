@@ -1,8 +1,6 @@
 import type { Narrow } from './narrow.js';
 import type { Role as GeneratedRole } from './generated/Role';
-import type { DspSummary as GeneratedDspSummary } from './generated/DspSummary';
 import type { DspView as GeneratedDspView } from './generated/DspView';
-import type { SessionResponse } from './generated/SessionResponse';
 export type { PublicUser as User } from './generated/PublicUser';
 export type { Member as Membership } from './generated/Member';
 export const permissions = [
@@ -18,18 +16,11 @@ export const permissions = [
 export type Permission = (typeof permissions)[number];
 /** `members` and `invitations` are counted by the role list only; a saved role has null. */
 export type Role = Narrow<GeneratedRole, { permissions: Permission[] }>;
-export type DspSummary = Narrow<GeneratedDspSummary, { profile: DspProfile }>;
-export type SessionView = Narrow<SessionResponse, { dsps: DspSummary[] }>;
+export type { DspSummary } from './generated/DspSummary';
+export type { SessionResponse as SessionView } from './generated/SessionResponse';
 type ViewRole = Pick<Role, 'id' | 'name' | 'owner'>;
 export type DspView = Narrow<
   GeneratedDspView,
-  { profile: DspProfile; permissions: Permission[]; role: ViewRole; roles?: ViewRole[] }
+  { permissions: Permission[]; role: ViewRole; roles?: ViewRole[] }
 >;
-interface DspProfile {
-  abbreviation: string;
-  stationCode: string;
-  setupRequired: boolean;
-  removed: boolean;
-  // Whether this DSP's audit log lists platform owners, as "Platform support".
-  supportVisible: boolean;
-}
+export type { DspProfile } from './generated/DspProfile';

@@ -9,6 +9,12 @@ export const paycomColumns = [
 ] as const;
 export type PaycomColumn = (typeof paycomColumns)[number][0];
 export const paycomDefaults: PaycomPreferences = {
+  opening_page: 'timecards',
+  rows_per_page: 100,
+  default_sort: 'employeeName',
+  department: null,
+  station: null,
+  columns: ['inDay', 'outLunch', 'inLunch', 'outDay', 'totalHours', 'condition'],
   name_order: 'first_last',
   driver_departments: null,
   late_da_time: '10:01',

@@ -50,10 +50,12 @@ pub fn seeded() -> (tempfile::TempDir, Store) {
 
 /// The newest audit events the platform (`None`) or one DSP may see.
 pub fn audits(db: &Store, dsp: Option<&str>) -> dispatch_backend::Result<Value> {
-    let mut page = db.audit_page(&db::AuditQuery {
-        dsp,
-        limit: 200,
-        ..db::AuditQuery::default()
-    })?;
+    let mut page = db
+        .audit_page(&db::AuditQuery {
+            dsp,
+            limit: 200,
+            ..db::AuditQuery::default()
+        })
+        .map(|value| serde_json::to_value(value).unwrap())?;
     Ok(page["events"].take())
 }

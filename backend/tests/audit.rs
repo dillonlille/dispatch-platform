@@ -72,6 +72,7 @@ fn dsp_audit_log_hides_platform_owner_actions() {
             actor: "support",
             ..Default::default()
         })
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap();
     assert_eq!(page["total"], 1);
     assert!(
@@ -123,6 +124,7 @@ fn audit_log_filters_pages_and_counts_by_area() {
             dsp: Some(dsp),
             ..query
         })
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap()
     };
     let actions = |page: &serde_json::Value| -> Vec<String> {
@@ -260,12 +262,16 @@ fn audit_log_filters_pages_and_counts_by_area() {
         json!({"kind":"role","id":"role_1"})
     );
     // The platform's log narrows to one DSP; a DSP's own log ignores the filter.
-    let everywhere = db.audit_page(&AuditQuery::default()).unwrap();
+    let everywhere = db
+        .audit_page(&AuditQuery::default())
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     let narrowed = db
         .audit_page(&AuditQuery {
             within: dsp,
             ..AuditQuery::default()
         })
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap();
     assert!(narrowed["total"].as_i64() < everywhere["total"].as_i64());
     assert!(
@@ -322,6 +328,7 @@ fn audit_log_filters_pages_and_counts_by_area() {
                 ..AuditQuery::default()
             },
         )
+        .map(|value| serde_json::to_value(value).unwrap())
         .unwrap();
     let rows = exported["events"].as_array().unwrap();
     assert!(rows.len() > 1 && rows.iter().all(|e| s(e, "area") == "team"));

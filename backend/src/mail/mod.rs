@@ -1,24 +1,16 @@
+pub use crate::contracts::TransportHealth;
 use crate::{
     Result, State,
-    contracts::MailMessage,
-    db::{self, Store, flag, n},
+    contracts::{MailHealth, MailMessage},
+    db::{self, Store, n},
     ensure,
 };
 use rusqlite::params;
-use serde::Serialize;
-use serde_json::{Value, json};
 use std::collections::HashMap;
 
 mod delivery;
 pub mod templates;
 pub use delivery::mailer;
-
-#[derive(Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransportHealth {
-    pub error: Option<String>,
-    pub checked_at: Option<String>,
-}
 
 pub fn transport_status(state: &State, error: Option<&str>) {
     if let Ok(mut health) = state.mail_transport.lock() {
@@ -29,7 +21,7 @@ pub fn transport_status(state: &State, error: Option<&str>) {
     }
 }
 
-pub fn health(db: &Store, state: &State) -> Result<Value> {
+pub fn health(db: &Store, state: &State) -> Result<MailHealth> {
     let counts = db.platform.one("SELECT count(*) FILTER (WHERE status='pending') \
         pending,count(*) FILTER (WHERE status='failed') failed,MIN(created_at) FILTER (WHERE \
         status='pending') oldest,count(*) FILTER (WHERE status='pending' AND created_at IS NULL) unknownAge FROM outbox", [])?.unwrap();
@@ -47,15 +39,29 @@ pub fn health(db: &Store, state: &State) -> Result<Value> {
         .lock()
         .map_err(|_| crate::Error::new("mail_health_unavailable", 503))?
         .clone();
-    Ok(json!({
-        "enabled":db.config.mail_available(),
-        "pending":n(&counts,"pending"), "failed":n(&counts,"failed"),
-        "oldestPendingAgeMs":if n(&counts,"unknownAge") > 0 { None } else { counts["oldest"].as_i64().map(|t| (db::now()-t).max(0)) },
-        "lastSuccessAt":last_sent.as_ref().map(|r| &r["sent_at"]),
-        "lastAttemptAt":last_attempt.as_ref().and_then(|r| r["last_attempt_at"].as_i64()).map(db::at),
-        "lastError":last_attempt.as_ref().map(|r| &r["last_error"]),
-        "transport":transport,
-    }))
+    Ok(MailHealth {
+        enabled: db.config.mail_available(),
+        pending: n(&counts, "pending"),
+        failed: n(&counts, "failed"),
+        oldest_pending_age_ms: if n(&counts, "unknownAge") > 0 {
+            None
+        } else {
+            counts["oldest"].as_i64().map(|t| (db::now() - t).max(0))
+        },
+        last_success_at: last_sent
+            .as_ref()
+            .and_then(|r| r["sent_at"].as_str())
+            .map(str::to_owned),
+        last_attempt_at: last_attempt
+            .as_ref()
+            .and_then(|r| r["last_attempt_at"].as_i64())
+            .map(db::at),
+        last_error: last_attempt
+            .as_ref()
+            .and_then(|r| r["last_error"].as_str())
+            .map(str::to_owned),
+        transport,
+    })
 }
 
 pub fn record_delivery(db: &Store, id: &str, attempts: i64, error: Option<&str>) -> Result<()> {
@@ -106,7 +112,7 @@ pub fn log(db: &Store) -> Result<Vec<MailMessage>> {
                 (true, Some(dsp)) => Some(match setup.get(dsp) {
                     Some(done) => *done,
                     None => {
-                        let done = !flag(&db.profile(dsp)?, "setupRequired");
+                        let done = !db.profile(dsp)?.setup_required;
                         setup.insert(dsp.to_owned(), done);
                         done
                     }

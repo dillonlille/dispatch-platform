@@ -37,10 +37,10 @@ impl Store {
         let dsp = self.find_dsp(id)?;
         Ok(Discovery {
             date: date.into(),
-            station: s(&profile, "stationCode").into(),
+            station: profile.station_code,
             timezone: dsp.timezone,
             dsp_name: dsp.name,
-            dsp_abbreviation: s(&profile, "abbreviation").into(),
+            dsp_abbreviation: profile.abbreviation,
         })
     }
     pub(crate) fn meal_sync_scopes(&self, id: &str, date: &str) -> Result<Vec<Scope>> {

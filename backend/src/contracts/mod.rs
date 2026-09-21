@@ -19,20 +19,28 @@ fn invalid_record() -> Error {
 
 mod accounts;
 mod assessment;
+mod audit;
 mod collections;
 #[cfg(test)]
 mod generated;
 mod jobs;
 mod meals;
+mod metrics;
+mod platform;
 mod requests;
+mod settings;
 mod workforce;
 
 pub use accounts::*;
 pub use assessment::*;
+pub use audit::*;
 pub use collections::*;
 pub use jobs::*;
 pub use meals::*;
+pub use metrics::*;
+pub use platform::*;
 pub use requests::*;
+pub use settings::*;
 pub use workforce::*;
 
 text_enum! {

@@ -4,7 +4,8 @@ use super::{
     Result,
     db::{self, Store, n, s},
 };
-use serde::Serialize;
+use crate::contracts::{DocumentState, JobOutcome, PageRead, PageReads, PageStage};
+pub use crate::contracts::{JobMetrics as Metrics, JobPhase as Phase};
 use serde_json::Value;
 use std::{
     collections::HashSet,
@@ -13,43 +14,6 @@ use std::{
     time::Instant,
 };
 
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Phase {
-    Starting,
-    Authentication,
-    Verification,
-    Collection,
-    Publication,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Metrics {
-    attempt: i64,
-    started_at: String,
-    finished_at: Option<String>,
-    outcome: String,
-    error: Option<String>,
-    phase: Option<Phase>,
-    detail: Option<String>,
-    queue_ms: u64,
-    elapsed_ms: u64,
-    authentication_ms: Option<u64>,
-    verification_ms: Option<u64>,
-    collection_ms: Option<u64>,
-    publication_ms: Option<u64>,
-    employees: Option<usize>,
-    timecards: Option<usize>,
-    itineraries: Option<usize>,
-    meals: Option<usize>,
-    peak_rss_bytes: Option<u64>,
-    peak_pss_bytes: Option<u64>,
-    peak_private_bytes: Option<u64>,
-    memory_samples: u64,
-    incomplete_memory_samples: u64,
-    page_reads: PageReads,
-}
 /// The journal line for one attempt: outcome and timings, without page reads.
 pub fn summary(metrics: &Metrics) -> Value {
     serde_json::json!({"outcome":metrics.outcome,"detail":metrics.detail,"queueMs":metrics.queue_ms,
@@ -76,7 +40,7 @@ impl Metrics {
             attempt,
             started_at: started_at.into(),
             finished_at: None,
-            outcome: "running".into(),
+            outcome: JobOutcome::Running,
             error: None,
             phase: Some(Phase::Starting),
             detail: None,
@@ -95,8 +59,11 @@ impl Metrics {
             peak_private_bytes: None,
             memory_samples: 0,
             incomplete_memory_samples: 0,
-            page_reads: PageReads::default(),
+            page_reads: Some(PageReads::default()),
         }
+    }
+    fn page_reads_mut(&mut self) -> &mut PageReads {
+        self.page_reads.get_or_insert_default()
     }
     fn add(&mut self, phase: Phase, ms: u64) {
         let value = match phase {
@@ -109,44 +76,12 @@ impl Metrics {
         *value = Some(value.unwrap_or(0).saturating_add(ms));
     }
 }
-// Keep diagnostics bounded even for the maximum 5,000-employee roster. Ordinals
-// identify progress without persisting employee codes, URLs or provider content.
-#[derive(Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageReads {
-    completed: usize,
-    retries: usize,
-    recovered: usize,
-    resumed: usize,
-    early_ready: usize,
-    direct: usize,
-    spot_checked: usize,
-    total_ms: u64,
-    active: Vec<PageRead>,
-    slowest: Vec<PageRead>,
-    failures: Vec<PageRead>,
-}
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageRead {
-    ordinal: usize,
-    attempt: usize,
-    stage: &'static str,
-    elapsed_ms: u64,
-    navigation_ms: u64,
-    content_ms: u64,
-    extraction_ms: u64,
-    error: Option<String>,
-    pending_requests: Option<usize>,
-    document_state: Option<&'static str>,
-}
 impl PageRead {
     fn add(&mut self, ms: u64) {
         match self.stage {
-            "navigation" => self.navigation_ms += ms,
-            "content" => self.content_ms += ms,
-            "extraction" => self.extraction_ms += ms,
-            _ => (),
+            PageStage::Navigation => self.navigation_ms += ms,
+            PageStage::Content => self.content_ms += ms,
+            PageStage::Extraction => self.extraction_ms += ms,
         }
     }
 }
@@ -175,19 +110,29 @@ impl Recorder {
         })))
     }
     pub fn resumed(&self, count: usize) {
-        self.0.lock().expect("job metrics").value.page_reads.resumed = count;
+        self.0
+            .lock()
+            .expect("job metrics")
+            .value
+            .page_reads_mut()
+            .resumed = count;
     }
     pub fn early_ready(&self) {
         self.0
             .lock()
             .expect("job metrics")
             .value
-            .page_reads
+            .page_reads_mut()
             .early_ready += 1;
     }
     /// Timecards read from the provider's response instead of a rendered page.
     pub fn direct(&self) {
-        self.0.lock().expect("job metrics").value.page_reads.direct += 1;
+        self.0
+            .lock()
+            .expect("job metrics")
+            .value
+            .page_reads_mut()
+            .direct += 1;
     }
     /// Response reads that a rendered read of the same employee confirmed.
     pub fn spot_checked(&self) {
@@ -195,7 +140,7 @@ impl Recorder {
             .lock()
             .expect("job metrics")
             .value
-            .page_reads
+            .page_reads_mut()
             .spot_checked += 1;
     }
     /// A response read that handed over to a rendered read is not a page failure.
@@ -209,13 +154,13 @@ impl Recorder {
     pub fn page_start(&self, ordinal: usize, attempt: usize) {
         let mut clock = self.0.lock().expect("job metrics");
         if attempt > 1 {
-            clock.value.page_reads.retries += 1;
+            clock.value.page_reads_mut().retries += 1;
         }
         clock.pages.push((
             PageRead {
                 ordinal,
                 attempt,
-                stage: "navigation",
+                stage: PageStage::Navigation,
                 elapsed_ms: 0,
                 navigation_ms: 0,
                 content_ms: 0,
@@ -229,6 +174,7 @@ impl Recorder {
         ));
     }
     pub fn page_stage(&self, ordinal: usize, stage: &'static str) {
+        let stage = PageStage::parse(stage).expect("known page stage");
         let mut clock = self.0.lock().expect("job metrics");
         if let Some((page, _, changed)) = clock
             .pages
@@ -249,7 +195,7 @@ impl Recorder {
             .find(|(p, _, _)| p.ordinal == ordinal)
         {
             page.pending_requests = pending;
-            page.document_state = Some(state);
+            page.document_state = Some(DocumentState::parse(state).expect("known document state"));
         }
     }
     pub fn page_finish(&self, ordinal: usize, error: Option<&str>) {
@@ -263,7 +209,7 @@ impl Recorder {
             page.add(changed.elapsed().as_millis() as u64);
             page.elapsed_ms = started.elapsed().as_millis() as u64;
             page.error = error.map(str::to_owned);
-            let reads = &mut clock.value.page_reads;
+            let reads = clock.value.page_reads_mut();
             reads.total_ms += page.elapsed_ms;
             if error.is_some() {
                 reads.failures.push(page.clone());
@@ -315,7 +261,7 @@ impl Recorder {
         let clock = self.0.lock().expect("job metrics");
         let mut value = clock.value.clone();
         if value.phase.is_some() {
-            value.page_reads.active = clock
+            value.page_reads_mut().active = clock
                 .pages
                 .iter()
                 .map(|(page, started, changed)| {
@@ -338,7 +284,7 @@ impl Recorder {
             let elapsed = clock.changed.elapsed().as_millis() as u64;
             clock.value.add(phase, elapsed);
             clock.value.elapsed_ms = clock.started.elapsed().as_millis() as u64;
-            clock.value.page_reads.active = clock
+            clock.value.page_reads_mut().active = clock
                 .pages
                 .drain(..)
                 .map(|(mut page, started, changed)| {
@@ -348,7 +294,7 @@ impl Recorder {
                 })
                 .collect();
             clock.value.finished_at = Some(db::iso());
-            clock.value.outcome = outcome.into();
+            clock.value.outcome = JobOutcome::parse(outcome).expect("known job outcome");
             clock.value.error = error.map(str::to_owned);
             if error.is_none() {
                 clock.value.detail = None;
@@ -380,7 +326,7 @@ impl Store {
         )?;
         Ok(())
     }
-    pub fn metrics(&self, job: &str) -> Result<Vec<Value>> {
+    pub fn metrics(&self, job: &str) -> Result<Vec<Metrics>> {
         self.jobs
             .all(
                 "SELECT metrics FROM job_metrics WHERE job_id=? ORDER BY attempt",
@@ -537,7 +483,7 @@ mod tests {
         assert_eq!(value.authentication_ms, None);
         recorder.phase(Phase::Collection);
         recorder.finish("cancelled", Some("job_cancelled"));
-        assert_eq!(recorder.snapshot().outcome, "cancelled");
+        assert_eq!(recorder.snapshot().outcome, JobOutcome::Cancelled);
         assert!(recorder.snapshot().collection_ms.is_some());
         assert!(recorder.snapshot().publication_ms.is_none());
     }

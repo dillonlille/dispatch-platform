@@ -1,8 +1,8 @@
 //! What only a platform owner sees: every DSP, the platform's health, diagnostics and releases.
 use crate::{
     Error, Result, State,
-    contracts::DspStatus,
-    db::{Store, flag, iso, s},
+    contracts::{BrowserHealth, DspStatus, JobStatus, PlatformHealth, ProviderMode},
+    db::{Store, iso},
     ensure,
     http::{
         input::{Input, Reply, optional},
@@ -11,7 +11,7 @@ use crate::{
     mail, operations, validate as v, workforce,
 };
 use serde_json::{Value, json};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 const TEST_DSPS: &str = "SELECT d.id,d.name,d.status FROM dsps d WHERE EXISTS \
     (SELECT 1 FROM audit a WHERE a.dsp_id=d.id AND a.action='diagnostics.fixtures_loaded') \
@@ -168,7 +168,7 @@ async fn restore_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> 
         v::fields(b, &[])?;
         let row = db.find_dsp(dsp)?;
         ensure(
-            !row.permanent && flag(&db.profile(dsp)?, "removed"),
+            !row.permanent && db.profile(dsp)?.removed,
             "dsp_not_removed",
             409,
         )?;
@@ -195,28 +195,29 @@ fn discard_mail(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
 }
 fn health(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
     let state = owner.state;
-    let counts: HashMap<String, Value> = db
+    let counts = db
         .jobs
-        .all("SELECT status,count(*) n FROM jobs GROUP BY status", [])?
+        .query_as::<(JobStatus, u32)>("SELECT status,count(*) n FROM jobs GROUP BY status", [])?
         .into_iter()
-        .map(|r| (s(&r, "status").into(), r["n"].clone()))
         .collect();
-    let browsers = json!({
-        "active":state.browsers.active(),
-        "capacity":db.config.browser_capacity,
-        "memory":state.browsers.admission()
-    });
-    let dsps = db.platform.count("SELECT count(*) FROM dsps", [])?;
-    Ok(Reply::json(json!({
-        "environment":db.config.environment,
-        "release":db.config.release,
-        "jobs":counts,
-        "browsers":browsers,
-        "dsps":dsps,
-        "email":db.config.mail_available(),
-        "mail":mail::health(db, state)?,
-        "providerMode":if db.config.fixture { "fixture" } else { "native" }
-    })))
+    Reply::of(&PlatformHealth {
+        environment: db.config.env(),
+        release: db.config.release.clone(),
+        jobs: counts,
+        browsers: BrowserHealth {
+            active: state.browsers.active(),
+            capacity: db.config.browser_capacity,
+            memory: state.browsers.admission(),
+        },
+        dsps: db.platform.count("SELECT count(*) FROM dsps", [])?,
+        email: db.config.mail_available(),
+        mail: mail::health(db, state)?,
+        provider_mode: if db.config.fixture {
+            ProviderMode::Fixture
+        } else {
+            ProviderMode::Native
+        },
+    })
 }
 
 fn diagnostics(db: &Store, owner: &User, _: &Input) -> Result<Reply> {

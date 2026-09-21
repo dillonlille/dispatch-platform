@@ -61,8 +61,7 @@ impl FromRow for Dsp {
 pub struct DspSummary {
     #[serde(flatten)]
     pub dsp: Dsp,
-    #[cfg_attr(test, ts(type = "unknown"))]
-    pub profile: Value,
+    pub profile: DspProfile,
     pub owner_email: Option<String>,
     pub owner_status: OwnerStatus,
     pub paycom: ConnectionStatus,
@@ -155,8 +154,7 @@ pub struct DspView {
     pub role: RoleSummary,
     pub permissions: Vec<String>,
     pub token: String,
-    #[cfg_attr(test, ts(type = "unknown"))]
-    pub profile: Value,
+    pub profile: DspProfile,
     /// Every role of the DSP, sent only to a platform owner so they can look through one.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -173,4 +171,15 @@ pub struct SessionResponse {
     pub environment: Environment,
     pub release: String,
     pub provider_mode: ProviderMode,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(default, rename_all = "camelCase")]
+pub struct DspProfile {
+    pub abbreviation: String,
+    pub station_code: String,
+    pub setup_required: bool,
+    pub removed: bool,
+    pub support_visible: bool,
 }

@@ -15,9 +15,8 @@ const COLUMNS: [&str; 6] = [
     "condition",
 ];
 pub fn defaults() -> Value {
-    json!({"opening_page":"timecards","rows_per_page":100,"name_order":"first_last",
-        "default_sort":"employeeName","department":null,"station":null,"columns":COLUMNS,
-        "driver_departments":null,"late_da_time":"10:01","late_da_departments":[]})
+    serde_json::to_value(crate::contracts::PaycomPreferences::default())
+        .expect("preference defaults")
 }
 pub(super) fn preferences(db: &Db) -> Result<Value> {
     let mut stored = db.setting(
