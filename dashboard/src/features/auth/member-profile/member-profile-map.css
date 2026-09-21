@@ -1,0 +1,200 @@
+.member-profile-page {
+  --map-land: #eff3f5;
+  --map-cover: #e1ebe3;
+  --map-use: #e5ecf1;
+  --map-water: #cbdfee;
+  --map-shore: #aec7db;
+  --map-river: #acc8dd;
+  --map-building: #d7e0e7;
+  --map-minor: #c7d2de;
+  --map-major: #9fafc0;
+  --map-motorway: #8b9db1;
+  --map-rail: #b8c4cf;
+  --map-halo: #2055ed;
+  --map-route: #2055ed;
+  --map-route-core: #2055ed;
+  --map-marker: #2055ed;
+  --map-dot: #fff;
+  --map-station: #2055ed;
+  --map-brand: #fff;
+  --map-opacity: 0.9;
+  --map-halo-width: 11;
+  --map-halo-opacity: 0.12;
+  --map-route-width: 4.5;
+  --map-traveler-core: #2055ed;
+  --map-traveler-outline: #fff;
+}
+[data-theme='dark'] .member-profile-page {
+  --map-land: #172030;
+  --map-cover: #18232e;
+  --map-use: #1c293c;
+  --map-water: #0b1422;
+  --map-shore: #213248;
+  --map-river: #233c58;
+  --map-building: #25344c;
+  --map-minor: #2c3e58;
+  --map-major: #3d5274;
+  --map-motorway: #4b6080;
+  --map-rail: #354054;
+  --map-halo: #547ff7;
+  --map-route: #668ef9;
+  --map-route-core: #b5c8ff;
+  --map-marker: #8eaaff;
+  --map-dot: #edf1f7;
+  --map-station: #253251;
+  --map-brand: #adc1ff;
+  --map-opacity: 0.8;
+  --map-halo-width: 13;
+  --map-halo-opacity: 0.68;
+  --map-route-width: 5.5;
+  --map-traveler-core: #f4f7ff;
+  --map-traveler-outline: #263a6b;
+}
+.member-profile-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -2;
+  pointer-events: none;
+}
+.member-profile-map-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.member-profile-map-motion {
+  --map-cycle: 10s;
+  --map-start-delay: 0.8s;
+  --map-echo-spacing: 0.45s;
+  fill: none;
+  --map-motion-state: paused;
+}
+.member-profile-page[data-ready='true'] .member-profile-map-motion {
+  --map-motion-state: running;
+}
+.member-profile-route-trail,
+.member-profile-traveler {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+.member-profile-route-trail {
+  --map-motion-start: 6px;
+  --map-motion-end: -94px;
+  --map-motion-opacity: 0.5;
+  stroke: var(--map-marker);
+  stroke-width: 9;
+  stroke-dasharray: 6 101;
+}
+.member-profile-traveler {
+  --map-motion-start: 0px;
+  --map-motion-end: -100px;
+  --map-motion-opacity: 1;
+  stroke-dasharray: 0.001 101;
+}
+.member-profile-traveler-halo {
+  stroke: var(--map-marker);
+  stroke-width: 30;
+  opacity: 0.2;
+}
+.member-profile-traveler-outline {
+  stroke: var(--map-traveler-outline);
+  stroke-width: 20;
+}
+.member-profile-traveler-core {
+  stroke: var(--map-traveler-core);
+  stroke-width: 12;
+}
+.member-profile-departure-pulse,
+.member-profile-destination-pulse {
+  stroke: var(--map-marker);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .member-profile-route-trail,
+  .member-profile-traveler {
+    animation: member-profile-marker-travel var(--map-cycle) linear var(--map-start-delay) infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+  .member-profile-departure-pulse {
+    animation: member-profile-departure var(--map-cycle) ease-out var(--map-start-delay) infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+  .member-profile-destination-pulse {
+    animation: member-profile-destination-arrival var(--map-cycle) ease-out var(--map-start-delay)
+      infinite;
+    animation-play-state: var(--map-motion-state);
+  }
+  .member-profile-destination-echo {
+    animation-delay: calc(var(--map-start-delay) + var(--map-echo-spacing));
+  }
+}
+@keyframes member-profile-marker-travel {
+  0%,
+  12% {
+    stroke-dashoffset: var(--map-motion-start);
+    opacity: 0;
+  }
+  14%,
+  60% {
+    opacity: var(--map-motion-opacity);
+  }
+  62% {
+    stroke-dashoffset: var(--map-motion-end);
+    opacity: var(--map-motion-opacity);
+  }
+  65%,
+  100% {
+    stroke-dashoffset: var(--map-motion-end);
+    opacity: 0;
+  }
+}
+@keyframes member-profile-departure {
+  0% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  2% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  12%,
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+@keyframes member-profile-destination-arrival {
+  0%,
+  61% {
+    transform: scale(1);
+    opacity: 0;
+  }
+  63% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  83%,
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .member-profile-map-motion {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .member-profile-map {
+    display: none;
+  }
+}
+.member-profile-page[data-ready='false'] .member-profile-map {
+  visibility: hidden;
+}

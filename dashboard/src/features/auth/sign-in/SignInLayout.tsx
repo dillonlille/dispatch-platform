@@ -1,11 +1,17 @@
 import type { ReactNode } from 'react';
-import { Brand } from '../../app/Brand.js';
+import { Brand } from '../../../app/Brand.js';
 import { LoginArtwork } from './LoginArtwork.js';
-import './auth.css';
+import './sign-in.css';
 
-export function AuthLayout({ children }: { children: ReactNode }) {
+export function SignInLayout({
+  children,
+  enter = false,
+}: {
+  children: ReactNode;
+  enter?: boolean;
+}) {
   return (
-    <main className="auth-layout">
+    <main className="auth-layout" data-enter={enter}>
       <LoginArtwork />
       <div className="auth-content">
         <div className="auth-brand">

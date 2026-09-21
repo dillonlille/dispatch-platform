@@ -1,16 +1,18 @@
 import { useState, type ReactNode } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
-export function AuthPasswordField({
+export function SignInPasswordField({
   name = 'password',
   label = 'Password',
   current = false,
   action,
+  autoFocus = false,
 }: {
   name?: string;
   label?: string;
   current?: boolean;
   action?: ReactNode;
+  autoFocus?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   const Icon = visible ? EyeOff : Eye;
@@ -24,6 +26,7 @@ export function AuthPasswordField({
         <input
           id={name}
           name={name}
+          autoFocus={autoFocus}
           type={visible ? 'text' : 'password'}
           minLength={current ? 1 : 8}
           maxLength={128}

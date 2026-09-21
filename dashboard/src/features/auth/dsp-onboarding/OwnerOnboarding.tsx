@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { api } from '../../app/api.js';
-import { useAction } from '../../app/useAction.js';
-import { dspHash, navigate, signInHash } from '../../app/navigation.js';
-import { ErrorBox } from '../../ui/index.js';
+import { api } from '../../../app/api.js';
+import { useAction } from '../../../app/useAction.js';
+import { dspHash, navigate, signInHash } from '../../../app/navigation.js';
+import { ErrorBox } from '../../../ui/index.js';
 import { DspSetupForm, type DspSetup } from './DspSetupForm.js';
 import { OnboardingLayout } from './OnboardingLayout.js';
 
