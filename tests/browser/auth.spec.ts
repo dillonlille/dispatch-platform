@@ -1,7 +1,59 @@
-import { test, expect, demo, signIn } from './fixtures.js';
+import type { Page } from '@playwright/test';
+import { test, expect, demo, login, signIn } from './fixtures.js';
 import { capturedMail } from '../mail-support.js';
 
 test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader'] } });
+
+async function signOut(page: Page) {
+  await page.locator('.account-menu summary').click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+}
+
+for (const preference of ['Light', 'Dark', 'System'] as const) {
+  test(`sign-in remembers ${preference} after sign-out and reload`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: preference === 'Dark' ? 'light' : 'dark' });
+    await login(page);
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Theme', exact: true }).click();
+    await page.getByRole('radio', { name: preference, exact: true }).check();
+    // Existing account preferences must also be remembered without being selected again.
+    await page.evaluate(() => localStorage.removeItem('dispatch-appearance:signed-out'));
+    await page.reload();
+    await signOut(page);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.reload();
+      for (const colorScheme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme });
+        const expected = preference === 'System' ? colorScheme : preference.toLowerCase();
+        await expect(page.locator('html')).toHaveAttribute('data-theme', expected);
+        await expect(page.locator('body')).toHaveCSS(
+          'background-color',
+          expected === 'light' ? 'rgb(255, 255, 255)' : 'rgb(17, 21, 29)',
+        );
+        await expect(page.getByLabel('Email address')).toBeVisible();
+      }
+    }
+  });
+}
+
+test('remembering sign-in appearance keeps different accounts independent', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await login(page);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Theme', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dark', exact: true }).check();
+  await signOut(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await signIn(page, demo.member);
+  await expect(page.locator('.account-menu')).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await signOut(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await signIn(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
 
 test('remember me uses three days and unchecked sign-in keeps eight hours', async ({
   page,

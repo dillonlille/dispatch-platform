@@ -37,18 +37,21 @@ async function fits(page: import('@playwright/test').Page) {
     .toBe(true);
 }
 
-test('owner onboarding fits desktop and phone viewports in both themes, including profile errors', async ({
+test('owner onboarding stays light and fits desktop and phone viewports, including profile errors', async ({
   page,
   dispatch,
 }) => {
   const url = await ownerInvitation(page, dispatch.root);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Theme', exact: true }).click();
+  await page.getByRole('radio', { name: 'Dark', exact: true }).check();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(url);
   await expect(page.getByRole('heading', { name: 'Set up your DSP' })).toBeVisible();
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
-    await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     for (const [width, height] of [
       [3840, 2160],
       [2560, 1080],
@@ -72,6 +75,7 @@ test('owner onboarding fits desktop and phone viewports in both themes, includin
   await page.getByLabel('Station code', { exact: true }).fill('DOT4');
   await page.getByRole('button', { name: 'Continue to profile' }).click();
   await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeFocused();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByLabel('First name', { exact: true }).fill('Responsive');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
   await page.getByLabel('Password', { exact: true }).fill('Different1');
@@ -90,6 +94,10 @@ test('owner onboarding fits desktop and phone viewports in both themes, includin
     await fits(page);
   }
   expect(errors).toEqual([]);
+  await page.getByRole('button', { name: 'Back to DSP setup' }).click();
+  await page.getByRole('button', { name: 'Back to sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 
 test('phones skip the map download; widening loads one shared map and theme changes reuse it', async ({
@@ -114,7 +122,7 @@ test('phones skip the map download; widening loads one shared map and theme chan
   expect(response.ok()).toBe(true);
   await response.finished();
   await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(maps).toHaveLength(1);
