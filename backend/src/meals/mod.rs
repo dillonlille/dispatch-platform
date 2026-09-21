@@ -1,3 +1,4 @@
+pub mod assessment;
 mod comparison;
 mod sync;
 // Cortex meal evidence and atomic publication. Browser data is untrusted input.

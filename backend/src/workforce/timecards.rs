@@ -2,7 +2,7 @@
 use crate::{
     Error, Result,
     collectors::Provider,
-    contracts::{EmployeeTimecardPeriod, EmployeeTimecardResponse, JobRow},
+    contracts::{EmployeeTimecardPeriod, EmployeeTimecardResponse, JobRow, Timecard},
     db::{Store, boolean, s},
     ensure, validate as v,
     workforce::sync::synced_cards,
@@ -133,8 +133,11 @@ impl Store {
             params![id, code, period.from, period.to],
         )?;
         Ok(EmployeeTimecardResponse {
-            employee,
-            timecards,
+            employee: serde_json::from_value(employee)?,
+            timecards: timecards
+                .into_iter()
+                .map(|card| Ok(serde_json::from_value::<Timecard>(card)?.assessed()))
+                .collect::<Result<_>>()?,
             period: period.clone(),
             collected_at,
             previous_period: (previous.from.as_str() >= EARLIEST_DATE).then_some(previous),

@@ -454,7 +454,8 @@ mod tests {
             reopened
                 .employee_timecard(&id, "E001", None)
                 .unwrap()
-                .employee["name"],
+                .employee
+                .name,
             "New Collection"
         );
     }

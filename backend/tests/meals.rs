@@ -112,6 +112,7 @@ fn itinerary_page_links_are_stored_returned_and_bound_to_the_route() {
     db.publish_meals(&id, "job-unlinked", &c, &scope).unwrap();
     let meal = |db: &dispatch_backend::db::Store| {
         db.meal_comparison(&id, &scope.date, &scope.timezone)
+            .map(|value| serde_json::to_value(value).unwrap())
             .unwrap()["rows"][0]["cortex"][0]
             .clone()
     };
