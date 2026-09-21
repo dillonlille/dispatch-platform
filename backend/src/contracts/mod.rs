@@ -18,16 +18,20 @@ fn invalid_record() -> Error {
 }
 
 mod accounts;
+mod assessment;
 mod collections;
 #[cfg(test)]
 mod generated;
 mod jobs;
+mod meals;
 mod requests;
 mod workforce;
 
 pub use accounts::*;
+pub use assessment::*;
 pub use collections::*;
 pub use jobs::*;
+pub use meals::*;
 pub use requests::*;
 pub use workforce::*;
 

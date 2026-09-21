@@ -1,3 +1,4 @@
+import type { MealComparison } from '../../../shared/contracts/meals.js';
 // The endpoints whose responses are generated from the backend's Rust types: each address
 // is written once, next to the type it answers with. Other endpoints still call `api` and
 // `useData` directly; move one here when its response gains a generated type.
@@ -12,6 +13,8 @@ import type {
   DspSummary,
   DspView,
   EmployeeTimecardPeriod,
+  EmployeesResponse,
+  DailyTimecards,
   EmployeeTimecardResponse,
   Job,
   MailMessage,
@@ -98,3 +101,27 @@ export const useConnection = (provider: Connection['provider'], poll = 0) =>
     provider === 'paycom' ? '/api/dsp/connections' : connectionUrl(provider),
     poll,
   );
+
+export const useEmployees = (
+  query: string,
+  status: string,
+  descending: boolean,
+  refreshKey: string,
+) =>
+  useCachedData<EmployeesResponse>(
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${descending ? 'desc' : 'asc'}`,
+    0,
+    refreshKey,
+  );
+export const dailyTimecardsUrl = (date: string, sort: string, descending: boolean) =>
+  `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${descending ? 'desc' : 'asc'}`;
+export const useDailyTimecards = (
+  date: string,
+  sort: string,
+  descending: boolean,
+  refreshKey?: string | null,
+) => useCachedData<DailyTimecards>(dailyTimecardsUrl(date, sort, descending), 0, refreshKey);
+export const mealComparisonUrl = (date: string) =>
+  `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
+export const useMealComparison = (date: string, refreshKey?: string | null) =>
+  useCachedData<MealComparison>(mealComparisonUrl(date), 0, refreshKey);

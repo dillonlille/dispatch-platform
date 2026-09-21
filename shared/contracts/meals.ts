@@ -1,51 +1,15 @@
-import type { Punch } from './workforce.js';
-export interface CortexMeal {
-  mealId: string;
-  itineraryId: string;
-  cortexId: string;
-  driverName: string;
-  station: string;
-  timezone: string;
-  collectedAt: string;
-  lastDelivery: string | null;
-  start: string;
-  end: string | null;
-  firstDelivery: string | null;
-  beforeStatus: string;
-  afterStatus: string;
-  // The Cortex itinerary page the meal was read from; null before links were retained.
-  sourceUrl?: string | null;
-}
-export interface MealEmployee {
-  id: string;
-  name: string;
-  paycom: {
-    employeeCode: string;
-    name: string;
-    department?: string;
-    status: string;
-    punches: Punch[];
-    sourceUrl?: string | null;
-  } | null;
-  cortex: CortexMeal[];
-}
-export interface EmployeeLink {
-  id: string;
-  cortexId: string;
-  paycomCode: string;
-}
-export interface MealComparison {
-  date: string;
-  timezone: string;
-  rows: MealEmployee[];
-  paycomCollectedAt: string | null;
-  cortexPublications: { station: string; timezone: string; collectedAt: string }[];
-  employees: { code: string; name: string }[];
-  drivers: {
-    id: string;
-    name: string;
-    paycomCode: string | null;
-    matchType: 'name' | 'saved' | 'separate' | 'unmatched';
-  }[];
-  links: { revision: number; links: EmployeeLink[]; separate?: string[] };
-}
+// API types generated from the Rust response models.
+export type { CortexMeal } from './generated/CortexMeal.js';
+export type { MealPaycom } from './generated/MealPaycom.js';
+export type { MealSource } from './generated/MealSource.js';
+export type { MealEmployee } from './generated/MealEmployee.js';
+export type { EmployeeLink } from './generated/EmployeeLink.js';
+export type { EmployeeLinks } from './generated/EmployeeLinks.js';
+export type { MealRosterEmployee } from './generated/MealRosterEmployee.js';
+export type { MealDriver } from './generated/MealDriver.js';
+export type { CortexPublication } from './generated/CortexPublication.js';
+export type { MealComparison } from './generated/MealComparison.js';
+export type { DeliveryGap } from './generated/DeliveryGap.js';
+export type { MealAssessment } from './generated/MealAssessment.js';
+export type { MealStatus } from './generated/MealStatus.js';
+export type { LateRule } from './generated/LateRule.js';

@@ -190,7 +190,12 @@ mod tests {
             store.employee_timecard(id, "E001", Some(&scope.period()))?,
             saved
         );
-        assert_eq!(store.employees(id, "", 0, None, false, None)?["total"], 12);
+        assert_eq!(
+            store
+                .employees(id, "", 0, None, false, None)
+                .map(|value| serde_json::to_value(value).unwrap())?["total"],
+            12
+        );
         assert!(
             EmployeeSync::parse(
                 &json!({"employeeCode":"E001","from":scope.from,"to":scope.to,"date":scope.from})

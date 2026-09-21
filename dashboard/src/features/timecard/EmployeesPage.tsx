@@ -1,19 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownAZ, ArrowUpAZ, ChevronRight } from 'lucide-react';
 import type {
-  Employee,
   EmployeeTimecardPeriod,
   EmployeeTimecardResponse,
 } from '../../../../shared/contracts/index.js';
 import { useUpdateState } from '../../app/browser-update.js';
-import { useCachedData } from '../../app/api.js';
-import { employeeTimecardUrl, useEmployeeTimecard } from '../../app/endpoints.js';
+import { employeeTimecardUrl, useEmployeeTimecard, useEmployees } from '../../app/endpoints.js';
 import { prefetchData } from '../../app/prefetch.js';
 import { DataState, Empty, SearchInput } from '../../ui/index.js';
 import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
 
-type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
 const statuses = ['all', 'active', 'inactive'] as const;
 export function EmployeesPage({
   actions,
@@ -29,8 +26,7 @@ export function EmployeesPage({
     code: string;
     period: EmployeeTimecardPeriod | null;
   }>();
-  const url = `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${desc ? 'desc' : 'asc'}`;
-  const { data, error } = useCachedData<Employees>(url, 0, refreshKey);
+  const { data, error } = useEmployees(query, status, desc, refreshKey);
   const employee =
     data?.employees.find((person) => person.code === selection?.code) ?? data?.employees[0];
   const period = employee?.code === selection?.code ? (selection?.period ?? null) : null;

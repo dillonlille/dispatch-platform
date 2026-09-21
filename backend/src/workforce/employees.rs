@@ -2,10 +2,11 @@ use super::preferences::preferences;
 use crate::{
     Result,
     collectors::Provider,
+    contracts::EmployeesResponse,
     db::{Store, boolean, s},
 };
 use rusqlite::params;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::cmp::Ordering;
 pub(crate) fn display_name(name: &str, order: &str) -> String {
     let parts: Vec<_> = name
@@ -42,7 +43,7 @@ impl Store {
         limit: Option<usize>,
         desc: bool,
         active: Option<bool>,
-    ) -> Result<Value> {
+    ) -> Result<EmployeesResponse> {
         let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
         let p = &settings["values"];
@@ -51,7 +52,11 @@ impl Store {
             [],
         )?
         else {
-            return Ok(json!({"employees":[],"total":0,"collectedAt":null}));
+            return Ok(EmployeesResponse {
+                employees: vec![],
+                total: 0,
+                collected_at: None,
+            });
         };
         let publication_id = s(&publication, "id");
         let direction = if desc { "DESC" } else { "ASC" };
@@ -91,6 +96,8 @@ impl Store {
         for row in &mut rows {
             boolean(row, &["active"]);
         }
-        Ok(json!({"employees":rows,"total":total,"collectedAt":publication["collected_at"]}))
+        Ok(serde_json::from_value(
+            json!({"employees":rows,"total":total,"collectedAt":publication["collected_at"]}),
+        )?)
     }
 }

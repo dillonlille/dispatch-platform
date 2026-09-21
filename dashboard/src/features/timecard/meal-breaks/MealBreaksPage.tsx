@@ -1,7 +1,7 @@
 import { useUpdateState } from '../../../app/browser-update.js';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Download, Globe, Info, Link2, RefreshCw } from 'lucide-react';
-import { useCachedData } from '../../../app/api.js';
+import { mealComparisonUrl, useMealComparison } from '../../../app/endpoints.js';
 import { useTableState } from '../../../app/useTableState.js';
 import {
   DataState,
@@ -14,8 +14,8 @@ import {
   useDataTable,
 } from '../../../ui/index.js';
 import { personName, time } from '../../../lib/format.js';
-import { clockLabel, mealPairs } from '../../../lib/meal-breaks.js';
-import { type MealComparison, type MealEmployee } from '../../../../../shared/contracts/meals.js';
+import { clockLabel, displayMeal } from '../../../lib/meal-breaks.js';
+import { type MealEmployee } from '../../../../../shared/contracts/meals.js';
 import type { PaycomPreferences } from '../../../../../shared/contracts/paycom.js';
 import { PaycomDateControls } from '../DateControls.js';
 import { MealDetail, mealColumns, mealLines } from './mealColumns.js';
@@ -44,8 +44,8 @@ export function MealBreaksPage({
     [filter, setFilter] = useUpdateState('meal-filter', 'all');
   const state = useTableState('meal', { id: 'employee', desc: false });
   const [linking, setLinking] = useState(false);
-  const url = `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
-  const request = useCachedData<MealComparison>(url, 0, refreshKey);
+  const url = mealComparisonUrl(date);
+  const request = useMealComparison(date, refreshKey);
   useAdjacentDays(url, date, today, request.data);
   const current = request.data?.date === date ? request.data : undefined;
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
@@ -58,14 +58,9 @@ export function MealBreaksPage({
   const rows = useMemo(
     () =>
       (data?.rows ?? []).map((row: MealEmployee) =>
-        mealLines(
-          row,
-          mealPairs(row, shownDate, { time: lateTime, departments: lateDepartments }),
-          personName(row.name, nameOrder),
-          shownDate,
-        ),
+        mealLines(row, displayMeal(row), personName(row.name, nameOrder), shownDate),
       ),
-    [data, shownDate, lateTime, lateDepartments, nameOrder],
+    [data, shownDate, nameOrder],
   );
   const counts = {
     all: rows.length,

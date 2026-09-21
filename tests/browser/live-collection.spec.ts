@@ -1,3 +1,5 @@
+import { assessMealResponse } from '../support/assessment.js';
+import type { CortexMeal } from '../../shared/contracts/meals.js';
 import type { Route } from '@playwright/test';
 import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
 import { paycomDefaults } from '../../dashboard/src/lib/paycom.js';
@@ -26,7 +28,7 @@ test('driver results update open timecards and meal breaks without resetting the
     status: 'Complete',
     punches: [{ in: '09:00', out: '17:00', hours: 8 }],
   };
-  let meals: any[] = [];
+  let meals: CortexMeal[] = [];
   let rowReads = 0;
   const mealDates = new Set<string>();
   let failNextRead = false;
@@ -59,7 +61,7 @@ test('driver results update open timecards and meal breaks without resetting the
       });
     }
     return route.fulfill({
-      json: {
+      json: assessMealResponse({
         date: selected,
         timezone: 'America/Los_Angeles',
         rows:
@@ -71,7 +73,7 @@ test('driver results update open timecards and meal breaks without resetting the
         employees: [],
         drivers: [],
         links: { revision: 0, links: [] },
-      },
+      }),
     });
   });
   await page.clock.install();
@@ -142,7 +144,7 @@ test('driver results update open timecards and meal breaks without resetting the
   );
   await expectDate(page, date);
   failNextRead = true;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:24:00Z` }];
+  meals = [{ ...meals[0]!, lastDelivery: `${date}T21:24:00Z` }];
   await announce();
   await expect(page.getByText('Retrying live data')).toBeVisible();
   await expect(page.locator('.meal-table')).toContainText('2:24 PM');
@@ -154,7 +156,7 @@ test('driver results update open timecards and meal breaks without resetting the
     document.dispatchEvent(new Event('visibilitychange'));
   });
   const hiddenReads = rowReads;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:25:00Z` }];
+  meals = [{ ...meals[0]!, lastDelivery: `${date}T21:25:00Z` }];
   await announce();
   await page.waitForTimeout(350);
   expect(rowReads).toBe(hiddenReads);

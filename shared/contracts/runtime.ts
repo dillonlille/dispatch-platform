@@ -1,3 +1,9 @@
+import {
+  dailyTimecardsSchema,
+  employeesSchema,
+  employeeTimecardSchema,
+  mealComparisonSchema,
+} from './runtime-workforce.js';
 import { z } from 'zod';
 import type { Dsp } from './generated/Dsp';
 import {
@@ -161,6 +167,10 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
   let schema: z.ZodType | undefined;
   if (method === 'GET') {
     if (route === '/api/session') schema = sessionSchema;
+    else if (route === '/api/dsp/employees') schema = employeesSchema;
+    else if (route && /^\/api\/dsp\/employees\/[^/]+$/.test(route)) schema = employeeTimecardSchema;
+    else if (route === '/api/dsp/timecards') schema = dailyTimecardsSchema;
+    else if (route === '/api/dsp/paycom/meal-breaks') schema = mealComparisonSchema;
     else if (route === '/api/platform/jobs' || route === '/api/dsp/jobs') schema = jobsSchema;
   } else {
     if (
