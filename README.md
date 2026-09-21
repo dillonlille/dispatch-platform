@@ -5,7 +5,7 @@ Run commands from the repository root.
 
 | Directory                                     | Owns                                                                         |
 | --------------------------------------------- | ---------------------------------------------------------------------------- |
-| `backend/host/`                               | Rust artifact tooling and Dev/Production host management                     |
+| `backend/host/`                               | Rust artifact tooling, releases and Dev/Production host management           |
 | `backend/src/`                                | HTTP, accounts, workforce, meals, jobs, providers and storage                |
 | `dashboard/src/features/`                     | Product screens, their styles and artwork                                    |
 | `dashboard/src/app/`, `shell/`, `ui/`, `lib/` | App infrastructure, navigation frame, reusable controls and pure helpers     |
@@ -30,7 +30,8 @@ tests verify them without rewriting files. Generated types, schema snapshots and
 approved artwork remain with their owners.
 
 The Python entry points at the top of `tooling/` retain their installed/CI paths;
-artifact and updater adapters delegate to the Rust host manager.
+artifact, release and updater adapters delegate to the Rust host manager.
+The [release command guide](tooling/RELEASES.md) covers preparation, publication and recovery.
 See [the Dev host guide](tooling/DEV-HOST.md) for that layout. The development and
 release guides remain outside Git at `/home/thepickle/dispatch-platform/docs/`,
 routed by the `dispatch-development` skill.

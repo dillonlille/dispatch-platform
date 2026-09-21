@@ -8,9 +8,16 @@ use serde_json::{Value, json};
 use std::{io::Read, path::Path};
 
 pub fn run(args: &[String]) -> Result<()> {
+    if args.first().is_some_and(|s| s == "release") {
+        let result = crate::release::run(&args[1..], &Native)?;
+        if !result.is_null() {
+            println!("{result}");
+        }
+        return Ok(());
+    }
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "Dispatch host management: capabilities | artifact <inventory|write|verify|unpack|retarget|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management]"
+            "Dispatch host management: capabilities | release --help | artifact <inventory|write|verify|unpack|retarget|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management]"
         );
         return Ok(());
     }
