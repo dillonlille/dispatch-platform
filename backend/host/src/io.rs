@@ -73,8 +73,23 @@ impl System for Native {
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
-        let mut child = command.spawn()?;
         let deadline = Instant::now() + Duration::from_secs(timeout);
+        let spawn_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
+        let mut child = loop {
+            match command.spawn() {
+                Ok(child) => break child,
+                // A concurrent fork can retain a just-closed writable descriptor
+                // until exec. This affects staged smoke/management executables;
+                // retry only ETXTBSY, within the command's original timeout.
+                Err(error)
+                    if error.raw_os_error() == Some(libc::ETXTBSY)
+                        && Instant::now() < spawn_deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        };
         let status = loop {
             if let Some(status) = child.try_wait()? {
                 break status;
