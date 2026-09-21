@@ -42,6 +42,7 @@ class ArtifactPromotionTests(unittest.TestCase):
 
     def restore(self, asset=None, validations=None):
         asset = self.package() if asset is None else asset
+        promote.runtime.host_binary()
         def download(_args, **kwargs):
             kwargs["stdout"].write(self.download)
         with patch.dict(promote.os.environ, self.env), \

@@ -151,7 +151,8 @@ def host_binary():
         # Build from this checkout, never search the candidate being verified.
         subprocess.check_call(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"], cwd=root,
                               stdout=sys.stderr)
-        return root / "target/release/dispatch-host"
+        metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version=1", cwd=root))
+        return Path(metadata["target_directory"]) / "release/dispatch-host"
     require(tooling.name == "management", "Run host tooling from a checkout or installed management directory")
     binary = tooling / "dispatch-host"
     if not binary.exists():
