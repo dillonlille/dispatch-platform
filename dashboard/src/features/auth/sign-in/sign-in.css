@@ -229,14 +229,17 @@
     font-size: 13px;
   }
 }
-
-/* Invitation lookup stays lightweight before choosing the existing onboarding flow. */
-.auth-loading {
-  min-height: 100dvh;
-  padding: 40px 48px;
-  display: flex;
-  flex-direction: column;
+/* Sign In owns its entrance; the member page only signals a completed desktop handoff. */
+@keyframes sign-in-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
-.auth-loading .loading {
-  margin: auto;
+@media (min-width: 701px) and (prefers-reduced-motion: no-preference) {
+  .auth-layout[data-enter='true'] {
+    animation: sign-in-enter 420ms ease-out both;
+  }
 }

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { Brand } from '../../app/Brand.js';
+import { Brand } from '../../../app/Brand.js';
 import { LoginVan } from './LoginVan.js';
 
 // Keep in sync with auth.css. Mobile never imports Three.js or fetches the model/poster.

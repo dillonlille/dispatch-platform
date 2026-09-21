@@ -189,7 +189,10 @@ test('owner onboarding validates DSP setup before accepting and denies setup thr
     (await capturedMail(f.root, 'member-setup@dispatch.test')).text,
   )![1];
   const memberInvite = `/api/invitations/${memberToken}`;
-  assert.equal((await f.request(memberInvite)).value.onboarding, false);
+  const details = await f.request(memberInvite);
+  assert.equal(details.value.onboarding, false);
+  assert.equal(details.value.stationCode, 'DOT4');
+  assert.equal(details.value.timezone, 'America/Los_Angeles');
   assert.equal((await f.request(memberInvite + '/accept', { ...account, dspProfile })).status, 403);
   assert.equal((await f.request(memberInvite)).status, 200);
   assert.equal((await f.request(memberInvite + '/accept', account)).status, 200);

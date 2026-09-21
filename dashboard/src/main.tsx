@@ -7,7 +7,7 @@ import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.
 import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
 import { Page, findRoute, navigation } from './app/routes.js';
 import { routeLabel } from './app/route-meta.js';
-import { AuthScreen, DspOnboarding, preloadOnboardingMap } from './features/auth/index.js';
+import { AuthScreen, DspOnboarding } from './features/auth/index.js';
 import { messageOf } from './lib/errors.js';
 import { Loading } from './ui/index.js';
 import { can } from './app/permissions.js';
@@ -183,7 +183,6 @@ function App() {
     </Shell>
   );
 }
-preloadOnboardingMap();
 createRoot(document.getElementById('root')!).render(
   <FeedbackProvider>
     <App />

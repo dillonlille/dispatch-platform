@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import mapUrl from './assets/onboarding-map.svg?url';
+import mapUrl from './assets/member-profile-map.svg?url';
 
 export { mapUrl };
 // Match the dashboard's 700px mobile breakpoint; share one query across loading and rendering.
@@ -25,12 +25,7 @@ function loadMap() {
   }));
 }
 
-/** Start in parallel with the invitation's initial requests, before the form mounts. */
-export function preloadOnboardingMap() {
-  if (window.location.hash.startsWith('#invite?') && isDesktop()) void loadMap();
-}
-
-export function useOnboardingMap() {
+export function useMemberProfileMap() {
   const desktop = useSyncExternalStore(subscribeViewport, isDesktop);
   const [loaded, setLoaded] = useState(() => ready || !desktop);
   useEffect(() => {
