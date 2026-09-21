@@ -50,7 +50,7 @@ test('Rust API enforces login, origin, host, CSRF, tenant views and membership p
   assert.equal(diagnostics.value.runtime.workerMemoryBytes, 0);
 });
 
-test('a platform owner looks through any DSP role with exactly that role’s access, unseen by the DSP', async (t) => {
+test('a platform owner looks through any DSP role with exactly that role’s access', async (t) => {
   const f = await fixture();
   t.after(f.close);
   const owner = await f.client();
@@ -58,14 +58,14 @@ test('a platform owner looks through any DSP role with exactly that role’s acc
   const full = await owner.select(north.id);
   assert.equal(full.role.owner, true);
   const custom = await owner.post('/api/dsp/roles', {
-    name: 'Auditor',
-    permissions: ['audit.view'],
+    name: 'Connections admin',
+    permissions: ['connections.manage'],
   });
   assert.equal(custom.status, 201, JSON.stringify(custom.value));
   const opened = await owner.select(north.id);
   assert.deepEqual(
     opened.roles.map((role: { name: string }) => role.name),
-    ['Owner', 'Manager', 'Member', 'Auditor'],
+    ['Owner', 'Manager', 'Member', 'Connections admin'],
   );
   const preview = async (roleId: string) => {
     const view = await owner.post('/api/session/dsp', { dspId: north.id, roleId });
@@ -73,17 +73,17 @@ test('a platform owner looks through any DSP role with exactly that role’s acc
     owner.headers['x-dispatch-view'] = view.value.token;
     return view.value;
   };
-  const auditor = await preview(custom.value.id);
-  assert.deepEqual(auditor.role, { id: custom.value.id, name: 'Auditor', owner: false });
-  assert.deepEqual(auditor.permissions, ['audit.view']);
-  assert.equal(auditor.roles.length, 4);
+  const connectionsAdmin = await preview(custom.value.id);
+  assert.deepEqual(connectionsAdmin.role, {
+    id: custom.value.id,
+    name: 'Connections admin',
+    owner: false,
+  });
+  assert.deepEqual(connectionsAdmin.permissions, ['connections.manage']);
+  assert.equal(connectionsAdmin.roles.length, 4);
   assert.equal((await owner.get('/api/dsp/employees')).status, 403);
   assert.equal((await owner.get('/api/dsp/roles')).status, 403);
-  const log = await owner.get('/api/dsp/audit');
-  assert.equal(log.status, 200);
-  assert(!JSON.stringify(log.value).includes('owner_view_opened'));
-  assert(Array.isArray(log.value.events) && typeof log.value.total === 'number');
-  assert.equal((await owner.get('/api/dsp/audit?area=nowhere')).status, 400);
+  assert.equal((await owner.get('/api/dsp/connections')).status, 200);
 
   // The previewed role is part of the signed view and cannot be traded up.
   const manager = opened.roles.find((role: { name: string }) => role.name === 'Manager');
@@ -103,7 +103,7 @@ test('a platform owner looks through any DSP role with exactly that role’s acc
   await owner.select(north.id);
   assert.equal((await owner.post(`/api/dsp/roles/${custom.value.id}/remove`)).status, 200);
   owner.headers['x-dispatch-view'] = stale;
-  assert.equal((await owner.get('/api/dsp/audit')).status, 409);
+  assert.equal((await owner.get('/api/dsp/connections')).status, 409);
   assert.equal(
     (await owner.post('/api/session/dsp', { dspId: north.id, roleId: custom.value.id })).status,
     409,
@@ -170,4 +170,65 @@ test('independent platforms reject each other’s sessions and signed views', as
   assert.equal((await b.request('/api/session', undefined, one.headers)).status, 401);
   two.headers['x-dispatch-view'] = one.headers['x-dispatch-view']!;
   assert.equal((await two.get('/api/dsp/employees')).status, 404);
+});
+
+test('only platform owners can read and export audit events, even with old DSP audit grants', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const owner = await f.client();
+  const member = await f.client('member@dispatch.test');
+  const north = member.session.dsps[0];
+  await owner.select(north.id);
+
+  // An existing custom role may still have the retired permission in storage.
+  f.database('data/platform/accounts.sqlite', (db) =>
+    db
+      .prepare("UPDATE roles SET permissions=? WHERE dsp_id=? AND name='Member'")
+      .run(JSON.stringify(['timecard.view', 'audit.view']), north.id),
+  );
+  const view = await member.select(north.id);
+  assert.deepEqual(view.permissions, ['timecard.view']);
+  const denied = async () => {
+    assert.equal((await member.get('/api/dsp/audit')).status, 404);
+    assert.equal((await member.post('/api/dsp/audit/export', {})).status, 404);
+    assert.equal((await member.get('/api/platform/audit')).status, 403);
+    assert.equal((await member.post('/api/platform/audit/export', {})).status, 403);
+  };
+  await denied();
+
+  // Owning a DSP still does not grant platform access.
+  const roles = (await owner.get('/api/dsp/roles')).value;
+  const dspOwner = roles.find((role: { owner: boolean }) => role.owner);
+  const membership = (await owner.get('/api/dsp/members')).value.find(
+    (row: { email: string }) => row.email === 'member@dispatch.test',
+  );
+  assert.equal(
+    (await owner.post(`/api/dsp/members/${membership.id}`, { role: dspOwner.id })).status,
+    200,
+  );
+  const ownerView = await member.select(north.id);
+  assert.equal(ownerView.role.owner, true);
+  assert(!ownerView.permissions.includes('audit.view'));
+  await denied();
+
+  // Even platform owners use the platform endpoints instead of a DSP log.
+  await owner.select(north.id);
+  assert.equal((await owner.get('/api/dsp/audit')).status, 404);
+  assert.equal((await owner.post('/api/dsp/audit/export', {})).status, 404);
+  const log = await owner.get(`/api/platform/audit?dsp=${north.id}`);
+  assert.equal(log.status, 200);
+  assert(
+    log.value.events.some((event: { action: string }) => event.action === 'member.role_changed'),
+  );
+  assert(
+    log.value.events.some((event: { action: string }) => event.action === 'dsp.owner_view_opened'),
+  );
+  assert(log.value.events.every((event: { dspId: string }) => event.dspId === north.id));
+  assert.equal((await owner.get('/api/platform/audit?area=nowhere')).status, 400);
+  const exported = await owner.post('/api/platform/audit/export', { dsp: north.id });
+  assert.equal(exported.status, 200);
+  assert(exported.value.events.length > 0);
+  assert(exported.value.events.every((event: { dspId: string }) => event.dspId === north.id));
+  const after = await owner.get('/api/platform/audit');
+  assert(after.value.events.some((event: { action: string }) => event.action === 'audit.exported'));
 });

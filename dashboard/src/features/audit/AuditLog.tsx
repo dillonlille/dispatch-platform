@@ -24,15 +24,12 @@ import type {
   AuditChange,
   AuditEvent,
   AuditPage,
-  DspView,
 } from '../../../../shared/contracts/index.js';
 import { api, useData } from '../../app/api.js';
 import { DataState, Empty, ErrorBox, SearchInput } from '../../ui/index.js';
 import { downloadCsv } from '../../lib/csv.js';
 import { deviceTimezone, timeOfDay, title } from '../../lib/format.js';
 import { useAction } from '../../app/useAction.js';
-import { dspHash } from '../../app/navigation.js';
-import { routeLabel, type DspRouteId } from '../../app/route-meta.js';
 import {
   changeText,
   changeValue,
@@ -61,15 +58,6 @@ const areas: [AuditArea, string, LucideIcon][] = [
   ['dsps', 'DSPs', Building2],
   ['settings', 'Settings', Settings],
 ];
-// A DSP's log always offers the same areas; the platform's adds those it has.
-const dspAreas: AuditArea[] = [
-  'team',
-  'roles',
-  'collections',
-  'schedules',
-  'connections',
-  'settings',
-];
 const ranges: [string, string][] = [
   ['7', 'Last 7 days'],
   ['30', 'Last 30 days'],
@@ -95,13 +83,6 @@ function Change({ change }: { change: AuditChange }) {
 }
 // Everything about one record: by reference, and by the name older events kept.
 type Subject = { key: string; name: string };
-const pages: Record<string, DspRouteId> = {
-  member: 'team',
-  role: 'team',
-  schedule: 'paycom',
-  job: 'paycom',
-};
-
 type Entry = { key: string; events: AuditEvent[] };
 // Repeated visits by one person collapse into a single quiet line.
 function entries(events: AuditEvent[]): Entry[] {
@@ -122,8 +103,8 @@ function entries(events: AuditEvent[]): Entry[] {
   return out;
 }
 
-export function AuditLog({ view }: { view?: DspView }) {
-  const timeZone = view?.dsp.timezone ?? deviceTimezone();
+export function AuditLog() {
+  const timeZone = deviceTimezone();
   // Filters survive the page's automatic refresh, like the app's other tables.
   const [area, setArea] = useUpdateState('audit-area', '');
   const [actor, setActor] = useUpdateState('audit-actor', '');
@@ -151,7 +132,7 @@ export function AuditLog({ view }: { view?: DspView }) {
     if (area) params.set('area', area);
     if (actor) params.set('actor', actor);
     if (q) params.set('q', q);
-    if (within && !view) params.set('dsp', within);
+    if (within) params.set('dsp', within);
     if (subject?.key) params.set('subject', subject.key);
     if (subject?.name) params.set('named', subject.name);
     if (range !== 'all') {
@@ -161,8 +142,8 @@ export function AuditLog({ view }: { view?: DspView }) {
       params.set('from', from.toISOString());
     }
     return params;
-  }, [area, actor, q, range, within, subject, view]);
-  const base = view ? '/api/dsp/audit' : '/api/platform/audit';
+  }, [area, actor, q, range, within, subject]);
+  const base = '/api/platform/audit';
   const { data, stale, error } = useData<AuditPage>(`${base}?${query}&limit=${limit}`, 10000);
   const page = data ?? stale;
 
@@ -179,11 +160,6 @@ export function AuditLog({ view }: { view?: DspView }) {
     timeZoneName: 'short',
     timeZone,
   });
-  // A DSP's log keeps the DSP's clock, whoever is reading it and wherever.
-  const zone =
-    dateFormatter('en-US', { timeZoneName: 'short', timeZone })
-      .formatToParts(new Date())
-      .find((part) => part.type === 'timeZoneName')?.value ?? timeZone;
   const dayLabel = (at: string) => {
     const key = dayKey.format(new Date(at));
     if (key === dayKey.format(new Date())) return 'Today';
@@ -222,7 +198,7 @@ export function AuditLog({ view }: { view?: DspView }) {
       const rows = all.events.map((event) => [
         exact.format(new Date(event.at)),
         event.actorName,
-        ...(view ? [] : [event.dspName ?? '']),
+        event.dspName ?? '',
         areas.find(([id]) => id === event.area)?.[1] ?? '',
         plain(sentence(event)),
         [
@@ -239,15 +215,7 @@ export function AuditLog({ view }: { view?: DspView }) {
           .join('; '),
         event.action,
       ]);
-      const header = [
-        'Time',
-        'Person',
-        ...(view ? [] : ['DSP']),
-        'Area',
-        'Event',
-        'Details',
-        'Action',
-      ];
+      const header = ['Time', 'Person', 'DSP', 'Area', 'Event', 'Details', 'Action'];
       downloadCsv(`audit-log-${dayKey.format(new Date())}.csv`, header, rows);
     },
     { inline: true },
@@ -267,25 +235,18 @@ export function AuditLog({ view }: { view?: DspView }) {
           value={search}
           onChange={setSearch}
         />
-        {view && (
-          <span className="audit-zone" title={timeZone}>
-            Times in {zone}
-          </span>
-        )}
-        {!view && (
-          <label className="audit-select">
-            <span>DSP</span>
-            <select aria-label="DSP" value={within} onChange={(e) => setWithin(e.target.value)}>
-              <option value="">All DSPs</option>
-              {page?.dsps.map((dsp) => (
-                <option key={dsp.id} value={dsp.id}>
-                  {dsp.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={16} aria-hidden />
-          </label>
-        )}
+        <label className="audit-select">
+          <span>DSP</span>
+          <select aria-label="DSP" value={within} onChange={(e) => setWithin(e.target.value)}>
+            <option value="">All DSPs</option>
+            {page?.dsps.map((dsp) => (
+              <option key={dsp.id} value={dsp.id}>
+                {dsp.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={16} aria-hidden />
+        </label>
         <label className="audit-select">
           <span>Person</span>
           <select aria-label="Person" value={actor} onChange={(e) => setActor(e.target.value)}>
@@ -319,7 +280,7 @@ export function AuditLog({ view }: { view?: DspView }) {
           All <i>{everything}</i>
         </button>
         {areas
-          .filter(([id]) => (view && dspAreas.includes(id)) || counts[id] || area === id)
+          .filter(([id]) => counts[id] || area === id)
           .map(([id, label]) => (
             <button
               key={id}
@@ -330,7 +291,7 @@ export function AuditLog({ view }: { view?: DspView }) {
               {label} <i>{counts[id] ?? 0}</i>
             </button>
           ))}
-        {(view || Boolean(counts.failures) || area === 'failures') && (
+        {(Boolean(counts.failures) || area === 'failures') && (
           <button
             className="audit-chip failures"
             aria-pressed={area === 'failures'}
@@ -386,7 +347,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                         ? []
                         : [
                             failed ? <span className="audit-failure">{failed}</span> : reason,
-                            ...notes(event, !view),
+                            ...notes(event, true),
                             detail && <span className="audit-pill">{detail}</span>,
                             ...edits
                               .filter((change) => change.field !== 'permission')
@@ -454,7 +415,7 @@ export function AuditLog({ view }: { view?: DspView }) {
                                 <Row label="Exact time">{exact.format(new Date(event.at))}</Row>
                               )}
                               <Row label="By">{event.actorName}</Row>
-                              {!view && event.dspName && <Row label="DSP">{event.dspName}</Row>}
+                              {event.dspName && <Row label="DSP">{event.dspName}</Row>}
                               {event.target && <Row label="Subject">{event.target}</Row>}
                               {!run && event.detail && <Row label="Detail">{event.detail}</Row>}
                               <Row label="Event">
@@ -477,11 +438,6 @@ export function AuditLog({ view }: { view?: DspView }) {
                                     >
                                       All activity involving {event.target}
                                     </button>
-                                  )}
-                                  {view && event.ref && pages[event.ref.kind] && (
-                                    <a href={dspHash(view.dsp.id, pages[event.ref.kind])}>
-                                      Open {routeLabel('dsp', pages[event.ref.kind]!)}
-                                    </a>
                                   )}
                                 </div>
                               )}

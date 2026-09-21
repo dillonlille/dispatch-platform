@@ -88,7 +88,7 @@ test('lib depends on nothing else in the dashboard', () => {
 });
 
 // A feature that embeds another names it here, so a new edge is a visible decision.
-const embeds = ['settings -> audit', 'settings -> connections'];
+const embeds = ['settings -> connections'];
 
 test('a feature reaches another feature only through its index, and only where allowed', () => {
   assert(modules.filter(({ file }) => feature(file)).length > 30, 'found too few feature files');

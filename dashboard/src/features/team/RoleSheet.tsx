@@ -15,7 +15,7 @@ const groups: [string, Permission[]][] = [
   ['Collections', ['collections.run']],
   ['Connections', ['connections.manage']],
   ['Team', ['members.invite', 'members.manage', 'roles.manage']],
-  ['DSP', ['settings.manage', 'audit.view']],
+  ['DSP', ['settings.manage']],
 ];
 const implied: Partial<Record<Permission, Permission>> = { 'timecard.manage': 'timecard.view' };
 export function RoleSheet({

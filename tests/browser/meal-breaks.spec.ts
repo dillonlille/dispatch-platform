@@ -769,10 +769,10 @@ test.describe('DSP calendar dates', () => {
     await expectDate(page, '2026-09-17');
   });
 
-  test('activity times follow the DSP clock, with no personal timezone setting', async ({
+  test('platform audit times follow the viewer clock, with no personal timezone setting', async ({
     page,
   }) => {
-    await page.route(/\/api\/dsp\/audit\?/, (route) =>
+    await page.route(/\/api\/platform\/audit\?/, (route) =>
       route.fulfill({
         json: {
           events: [
@@ -802,11 +802,12 @@ test.describe('DSP calendar dates', () => {
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
     await expect(page.getByText('Business timezone', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Display timezone')).toHaveCount(0);
-    await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
-    // 12:10 AM on 9/17 in New York is 11:10 PM on 9/16 for the DSP.
-    await expect(page.getByRole('heading', { name: /Sep 16/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+    await page.getByRole('link', { name: 'Audit log', exact: true }).click();
+    // The platform log uses the viewer’s New York clock across DSPs.
+    await expect(page.getByRole('heading', { name: /Sep 17/ })).toBeVisible();
     await expect(page.getByRole('listitem').filter({ hasText: 'Avery Morgan' })).toContainText(
-      '11:10 PM',
+      '12:10 AM',
     );
   });
 });

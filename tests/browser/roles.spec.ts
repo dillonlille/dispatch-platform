@@ -16,6 +16,7 @@ test('owner creates a role and the member’s interface follows its permissions'
 
   await page.getByRole('button', { name: 'Create role', exact: true }).click();
   const sheet = page.getByRole('dialog', { name: 'Create role' });
+  await expect(sheet.getByRole('switch', { name: 'View Audit Log', exact: true })).toHaveCount(0);
   await sheet.getByLabel('Role name').fill('Payroll Admin');
   await sheet.getByRole('switch', { name: 'Manage Timecard', exact: true }).check();
   // Managing the timecard includes viewing it, so that switch locks on.

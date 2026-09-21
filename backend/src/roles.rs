@@ -28,7 +28,6 @@ pub const PERMISSIONS: &[&str] = &[
     "members.manage",
     "roles.manage",
     "settings.manage",
-    "audit.view",
 ];
 // Any membership satisfies this; it guards pages every member may open.
 pub const ACCESS: &str = "access";

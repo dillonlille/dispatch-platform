@@ -34,7 +34,6 @@ export const permissions = [
   'members.manage',
   'roles.manage',
   'settings.manage',
-  'audit.view',
 ] as const;
 export type Permission = (typeof permissions)[number];
 /** `members` and `invitations` are counted by the role list only; a saved role has null. */
