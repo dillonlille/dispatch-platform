@@ -10,6 +10,8 @@ export function seedQueuedJob(
   id: string,
 ) {
   f.database('data/preview/jobs.sqlite', (db) => {
+    // The running scheduler may briefly hold the write lock while the fixture inserts a job.
+    db.exec('PRAGMA busy_timeout=5000');
     const inserted = db
       .prepare(
         `INSERT INTO jobs

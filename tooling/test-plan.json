@@ -6,6 +6,7 @@
     "tests/dashboard-structure.test.ts",
     "tests/diagnostics.test.ts",
     "tests/meal-breaks.test.ts",
+    "tests/response-cache.test.ts",
     "tests/unused-css.test.ts"
   ],
   "native": {

@@ -4,6 +4,26 @@ use dispatch_backend::{collectors::Provider, db::s, workforce};
 use serde_json::{Value, json};
 
 #[test]
+fn demo_periods_follow_the_paycom_cycle_and_never_record_future_punches() {
+    for (day, from, to) in [
+        ("2026-09-05", "2026-08-23", "2026-09-05"),
+        ("2026-09-06", "2026-09-06", "2026-09-19"),
+        ("2026-09-19", "2026-09-06", "2026-09-19"),
+        ("2026-09-20", "2026-09-20", "2026-10-03"),
+        ("2025-12-31", "2025-12-28", "2026-01-10"),
+        ("2026-03-08", "2026-03-08", "2026-03-21"),
+        ("2028-02-29", "2028-02-20", "2028-03-04"),
+    ] {
+        let data = workforce::fixture_date("America/Chicago", Some(day.parse().unwrap())).unwrap();
+        assert_eq!(data["from"], from);
+        assert_eq!(data["to"], to);
+        assert!(data["timecards"].as_array().unwrap().iter().all(|card| {
+            s(card, "date") >= from && s(card, "date") <= day && s(card, "date") <= to
+        }));
+    }
+}
+
+#[test]
 fn employee_timecards_use_period_order_and_the_latest_revision_within_each_period() {
     use dispatch_backend::contracts::EmployeeTimecardPeriod;
     let (_root, db, id) = bootstrapped();
@@ -13,30 +33,33 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
         data["timecards"][0]["hours"] = json!(hours);
         data
     };
-    let old = period_data("2026-09-05", "2026-09-06T00:00:00Z", 5.0);
-    let middle = period_data("2026-09-12", "2026-09-13T00:00:00Z", 6.0);
+    let old = period_data("2026-08-22", "2026-08-23T00:00:00Z", 5.0);
+    let middle = period_data("2026-09-05", "2026-09-06T00:00:00Z", 6.0);
     let current = period_data("2026-09-19", "2026-09-20T00:00:00Z", 7.0);
     for data in [&old, &middle, &current] {
         db.publish(&id, data).unwrap();
     }
     // A later sync of an older period must update that period, not replace Latest.
-    let mut revision = period_data("2026-09-12", "2026-09-21T00:00:00Z", 9.0);
+    let mut revision = period_data("2026-09-05", "2026-09-21T00:00:00Z", 9.0);
     revision["employees"][0]["name"] = json!("Old employee name");
     db.publish(&id, &revision).unwrap();
     let latest = db.employee_timecard(&id, "E001", None).unwrap();
+    assert_eq!(latest.period.from, "2026-09-06");
     assert_eq!(latest.period.to, "2026-09-19");
     assert_eq!(latest.employee["name"], "Avery Morgan");
     assert!(latest.next_period.is_none());
     let previous = db
         .employee_timecard(&id, "E001", latest.previous_period.as_ref())
         .unwrap();
-    assert_eq!(previous.period.to, "2026-09-12");
+    assert_eq!(previous.period.from, "2026-08-23");
+    assert_eq!(previous.period.to, "2026-09-05");
     assert_eq!(previous.next_period, Some(latest.period.clone()));
     assert_eq!(previous.timecards.last().unwrap()["hours"], 9.0);
     let first = db
         .employee_timecard(&id, "E001", previous.previous_period.as_ref())
         .unwrap();
-    assert_eq!(first.period.to, "2026-09-05");
+    assert_eq!(first.period.from, "2026-08-09");
+    assert_eq!(first.period.to, "2026-08-22");
     assert!(first.previous_period.is_none());
     assert_eq!(first.next_period, Some(previous.period));
     let missing = EmployeeTimecardPeriod {
@@ -81,26 +104,31 @@ fn employee_status_filter_applies_before_counting_and_pagination() {
     data["employees"][1]["active"] = json!(false);
     data["employees"][4]["active"] = json!(false);
     db.publish(&id, &data).unwrap();
-    let inactive = db.employees(&id, "", 0, 1, false, Some(false)).unwrap();
+    let inactive = db
+        .employees(&id, "", 0, Some(1), false, Some(false))
+        .unwrap();
     assert_eq!(inactive["total"], 2);
     assert_eq!(inactive["employees"].as_array().unwrap().len(), 1);
     assert_eq!(inactive["employees"][0]["active"], false);
-    let next = db.employees(&id, "", 1, 1, false, Some(false)).unwrap();
+    let next = db
+        .employees(&id, "", 1, Some(1), false, Some(false))
+        .unwrap();
     assert_ne!(
         inactive["employees"][0]["code"],
         next["employees"][0]["code"]
     );
     assert_eq!(
-        db.employees(&id, "", 0, 100, false, Some(true)).unwrap()["total"],
+        db.employees(&id, "", 0, Some(100), false, Some(true))
+            .unwrap()["total"],
         10
     );
     assert_eq!(
-        db.employees(&id, "Jordan", 0, 100, false, Some(false))
+        db.employees(&id, "Jordan", 0, Some(100), false, Some(false))
             .unwrap()["total"],
         1
     );
     assert_eq!(
-        db.employees(&id, "Jordan", 0, 100, false, Some(true))
+        db.employees(&id, "Jordan", 0, Some(100), false, Some(true))
             .unwrap()["total"],
         0
     );
@@ -138,7 +166,7 @@ fn publication_is_atomic_and_keeps_the_last_successful_dataset() {
         .retain(|r| r["employeeCode"] != "E001");
     db.publish(id, &later).unwrap();
     assert_eq!(
-        db.employees(id, "", 0, 100, false, None).unwrap()["total"],
+        db.employees(id, "", 0, Some(100), false, None).unwrap()["total"],
         11
     );
     assert_eq!(db.employee_timecard(id, "E001", None).unwrap(), before);
@@ -203,7 +231,7 @@ fn timecard_links_publish_with_unchanged_hours_and_are_returned() {
     for card in db.employee_timecard(id, "E003", None).unwrap().timecards {
         assert_eq!(card["sourceUrl"], json!(link("E003")));
     }
-    let date = s(&data, "to");
+    let date = s(&data["timecards"][0], "date");
     let (_, _, rows) = db.daily_source(id, date).unwrap();
     assert_eq!(rows.len(), 12);
     for row in rows {
@@ -232,7 +260,7 @@ fn unchanged_publications_reuse_storage_but_changed_data_and_history_survive() {
         vec![first.clone()]
     );
     assert_eq!(
-        db.employees(id, "", 0, 100, false, None).unwrap()["collectedAt"],
+        db.employees(id, "", 0, Some(100), false, None).unwrap()["collectedAt"],
         data["collectedAt"]
     );
     data["timecards"][0]["hours"] = json!(7.25);
@@ -287,7 +315,7 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
     values["driver_departments"] = json!([]);
     db.save_preferences(id, s(&actor, "id"), 0, &values)
         .unwrap();
-    let day = workforce::fixture("UTC").unwrap()["to"]
+    let day = workforce::fixture("UTC").unwrap()["timecards"][0]["date"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -296,7 +324,7 @@ fn settings_reject_unknown_fields_and_preserve_empty_driver_selection() {
         json!([])
     );
     assert_eq!(
-        db.employees(id, "", 0, 100, false, None).unwrap()["total"],
+        db.employees(id, "", 0, Some(100), false, None).unwrap()["total"],
         12
     );
     values["unknown"] = json!(true);

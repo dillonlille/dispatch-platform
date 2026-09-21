@@ -1,11 +1,10 @@
-import { useCollectionUpdates } from '../../app/live-collection.js';
 import { PaycomDateControls } from './DateControls.js';
 import { localDate } from '../../../../shared/meal-breaks.js';
 import { useMemo, useState } from 'react';
 import { Download, Globe, Info } from 'lucide-react';
 import type { Timecard } from '../../../../shared/contracts/index.js';
 import type { PaycomPreferences } from '../../../../shared/paycom.js';
-import { useData } from '../../app/api.js';
+import { useCachedData } from '../../app/api.js';
 import { useTableState } from '../../app/useTableState.js';
 import {
   DataState,
@@ -20,6 +19,7 @@ import {
 import { time } from '../../lib/format.js';
 import { punchColumns } from './punchColumns.js';
 import { pageSize } from './pageSize.js';
+import { useAdjacentDays } from './useAdjacentDays.js';
 
 type Card = Timecard & { name: string };
 type Daily = {
@@ -52,17 +52,9 @@ export function TimecardsPage({
   const sort = state.sort!;
   const calendarToday = localDate(timezone);
   const [selectedCode, setSelectedCode] = useState<string>();
-  const liveRevision = useCollectionUpdates(date);
-  const {
-    data: current,
-    stale,
-    error,
-  } = useData<Daily>(
-    `/api/dsp/timecards?date=${date}&sort=${sort.id}&direction=${sort.desc ? 'desc' : 'asc'}`,
-    0,
-    `${refreshKey}:${liveRevision}`,
-    date,
-  );
+  const url = `/api/dsp/timecards?date=${date}&sort=${sort.id}&direction=${sort.desc ? 'desc' : 'asc'}`;
+  const { data: current, stale, error } = useCachedData<Daily>(url, 0, refreshKey);
+  useAdjacentDays(url, date, calendarToday, current);
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? stale;
   const selected = data?.rows.find((row) => row.employeeCode === selectedCode);

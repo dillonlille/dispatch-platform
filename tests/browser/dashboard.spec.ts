@@ -81,8 +81,8 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await expect(page.getByText('Paycom needs your verification')).toHaveCount(0);
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
-  // Fixture meal timestamps describe a complete business day.
-  await setDate(page, '2026-01-11');
+  // A completed first week supplies seven daily records for each of the twelve employees.
+  await setDate(page, '2026-01-17');
   await page.getByRole('button', { name: 'Sync now', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Paycom sync', exact: true })).toContainText(
     'Paycom synced',

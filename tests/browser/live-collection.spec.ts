@@ -27,6 +27,7 @@ test('driver results update open timecards and meal breaks without resetting the
   };
   let meals: any[] = [];
   let rowReads = 0;
+  const mealDates = new Set<string>();
   let failNextRead = false;
   await page.route('**/api/dsp/collection-updates?*', async (route) => {
     const after = new URL(route.request().url()).searchParams.get('after');
@@ -45,6 +46,8 @@ test('driver results update open timecards and meal breaks without resetting the
   });
   await page.route('**/api/dsp/paycom/meal-breaks?*', (route) => {
     rowReads++;
+    const selected = new URL(route.request().url()).searchParams.get('date')!;
+    mealDates.add(selected);
     if (failNextRead) {
       failNextRead = false;
       return route.fulfill({
@@ -52,7 +55,6 @@ test('driver results update open timecards and meal breaks without resetting the
         json: { error: 'platform_busy', message: 'Retrying live data' },
       });
     }
-    const selected = new URL(route.request().url()).searchParams.get('date');
     return route.fulfill({
       json: {
         date: selected,
@@ -104,6 +106,8 @@ test('driver results update open timecards and meal breaks without resetting the
       afterStatus: 'verified',
     },
   ];
+  // Finish navigation preloads before counting requests caused by live notifications.
+  await expect.poll(() => [...mealDates].sort()).toEqual(['2026-09-14', date, '2026-09-16']);
   // A burst of notifications produces one table refresh.
   await expect.poll(() => waiting.size).toBeGreaterThan(0);
   const before = rowReads;

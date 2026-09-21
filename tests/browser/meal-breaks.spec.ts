@@ -340,7 +340,8 @@ test('members can open real collected punch data without management controls', a
 });
 
 test('switching dates holds the layout until the new day arrives', async ({ page }) => {
-  let hold: Promise<void> | undefined;
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
   await page.route('**/api/dsp/paycom/settings', (route) =>
     route.fulfill({
       json: {
@@ -352,13 +353,13 @@ test('switching dates holds the layout until the new day arrives', async ({ page
     }),
   );
   await page.route('**/api/dsp/paycom/meal-breaks?*', async (route) => {
-    await hold;
+    if (new URL(route.request().url()).searchParams.get('date') === '2026-09-14') await hold;
     await route.fulfill({
       json: { ...sample(), date: new URL(route.request().url()).searchParams.get('date') },
     });
   });
   await page.route('**/api/dsp/jobs/meal-breaks?*', async (route) => {
-    await hold;
+    if (new URL(route.request().url()).searchParams.get('date') === '2026-09-14') await hold;
     const source = {
       enabled: true,
       active: false,
@@ -386,8 +387,6 @@ test('switching dates holds the layout until the new day arrives', async ({ page
       ),
     );
   const before = await layout();
-  let release!: () => void;
-  hold = new Promise((resolve) => (release = resolve));
   await page.getByRole('button', { name: 'Previous day', exact: true }).click();
   await expect(results).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
@@ -519,7 +518,6 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   let collectedAt = '2026-09-16T06:00:00Z';
   let syncRequests = 0;
   let mealReads = 0;
-  const mealDates: string[] = [];
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.route('**/api/dsp/paycom/settings', (route) =>
@@ -547,8 +545,15 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await page.route('**/api/dsp/paycom/meal-breaks?*', (route) => {
     mealReads++;
     const selected = new URL(route.request().url()).searchParams.get('date')!;
-    mealDates.push(selected);
-    return route.fulfill({ json: { ...sample(), date: selected, paycomCollectedAt: collectedAt } });
+    const comparison = sample();
+    return route.fulfill({
+      json: {
+        ...comparison,
+        date: selected,
+        paycomCollectedAt: collectedAt,
+        rows: comparison.rows.map((row) => ({ ...row, name: `${row.name} ${selected}` })),
+      },
+    });
   });
   await page.route('**/api/dsp/jobs/meal-breaks?*', (route) =>
     route.fulfill({
@@ -609,7 +614,8 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     await meals.click();
     await expect(page.locator('.meal-table tbody > tr')).toHaveCount(5);
     await expectDate(page, date);
-    expect(mealDates.at(-1)).toBe(date);
+    // Neighboring dates may preload; every displayed row must belong to the selected date.
+    await expect(page.locator('.meal-table tbody > tr').filter({ hasText: date })).toHaveCount(5);
     await expectDate(page.locator('.meal-heading'), date);
     await expect(
       page.locator('.page-heading').getByRole('button', { name: 'Sync now', exact: true }),
