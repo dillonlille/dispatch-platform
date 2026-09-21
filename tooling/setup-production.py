@@ -9,7 +9,7 @@ import secrets
 import subprocess
 from urllib.parse import urlparse
 
-from runtime_artifact import private_directory, require, unpack, verify_artifact, write_json
+from runtime_artifact import install_management, private_directory, require, unpack, verify_artifact, write_json
 
 
 def main():
@@ -66,6 +66,7 @@ def main():
                {"email": args.owner_email, "password": password, "url": args.origin})
     write_json(root / "config/updater.json", {
         "service": "dispatch-production.service", "healthUrl": "http://127.0.0.1:5180/api/health"})
+    install_management(root, "production")
     print("Production initialized with separate accounts and state; services have not been started.")
     print(f"Initial login is private in {root / 'config/initial-owner.json'}")
 

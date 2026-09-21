@@ -135,12 +135,12 @@ def cache_eligible(root, environment, allow_ci=False):
     if any(file.exists() for file in configs):
         return False
     workspace = tomllib.loads((root / "Cargo.toml").read_text())
-    if workspace.get("workspace", {}).get("members") != ["backend"]:
+    if workspace.get("workspace", {}).get("members") not in (["backend"], ["backend", "backend/host"]):
         return False
     for file in (root / "backend").rglob("*"):
         if file.is_symlink() or file.name == "build.rs":
             return False
-    for manifest in [root / "Cargo.toml", root / "backend/Cargo.toml"]:
+    for manifest in [root / "Cargo.toml", *sorted((root / "backend").rglob("Cargo.toml"))]:
         data = tomllib.loads(manifest.read_text())
         if data.get("package", {}).get("build"):
             return False

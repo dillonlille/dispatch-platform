@@ -42,6 +42,14 @@ class PipelineTests(unittest.TestCase):
             (root / "backend/build.rs").unlink()
             (root / "backend/Cargo.toml").write_text('[dependencies]\nexternal = { path = "../../outside" }\n')
             self.assertFalse(cache.cache_eligible(root, env))
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["backend", "backend/host"]\n')
+            (root / "backend/Cargo.toml").write_text('[dependencies]\ndispatch-host = { path = "host" }\n')
+            (root / "backend/host").mkdir()
+            host_manifest = root / "backend/host/Cargo.toml"
+            host_manifest.write_text('[package]\nname = "dispatch-host"\n')
+            self.assertTrue(cache.cache_eligible(root, env))
+            host_manifest.write_text('[dependencies]\nexternal = { path = "../../../outside" }\n')
+            self.assertFalse(cache.cache_eligible(root, env))
 
     def test_ci_binary_reuse_requires_explicit_environment_and_exact_validated_inputs(self):
         with tempfile.TemporaryDirectory(prefix="dispatch-ci-binary-") as temp:
@@ -114,13 +122,17 @@ class PipelineTests(unittest.TestCase):
                 (root / "backend/src/main.rs").write_text("fn main() {}")
                 (root / "backend/src/provider.js").write_text("provider")
                 (root / "backend/src/schema.sql").write_text("schema")
+                (root / "backend/host/src").mkdir(parents=True)
+                (root / "backend/host/Cargo.toml").write_text("host manifest")
+                (root / "backend/host/src/lib.rs").write_text("host policy")
             key = lambda root, profile="release", compiler="rust-cc", env={}: cache.fingerprint(root, profile, compiler, env)
             first = key(roots[0])
             self.assertEqual(first, key(roots[1]), "Separate worktrees share identical code")
             (roots[1] / "dashboard/main.tsx").write_text("changed UI")
             self.assertEqual(first, key(roots[1]))
             for file in ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "backend/src/main.rs",
-                         "backend/src/provider.js", "backend/src/schema.sql"]:
+                         "backend/src/provider.js", "backend/src/schema.sql",
+                         "backend/host/Cargo.toml", "backend/host/src/lib.rs"]:
                 path = roots[1] / file
                 original = path.read_text()
                 path.write_text(original + "changed")

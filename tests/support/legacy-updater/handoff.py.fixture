@@ -1,0 +1,118 @@
+"""Frozen legacy updater -> current launchers -> Rust recovery of the legacy build."""
+import hashlib
+import http.server
+import importlib.util
+from importlib.machinery import SourceFileLoader
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+from unittest.mock import patch
+
+# This process intentionally imports the frozen, shipped updater and verifier.
+runtime_path = Path(__file__).with_name("runtime_artifact.py.fixture")
+runtime_spec = importlib.util.spec_from_file_location("runtime_artifact", runtime_path, loader=SourceFileLoader("runtime_artifact", str(runtime_path)))
+runtime = importlib.util.module_from_spec(runtime_spec)
+sys.modules["runtime_artifact"] = runtime
+runtime_spec.loader.exec_module(runtime)
+write_json, verify_artifact = runtime.write_json, runtime.verify_artifact
+legacy_path = Path(__file__).with_name("update-dev.py.fixture")
+spec = importlib.util.spec_from_file_location("legacy_dev", legacy_path, loader=SourceFileLoader("legacy_dev", str(legacy_path)))
+legacy = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(legacy)
+source, binary = Path(sys.argv[1]), Path(sys.argv[2])
+
+def git(root, *args):
+    return subprocess.check_output(["git", "-c", "user.name=Test", "-c", "user.email=test@dispatch.test", *args], cwd=root, text=True, stderr=subprocess.DEVNULL).strip()
+
+def bundle(root, commit, rust=False):
+    for directory in ["dashboard", "tooling", "services/rust"]:
+        (root / directory).mkdir(mode=0o700, parents=True, exist_ok=True)
+    (root / "dashboard/index.html").write_text("ready")
+    if rust:
+        shutil.copyfile(binary, root / "services/rust/dispatch-backend")
+    else:
+        (root / "services/rust/dispatch-backend").write_text("legacy runtime")
+    (root / "tooling/build-info.json").write_text(json.dumps({"commit": commit, **({"hostManagement": 1} if rust else {})}))
+    files = [{"path": p.relative_to(root).as_posix(), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(), "size": p.stat().st_size}
+             for p in sorted(root.rglob("*")) if p.is_file() and p.name != "release.json"]
+    value = {"format": 3, "version": "0.1.0", "runtime": "rust", "schema": 3, "files": files}
+    value["digest"] = hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
+    (root / "release.json").write_text(json.dumps(value))
+    return value
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary) / "dev"
+    root.mkdir(mode=0o700)
+    (root / "tooling").mkdir()
+    git(root, "init", "-b", "dev")
+    git(root, "remote", "add", "origin", "https://github.com/dillonlille/dispatch-platform.git")
+    (root / ".gitignore").write_text("/config\n/data\n/dsps\n/.runtime\n/.build\n/.platform.lock\n")
+    for name in ["runtime_artifact.py", "update-dev.py"]:
+        shutil.copyfile(Path(__file__).with_name(name + ".fixture"), root / "tooling" / name)
+    git(root, "add", ".")
+    git(root, "commit", "-m", "legacy")
+    old = git(root, "rev-parse", "HEAD")
+    for name in ["runtime_artifact.py", "update-dev.py"]:
+        shutil.copyfile(source / name, root / "tooling" / name)
+    git(root, "commit", "-am", "Rust host management")
+    new = git(root, "rev-parse", "HEAD")
+    git(root, "update-ref", "refs/remotes/origin/dev", new)
+    git(root, "reset", "--hard", old)
+    class Health(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ready", "environment": "preview", "runtime": "rust",
+                                         "release": json.loads((root / ".build/release.json").read_text())["digest"]}).encode())
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    write_json(root / "config/updater.json", {"service": "dispatch-dev.service", "healthUrl": f"http://127.0.0.1:{server.server_port}/api/health"})
+    updater = legacy.DevUpdater(root)
+    old_manifest = bundle(root / ".build", old)
+    candidate = root / ".runtime/candidate"
+    manifest = bundle(candidate, new, True)
+    legacy.install_management(root, root / "tooling")
+    installed = root / ".runtime/management/update-dev.py"
+    def service(action):
+        if action == "start":
+            subprocess.run([sys.executable, str(installed), "--root", str(root), "--verify"], check=True, capture_output=True,
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    # The real old entry point verifies the new artifact during service activation.
+    with patch.object(updater, "service", side_effect=service), patch.object(updater, "healthy", return_value=True):
+        updater.activate(candidate, new)
+    updater.refresh_management()
+    assert installed.read_bytes() == (source / "update-dev.py").read_bytes()
+    result = subprocess.run([sys.executable, str(installed), "--root", str(root), "--verify"], capture_output=True, text=True,
+                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert result.returncode == 0, result.stderr
+    management_binary = installed.with_name("dispatch-host")
+    assert management_binary.read_bytes() == binary.read_bytes()
+    # A retained Rust manager recovers an interrupted activation to a runtime that
+    # predates host commands. Actual installed ExecStartPre runs during recovery.
+    write_json(updater.receipt, {"commit": new, "oldCommit": old, "oldDigest": old_manifest["digest"], "previous": "previous"})
+    git(root, "update-ref", "refs/remotes/origin/dev", old)
+    commands = Path(temporary) / "commands"
+    commands.mkdir()
+    real_git = shutil.which("git")
+    (commands / "git").write_text(f'#!/bin/sh\nif [ "$1" = fetch ]; then exit 0; fi\nexec "{real_git}" "$@"\n')
+    # Pass root through environment, never interpolate paths as shell source.
+    (commands / "systemctl").write_text('#!/bin/sh\nif [ "$2" = start ]; then exec python3 "$HANDOFF_ROOT/.runtime/management/update-dev.py" --root "$HANDOFF_ROOT" --verify; fi\n')
+    for command in commands.iterdir():
+        command.chmod(0o700)
+    result = subprocess.run([sys.executable, str(installed), "--root", str(root)], capture_output=True, text=True, timeout=60,
+                            env={**os.environ, "PATH": str(commands) + os.pathsep + os.environ["PATH"], "HANDOFF_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"})
+    assert result.returncode == 0, result.stderr
+    assert git(root, "rev-parse", "HEAD") == old
+    assert verify_artifact(root / ".build", old) == old_manifest
+    assert not updater.receipt.exists()
+    assert management_binary.read_bytes() == binary.read_bytes()
+    server.shutdown()
+    print("legacy activation and Rust rollback passed")

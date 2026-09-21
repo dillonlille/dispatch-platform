@@ -30,7 +30,7 @@ const manifest = await replaceBuild(out, async (staging) => {
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   fs.writeFileSync(
     path.join(staging, 'tooling/build-info.json'),
-    JSON.stringify({ commit }) + '\n',
+    JSON.stringify({ commit, hostManagement: 1 }) + '\n',
   );
   writeManifest(staging, JSON.parse(fs.readFileSync('package.json', 'utf8')).version);
 });
