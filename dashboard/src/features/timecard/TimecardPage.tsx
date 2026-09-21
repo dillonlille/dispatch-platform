@@ -1,14 +1,20 @@
 import { useUpdateState } from '../../app/browser-update.js';
 import { useEffect, useState } from 'react';
 import { ArrowRight, RefreshCw, Settings } from 'lucide-react';
-import type { Connection, DspView } from '../../../../shared/contracts/index.js';
+import type {
+  Connection,
+  DspView,
+  EmployeeTimecardResponse,
+} from '../../../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
 import { api, useCachedData, useData } from '../../app/api.js';
+import { syncEmployeeTimecard } from '../../app/endpoints.js';
 import { dataCache } from '../../app/data-cache.js';
 import { useCollectionUpdates } from '../../app/live-collection.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
 import { randomId } from '../../lib/random-id.js';
+import { timecardPeriod } from '../../lib/timecard-format.js';
 import { EmployeesPage } from './EmployeesPage.js';
 import { TimecardsPage } from './TimecardsPage.js';
 import { MealBreaksPage } from './meal-breaks/MealBreaksPage.js';
@@ -64,41 +70,55 @@ export function PaycomPage({ view }: { view: DspView }) {
       : '';
   const canConnect = can(view, 'connections.manage');
   const sync = useAction(
-    async () => {
+    async (timecard?: EmployeeTimecardResponse) => {
       try {
-        await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-          requestId: randomId(),
-          ...(tab !== 'employees' ? { date } : {}),
-        });
+        if (timecard) {
+          await syncEmployeeTimecard(timecard.employee.code, timecard.period, randomId());
+        } else if (daily)
+          await api('/api/dsp/jobs/meal-breaks', {
+            requestId: randomId(),
+            date,
+          });
       } finally {
         refresh();
         // Keep every Sync Now disabled until status read after this request arrives.
         setSyncRevision((value) => value + 1);
       }
     },
-    { success: () => (daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued') },
+    {
+      success: (timecard) =>
+        timecard
+          ? `${timecard.employee.name}’s timecard sync queued`
+          : 'Flex and Paycom collections queued',
+    },
   );
-  const syncButton = canCollect && (
-    <button
-      disabled={
-        !!syncUnavailable ||
-        !syncState.data ||
-        !!syncState.error ||
-        sync.busy ||
-        !!activeSync ||
-        (daily && !sourceCurrent)
-      }
-      title={
-        syncUnavailable ||
-        (activeSync && 'A collection is in progress for this DSP.') ||
-        (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
-      }
-      onClick={() => void sync.run()}
-    >
-      <RefreshCw size={16} />
-      Sync now
-    </button>
-  );
+  const syncButton = (timecard?: EmployeeTimecardResponse) =>
+    canCollect && (
+      <button
+        disabled={
+          !!syncUnavailable ||
+          !syncState.data ||
+          !!syncState.error ||
+          sync.busy ||
+          !!activeSync ||
+          (daily && !sourceCurrent) ||
+          (!daily && !timecard)
+        }
+        title={
+          syncUnavailable ||
+          (activeSync && 'A collection is in progress for this DSP.') ||
+          (timecard
+            ? `Sync ${timecard.employee.name} · ${timecardPeriod(timecard.period.from, timecard.period.to)}`
+            : daily
+              ? `Sync Flex and Paycom for ${date}`
+              : 'Select an employee timecard to sync')
+        }
+        onClick={() => void sync.run(timecard)}
+      >
+        <RefreshCw size={16} />
+        Sync now
+      </button>
+    );
   return (
     <div className={`paycom-page${daily ? ' paycom-daily-page' : ''}`}>
       <Header title="Timecard">
@@ -118,7 +138,7 @@ export function PaycomPage({ view }: { view: DspView }) {
             />
           </>
         )}
-        {daily && syncButton}
+        {daily && syncButton()}
         {can(view, 'timecard.manage') && (
           <button onClick={() => navigate(dspHash(view.dsp.id, 'paycom-settings'))}>
             {daily && <Settings size={16} />}
@@ -165,13 +185,25 @@ export function PaycomPage({ view }: { view: DspView }) {
         <div className="embedded-page">
           {tab === 'employees' ? (
             <EmployeesPage
-              refreshKey={refreshKey}
-              actions={
+              refreshKey={`${refreshKey}:${syncRevision}`}
+              actions={(timecard) => (
                 <>
                   {canCollect && (
                     <SourceSyncStatus
                       name="Paycom"
-                      source={sourceState?.paycom}
+                      source={
+                        sourceState?.paycom && {
+                          ...sourceState.paycom,
+                          collectedAt: timecard?.collectedAt ?? null,
+                          job: timecard?.syncStatus ? { status: timecard.syncStatus } : null,
+                          active:
+                            !!timecard?.syncStatus &&
+                            ['queued', 'running', 'waiting_verification'].includes(
+                              timecard.syncStatus,
+                            ),
+                          jobDate: timecard?.period.from ?? null,
+                        }
+                      }
                       timezone={view.dsp.timezone}
                       compact
                     />
@@ -183,9 +215,9 @@ export function PaycomPage({ view }: { view: DspView }) {
                       timezone={view.dsp.timezone}
                     />
                   )}
-                  {syncButton}
+                  {syncButton(timecard)}
                 </>
-              }
+              )}
             />
           ) : (
             <TimecardsPage

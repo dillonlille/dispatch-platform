@@ -60,7 +60,14 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
         .unwrap();
     assert_eq!(first.period.from, "2026-08-09");
     assert_eq!(first.period.to, "2026-08-22");
-    assert!(first.previous_period.is_none());
+    let uncollected = db
+        .employee_timecard(&id, "E001", first.previous_period.as_ref())
+        .unwrap();
+    assert_eq!(uncollected.period.from, "2026-07-26");
+    assert!(uncollected.collected_at.is_none());
+    assert!(uncollected.timecards.is_empty());
+    assert_eq!(uncollected.next_period, Some(first.period.clone()));
+    assert!(uncollected.previous_period.is_some());
     assert_eq!(first.next_period, Some(previous.period));
     let missing = EmployeeTimecardPeriod {
         from: "2025-01-01".into(),
@@ -71,7 +78,7 @@ fn employee_timecards_use_period_order_and_the_latest_revision_within_each_perio
             .err()
             .unwrap()
             .code,
-        "employee_timecard_not_found"
+        "invalid_period"
     );
     assert_eq!(
         db.employee_timecard(&id, "UNKNOWN", None)

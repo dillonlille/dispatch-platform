@@ -8,7 +8,7 @@ import { dateFormatter } from '../../../../shared/date-format.js';
 export type SyncSource = {
   enabled: boolean;
   active: boolean;
-  job: Job | null;
+  job: Pick<Job, 'status'> | null;
   jobDate: string | null;
   collectedAt: string | null;
 };

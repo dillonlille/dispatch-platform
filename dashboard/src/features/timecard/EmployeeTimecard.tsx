@@ -16,7 +16,7 @@ import {
 
 type EmployeeDay = Timecard & { events: ReturnType<typeof paycomDay>['events'] };
 function periodDays(data: EmployeeTimecardResponse | undefined): EmployeeDay[] {
-  if (!data) return [];
+  if (!data?.collectedAt) return [];
   const byDate = new Map(data.timecards.map((card) => [card.date, card]));
   const days: EmployeeDay[] = [];
   for (let date = data.period.from; date <= data.period.to; date = addDays(date, 1)) {
@@ -70,13 +70,16 @@ export function EmployeeTimecard({
   const minutes = days.reduce((total, card) => total + Math.round(card.hours * 60), 0);
   const period = requestedPeriod ?? data?.period;
   let status = data?.nextPeriod ? 'Previous timecard' : 'Latest';
+  if (data && !data.collectedAt) status = 'Not collected';
   if (busy) status = 'Loading…';
   if (error) status = 'Unavailable';
   return (
     <>
       <div className="employee-timecard-heading">
         <h4>Timecard</h4>
-        <span className={data?.nextPeriod ? 'muted' : 'employee-latest'}>{status}</span>
+        <span className={!data?.collectedAt || data.nextPeriod ? 'muted' : 'employee-latest'}>
+          {status}
+        </span>
       </div>
       <nav className="employee-period-controls" aria-label="Timecard navigation">
         <button
@@ -113,7 +116,15 @@ export function EmployeeTimecard({
         {(!current || !days.length) && (
           <div className="employee-timecard-state">
             <DataState data={current} error={error} failed={!!error}>
-              {() => <Empty title="No recorded activity in this timecard" />}
+              {() => (
+                <Empty
+                  title={
+                    current?.collectedAt
+                      ? 'No recorded activity in this timecard'
+                      : 'This pay period has not been collected'
+                  }
+                />
+              )}
             </DataState>
             {error && (
               <button type="button" onClick={onRetry}>
@@ -125,11 +136,11 @@ export function EmployeeTimecard({
       </div>
       <div className="employee-timecard-total">
         <span>
-          {current ? recorded : '—'} recorded {recorded === 1 ? 'day' : 'days'}
+          {current?.collectedAt ? recorded : '—'} recorded {recorded === 1 ? 'day' : 'days'}
         </span>
         <div>
           <span>Total hours</span>
-          <strong>{current ? hoursAndMinutes(minutes / 60) : '—'}</strong>
+          <strong>{current?.collectedAt ? hoursAndMinutes(minutes / 60) : '—'}</strong>
         </div>
       </div>
     </>

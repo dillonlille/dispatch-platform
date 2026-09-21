@@ -8,6 +8,7 @@ use crate::{
         paycom,
     },
     db::{Db, Kind, Store, s},
+    employee_sync::EmployeeSync,
     ensure, validate as v, workforce,
 };
 use serde_json::{Value, json};
@@ -87,15 +88,23 @@ impl Collector for Paycom {
         })
     }
     fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected> {
-        let data =
-            workforce::fixture_date(timezone, workforce::collection_date(request, timezone)?)?;
+        let data = if let Some(scope) = EmployeeSync::parse(request)? {
+            scope.fixture(timezone)?
+        } else {
+            workforce::fixture_date(timezone, workforce::collection_date(request, timezone)?)?
+        };
         Ok(Collected { data, scope: None })
     }
     fn progress(&self) -> &'static str {
         "Collecting workforce"
     }
-    fn publish(&self, store: &Store, dsp: &str, _: &str, collected: Collected) -> Result<()> {
-        store.publish(dsp, &collected.data)?;
+    fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()> {
+        let request: Value = serde_json::from_str(&store.job_row(job, Some(dsp))?.request)?;
+        if let Some(scope) = EmployeeSync::parse(&request)? {
+            store.publish_employee_timecard(dsp, &scope, &collected.data)?;
+        } else {
+            store.publish(dsp, &collected.data)?;
+        }
         Ok(())
     }
     fn discard(&self, store: &Store, dsp: &str, job: Option<&str>) -> Result<()> {

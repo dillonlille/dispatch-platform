@@ -25,12 +25,17 @@ import type { ScheduleInput } from '../../../shared/schedules.js';
 export const getSession = () => api<SessionView>('/api/session');
 export const employeeTimecardUrl = (code: string, period?: EmployeeTimecardPeriod | null) =>
   `/api/dsp/employees/${encodeURIComponent(code)}${period ? `?from=${period.from}&to=${period.to}` : ''}`;
+export const syncEmployeeTimecard = (
+  code: string,
+  period: EmployeeTimecardPeriod,
+  requestId: string,
+) => api<Job>(`/api/dsp/employees/${encodeURIComponent(code)}/sync`, { requestId, ...period });
 export const useEmployeeTimecard = (
   code: string,
   period: EmployeeTimecardPeriod | null,
   refreshKey: string,
 ) => {
-  const url = employeeTimecardUrl(code, period);
+  const url = code ? employeeTimecardUrl(code, period) : '';
   const result = useCachedData<EmployeeTimecardResponse>(url, 0, refreshKey);
   useEffect(() => {
     if (!result.data) return;

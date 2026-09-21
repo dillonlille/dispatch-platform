@@ -451,6 +451,31 @@ impl Store {
                 rows.insert(s(&row, "employeeCode").to_owned(), row);
             }
         }
+        // A completed employee sync overlays only that employee, and only until
+        // a newer full collection supersedes it.
+        for sync in db.all(
+            "SELECT data FROM employee_timecard_syncs WHERE period_from<=? AND period_to>=? \
+             AND collected_at>=? ORDER BY collected_at,employee_code",
+            params![
+                date,
+                date,
+                publication.as_ref().map_or("", |p| s(p, "collected_at"))
+            ],
+        )? {
+            let data: Value = serde_json::from_str(s(&sync, "data"))?;
+            let employee = &data["employees"][0];
+            let code = s(employee, "code");
+            roster.insert(code.into(), json!({"code":code,"name":employee["name"]}));
+            if let Some(mut card) = crate::employee_sync::synced_cards(&data)
+                .into_iter()
+                .find(|card| card["date"] == date)
+            {
+                for key in ["name", "department", "station"] {
+                    card[key] = employee[key].clone();
+                }
+                rows.insert(code.into(), card);
+            }
+        }
         for (metadata, items) in self.live_results(id, Provider::Paycom, date)? {
             for employee in metadata["roster"].as_array().into_iter().flatten() {
                 roster.insert(

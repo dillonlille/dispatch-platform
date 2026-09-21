@@ -222,7 +222,8 @@
 }
 .employee-period-controls {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: 36px auto 36px;
+  justify-content: center;
   gap: 10px;
   align-items: center;
   height: 44px;
@@ -379,7 +380,7 @@
     min-height: 44px;
   }
   .employee-period-controls {
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-columns: 44px auto 44px;
   }
   .employee-period-controls > button {
     width: 44px;

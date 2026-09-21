@@ -278,6 +278,32 @@ pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
     }).collect()
 }
 impl Driver {
+    pub(super) async fn collect_employee(
+        &mut self,
+        run: &Run<'_>,
+        employee: &Value,
+        requested: &crate::contracts::EmployeeTimecardPeriod,
+    ) -> Result<Value> {
+        self.credentials = Value::Null;
+        self.assistance = None;
+        let period = requested.provider_period()?;
+        run.progress(20, format!("Reading timecard for {}", s(employee, "code")))
+            .await?;
+        self.new_page().await?;
+        let records = read_timecard(
+            &mut self.page,
+            &self.origin,
+            employee,
+            &period,
+            run.metrics,
+            0,
+            &Direct::new(&[0]),
+        )
+        .await?;
+        Ok(json!({"employees":[employee],"timecards":records,
+            "sources":[{"employeeCode":employee["code"],"periodKey":period["key"],"url":source_url(&self.origin,employee,&period)}],
+            "from":requested.from,"to":requested.to,"collectedAt":db::iso()}))
+    }
     pub async fn collect<F, Fut>(
         &mut self,
         timezone: &str,

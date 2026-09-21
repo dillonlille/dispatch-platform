@@ -17,7 +17,7 @@ fn invalid_record() -> Error {
     Error::new("invalid_stored_record", 500)
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct EmployeeTimecardPeriod {
     pub from: String,
@@ -43,6 +43,8 @@ pub struct EmployeeTimecardResponse {
     pub period: EmployeeTimecardPeriod,
     pub previous_period: Option<EmployeeTimecardPeriod>,
     pub next_period: Option<EmployeeTimecardPeriod>,
+    pub collected_at: Option<String>,
+    pub sync_status: Option<JobStatus>,
 }
 
 text_enum! {

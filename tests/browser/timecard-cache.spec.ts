@@ -314,6 +314,8 @@ test('cached names cannot cross DSPs, even when an older request finishes late',
           ? {
               employee,
               period: { from: '2026-09-06', to: '2026-09-19' },
+              collectedAt: '2026-09-20T00:00:00Z',
+              syncStatus: null,
               previousPeriod: null,
               nextPeriod: null,
               timecards: [

@@ -30,6 +30,11 @@ pub fn routes() -> Vec<Route> {
     vec![
         read("/api/dsp/employees", VIEW, employees),
         read("/api/dsp/employees/{code}", VIEW, employee),
+        write(
+            "/api/dsp/employees/{code}/sync",
+            Dsp("collections.run"),
+            sync_employee,
+        ),
         read("/api/dsp/timecards", VIEW, timecards),
         read("/api/dsp/paycom/status", VIEW, paycom_status),
         read("/api/dsp/paycom/settings", VIEW, paycom_settings),
@@ -102,6 +107,29 @@ fn timecards(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
         sort,
         descending(q)?,
     )?))
+}
+
+fn sync_employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
+    let body = &input.body;
+    v::fields(body, &["requestId", "from", "to"])?;
+    let period = EmployeeTimecardPeriod {
+        from: v::text(body, "from", 10, 10)?.into(),
+        to: v::text(body, "to", 10, 10)?.into(),
+    };
+    let code = input.param("code");
+    let job = db.enqueue_employee_timecard(
+        c.dsp_id(),
+        Some(c.actor()),
+        v::text(body, "requestId", 1, 128)?,
+        code,
+        &period,
+    )?;
+    c.audit(
+        db,
+        "collection.requested",
+        &format!("{code} {}–{}", period.from, period.to),
+    )?;
+    Ok(Reply::status(job, 202))
 }
 
 fn paycom_status(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
