@@ -1,5 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
-import type { ClockTime, DeliveryGap } from '../../../../../shared/meal-breaks.js';
+import type { ClockTime, DeliveryGap } from '../../../lib/meal-breaks.js';
 
 export function Source({ name }: { name: 'Paycom' | 'Flex' }) {
   return (

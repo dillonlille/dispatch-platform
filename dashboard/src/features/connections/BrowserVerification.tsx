@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
-import type { BrowserFrame, BrowserInput } from '../../../../shared/browser.js';
+import type { BrowserFrame, BrowserInput } from '../../../../shared/contracts/browser.js';
 import { api, ApiError } from '../../app/api.js';
 import { ErrorBox, Loading, Modal } from '../../ui/index.js';
 import { messageOf } from '../../lib/errors.js';

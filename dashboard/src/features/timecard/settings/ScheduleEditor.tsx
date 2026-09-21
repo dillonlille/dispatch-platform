@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { Globe2 } from 'lucide-react';
 import { api, ApiError } from '../../../app/api.js';
 import { ErrorBox, Modal } from '../../../ui/index.js';
-import type { CollectionSchedule, ScheduleInput } from '../../../../../shared/schedules.js';
+import type {
+  CollectionSchedule,
+  ScheduleInput,
+} from '../../../../../shared/contracts/schedules.js';
 import { messageOf } from '../../../lib/errors.js';
 import { nextCollection } from './nextCollection.js';
 import { saveSchedule, removeSchedule } from '../../../app/endpoints.js';

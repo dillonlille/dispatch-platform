@@ -227,6 +227,11 @@ test('employee workspace navigates real period history, resets selection, filter
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    expect(
+      await page
+        .getByRole('region', { name: 'Timecard punches' })
+        .evaluate((element) => element.scrollHeight <= element.clientHeight),
+    ).toBe(true);
     if (width > 700)
       expect(
         await page

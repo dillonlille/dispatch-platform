@@ -36,12 +36,12 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn platform_audit(db: &Store, _: &User, input: &Input) -> Result<Reply> {
-    Ok(Reply::json(db.audit_page(&audit_query(&input.query)?)?))
+    Reply::of(&db.audit_page(&audit_query(&input.query)?)?)
 }
 
 fn export_platform_audit(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     let query = audit_query(&input.body)?;
-    Ok(Reply::json(db.audit_export(owner.actor(), query)?))
+    Reply::of(&db.audit_export(owner.actor(), query)?)
 }
 
 fn audit_query(q: &Value) -> Result<AuditQuery<'_>> {

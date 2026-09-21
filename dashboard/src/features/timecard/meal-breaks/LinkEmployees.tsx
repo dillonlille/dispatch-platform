@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { api } from '../../../app/api.js';
 import { ErrorBox, Modal, SearchInput } from '../../../ui/index.js';
-import { fullName, type MealComparison } from '../../../../../shared/meal-breaks.js';
+import { fullName } from '../../../lib/meal-breaks.js';
+import { type MealComparison } from '../../../../../shared/contracts/meals.js';
 import { useAction } from '../../../app/useAction.js';
 
 export function LinkEmployees({

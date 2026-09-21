@@ -1,15 +1,10 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import {
-  cortexClock,
-  fullName,
-  mealPairs,
-  type ClockTime,
-  type MealEmployee,
-} from '../../../../../shared/meal-breaks.js';
+import { cortexClock, fullName, displayMeal, type ClockTime } from '../../../lib/meal-breaks.js';
+import { type MealEmployee } from '../../../../../shared/contracts/meals.js';
 import type { TableColumn } from '../../../ui/index.js';
 import { Clock, GapBadge, LunchCell, Source } from './cells.js';
 
-type Summary = ReturnType<typeof mealPairs>;
+type Summary = ReturnType<typeof displayMeal>;
 type Pair = Summary['pairs'][number];
 /** One meal of one employee. The first meal is the employee's row; the rest sit beneath it. */
 export interface MealLine {

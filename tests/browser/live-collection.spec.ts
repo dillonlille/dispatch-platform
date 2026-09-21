@@ -1,12 +1,15 @@
+import { assessMealResponse } from '../support/assessment.js';
+import type { CortexMeal } from '../../shared/contracts/meals.js';
 import type { Route } from '@playwright/test';
 import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
-import { paycomDefaults } from '../../shared/paycom.js';
+import { paycomDefaults } from '../../dashboard/src/lib/paycom.js';
 
 test('driver results update open timecards and meal breaks without resetting the view', async ({
   page,
 }) => {
   const date = '2026-09-15';
   let revision = 0;
+  let initial: Route | undefined;
   const waiting = new Set<Route>();
   const announce = async () => {
     revision++;
@@ -25,13 +28,15 @@ test('driver results update open timecards and meal breaks without resetting the
     status: 'Complete',
     punches: [{ in: '09:00', out: '17:00', hours: 8 }],
   };
-  let meals: any[] = [];
+  let meals: CortexMeal[] = [];
   let rowReads = 0;
   const mealDates = new Set<string>();
   let failNextRead = false;
   await page.route('**/api/dsp/collection-updates?*', async (route) => {
     const after = new URL(route.request().url()).searchParams.get('after');
-    if (after !== String(revision)) await route.fulfill({ json: { revision: String(revision) } });
+    if (after === '' && revision === 0) initial = route;
+    else if (after !== String(revision))
+      await route.fulfill({ json: { revision: String(revision) } });
     else {
       waiting.clear();
       waiting.add(route);
@@ -56,7 +61,7 @@ test('driver results update open timecards and meal breaks without resetting the
       });
     }
     return route.fulfill({
-      json: {
+      json: assessMealResponse({
         date: selected,
         timezone: 'America/Los_Angeles',
         rows:
@@ -68,18 +73,34 @@ test('driver results update open timecards and meal breaks without resetting the
         employees: [],
         drivers: [],
         links: { revision: 0, links: [] },
-      },
+      }),
     });
   });
+  await page.clock.install();
   await login(page, demo.member);
   await page.getByRole('heading', { name: 'Currently under development' }).waitFor();
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   await setDate(page, date);
   await page.getByRole('button', { name: 'View punches for Live Driver' }).click();
   await expect(page.getByRole('dialog')).toContainText('17:00');
-  await expect.poll(() => waiting.size).toBe(1);
+  // Deliver the baseline and first update inside the same 150ms coalescing window.
+  await expect.poll(() => initial !== undefined).toBe(true);
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  await initial!.fulfill({ json: { revision: '0' } });
+  const nextPoll = async () => {
+    await expect
+      .poll(async () => {
+        await page.clock.runFor(1);
+        return waiting.size;
+      })
+      .toBe(1);
+  };
+  await nextPoll();
   card = { ...card, hours: 9, punches: [{ in: '09:00', out: '18:00', hours: 9 }] };
   await announce();
+  await nextPoll();
+  await page.clock.runFor(150);
+  await page.clock.resume();
   await expect(page.getByRole('dialog')).toContainText('18:00');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
@@ -123,7 +144,7 @@ test('driver results update open timecards and meal breaks without resetting the
   );
   await expectDate(page, date);
   failNextRead = true;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:24:00Z` }];
+  meals = [{ ...meals[0]!, lastDelivery: `${date}T21:24:00Z` }];
   await announce();
   await expect(page.getByText('Retrying live data')).toBeVisible();
   await expect(page.locator('.meal-table')).toContainText('2:24 PM');
@@ -135,7 +156,7 @@ test('driver results update open timecards and meal breaks without resetting the
     document.dispatchEvent(new Event('visibilitychange'));
   });
   const hiddenReads = rowReads;
-  meals = [{ ...meals[0], lastDelivery: `${date}T21:25:00Z` }];
+  meals = [{ ...meals[0]!, lastDelivery: `${date}T21:25:00Z` }];
   await announce();
   await page.waitForTimeout(350);
   expect(rowReads).toBe(hiddenReads);

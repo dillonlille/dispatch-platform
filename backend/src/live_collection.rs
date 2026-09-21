@@ -317,7 +317,9 @@ mod tests {
         let old_snapshot = old.clone();
         state
             .run(move |db| {
-                let daily = db.daily(&tenant, "2026-01-19", "name", false)?;
+                let daily = db
+                    .daily(&tenant, "2026-01-19", "name", false)
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 assert_eq!(daily["rows"].as_array().unwrap().len(), 12);
                 let row = daily["rows"]
                     .as_array()
@@ -325,9 +327,11 @@ mod tests {
                     .iter()
                     .find(|r| r["employeeCode"] == "E001")
                     .unwrap();
-                assert_eq!(row["hours"], 9);
+                assert_eq!(row["hours"], 9.0);
                 assert_eq!(daily["collectedAt"], old_snapshot["collectedAt"]);
-                let comparison = db.meal_comparison(&tenant, "2026-01-19", "UTC")?;
+                let comparison = db
+                    .meal_comparison(&tenant, "2026-01-19", "UTC")
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 let row = comparison["rows"]
                     .as_array()
                     .unwrap()
@@ -336,7 +340,8 @@ mod tests {
                     .unwrap();
                 assert_eq!(row["paycom"]["punches"][0]["in"], "09:00");
                 assert!(
-                    db.daily(&tenant, "2026-02-01", "name", false)?["rows"]
+                    db.daily(&tenant, "2026-02-01", "name", false)
+                        .map(|value| serde_json::to_value(value).unwrap())?["rows"]
                         .as_array()
                         .unwrap()
                         .is_empty()
@@ -362,7 +367,9 @@ mod tests {
         let job = paycom_job.clone();
         state
             .run(move |db| {
-                let comparison = db.meal_comparison(&tenant, "2026-01-19", "UTC")?;
+                let comparison = db
+                    .meal_comparison(&tenant, "2026-01-19", "UTC")
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 assert!(
                     comparison["rows"]
                         .as_array()
@@ -371,7 +378,9 @@ mod tests {
                         .all(|r| r["id"] != "paycom:E001")
                 );
                 db.finish(&job, "paycom-owner", Some("invalid_checkpoint"))?;
-                let daily = db.daily(&tenant, "2026-01-19", "name", false)?;
+                let daily = db
+                    .daily(&tenant, "2026-01-19", "name", false)
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 let row = daily["rows"]
                     .as_array()
                     .unwrap()
@@ -422,7 +431,9 @@ mod tests {
         let tenant = dsp.clone();
         state
             .read(move |db| {
-                let comparison = db.meal_comparison(&tenant, "2026-01-19", "UTC")?;
+                let comparison = db
+                    .meal_comparison(&tenant, "2026-01-19", "UTC")
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 let row = comparison["rows"]
                     .as_array()
                     .unwrap()
@@ -453,7 +464,9 @@ mod tests {
         writer.cortex(&capture).await?;
         state
             .run(move |db| {
-                let comparison = db.meal_comparison(&dsp, "2026-01-19", "UTC")?;
+                let comparison = db
+                    .meal_comparison(&dsp, "2026-01-19", "UTC")
+                    .map(|value| serde_json::to_value(value).unwrap())?;
                 assert!(
                     comparison["rows"]
                         .as_array()

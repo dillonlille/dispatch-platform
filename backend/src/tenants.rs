@@ -3,11 +3,11 @@ use super::{
     Error, Result,
     accounts::{Auth, Context},
     contracts::{
-        ConnectionStatus, Dsp, DspSetupRequest, DspStatus, DspSummary, DspSummaryLegacy, Member,
-        OwnerStatus,
+        ConnectionStatus, Dsp, DspProfile, DspSetupRequest, DspStatus, DspSummary,
+        DspSummaryLegacy, Member, OwnerStatus,
     },
     crypto,
-    db::{FromRow, Row, Store, flag, iso, now},
+    db::{FromRow, Row, Store, iso, now},
     ensure,
 };
 use rusqlite::params;
@@ -229,33 +229,29 @@ impl Store {
         }
         Ok(result)
     }
-    pub fn profile(&self, id: &str) -> Result<Value> {
-        let mut out = profile_default();
-        let stored = self.dsp(id)?.setting("dsp.profile", json!({}))?;
-        for (k, v) in stored
-            .as_object()
-            .ok_or_else(|| Error::new("invalid_profile", 500))?
-        {
-            out[k] = v.clone();
-        }
-        Ok(out)
+    pub fn profile(&self, id: &str) -> Result<DspProfile> {
+        Ok(serde_json::from_value(
+            self.dsp(id)?.setting("dsp.profile", json!({}))?,
+        )?)
     }
-    pub fn set_profile(&self, id: &str, changes: Value) -> Result<Value> {
-        let mut profile = self.profile(id)?;
+    pub fn set_profile(&self, id: &str, changes: Value) -> Result<DspProfile> {
+        let mut profile = serde_json::to_value(self.profile(id)?)?;
         for (k, v) in changes
             .as_object()
             .ok_or_else(|| Error::new("invalid_input", 400))?
         {
             profile[k] = v.clone();
         }
-        self.dsp(id)?.set("dsp.profile", &profile)?;
+        let profile: DspProfile = serde_json::from_value(profile)?;
+        self.dsp(id)?
+            .set("dsp.profile", &serde_json::to_value(&profile)?)?;
         Ok(profile)
     }
     pub fn set_status(&self, id: &str, status: DspStatus, actor: &str) -> Result<Dsp> {
         let dsp = self.find_dsp(id)?;
         ensure(!dsp.permanent, "permanent_dev_required", 409)?;
         ensure(
-            status != DspStatus::Active || !flag(&self.profile(id)?, "removed"),
+            status != DspStatus::Active || !self.profile(id)?.removed,
             "restore_removed_dsp_first",
             409,
         )?;
@@ -437,6 +433,6 @@ impl Store {
         Ok(())
     }
 }
-pub fn profile_default() -> Value {
-    json!({"abbreviation":"","stationCode":"","setupRequired":false,"removed":false,"supportVisible":false})
+pub fn profile_default() -> DspProfile {
+    DspProfile::default()
 }

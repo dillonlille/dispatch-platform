@@ -1,20 +1,13 @@
 //! Admission is conservative: reserve 1 GiB per browser plus 512 MiB for the
 //! platform/host. MemAvailable already includes resident browser pages, so only
 //! their remaining growth allowance is reserved again. Never kill active work.
-use serde::Serialize;
+pub use crate::contracts::BrowserAdmission as Admission;
 use std::{
     fs,
     path::{Component, Path},
 };
 pub const BROWSER_BYTES: u64 = 1024 * 1024 * 1024;
 const HEADROOM_BYTES: u64 = 512 * 1024 * 1024;
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Admission {
-    pub available_bytes: Option<u64>,
-    pub required_bytes: u64,
-    pub can_start: bool,
-}
 impl Admission {
     pub fn new(available: Option<u64>, residents: impl Iterator<Item = u64>) -> Self {
         let required = residents.fold(BROWSER_BYTES + HEADROOM_BYTES, |total, resident| {

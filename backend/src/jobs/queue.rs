@@ -161,7 +161,7 @@ impl Store {
             .query_as::<(String, String)>(DSP_NAMES, [dsps])?
             .into_iter()
             .collect();
-        let mut metrics: HashMap<String, Vec<Value>> = HashMap::new();
+        let mut metrics: HashMap<String, Vec<crate::contracts::JobMetrics>> = HashMap::new();
         for (job, stored) in self.jobs.query_as::<(String, String)>(METRICS, [ids])? {
             metrics
                 .entry(job)
@@ -217,7 +217,7 @@ impl Store {
             &json!({"date":period.from}),
             &self.find_dsp(id)?.timezone,
         )?;
-        let scope = crate::employee_sync::EmployeeSync {
+        let scope = crate::workforce::sync::EmployeeSync {
             employee_code: code.into(),
             from: period.from.clone(),
             to: period.to.clone(),

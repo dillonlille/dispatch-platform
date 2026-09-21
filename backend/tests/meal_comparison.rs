@@ -72,7 +72,10 @@ fn seed(db: &Store, id: &str) -> (String, String) {
 fn union_matches_names_applies_overrides_and_retains_partial_source_only_employees() {
     let (_root, db, id) = store();
     let (date, transporter) = seed(&db, &id);
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(data["timezone"], "America/Los_Angeles");
     assert_eq!(data["rows"].as_array().unwrap().len(), 11);
     assert_eq!(data["drivers"][0]["matchType"], "name");
@@ -100,7 +103,10 @@ fn union_matches_names_applies_overrides_and_retains_partial_source_only_employe
         &json!({"revision":0,"changes":[{"cortexId":transporter,"paycomCode":"E001"}]}),
     )
     .unwrap();
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(data["rows"].as_array().unwrap().len(), 11);
     assert_eq!(data["drivers"][0]["matchType"], "saved");
     let linked = data["rows"]
@@ -127,7 +133,10 @@ fn union_matches_names_applies_overrides_and_retains_partial_source_only_employe
         &json!({"revision":1,"changes":[{"cortexId":transporter,"paycomCode":"E002"}]}),
     )
     .unwrap();
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     let linked = data["rows"]
         .as_array()
         .unwrap()
@@ -142,20 +151,32 @@ fn union_matches_names_applies_overrides_and_retains_partial_source_only_employe
         &json!({"revision":2,"changes":[{"cortexId":transporter,"paycomCode":null}]}),
     )
     .unwrap();
-    let separate = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let separate = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(separate["rows"].as_array().unwrap().len(), 12);
     assert_eq!(separate["drivers"][0]["matchType"], "separate");
     assert_eq!(separate["links"]["separate"], json!([transporter]));
     db.save_employee_links(&id, &actor(&db), &json!({"revision":3,"changes":[{"cortexId":transporter,"paycomCode":null,"automatic":true}]})).unwrap();
-    let automatic = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let automatic = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(automatic["rows"].as_array().unwrap().len(), 11);
     assert_eq!(automatic["drivers"][0]["matchType"], "name");
     assert_eq!(automatic["links"]["separate"], json!([]));
     assert_eq!(
-        db.meal_comparison(&id, "2020-01-01", "UTC").unwrap()["rows"],
+        db.meal_comparison(&id, "2020-01-01", "UTC")
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["rows"],
         json!([])
     );
-    assert!(db.meal_comparison(&id, "not-a-date", "UTC").is_err());
+    assert!(
+        db.meal_comparison(&id, "not-a-date", "UTC")
+            .map(|value| serde_json::to_value(value).unwrap())
+            .is_err()
+    );
     assert_eq!(
         db.collector(&id, Provider::Cortex)
             .unwrap()
@@ -235,7 +256,10 @@ fn newer_empty_scope_suppresses_stale_meals_and_latest_paycom_period_wins() {
     db.publish_meals(&id, "new-scope", &capture, &scope)
         .unwrap();
     db.collector(&id,Provider::Cortex).unwrap().exec("UPDATE meal_publications SET collected_at='2099-01-01T00:00:00.000Z' WHERE job_id='new-scope'",[]).unwrap();
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(data["rows"].as_array().unwrap().len(), 11);
     assert!(
         data["rows"]
@@ -249,7 +273,9 @@ fn newer_empty_scope_suppresses_stale_meals_and_latest_paycom_period_wins() {
     newer["timecards"] = json!([]);
     db.publish(&id, &newer).unwrap();
     assert_eq!(
-        db.meal_comparison(&id, &date, "UTC").unwrap()["rows"],
+        db.meal_comparison(&id, &date, "UTC")
+            .map(|value| serde_json::to_value(value).unwrap())
+            .unwrap()["rows"],
         json!([])
     );
 }
@@ -265,7 +291,10 @@ fn ambiguity_includes_employees_without_punches_and_drivers_without_meals() {
             [],
         )
         .unwrap();
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(data["rows"].as_array().unwrap().len(), 12);
     assert_eq!(data["drivers"][0]["matchType"], "unmatched");
     paycom
@@ -277,7 +306,10 @@ fn ambiguity_includes_employees_without_punches_and_drivers_without_meals() {
     db.collector(&id, Provider::Cortex).unwrap().exec(
         "INSERT INTO meal_itineraries SELECT publication_id,itinerary_id||'-2',transporter_id||'-2',driver_name,route_code,observed_at,route_complete,delivery_coverage,meal_state FROM meal_itineraries",[]
     ).unwrap();
-    let data = db.meal_comparison(&id, &date, "UTC").unwrap();
+    let data = db
+        .meal_comparison(&id, &date, "UTC")
+        .map(|value| serde_json::to_value(value).unwrap())
+        .unwrap();
     assert_eq!(data["rows"].as_array().unwrap().len(), 12);
     assert_eq!(data["drivers"].as_array().unwrap().len(), 1);
     assert_eq!(data["drivers"][0]["matchType"], "unmatched");

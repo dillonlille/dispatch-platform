@@ -129,13 +129,10 @@ for (const width of [1280, 390, 320]) {
       page.getByLabel('Employee directory').getByRole('button', { name, exact: true });
     await switchWithDelay(employee('Jordan Ellis'), 'E002', () => expect(rows).toHaveCount(14));
     const punches = page.getByRole('region', { name: 'Timecard punches' });
-    expect(await punches.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    expect(await punches.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
       true,
     );
-    await punches.scrollIntoViewIfNeeded();
-    await punches.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
+    await rows.last().scrollIntoViewIfNeeded();
     await expect(rows.last()).toBeInViewport();
     await switchWithDelay(employee('Morgan Reed'), 'E003', async () => {
       await expect(rows).toHaveCount(14);

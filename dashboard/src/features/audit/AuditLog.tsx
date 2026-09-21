@@ -18,14 +18,9 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { dateFormatter } from '../../../../shared/date-format.js';
-import type {
-  AuditArea,
-  AuditChange,
-  AuditEvent,
-  AuditPage,
-} from '../../../../shared/contracts/index.js';
-import { api, useData } from '../../app/api.js';
+import { dateFormatter } from '../../lib/date-format.js';
+import type { AuditArea, AuditChange, AuditEvent } from '../../../../shared/contracts/index.js';
+import { useAuditPage, exportAudit } from '../../app/endpoints.js';
 import { DataState, Empty, ErrorBox, SearchInput } from '../../ui/index.js';
 import { downloadCsv } from '../../lib/csv.js';
 import { deviceTimezone, timeOfDay, title } from '../../lib/format.js';
@@ -143,8 +138,7 @@ export function AuditLog() {
     }
     return params;
   }, [area, actor, q, range, within, subject]);
-  const base = '/api/platform/audit';
-  const { data, stale, error } = useData<AuditPage>(`${base}?${query}&limit=${limit}`, 10000);
+  const { data, stale, error } = useAuditPage(query, limit);
   const page = data ?? stale;
 
   const clock = (at: string) => timeOfDay(at, timeZone);
@@ -190,7 +184,7 @@ export function AuditLog() {
     async () => {
       setTruncated('');
       // The server records the export and returns every matching event.
-      const all = await api<AuditPage>(`${base}/export`, Object.fromEntries(query));
+      const all = await exportAudit(query);
       if (all.total > all.events.length)
         setTruncated(
           `Exported the newest ${all.events.length.toLocaleString('en-US')} of ${all.total.toLocaleString('en-US')} events.`,

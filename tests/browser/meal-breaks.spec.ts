@@ -1,17 +1,18 @@
+import { assessMealResponse, type MealComparisonSource } from '../support/assessment.js';
 import type { Page } from '@playwright/test';
 import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
-import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
-import { paycomDefaults } from '../../shared/paycom.js';
+import type { MealSource } from '../../shared/contracts/meals.js';
+import { paycomDefaults } from '../../dashboard/src/lib/paycom.js';
 
 const date = '2026-09-15';
-function sample(): MealComparison {
+function sample(): MealComparisonSource {
   const instant = (clock: string) => new Date(`${date}T${clock}:00-07:00`).toISOString();
   const employee = (
     id: number,
     name: string,
     punches: string[] | null,
     meal: string[] | null,
-  ): MealEmployee => ({
+  ): MealSource => ({
     id: `paycom:E00${id}`,
     name,
     paycom: punches
@@ -128,7 +129,7 @@ test('approved comparison table, filters, details, links, date errors and mobile
         status: 503,
         json: { error: 'platform_busy', message: 'Please try again.' },
       });
-    await route.fulfill({ json: { ...data, date: selected } });
+    await route.fulfill({ json: assessMealResponse({ ...data, date: selected }) });
   });
   await page.route('**/api/dsp/paycom/employee-links', async (route) => {
     const input = route.request().postDataJSON();
@@ -265,7 +266,10 @@ test('Flex gap badges and employee filter preserve comparison statuses and expos
   );
   await page.route('**/api/dsp/paycom/meal-breaks?*', (route) =>
     route.fulfill({
-      json: { ...data, date: new URL(route.request().url()).searchParams.get('date') },
+      json: assessMealResponse({
+        ...data,
+        date: new URL(route.request().url()).searchParams.get('date'),
+      }),
     }),
   );
   await page.setViewportSize({ width: 1586, height: 992 });
@@ -355,7 +359,10 @@ test('switching dates holds the layout until the new day arrives', async ({ page
   await page.route('**/api/dsp/paycom/meal-breaks?*', async (route) => {
     if (new URL(route.request().url()).searchParams.get('date') === '2026-09-14') await hold;
     await route.fulfill({
-      json: { ...sample(), date: new URL(route.request().url()).searchParams.get('date') },
+      json: assessMealResponse({
+        ...sample(),
+        date: new URL(route.request().url()).searchParams.get('date'),
+      }),
     });
   });
   await page.route('**/api/dsp/jobs/meal-breaks?*', async (route) => {
@@ -442,7 +449,10 @@ test('sync remains locked across dates, tabs and reloads until both sources stop
   });
   await page.route('**/api/dsp/paycom/meal-breaks?*', (route) =>
     route.fulfill({
-      json: { ...sample(), date: new URL(route.request().url()).searchParams.get('date') },
+      json: assessMealResponse({
+        ...sample(),
+        date: new URL(route.request().url()).searchParams.get('date'),
+      }),
     }),
   );
   await open(page, false, '2026-09-16');
@@ -547,12 +557,12 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
     const selected = new URL(route.request().url()).searchParams.get('date')!;
     const comparison = sample();
     return route.fulfill({
-      json: {
+      json: assessMealResponse({
         ...comparison,
         date: selected,
         paycomCollectedAt: collectedAt,
         rows: comparison.rows.map((row) => ({ ...row, name: `${row.name} ${selected}` })),
-      },
+      }),
     });
   });
   await page.route('**/api/dsp/jobs/meal-breaks?*', (route) =>

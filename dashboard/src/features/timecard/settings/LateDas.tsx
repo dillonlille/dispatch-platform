@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { api, useData } from '../../../app/api.js';
-import type { PaycomSettings } from '../../../../../shared/paycom.js';
+import { usePaycomSettings, savePaycomSettings } from '../../../app/endpoints.js';
+import type { PaycomSettings } from '../../../../../shared/contracts/paycom.js';
 import { messageOf } from '../../../lib/errors.js';
 
 export function LateDas({
@@ -12,7 +12,7 @@ export function LateDas({
   onSaved: (message: string) => void;
   onError: (message: string) => void;
 }) {
-  const query = useData<PaycomSettings>('/api/dsp/paycom/settings', 0, dspId, dspId);
+  const query = usePaycomSettings(dspId);
   const [saved, setSaved] = useState<PaycomSettings>();
   const [draft, setDraft] = useState<{ time: string; departments: string[] }>();
   const [busy, setBusy] = useState(false);
@@ -39,10 +39,11 @@ export function LateDas({
     onError('');
     try {
       setSaved(
-        await api<PaycomSettings>('/api/dsp/paycom/settings', {
-          revision: settings!.revision,
+        await savePaycomSettings(settings!.revision, {
           // The backend requires every stored preference back, including ones not edited here.
-          values: { ...settings!.values, late_da_time: time, late_da_departments: departments },
+          ...settings!.values,
+          late_da_time: time,
+          late_da_departments: departments,
         }),
       );
       setDraft(undefined);

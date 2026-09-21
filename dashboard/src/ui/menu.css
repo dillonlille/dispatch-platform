@@ -1,0 +1,70 @@
+.account-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 12px);
+  padding: 5px;
+  z-index: 50;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 18px var(--shadow-color);
+}
+.account-popover a,
+.account-popover button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--foreground);
+  background: transparent;
+  text-align: left;
+}
+.account-popover a:hover,
+.account-popover button:hover {
+  background: var(--accent);
+}
+.view-role-menu .account-popover {
+  inset: calc(100% + 6px) auto auto 0;
+  width: max-content;
+  min-width: max(100%, 168px);
+  max-width: min(280px, calc(100vw - 32px));
+  max-height: min(320px, calc(100vh - 96px));
+  overflow-y: auto;
+}
+.view-role-menu .account-popover button {
+  justify-content: space-between;
+  min-height: 0;
+}
+.view-role-menu .account-popover span {
+  margin: 0;
+  color: inherit;
+}
+.row-menu {
+  position: relative;
+  display: inline-block;
+}
+.row-menu summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+.row-menu summary::-webkit-details-marker {
+  display: none;
+}
+.row-menu .account-popover {
+  position: fixed;
+  inset: auto;
+  width: min(200px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  visibility: hidden;
+}

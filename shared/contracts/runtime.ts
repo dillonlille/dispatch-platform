@@ -1,8 +1,19 @@
+import { paycomSettingsSchema } from './runtime-settings.js';
+import { auditPageSchema } from './runtime-audit.js';
+import { platformHealthSchema } from './runtime-platform.js';
+import {
+  dailyTimecardsSchema,
+  employeesSchema,
+  employeeTimecardSchema,
+  mealComparisonSchema,
+} from './runtime-workforce.js';
 import { z } from 'zod';
 import type { Dsp } from './generated/Dsp';
 import {
   permissions,
   type DspView,
+  type DspProfile,
+  type DspSummary,
   type Job,
   type JobMetrics,
   type SessionView,
@@ -43,21 +54,22 @@ const profile = z.object({
   setupRequired: z.boolean(),
   removed: z.boolean(),
   supportVisible: z.boolean(),
-});
+}) satisfies z.ZodType<DspProfile>;
 const permission = z.enum(permissions);
+const dspSummary = dsp
+  .extend({
+    profile,
+    ownerEmail: text.nullable(),
+    ownerStatus: z.enum(['active', 'invited', 'missing']),
+    paycom: connectionStatus,
+    lastCollection: text.nullable(),
+    role: text.nullable(),
+  })
+  .passthrough() satisfies z.ZodType<DspSummary>;
 export const sessionSchema = z.object({
   user: userSchema,
   csrf: text.min(1),
-  dsps: z.array(
-    dsp.extend({
-      profile,
-      ownerEmail: text.nullable(),
-      ownerStatus: z.enum(['active', 'invited', 'missing']),
-      paycom: connectionStatus,
-      lastCollection: text.nullable(),
-      role: text.nullable(),
-    }),
-  ),
+  dsps: z.array(dspSummary),
   development: z.boolean(),
   environment,
   release: text,
@@ -81,8 +93,8 @@ const pageRead = z.object({
   contentMs: milliseconds,
   extractionMs: milliseconds,
   error: text.nullable(),
-  pendingRequests: count.nullable().optional(),
-  documentState: z.enum(['loading', 'interactive', 'complete']).nullable().optional(),
+  pendingRequests: count.nullable().default(null),
+  documentState: z.enum(['loading', 'interactive', 'complete']).nullable().default(null),
 });
 const metricsSchema = z.object({
   attempt: count,
@@ -93,7 +105,7 @@ const metricsSchema = z.object({
   phase: z
     .enum(['starting', 'authentication', 'verification', 'collection', 'publication'])
     .nullable(),
-  detail: text.nullable().optional(),
+  detail: text.nullable().default(null),
   queueMs: milliseconds,
   elapsedMs: milliseconds,
   authenticationMs: milliseconds.nullable(),
@@ -102,8 +114,8 @@ const metricsSchema = z.object({
   publicationMs: milliseconds.nullable(),
   employees: count.nullable(),
   timecards: count.nullable(),
-  itineraries: count.nullable().optional(),
-  meals: count.nullable().optional(),
+  itineraries: count.nullable().default(null),
+  meals: count.nullable().default(null),
   peakRssBytes: count.nullable(),
   peakPssBytes: count.nullable(),
   peakPrivateBytes: count.nullable(),
@@ -114,10 +126,10 @@ const metricsSchema = z.object({
       completed: count,
       retries: count,
       recovered: count,
-      resumed: count.optional(),
-      earlyReady: count.optional(),
-      direct: count.optional(),
-      spotChecked: count.optional(),
+      resumed: count.default(0),
+      earlyReady: count.default(0),
+      direct: count.default(0),
+      spotChecked: count.default(0),
       totalMs: milliseconds,
       active: z.array(pageRead),
       slowest: z.array(pageRead),
@@ -161,6 +173,14 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
   let schema: z.ZodType | undefined;
   if (method === 'GET') {
     if (route === '/api/session') schema = sessionSchema;
+    else if (route === '/api/platform/dsps') schema = z.array(dspSummary);
+    else if (route === '/api/dsp/paycom/settings') schema = paycomSettingsSchema;
+    else if (route === '/api/platform/audit') schema = auditPageSchema;
+    else if (route === '/api/platform/health') schema = platformHealthSchema;
+    else if (route === '/api/dsp/employees') schema = employeesSchema;
+    else if (route && /^\/api\/dsp\/employees\/[^/]+$/.test(route)) schema = employeeTimecardSchema;
+    else if (route === '/api/dsp/timecards') schema = dailyTimecardsSchema;
+    else if (route === '/api/dsp/paycom/meal-breaks') schema = mealComparisonSchema;
     else if (route === '/api/platform/jobs' || route === '/api/dsp/jobs') schema = jobsSchema;
   } else {
     if (
@@ -175,6 +195,8 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
     )
       schema = okSchema;
     else if (route === '/api/session/dsp') schema = viewSchema;
+    else if (route === '/api/dsp/paycom/settings') schema = paycomSettingsSchema;
+    else if (route === '/api/platform/audit/export') schema = auditPageSchema;
     else if (route === '/api/dsp/jobs' || route === '/api/dsp/cortex/meal-breaks/collect')
       schema = jobSchema;
     else if (route === '/api/dsp/jobs/meal-breaks')

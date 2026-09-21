@@ -3,7 +3,7 @@ use crate::{
     Error, Result, State,
     contracts::Presence,
     contracts::{InvitationRequest, Member as PublicMember},
-    db::{Store, flag},
+    db::Store,
     http::{
         input::{Input, Reply},
         route::{Anyone, Dsp, Member, Public, Route, async_post, read, write},
@@ -72,7 +72,7 @@ fn invite(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     db.platform.transaction(|| {
         let raw = db.invite(&c.auth, id, &email, &role.id)?;
         // The first owner of a DSP that is still being set up is also asked to finish that.
-        let setup = role.system && flag(&db.profile(id)?, "setupRequired");
+        let setup = role.system && db.profile(id)?.setup_required;
         db.invitation_mail(&c.auth, &email, &c.dsp.name, &role.name, &raw, setup)
     })?;
     Ok(Reply::json(

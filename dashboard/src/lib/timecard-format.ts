@@ -1,4 +1,4 @@
-import { dateFormatter } from '../../../shared/date-format.js';
+import { dateFormatter } from './date-format.js';
 
 export function hoursAndMinutes(hours: number) {
   const minutes = Math.round(hours * 60);

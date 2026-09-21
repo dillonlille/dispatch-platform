@@ -1,0 +1,48 @@
+.settings-section {
+  border-bottom: 1px solid var(--border);
+  grid-template-columns: minmax(170px, 1fr) minmax(300px, 2fr);
+  gap: 48px;
+  max-width: 900px;
+  padding: 32px 0;
+  display: grid;
+}
+.settings-section > div > p {
+  color: var(--muted-foreground);
+  max-width: 240px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.settings-section:last-child {
+  border-bottom: 0;
+}
+@media (width <= 600px) {
+  .settings-section {
+    grid-template-columns: 1fr;
+    gap: 25px;
+    padding: 25px 0;
+  }
+  .settings-section > div > p {
+    max-width: 100%;
+  }
+}
+.settings-section > form {
+  max-width: 448px;
+}
+.settings-section > form > button {
+  margin-top: 24px;
+}
+.settings-section .details {
+  padding: 0;
+}
+@media (max-width: 760px) {
+  .settings-section > form {
+    max-width: 100%;
+  }
+}
+
+.settings-connections > .page-heading {
+  display: none;
+}
+.page-container > .restored-tabs + .settings-section {
+  margin-top: 8px;
+}

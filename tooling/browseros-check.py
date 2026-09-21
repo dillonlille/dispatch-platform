@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 # The one list of native suites, shared with the check that no test file is left out.
-SHARDS = json.loads((Path(__file__).resolve().parent / "test-plan.json").read_text())["native"]
+SHARDS = json.loads((Path(__file__).resolve().parent / "ci/test-plan.json").read_text())["native"]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

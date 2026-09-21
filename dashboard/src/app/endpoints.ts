@@ -1,3 +1,5 @@
+import type { PaycomPreferences, PaycomSettings } from '../../../shared/contracts/paycom.js';
+import type { MealComparison } from '../../../shared/contracts/meals.js';
 // The endpoints whose responses are generated from the backend's Rust types: each address
 // is written once, next to the type it answers with. Other endpoints still call `api` and
 // `useData` directly; move one here when its response gains a generated type.
@@ -6,12 +8,16 @@ import { useEffect } from 'react';
 import { prefetchData } from './prefetch.js';
 import { dataCache } from './data-cache.js';
 import type {
+  AuditPage,
+  PlatformHealth,
   CollectionSchedule,
   CollectionSchedules,
   Connection,
   DspSummary,
   DspView,
   EmployeeTimecardPeriod,
+  EmployeesResponse,
+  DailyTimecards,
   EmployeeTimecardResponse,
   Job,
   MailMessage,
@@ -20,7 +26,7 @@ import type {
   Role,
   SessionView,
 } from '../../../shared/contracts/index.js';
-import type { ScheduleInput } from '../../../shared/schedules.js';
+import type { ScheduleInput } from '../../../shared/contracts/schedules.js';
 
 export const getSession = () => api<SessionView>('/api/session');
 export const employeeTimecardUrl = (code: string, period?: EmployeeTimecardPeriod | null) =>
@@ -98,3 +104,41 @@ export const useConnection = (provider: Connection['provider'], poll = 0) =>
     provider === 'paycom' ? '/api/dsp/connections' : connectionUrl(provider),
     poll,
   );
+
+export const useEmployees = (
+  query: string,
+  status: string,
+  descending: boolean,
+  refreshKey: string,
+) =>
+  useCachedData<EmployeesResponse>(
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${descending ? 'desc' : 'asc'}`,
+    0,
+    refreshKey,
+  );
+export const dailyTimecardsUrl = (date: string, sort: string, descending: boolean) =>
+  `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${descending ? 'desc' : 'asc'}`;
+export const useDailyTimecards = (
+  date: string,
+  sort: string,
+  descending: boolean,
+  refreshKey?: string | null,
+) => useCachedData<DailyTimecards>(dailyTimecardsUrl(date, sort, descending), 0, refreshKey);
+export const mealComparisonUrl = (date: string) =>
+  `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
+export const useMealComparison = (date: string, refreshKey?: string | null) =>
+  useCachedData<MealComparison>(mealComparisonUrl(date), 0, refreshKey);
+
+const paycomSettings = '/api/dsp/paycom/settings';
+/** Editors use a fresh DSP-scoped read; the timecard view shares its session cache. */
+export const usePaycomSettings = (dspId?: string) =>
+  useData<PaycomSettings>(paycomSettings, 0, dspId, dspId ?? paycomSettings, dspId === undefined);
+export const savePaycomSettings = (revision: number, values: PaycomPreferences) =>
+  api<PaycomSettings>(paycomSettings, { revision, values });
+export const usePlatformHealth = (poll = 0) =>
+  useData<PlatformHealth>('/api/platform/health', poll);
+const audit = '/api/platform/audit';
+export const useAuditPage = (query: URLSearchParams, limit: number) =>
+  useData<AuditPage>(`${audit}?${query}&limit=${limit}`, 10000);
+export const exportAudit = (query: URLSearchParams) =>
+  api<AuditPage>(`${audit}/export`, Object.fromEntries(query));

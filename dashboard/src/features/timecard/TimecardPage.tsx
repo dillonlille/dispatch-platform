@@ -6,9 +6,9 @@ import type {
   DspView,
   EmployeeTimecardResponse,
 } from '../../../../shared/contracts/index.js';
-import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
+import { paycomDefaults } from '../../lib/paycom.js';
 import { api, useCachedData, useData } from '../../app/api.js';
-import { syncEmployeeTimecard } from '../../app/endpoints.js';
+import { syncEmployeeTimecard, usePaycomSettings } from '../../app/endpoints.js';
 import { dataCache } from '../../app/data-cache.js';
 import { useCollectionUpdates } from '../../app/live-collection.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
@@ -27,7 +27,7 @@ export function PaycomPage({ view }: { view: DspView }) {
   const canCollect = can(view, 'collections.run');
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
-  const preferences = useCachedData<PaycomSettings>('/api/dsp/paycom/settings');
+  const preferences = usePaycomSettings();
   useCollectionUpdates();
   const tab = selectedTab ?? 'timecards';
   const [syncRevision, setSyncRevision] = useState(0);
