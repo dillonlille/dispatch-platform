@@ -1,16 +1,17 @@
 import { useUpdateState } from '../../../app/browser-update.js';
-import { useCollectionUpdates } from '../../../app/live-collection.js';
-import { Fragment, useMemo, useState } from 'react';
-import { AlertTriangle, Globe, Info, Link2, RefreshCw } from 'lucide-react';
-import { useData } from '../../../app/api.js';
+import { useMemo, useState } from 'react';
+import { AlertTriangle, Download, Globe, Info, Link2, RefreshCw } from 'lucide-react';
+import { useCachedData } from '../../../app/api.js';
+import { useTableState } from '../../../app/useTableState.js';
 import {
   DataState,
+  DataTable,
+  downloadTable,
   Empty,
   ErrorBox,
-  Pagination,
   SearchInput,
-  SortHeader,
-  usePagination,
+  TablePagination,
+  useDataTable,
 } from '../../../ui/index.js';
 import { personName, time } from '../../../lib/format.js';
 import {
@@ -21,9 +22,9 @@ import {
 } from '../../../../../shared/meal-breaks.js';
 import type { PaycomPreferences } from '../../../../../shared/paycom.js';
 import { PaycomDateControls } from '../DateControls.js';
-import { Source } from './cells.js';
-import { EmployeeRows } from './EmployeeRows.js';
+import { MealDetail, mealColumns, mealLines } from './mealColumns.js';
 import { LinkEmployees } from './LinkEmployees.js';
+import { useAdjacentDays } from '../useAdjacentDays.js';
 import './meal-breaks.css';
 
 export function MealBreaksPage({
@@ -44,33 +45,31 @@ export function MealBreaksPage({
   preferences: PaycomPreferences;
 }) {
   const [query, setQuery] = useUpdateState('meal-query', ''),
-    [filter, setFilter] = useUpdateState('meal-filter', 'all'),
-    [requestedPage, setPage] = useUpdateState('meal-page', 0),
-    [descending, setDescending] = useUpdateState('meal-descending', false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set()),
-    [linking, setLinking] = useState(false);
-  const liveRevision = useCollectionUpdates(date);
-  const request = useData<MealComparison>(
-    `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`,
-    0,
-    `${refreshKey}:${liveRevision}`,
-    date,
-  );
+    [filter, setFilter] = useUpdateState('meal-filter', 'all');
+  const state = useTableState('meal', { id: 'employee', desc: false });
+  const [linking, setLinking] = useState(false);
+  const url = `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
+  const request = useCachedData<MealComparison>(url, 0, refreshKey);
+  useAdjacentDays(url, date, today, request.data);
   const current = request.data?.date === date ? request.data : undefined;
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? request.stale;
   const shownDate = data?.date ?? date;
   const zone = data?.timezone ?? timezone;
-  const name = (row: MealEmployee) => personName(row.name, preferences.name_order);
+  const nameOrder = preferences.name_order;
   const lateTime = preferences.late_da_time,
     lateDepartments = preferences.late_da_departments;
   const rows = useMemo(
     () =>
-      (data?.rows ?? []).map((row) => ({
-        row,
-        summary: mealPairs(row, shownDate, { time: lateTime, departments: lateDepartments }),
-      })),
-    [data, shownDate, lateTime, lateDepartments],
+      (data?.rows ?? []).map((row: MealEmployee) =>
+        mealLines(
+          row,
+          mealPairs(row, shownDate, { time: lateTime, departments: lateDepartments }),
+          personName(row.name, nameOrder),
+          shownDate,
+        ),
+      ),
+    [data, shownDate, lateTime, lateDepartments, nameOrder],
   );
   const counts = {
     all: rows.length,
@@ -79,25 +78,33 @@ export function MealBreaksPage({
     missing: rows.filter((r) => r.summary.missing).length,
     gaps: rows.filter((r) => r.summary.longGap).length,
   };
-  const filtered = rows
-    .filter(
-      ({ row, summary }) =>
-        (filter === 'all' ||
-          (filter === 'late'
-            ? summary.lateIn
-            : filter === 'different'
-              ? summary.different
-              : filter === 'gaps'
-                ? summary.longGap
-                : summary.missing)) &&
-        `${name(row)} ${row.paycom?.employeeCode ?? ''} ${row.cortex.map((m) => m.driverName).join(' ')}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-    )
-    .sort((a, b) => (descending ? -1 : 1) * name(a.row).localeCompare(name(b.row)));
-  const pageSize = 100;
-  const { page, start, end } = usePagination(requestedPage, filtered.length, pageSize);
-  const visible = filtered.slice(start, end);
+  const filtered = useMemo(
+    () =>
+      rows.filter(
+        ({ row, summary, name }) =>
+          (filter === 'all' ||
+            (filter === 'late'
+              ? summary.lateIn
+              : filter === 'different'
+                ? summary.different
+                : filter === 'gaps'
+                  ? summary.longGap
+                  : summary.missing)) &&
+          `${name} ${row.paycom?.employeeCode ?? ''} ${row.cortex.map((m) => m.driverName).join(' ')}`
+            .toLowerCase()
+            .includes(query.toLowerCase()),
+      ),
+    [rows, filter, query],
+  );
+  const table = useDataTable({
+    columns: mealColumns,
+    rows: filtered,
+    rowId: (line) => line.id,
+    state,
+    pageSize: 100,
+    subRows: (line) => line.more,
+  });
+  const setPage = state.setPage;
   const unlinked = data?.drivers.filter((d) => d.matchType === 'unmatched').length ?? 0;
   const automatic = data?.drivers.filter((d) => d.matchType === 'name').length ?? 0;
   const separate = data?.drivers.filter((d) => d.matchType === 'separate').length ?? 0;
@@ -121,10 +128,18 @@ export function MealBreaksPage({
           onChange={(value) => {
             onDateChange(value);
             setPage(0);
-            setExpanded(new Set());
+            table.collapseAll();
             setLinking(false);
           }}
         />
+        <button
+          className="icon-button"
+          aria-label="Export meal breaks"
+          disabled={!filtered.length}
+          onClick={() => downloadTable(table, `meal-breaks-${shownDate}.csv`)}
+        >
+          <Download size={16} />
+        </button>
       </header>
       <div className="meal-toolbar">
         <SearchInput
@@ -225,80 +240,19 @@ export function MealBreaksPage({
                 aria-label="Meal break comparison"
                 tabIndex={0}
               >
-                <table className="meal-table">
-                  <caption className="sr-only">
-                    Meal breaks for {shownDate}. Paycom local clock times and Flex station-local
-                    times, compared to the minute.
-                  </caption>
-                  <thead>
-                    <tr>
-                      <SortHeader
-                        scope="col"
-                        className="meal-sort"
-                        direction={descending ? 'desc' : 'asc'}
-                        onSort={() => setDescending(!descending)}
-                        indicator={<span aria-hidden="true">{descending ? '↓' : '↑'}</span>}
-                      >
-                        {'Employee '}
-                      </SortHeader>
-                      <th scope="col">
-                        IN DAY
-                        <Source name="Paycom" />
-                      </th>
-                      <th scope="col">
-                        Last delivery
-                        <Source name="Flex" />
-                      </th>
-                      <th scope="col" className="meal-lunch">
-                        OUT LUNCH
-                      </th>
-                      <th scope="col" className="meal-lunch">
-                        IN LUNCH
-                      </th>
-                      <th scope="col">
-                        First delivery
-                        <Source name="Flex" />
-                      </th>
-                      <th scope="col">
-                        OUT DAY
-                        <Source name="Paycom" />
-                      </th>
-                      <th scope="col">Comparison</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map(({ row, summary }) => (
-                      <Fragment key={row.id}>
-                        <EmployeeRows
-                          row={row}
-                          summary={summary}
-                          date={shownDate}
-                          name={name(row)}
-                          expanded={expanded.has(row.id)}
-                          toggle={() =>
-                            setExpanded((previous) => {
-                              const next = new Set(previous);
-                              if (next.has(row.id)) next.delete(row.id);
-                              else next.add(row.id);
-                              return next;
-                            })
-                          }
-                        />
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  table={table}
+                  className="meal-table"
+                  caption={`Meal breaks for ${shownDate}. Paycom local clock times and Flex station-local times, compared to the minute.`}
+                  rowClassName={(_, { depth }) => (depth ? 'meal-extra' : undefined)}
+                  renderDetail={(line) => <MealDetail line={line} />}
+                  detailClassName="meal-detail"
+                />
               </div>
               {!filtered.length && (
                 <Empty title="No matching employees">Try another name or filter.</Empty>
               )}
-              <Pagination
-                variant="pages"
-                page={page}
-                pageSize={pageSize}
-                total={filtered.length}
-                onChange={setPage}
-              />
+              <TablePagination table={table} variant="pages" />
             </div>
           )
         }

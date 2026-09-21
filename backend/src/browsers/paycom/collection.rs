@@ -278,6 +278,32 @@ pub(super) fn project(record: &Value, employee: &str) -> Result<Vec<Value>> {
     }).collect()
 }
 impl Driver {
+    pub(super) async fn collect_employee(
+        &mut self,
+        run: &Run<'_>,
+        employee: &Value,
+        requested: &crate::contracts::EmployeeTimecardPeriod,
+    ) -> Result<Value> {
+        self.credentials = Value::Null;
+        self.assistance = None;
+        let period = requested.provider_period()?;
+        run.progress(20, format!("Reading timecard for {}", s(employee, "code")))
+            .await?;
+        self.new_page().await?;
+        let records = read_timecard(
+            &mut self.page,
+            &self.origin,
+            employee,
+            &period,
+            run.metrics,
+            0,
+            &Direct::new(&[0]),
+        )
+        .await?;
+        Ok(json!({"employees":[employee],"timecards":records,
+            "sources":[{"employeeCode":employee["code"],"periodKey":period["key"],"url":source_url(&self.origin,employee,&period)}],
+            "from":requested.from,"to":requested.to,"collectedAt":db::iso()}))
+    }
     pub async fn collect<F, Fut>(
         &mut self,
         timezone: &str,
@@ -904,6 +930,29 @@ mod tests {
             assert!(selected_body(&body, date("2026-09-16")?).is_err());
         }
         assert!(codes(&json!(["AA01", "aa01"])).is_err());
+        Ok(())
+    }
+    #[test]
+    fn requested_days_keep_the_cycle_observed_in_paycom() -> Result<()> {
+        let mut observed = body();
+        observed["startDate"] = json!("2026-09-06");
+        observed["endDate"] = json!("2026-09-19");
+        for (day, from, to) in [
+            ("2026-09-05", "2026-08-23", "2026-09-05"),
+            ("2026-09-06", "2026-09-06", "2026-09-19"),
+            ("2026-09-19", "2026-09-06", "2026-09-19"),
+            ("2026-09-20", "2026-09-20", "2026-10-03"),
+            ("2025-12-31", "2025-12-28", "2026-01-10"),
+            ("2026-03-08", "2026-03-08", "2026-03-21"),
+            ("2028-02-29", "2028-02-20", "2028-03-04"),
+        ] {
+            let (selected, period, _) = selected_body(&observed, date(day)?)?;
+            assert_eq!(selected["startDate"], from);
+            assert_eq!(selected["endDate"], to);
+            assert_eq!(period["dates"].as_array().unwrap().len(), 14);
+            assert_eq!(period["dates"][0], from);
+            assert_eq!(period["dates"][13], to);
+        }
         Ok(())
     }
     #[test]

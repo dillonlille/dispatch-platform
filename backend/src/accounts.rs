@@ -1,6 +1,6 @@
 use super::{
     Error, Result,
-    contracts::{Dsp, DspStatus, PublicUser, UserStatus},
+    contracts::{Dsp, DspSetupRequest, DspStatus, PublicUser, UserStatus},
     crypto,
     db::{Db, FromRow, Row, Store, flag, iso, now, s},
     ensure,
@@ -9,6 +9,21 @@ use super::{
 };
 use rusqlite::params;
 use serde_json::{Value, json};
+/// One fixed lifetime drives both the server deadline and the browser cookie.
+#[derive(Clone, Copy)]
+pub enum SessionLifetime {
+    Standard,
+    Remembered,
+}
+impl SessionLifetime {
+    pub fn seconds(self) -> i64 {
+        match self {
+            Self::Standard => 8 * 60 * 60,
+            Self::Remembered => 3 * 24 * 60 * 60,
+        }
+    }
+}
+
 const INVITATION_TTL: i64 = 7 * 86400000;
 const SESSION_USER: &str = "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id \
     WHERE s.hash=? AND s.expires_at>? AND s.user_version=u.version AND u.status='active'";
@@ -17,10 +32,16 @@ const RESET_USER: &str = "SELECT u.* FROM resets r JOIN users u ON u.id=r.user_i
     AND u.status='active'";
 const INVITER: &str = "SELECT u.first_name||' '||u.last_name name,u.platform_owner \
     FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?";
-const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,r.name role,r.id roleId,\
+const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,d.timezone,r.name role,r.id roleId,\
     r.system owner FROM invitations i JOIN dsps d ON d.id=i.dsp_id \
     JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL \
     AND i.expires_at>? AND d.status='active' AND d.environment=?";
+
+/// What a queued message is for. Diagnostics joins it back to the invitation or account.
+enum MailContext<'a> {
+    Invitation { hash: &'a str },
+    Reset { user: &'a str },
+}
 
 /// A row of `users`, with the password hash: it never leaves the backend.
 #[derive(Clone)]
@@ -318,8 +339,9 @@ impl Store {
             .ok_or_else(|| Error::new("invitation_expired", 404))?;
         let owner = flag(&invitation, "owner");
         invitation.as_object_mut().unwrap().remove("owner");
-        invitation["onboarding"] =
-            json!(owner && flag(&self.profile(s(&invitation, "dspId"))?, "setupRequired"));
+        let profile = self.profile(s(&invitation, "dspId"))?;
+        invitation["onboarding"] = json!(owner && flag(&profile, "setupRequired"));
+        invitation["stationCode"] = profile["stationCode"].clone();
         Ok(invitation)
     }
     pub fn recovery(&self, email: &str) -> Result<()> {
@@ -342,7 +364,7 @@ impl Store {
                     &user.email,
                     &format!("{}/#reset?token={raw}", self.config.origin),
                 );
-                self.queue_mail(&user.email, &mail.subject, &mail.text, Some(&mail.html))
+                self.queue_mail(&user.email, &mail, MailContext::Reset { user: &user.id })
             })?;
         }
         Ok(())
@@ -373,14 +395,21 @@ impl Store {
             expires_at: now() + INVITATION_TTL,
             onboarding,
         });
-        self.queue_mail(to, &mail.subject, &mail.text, Some(&mail.html))
+        self.queue_mail(
+            to,
+            &mail,
+            MailContext::Invitation {
+                hash: &crypto::sha(raw),
+            },
+        )
     }
-    fn queue_mail(&self, to: &str, subject: &str, text: &str, html: Option<&str>) -> Result<()> {
+    fn queue_mail(&self, to: &str, mail: &email::Message, context: MailContext) -> Result<()> {
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
+        let (text, html) = (&mail.text, Some(&mail.html));
         let subject = if self.config.env().is_preview() {
-            format!("[Dispatch Dev] {subject}")
+            format!("[Dispatch Dev] {}", mail.subject)
         } else {
-            subject.to_owned()
+            mail.subject.clone()
         };
         let id = crypto::id("mail")?;
         let encrypted = crypto::encrypt(
@@ -388,9 +417,14 @@ impl Store {
             &id,
             &json!({"to":to,"subject":subject,"text":text,"html":html,"environment":self.config.environment,"origin":self.config.origin}),
         )?;
+        let (kind, invitation, user) = match context {
+            MailContext::Invitation { hash } => ("invitation", Some(hash), None),
+            MailContext::Reset { user } => ("reset", None, Some(user)),
+        };
         self.platform.exec(
-            "INSERT INTO outbox(id,encrypted_message,available_at,created_at) VALUES (?,?,?3,?3)",
-            params![id, encrypted, now()],
+            "INSERT INTO outbox(id,encrypted_message,available_at,created_at,kind,\
+             invitation_hash,user_id) VALUES (?,?,?3,?3,?,?,?)",
+            params![id, encrypted, now(), kind, invitation, user],
         )?;
         Ok(())
     }
@@ -474,6 +508,7 @@ impl super::State {
         first: String,
         last: String,
         password: String,
+        dsp_profile: Option<DspSetupRequest>,
     ) -> Result<Value> {
         let token = raw.clone();
         let (invite, existing) = self
@@ -483,6 +518,11 @@ impl super::State {
                 Ok((invite, existing))
             })
             .await?;
+        ensure(
+            dsp_profile.is_none() || flag(&invite, "onboarding"),
+            "permission_denied",
+            403,
+        )?;
         let expected = existing.clone();
         let encoded = self
             .password_work(move || {
@@ -554,6 +594,9 @@ impl super::State {
                     &changes,
                     Some(("member", &id)),
                 )?;
+                if let Some(profile) = &dsp_profile {
+                    db.complete_dsp_profile(dsp, &id, profile)?;
+                }
                 Ok(json!({"email":invite["email"],"dspId":invite["dspId"]}))
             })
         })
@@ -564,6 +607,7 @@ impl super::State {
         email: String,
         password: String,
         ip: String,
+        lifetime: SessionLifetime,
     ) -> Result<String> {
         let permit = self
             .password_slots
@@ -605,6 +649,7 @@ impl super::State {
                 401,
             )?;
             let raw = crypto::token()?;
+            let created_at = now();
             db.platform.transaction(|| {
                 db.platform
                     .exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
@@ -614,8 +659,8 @@ impl super::State {
                         crypto::sha(&raw),
                         row.user.id,
                         row.version,
-                        now() + 8 * 3600000,
-                        now()
+                        created_at + lifetime.seconds() * 1000,
+                        created_at
                     ],
                 )?;
                 db.audit(Some(&row.user.id), None, "account.signed_in", "")

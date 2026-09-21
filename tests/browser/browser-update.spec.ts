@@ -1,4 +1,4 @@
-import { test, expect, demo, login } from './fixtures.js';
+import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
 import type { Page } from '@playwright/test';
 
 async function loginWithClock(page: Page) {
@@ -124,10 +124,11 @@ test('unavailable update check does not refresh or interrupt sign in', async ({ 
   await page.route('**/api/browser-update', (route) =>
     route.fulfill({ status: 503, body: 'Restarting' }),
   );
-  await page.clock.install();
+  // Freeze before navigation so animation frames cannot advance past a wall-clock target.
+  await page.clock.install({ time: new Date('2026-09-20T12:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-09-20T12:01:00Z'));
   await page.goto('/');
   await page.getByLabel('Email address').fill(demo.email);
-  await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.clock.runFor(10000);
   expect(loads).toBe(1);
   await expect(page.getByLabel('Email address')).toHaveValue(demo.email);
@@ -157,7 +158,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
   }, dsp.id);
   await expect(page.getByRole('heading', { name: 'Timecard', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Meal Breaks', exact: true }).click();
-  await page.getByLabel('Paycom date').fill('2026-09-15');
+  await setDate(page, '2026-09-15');
   await page.getByLabel('Search meal break employees').fill('Avery');
   await page.evaluate(() => window.scrollTo(0, 200));
   const scroll = await page.evaluate(() => window.scrollY);
@@ -178,7 +179,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
     'aria-selected',
     'true',
   );
-  await expect(page.getByLabel('Paycom date')).toHaveValue('2026-09-15');
+  await expectDate(page, '2026-09-15');
   await expect(page.getByLabel('Search meal break employees')).toHaveValue('Avery');
   await expect
     .poll(async () => {

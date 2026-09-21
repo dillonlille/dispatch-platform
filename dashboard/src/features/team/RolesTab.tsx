@@ -1,10 +1,11 @@
 import { Ellipsis, Lock } from 'lucide-react';
 import type { DspView, Role } from '../../../../shared/contracts/index.js';
-import { DataState, Empty } from '../../ui/index.js';
+import { DataState, DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
 import { can, permissionLabels } from '../../app/permissions.js';
 import { assignable } from './assignable.js';
 
 const visible = 2;
+const none: Role[] = [];
 
 function PermissionSummary({ role }: { role: Role }) {
   if (role.owner) return <span className="muted">All permissions</span>;
@@ -43,49 +44,55 @@ export function RolesTab({
   edit: (role: Role) => void;
 }) {
   const manage = can(view, 'roles.manage');
+  const columns: TableColumn<Role>[] = [
+    {
+      id: 'role',
+      header: 'Role',
+      headerClassName: 'role-name-column',
+      value: (role) => role.name,
+      cell: (role) => (
+        <strong className="role-name">
+          {role.name}
+          {role.owner && <Lock size={14} aria-label="Locked" />}
+        </strong>
+      ),
+    },
+    {
+      id: 'permissions',
+      header: 'Permissions',
+      cell: (role) => <PermissionSummary role={role} />,
+    },
+    {
+      id: 'members',
+      header: 'Members',
+      headerClassName: 'role-members-column',
+      className: 'muted',
+      value: (role) => role.members,
+      cell: (role) => role.members,
+    },
+    {
+      id: 'actions',
+      header: <span className="sr-only">Actions</span>,
+      cell: (role) =>
+        manage &&
+        !role.owner &&
+        assignable(view, role) && (
+          <button
+            className="icon-button"
+            aria-label={`Edit ${role.name}`}
+            onClick={() => edit(role)}
+          >
+            <Ellipsis size={18} />
+          </button>
+        ),
+    },
+  ];
+  const table = useDataTable({ columns, rows: roles ?? none, rowId: (role) => role.id });
   return (
     <DataState data={roles}>
       {(roles) => (
         <div className="table-wrap role-table">
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: '30%' }}>Role</th>
-                <th>Permissions</th>
-                <th style={{ width: '14%' }}>Members</th>
-                <th>
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map((role) => (
-                <tr key={role.id}>
-                  <td>
-                    <strong className="role-name">
-                      {role.name}
-                      {role.owner && <Lock size={14} aria-label="Locked" />}
-                    </strong>
-                  </td>
-                  <td>
-                    <PermissionSummary role={role} />
-                  </td>
-                  <td className="muted">{role.members}</td>
-                  <td>
-                    {manage && !role.owner && assignable(view, role) && (
-                      <button
-                        className="icon-button"
-                        aria-label={`Edit ${role.name}`}
-                        onClick={() => edit(role)}
-                      >
-                        <Ellipsis size={18} />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable table={table} />
           {!roles.length && <Empty title="No roles" />}
         </div>
       )}

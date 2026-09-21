@@ -131,3 +131,70 @@ test('existing-account invitations require the account password and revocation r
   );
   assert.equal((await f.request(`/api/invitations/${raw}`)).status, 404);
 });
+
+test('owner onboarding validates DSP setup before accepting and denies setup through member invites', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const platform = await f.client();
+  const created = await platform.post('/api/platform/dsps', { ownerEmail: 'setup@dispatch.test' });
+  const id = created.value.dsp.id;
+  const token = /token=([A-Za-z0-9_-]{43})/.exec(
+    (await capturedMail(f.root, 'setup@dispatch.test')).text,
+  )![1];
+  const invite = `/api/invitations/${token}`;
+  const account = { firstName: 'Setup', lastName: 'Owner', password };
+  const dspProfile = {
+    name: 'Northstar Logistics',
+    abbreviation: 'NSTL',
+    stationCode: 'dot4',
+    timezone: 'America/Los_Angeles',
+  };
+  for (const invalid of [
+    { abbreviation: '' },
+    { abbreviation: '   ' },
+    { stationCode: '!!!' },
+    { timezone: 'not/a-timezone' },
+  ]) {
+    assert.equal(
+      (
+        await f.request(invite + '/accept', {
+          ...account,
+          dspProfile: { ...dspProfile, ...invalid },
+        })
+      ).status,
+      400,
+    );
+    assert.equal((await f.request(invite)).value.onboarding, true);
+  }
+  assert.equal((await f.request(invite + '/accept', { ...account, dspProfile })).status, 200);
+  const user = await f.client('setup@dispatch.test');
+  const view = await user.select(id);
+  assert.equal(view.dsp.name, 'Northstar Logistics');
+  assert.equal(view.dsp.timezone, 'America/Los_Angeles');
+  assert.deepEqual(
+    [view.profile.abbreviation, view.profile.stationCode, view.profile.setupRequired],
+    ['NSTL', 'DOT4', false],
+  );
+  assert.equal((await f.request(invite + '/accept', { ...account, dspProfile })).status, 404);
+  assert.equal(
+    (await user.post('/api/dsp/profile', { ...dspProfile, abbreviation: ' ' })).status,
+    400,
+  );
+  const roles: { id: string; name: string }[] = (await user.get('/api/dsp/roles')).value;
+  await user.post('/api/dsp/members/invite', {
+    email: 'member-setup@dispatch.test',
+    role: roles.find((r) => r.name === 'Member')!.id,
+  });
+  const memberToken = /token=([A-Za-z0-9_-]{43})/.exec(
+    (await capturedMail(f.root, 'member-setup@dispatch.test')).text,
+  )![1];
+  const memberInvite = `/api/invitations/${memberToken}`;
+  const details = await f.request(memberInvite);
+  assert.equal(details.value.onboarding, false);
+  assert.equal(details.value.stationCode, 'DOT4');
+  assert.equal(details.value.timezone, 'America/Los_Angeles');
+  assert.equal((await f.request(memberInvite + '/accept', { ...account, dspProfile })).status, 403);
+  assert.equal((await f.request(memberInvite)).status, 200);
+  assert.equal((await f.request(memberInvite + '/accept', account)).status, 200);
+  assert.equal((await user.select(id)).dsp.name, 'Northstar Logistics');
+});

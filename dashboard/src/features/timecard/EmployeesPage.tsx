@@ -1,84 +1,152 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDownAZ, ArrowUpAZ, ChevronRight } from 'lucide-react';
+import type {
+  Employee,
+  EmployeeTimecardPeriod,
+  EmployeeTimecardResponse,
+} from '../../../../shared/contracts/index.js';
 import { useUpdateState } from '../../app/browser-update.js';
-import { useState } from 'react';
-import type { Employee } from '../../../../shared/contracts/index.js';
-import { useData } from '../../app/api.js';
-import { DataState, Empty, Pagination, SortHeader } from '../../ui/index.js';
+import { useCachedData } from '../../app/api.js';
+import { employeeTimecardUrl, useEmployeeTimecard } from '../../app/endpoints.js';
+import { prefetchData } from '../../app/prefetch.js';
+import { DataState, Empty, SearchInput } from '../../ui/index.js';
+import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
-import { pageSize } from './pageSize.js';
 
 type Employees = { employees: Employee[]; total: number; collectedAt: string | null };
-export function EmployeesPage() {
-  const [direction, setDirection] = useUpdateState('employee-direction', 'asc');
-  const [query, setQuery] = useUpdateState('employee-query', ''),
-    [page, setPage] = useUpdateState('employee-page', 0),
-    [employee, setEmployee] = useState<string>();
-  const { data, error } = useData<Employees>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&offset=${page * pageSize}&limit=${pageSize}&direction=${direction}`,
-  );
-  if (employee) return <EmployeeDetail code={employee} close={() => setEmployee(undefined)} />;
+const statuses = ['all', 'active', 'inactive'] as const;
+export function EmployeesPage({
+  actions,
+  refreshKey,
+}: {
+  actions: (timecard: EmployeeTimecardResponse | undefined) => ReactNode;
+  refreshKey: string;
+}) {
+  const [desc, setDesc] = useUpdateState('employee-sort-desc', false);
+  const [query, setQuery] = useUpdateState('employee-query', '');
+  const [status, setStatus] = useUpdateState<(typeof statuses)[number]>('employee-status', 'all');
+  const [selection, setSelection] = useState<{
+    code: string;
+    period: EmployeeTimecardPeriod | null;
+  }>();
+  const url = `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${desc ? 'desc' : 'asc'}`;
+  const { data, error } = useCachedData<Employees>(url, 0, refreshKey);
+  const employee =
+    data?.employees.find((person) => person.code === selection?.code) ?? data?.employees[0];
+  const period = employee?.code === selection?.code ? (selection?.period ?? null) : null;
+  const timecard = useEmployeeTimecard(employee?.code ?? '', period, refreshKey);
+  const directory = useRef<HTMLUListElement>(null);
+  const visibleCodes = data?.employees.map((person) => person.code).join(',');
+  useEffect(() => {
+    const list = directory.current;
+    if (!list) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        prefetchData(
+          entries
+            .filter((entry) => entry.isIntersecting)
+            .map((entry) => employeeTimecardUrl((entry.target as HTMLElement).dataset.employee!)),
+        );
+      },
+      { root: list },
+    );
+    list.querySelectorAll('[data-employee]').forEach((button) => observer.observe(button));
+    return () => observer.disconnect();
+  }, [visibleCodes]);
   return (
-    <div className="paycom-data-view">
-      <div className="paycom-employee-search">
-        <label>
-          Find employee
-          <input
-            type="search"
-            aria-label="Search employees"
-            placeholder="Search by name"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(0);
-            }}
-          />
-        </label>
+    <section className="employees-page" aria-label="Employees">
+      <div className="employees-heading">
+        <div className="employees-title">
+          <h2>Employees</h2>
+          <span className="employees-count" aria-label="Employee count">
+            {data?.total ?? '…'}
+          </span>
+        </div>
+        <div className="employees-sync">{actions(timecard.data)}</div>
       </div>
-      <DataState data={data} error={error}>
+      <div className="employees-toolbar">
+        <SearchInput
+          type="search"
+          label="Search employees"
+          placeholder="Search employees…"
+          value={query}
+          onChange={setQuery}
+        />
+        <div className="employees-filters" role="group" aria-label="Employee status">
+          {statuses.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={status === value}
+              onClick={() => setStatus(value)}
+            >
+              {value === 'all' ? 'All' : value === 'active' ? 'Active' : 'Inactive'}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          aria-label={desc ? 'Sort employees A to Z' : 'Sort employees Z to A'}
+          onClick={() => setDesc(!desc)}
+        >
+          {desc ? <ArrowUpAZ size={16} /> : <ArrowDownAZ size={16} />}
+          {desc ? 'Z–A' : 'A–Z'}
+        </button>
+      </div>
+      <DataState data={data} error={error} failed={!!error}>
         {(data) => (
-          <div className="paycom-data-table">
-            <div className="paycom-table-heading">
-              <h2>Employees</h2>
-              <span>{data.total} employees</span>
-            </div>
-            <div className="table-wrap">
-              <table aria-label="Employee directory">
-                <thead>
-                  <tr>
-                    <SortHeader
-                      direction={direction === 'asc' ? 'asc' : 'desc'}
-                      onSort={() => {
-                        setDirection(direction === 'asc' ? 'desc' : 'asc');
-                        setPage(0);
-                      }}
-                    >
-                      Employee
-                    </SortHeader>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.employees.map((person) => (
-                    <tr key={person.code}>
-                      <td>
-                        <button className="employee-link" onClick={() => setEmployee(person.code)}>
-                          {person.name}
+          <>
+            {employee ? (
+              <div className="employees-workspace">
+                <nav className="employees-directory" aria-label="Employee directory">
+                  <div className="employees-directory-heading">
+                    <span>Employee</span>
+                    <span>{desc ? 'Z–A' : 'A–Z'}</span>
+                  </div>
+                  <ul ref={directory}>
+                    {data.employees.map((person) => (
+                      <li key={person.code}>
+                        <button
+                          type="button"
+                          className="employees-person"
+                          data-employee={person.code}
+                          aria-pressed={person.code === employee.code}
+                          onClick={() => setSelection({ code: person.code, period: null })}
+                          onPointerEnter={() => prefetchData([employeeTimecardUrl(person.code)])}
+                          onFocus={() => prefetchData([employeeTimecardUrl(person.code)])}
+                        >
+                          <EmployeeAvatar name={person.name} />
+                          <span>{person.name}</span>
+                          <ChevronRight size={16} aria-hidden="true" />
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!data.employees.length && (
-              <Empty title={query ? 'No employees match your search' : 'No workforce data yet'}>
-                {query
-                  ? 'Try another name.'
+                      </li>
+                    ))}
+                  </ul>
+                </nav>
+                <EmployeeDetail
+                  key={employee.code}
+                  employee={employee}
+                  period={period}
+                  timecard={timecard}
+                  onPeriodChange={(period) => setSelection({ code: employee.code, period })}
+                />
+              </div>
+            ) : (
+              <Empty
+                title={
+                  query || status !== 'all'
+                    ? 'No employees match your search'
+                    : 'No workforce data yet'
+                }
+              >
+                {query || status !== 'all'
+                  ? 'Try another name or status.'
                   : 'Employees will appear after the first collection finishes.'}
               </Empty>
             )}
-            <Pagination page={page} pageSize={pageSize} total={data.total} onChange={setPage} />
-          </div>
+          </>
         )}
       </DataState>
-    </div>
+    </section>
   );
 }

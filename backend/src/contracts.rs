@@ -17,6 +17,36 @@ fn invalid_record() -> Error {
     Error::new("invalid_stored_record", 500)
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct EmployeeTimecardPeriod {
+    pub from: String,
+    pub to: String,
+}
+impl FromRow for EmployeeTimecardPeriod {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            from: row.get("period_from")?,
+            to: row.get("period_to")?,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeTimecardResponse {
+    #[cfg_attr(test, ts(type = "unknown"))]
+    pub employee: Value,
+    #[cfg_attr(test, ts(type = "unknown[]"))]
+    pub timecards: Vec<Value>,
+    pub period: EmployeeTimecardPeriod,
+    pub previous_period: Option<EmployeeTimecardPeriod>,
+    pub next_period: Option<EmployeeTimecardPeriod>,
+    pub collected_at: Option<String>,
+    pub sync_status: Option<JobStatus>,
+}
+
 text_enum! {
     #[cfg_attr(test, derive(ts_rs::TS))]
         pub enum Environment {
@@ -98,10 +128,12 @@ text_enum! {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    #[serde(default)]
+    pub remember_me: bool,
 }
 impl LoginRequest {
     pub fn parse(value: &Value) -> Result<Self> {
@@ -145,6 +177,7 @@ pub struct InvitationRequest {
     pub first_name: String,
     pub last_name: String,
     pub password: String,
+    pub dsp_profile: Option<DspSetupRequest>,
 }
 impl InvitationRequest {
     pub fn parse(value: &Value) -> Result<Self> {
@@ -152,6 +185,33 @@ impl InvitationRequest {
         input.first_name = v::name(value, "firstName", 100)?;
         input.last_name = v::name(value, "lastName", 100)?;
         v::text(value, "password", 8, 128)?;
+        if input.dsp_profile.is_some() {
+            input.dsp_profile = Some(DspSetupRequest::parse(&value["dspProfile"])?);
+        }
+        Ok(input)
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DspSetupRequest {
+    pub name: String,
+    pub abbreviation: String,
+    pub station_code: String,
+    pub timezone: String,
+}
+impl DspSetupRequest {
+    pub fn parse(value: &Value) -> Result<Self> {
+        let mut input: Self = request(value)?;
+        input.name = v::name(value, "name", 100)?;
+        input.abbreviation = v::name(value, "abbreviation", 16)?;
+        input.timezone = v::timezone(value, "timezone")?;
+        let station = v::text(value, "stationCode", 3, 8)?;
+        ensure(
+            station.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "invalid_input",
+            400,
+        )?;
+        input.station_code = station.to_uppercase();
         Ok(input)
     }
 }
@@ -253,6 +313,37 @@ pub struct DspSummaryLegacy {
     pub owner_email: Option<String>,
     pub platform_email: Option<String>,
     pub invite_email: Option<String>,
+}
+/// One queued email as platform Diagnostics lists it. What it was for is known only for
+/// mail queued since the outbox recorded it; an invitation's row lasts as long as the
+/// invitation does.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct MailMessage {
+    pub id: String,
+    /// `invitation`, `reset`, or none for older mail.
+    pub kind: Option<String>,
+    /// `pending`, `sent` or `failed`.
+    pub status: String,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub attempts: i64,
+    pub queued_at: Option<String>,
+    pub sent_at: Option<String>,
+    pub last_attempt_at: Option<String>,
+    /// When a pending message is tried next.
+    pub next_attempt_at: Option<String>,
+    pub last_error: Option<String>,
+    pub recipient: Option<String>,
+    pub role: Option<String>,
+    /// The invitation is for the DSP's owner, who also sets the DSP up.
+    pub owner: bool,
+    pub dsp_name: Option<String>,
+    /// Who invited them; none when a platform owner did.
+    pub invited_by: Option<String>,
+    pub accepted_at: Option<String>,
+    /// Owner invitations only: the DSP's setup is finished.
+    pub setup_complete: Option<bool>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -636,8 +727,11 @@ mod generated {
             DspStatus,
             DspSummary,
             DspView,
+            EmployeeTimecardPeriod,
+            EmployeeTimecardResponse,
             Environment,
             JobStatus,
+            MailMessage,
             Member,
             OwnerStatus,
             Presence,

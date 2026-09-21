@@ -1,10 +1,20 @@
 import { useUpdateState } from '../../app/browser-update.js';
+import { useEffect, useState } from 'react';
 import { ArrowRight, RefreshCw, Settings } from 'lucide-react';
-import type { Connection, DspView } from '../../../../shared/contracts/index.js';
+import type {
+  Connection,
+  DspView,
+  EmployeeTimecardResponse,
+} from '../../../../shared/contracts/index.js';
 import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
-import { api, useData } from '../../app/api.js';
+import { api, useCachedData, useData } from '../../app/api.js';
+import { syncEmployeeTimecard } from '../../app/endpoints.js';
+import { dataCache } from '../../app/data-cache.js';
+import { useCollectionUpdates } from '../../app/live-collection.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
+import { randomId } from '../../lib/random-id.js';
+import { timecardPeriod } from '../../lib/timecard-format.js';
 import { EmployeesPage } from './EmployeesPage.js';
 import { TimecardsPage } from './TimecardsPage.js';
 import { MealBreaksPage } from './meal-breaks/MealBreaksPage.js';
@@ -17,9 +27,11 @@ export function PaycomPage({ view }: { view: DspView }) {
   const canCollect = can(view, 'collections.run');
   const [selectedTab, setTab] = useUpdateState<string | undefined>('paycom-tab', undefined);
   const { date, today, selectDate } = usePaycomDate(view.dsp.id, view.dsp.timezone);
-  const preferences = useData<PaycomSettings>('/api/dsp/paycom/settings');
+  const preferences = useCachedData<PaycomSettings>('/api/dsp/paycom/settings');
+  useCollectionUpdates();
   const tab = selectedTab ?? 'timecards';
-  const overview = useData<{
+  const [syncRevision, setSyncRevision] = useState(0);
+  const overview = useCachedData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
   }>('/api/dsp/paycom/status', 5000);
@@ -28,17 +40,20 @@ export function PaycomPage({ view }: { view: DspView }) {
     scopeAvailable: boolean;
     paycom: SyncSource;
     flex: SyncSource;
-  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000);
+  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000, undefined, String(syncRevision));
   // The last known state stays up while another date loads so the page does not shift.
-  const sourceState = syncState.data;
-  const sourceCurrent = sourceState?.date === date;
+  const sourceState = syncState.data ?? syncState.stale;
+  const sourceCurrent = syncState.data?.date === date;
   const { error, refresh } = overview;
   const data = overview.data?.connection;
   const meals = tab === 'meal-breaks';
   const timecards = tab === 'timecards';
   const daily = timecards || meals;
-  const activeSync = sourceState?.paycom.active || (daily && sourceState?.flex.active);
+  const activeSync = sourceState?.paycom.active || sourceState?.flex.active;
   const collectedAt = overview.data?.workforce.collectedAt;
+  useEffect(() => {
+    if (collectedAt) dataCache.observeVersion('paycom', collectedAt);
+  }, [collectedAt]);
   const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
   const syncUnavailable = daily
     ? !sourceState
@@ -55,35 +70,55 @@ export function PaycomPage({ view }: { view: DspView }) {
       : '';
   const canConnect = can(view, 'connections.manage');
   const sync = useAction(
-    async () => {
-      await api(daily ? '/api/dsp/jobs/meal-breaks' : '/api/dsp/jobs', {
-        requestId: crypto.randomUUID(),
-        ...(tab !== 'employees' ? { date } : {}),
-      });
-      refresh();
-      syncState.refresh();
+    async (timecard?: EmployeeTimecardResponse) => {
+      try {
+        if (timecard) {
+          await syncEmployeeTimecard(timecard.employee.code, timecard.period, randomId());
+        } else if (daily)
+          await api('/api/dsp/jobs/meal-breaks', {
+            requestId: randomId(),
+            date,
+          });
+      } finally {
+        refresh();
+        // Keep every Sync Now disabled until status read after this request arrives.
+        setSyncRevision((value) => value + 1);
+      }
     },
-    { success: () => (daily ? 'Flex and Paycom collections queued' : 'Paycom collection queued') },
+    {
+      success: (timecard) =>
+        timecard
+          ? `${timecard.employee.name}’s timecard sync queued`
+          : 'Flex and Paycom collections queued',
+    },
   );
-  const syncButton = canCollect && (
-    <button
-      disabled={
-        !!syncUnavailable ||
-        !!syncState.error ||
-        sync.busy ||
-        !!activeSync ||
-        (daily && !sourceCurrent)
-      }
-      title={
-        syncUnavailable ||
-        (daily ? `Sync Flex and Paycom for ${date}` : 'Sync Paycom’s current pay period')
-      }
-      onClick={() => void sync.run()}
-    >
-      <RefreshCw size={16} />
-      Sync now
-    </button>
-  );
+  const syncButton = (timecard?: EmployeeTimecardResponse) =>
+    canCollect && (
+      <button
+        disabled={
+          !!syncUnavailable ||
+          !syncState.data ||
+          !!syncState.error ||
+          sync.busy ||
+          !!activeSync ||
+          (daily && !sourceCurrent) ||
+          (!daily && !timecard)
+        }
+        title={
+          syncUnavailable ||
+          (activeSync && 'A collection is in progress for this DSP.') ||
+          (timecard
+            ? `Sync ${timecard.employee.name} · ${timecardPeriod(timecard.period.from, timecard.period.to)}`
+            : daily
+              ? `Sync Flex and Paycom for ${date}`
+              : 'Select an employee timecard to sync')
+        }
+        onClick={() => void sync.run(timecard)}
+      >
+        <RefreshCw size={16} />
+        Sync now
+      </button>
+    );
   return (
     <div className={`paycom-page${daily ? ' paycom-daily-page' : ''}`}>
       <Header title="Timecard">
@@ -103,7 +138,7 @@ export function PaycomPage({ view }: { view: DspView }) {
             />
           </>
         )}
-        {daily && syncButton}
+        {daily && syncButton()}
         {can(view, 'timecard.manage') && (
           <button onClick={() => navigate(dspHash(view.dsp.id, 'paycom-settings'))}>
             {daily && <Settings size={16} />}
@@ -123,22 +158,7 @@ export function PaycomPage({ view }: { view: DspView }) {
         ]}
         label="Timecard"
       />
-      {!daily && (
-        <section className="paycom-workspace-controls" aria-label="Date and sync">
-          <div className="paycom-controls-row">{syncButton}</div>
-          {canCollect && (
-            <div className="paycom-sync-status">
-              <SourceSyncStatus
-                name="Paycom"
-                source={sourceState?.paycom}
-                timezone={view.dsp.timezone}
-              />
-              {syncUnavailable && <span className="muted">{syncUnavailable}</span>}
-            </div>
-          )}
-        </section>
-      )}
-      {daily && canCollect && syncUnavailable && (
+      {canCollect && syncUnavailable && (
         <p className="paycom-sync-unavailable muted">{syncUnavailable}</p>
       )}
       {tab === 'meal-breaks' ? (
@@ -164,7 +184,41 @@ export function PaycomPage({ view }: { view: DspView }) {
       ) : (
         <div className="embedded-page">
           {tab === 'employees' ? (
-            <EmployeesPage />
+            <EmployeesPage
+              refreshKey={`${refreshKey}:${syncRevision}`}
+              actions={(timecard) => (
+                <>
+                  {canCollect && (
+                    <SourceSyncStatus
+                      name="Paycom"
+                      source={
+                        sourceState?.paycom && {
+                          ...sourceState.paycom,
+                          collectedAt: timecard?.collectedAt ?? null,
+                          job: timecard?.syncStatus ? { status: timecard.syncStatus } : null,
+                          active:
+                            !!timecard?.syncStatus &&
+                            ['queued', 'running', 'waiting_verification'].includes(
+                              timecard.syncStatus,
+                            ),
+                          jobDate: timecard?.period.from ?? null,
+                        }
+                      }
+                      timezone={view.dsp.timezone}
+                      compact
+                    />
+                  )}
+                  {canCollect && sourceState?.flex.active && (
+                    <SourceSyncStatus
+                      name="Flex"
+                      source={sourceState.flex}
+                      timezone={view.dsp.timezone}
+                    />
+                  )}
+                  {syncButton(timecard)}
+                </>
+              )}
+            />
           ) : (
             <TimecardsPage
               date={date}

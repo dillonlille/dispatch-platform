@@ -1,6 +1,7 @@
 //! Signing in and out, and changing or recovering a password.
 use crate::{
     Result, State,
+    accounts::SessionLifetime,
     contracts::{LoginRequest, PasswordRequest, ResetRequest},
     db::Store,
     http::{
@@ -23,8 +24,15 @@ pub fn routes() -> Vec<Route> {
 
 async fn login(state: Arc<State>, input: Input, _: Public) -> Result<Reply> {
     let login = LoginRequest::parse(&input.body)?;
-    let raw = state.login(login.email, login.password, input.ip).await?;
-    Ok(Reply::signed_in(&raw, state.config.development))
+    let lifetime = if login.remember_me {
+        SessionLifetime::Remembered
+    } else {
+        SessionLifetime::Standard
+    };
+    let raw = state
+        .login(login.email, login.password, input.ip, lifetime)
+        .await?;
+    Ok(Reply::signed_in(&raw, state.config.development, lifetime))
 }
 
 fn logout(db: &Store, user: &User, _: &Input) -> Result<Reply> {

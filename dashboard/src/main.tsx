@@ -132,9 +132,17 @@ function App() {
     route.startsWith('invite?') ||
     route.startsWith('reset?')
   )
-    return <AuthScreen onLogin={() => load(true)} />;
+    return <AuthScreen key={route} onLogin={() => load(true)} />;
   if (view?.profile?.setupRequired && can(view, 'settings.manage'))
-    return <DspOnboarding complete={reopen} />;
+    return (
+      <DspOnboarding
+        complete={async () => {
+          await load();
+          await reopen();
+        }}
+        signOut={logout}
+      />
+    );
   const scope = dspId ? 'dsp' : 'platform';
   async function logout() {
     await leavePresence();

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export function Tabs({
   value,
   onChange,
@@ -6,7 +8,8 @@ export function Tabs({
 }: {
   value: string;
   onChange: (value: string) => void;
-  items: string[][];
+  /** Each tab's id and its label. */
+  items: (readonly [string, ReactNode] | string[])[];
   label: string;
 }) {
   return (

@@ -1,0 +1,245 @@
+/* Login composition. All background colors are here; animation knobs are in van/settings.ts. */
+.auth-layout {
+  --login-art-background:
+    radial-gradient(ellipse at 40% 35%, #2f5ed8 0%, #2452cf 25%, transparent 65%),
+    linear-gradient(145deg, #1c46bd 10%, #14348f 62%, #102359 100%);
+  --login-contour-color: #b8d0ff;
+  --login-contour-opacity: 0.2;
+  display: grid;
+  grid-template-columns: 52% 48%;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme='dark'] .auth-layout {
+  --login-art-background:
+    radial-gradient(ellipse at 42% 39%, #294b96 0%, #1b356e 33%, transparent 69%),
+    linear-gradient(145deg, #172f64, #0d162c);
+}
+.login-art {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--login-art-background);
+  color: #fff;
+  padding: 40px 48px;
+  pointer-events: none;
+}
+.login-art > .brand {
+  position: relative;
+  z-index: 1;
+}
+.login-art .brand,
+.login-art .brand svg {
+  color: #fff;
+}
+.login-contours {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--login-contour-color);
+  opacity: var(--login-contour-opacity);
+  mask-image: radial-gradient(ellipse at 46% 44%, #0003 12%, #000 85%);
+}
+.login-van {
+  position: absolute;
+  inset: 105px 0 78px;
+  overflow: hidden;
+}
+.login-van canvas,
+.login-van img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+.login-art-footer {
+  position: absolute;
+  bottom: 40px;
+  left: 48px;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.auth-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 100dvh;
+  padding: 112px 48px 84px;
+}
+.auth-brand {
+  display: none;
+}
+.auth-annotation,
+.auth-wordmark {
+  position: absolute;
+  right: 54px;
+  color: var(--muted-foreground);
+}
+.auth-annotation {
+  top: 46px;
+  font-size: 11px;
+  letter-spacing: 1.7px;
+}
+.auth-wordmark {
+  bottom: 34px;
+  font-size: 12px;
+}
+.auth-panel {
+  width: 350px;
+  max-width: 100%;
+}
+.auth-panel h1 {
+  font-size: 44px;
+  line-height: 1.16;
+  font-weight: 580;
+  letter-spacing: -1.8px;
+  margin-bottom: 42px;
+}
+.auth-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.auth-panel form > label + label,
+.auth-panel form > button {
+  margin-top: 0;
+}
+.auth-panel label {
+  font-size: 12px;
+  line-height: 1.4;
+  gap: 10px;
+  font-weight: 520;
+}
+.auth-panel input:not([type='checkbox']) {
+  min-height: 50px;
+  padding: 0 15px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.auth-panel input::placeholder {
+  opacity: 0.8;
+}
+.auth-password {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.auth-panel button.auth-forgot {
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 11px;
+}
+.auth-password-input {
+  position: relative;
+}
+.auth-password-input input {
+  padding-right: 48px !important;
+}
+.auth-panel button.auth-reveal {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.auth-panel label.auth-remember {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.auth-panel .auth-submit {
+  min-height: 50px;
+  border-radius: 7px;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 13px;
+}
+.auth-footer {
+  margin-top: 24px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.auth-back {
+  margin-top: 24px;
+}
+@media (701px <= width <= 1050px) {
+  .auth-layout {
+    grid-template-columns: 48% 52%;
+  }
+  .login-art {
+    padding-inline: 32px;
+  }
+  .login-art-footer {
+    left: 32px;
+  }
+  .auth-content {
+    padding-inline: 35px;
+  }
+}
+@media (width <= 700px) {
+  .auth-layout {
+    display: block;
+  }
+  .login-art,
+  .auth-annotation,
+  .auth-wordmark {
+    display: none;
+  }
+  .auth-content {
+    padding: 112px 28px 72px;
+  }
+  .auth-brand {
+    display: block;
+    position: absolute;
+    top: 32px;
+    left: 28px;
+  }
+  .auth-brand .brand {
+    font-size: 21px;
+  }
+  .auth-panel h1 {
+    font-size: 34px;
+    margin-bottom: 30px;
+    letter-spacing: -1.55px;
+  }
+  .auth-panel input:not([type='checkbox']) {
+    font-size: 16px;
+  }
+  .auth-panel input::placeholder {
+    font-size: 13px;
+  }
+}
+/* Sign In owns its entrance; the member page only signals a completed desktop handoff. */
+@keyframes sign-in-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (min-width: 701px) and (prefers-reduced-motion: no-preference) {
+  .auth-layout[data-enter='true'] {
+    animation: sign-in-enter 420ms ease-out both;
+  }
+}

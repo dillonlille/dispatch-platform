@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DspView, SessionView } from '../../../../shared/contracts/index.js';
 import { api } from '../../app/api.js';
-import { DetailList, ErrorBox, Header, Tabs } from '../../ui/index.js';
+import { ErrorBox, Header, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
 import { AuditLog } from '../audit/index.js';
 import { ConnectionsPage } from '../connections/index.js';
@@ -9,6 +9,7 @@ import { useAction } from '../../app/useAction.js';
 import { ThemeSection } from './ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from '../../app/navigation.js';
 import { SupportVisibility } from './SupportVisibility.js';
+import { ProfileBadge } from './ProfileBadge.js';
 
 export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
   const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
@@ -24,7 +25,8 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
   const busy = changePassword.busy;
   const connections = can(view, 'connections.manage');
   const tabs = [
-    ['general', 'General'],
+    // The id stays `general` so existing links to the tab keep working.
+    ['general', 'Profile'],
     ['security', 'Security'],
     ...(connections ? [['connections', 'Connections']] : []),
     ['theme', 'Theme'],
@@ -44,43 +46,7 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
         items={tabs}
         label="Settings"
       />
-      {tab === 'general' && (
-        <>
-          <section className="settings-section">
-            <div>
-              <h2>Account</h2>
-            </div>
-            <DetailList
-              items={[
-                ['First name', session.user.firstName],
-                ['Last name', session.user.lastName],
-                ['Email address', session.user.email],
-                [
-                  'Role',
-                  session.user.platformOwner
-                    ? 'Platform owner'
-                    : (view?.role.name ?? 'Team member'),
-                ],
-              ]}
-            />
-          </section>
-          {view && (
-            <section className="settings-section">
-              <div>
-                <h2>Workspace</h2>
-              </div>
-              <DetailList
-                items={[
-                  ['DSP', view.dsp.name],
-                  ['Station', view.profile?.stationCode || '—'],
-                  ['Business timezone', view.dsp.timezone],
-                  ['Status', view.dsp.status],
-                ]}
-              />
-            </section>
-          )}
-        </>
-      )}
+      {tab === 'general' && <ProfileBadge session={session} view={view} />}
       {tab === 'security' && (
         <section className="settings-section">
           <div>

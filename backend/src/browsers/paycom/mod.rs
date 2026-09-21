@@ -391,6 +391,22 @@ impl Drives for Driver {
     }
     fn collect<'a>(&'a mut self, run: &'a Run<'a>) -> Pending<'a, Collected> {
         Box::pin(async move {
+            if let Some(scope) = crate::employee_sync::EmployeeSync::parse(run.request)? {
+                let code = scope.employee_code.clone();
+                let job = run.job.to_owned();
+                let owner = run.owner.to_owned();
+                let employee = run
+                    .state
+                    .read(move |store| {
+                        let dsp = store.guard_job(&job, &owner)?;
+                        store.paycom_employee(s(&dsp, "id"), &code)
+                    })
+                    .await?;
+                let data = self
+                    .collect_employee(run, &employee, &scope.period())
+                    .await?;
+                return Ok(Collected { data, scope: None });
+            }
             let data = Driver::collect(
                 self,
                 run.timezone,

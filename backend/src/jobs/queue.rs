@@ -204,6 +204,32 @@ impl Store {
         crate::workforce::collection_date(&request, &self.find_dsp(id)?.timezone)?;
         self.enqueue_for(id, actor, key, Provider::Paycom, &request)
     }
+    pub fn enqueue_employee_timecard(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+        key: &str,
+        code: &str,
+        period: &crate::contracts::EmployeeTimecardPeriod,
+    ) -> Result<Value> {
+        self.employee_timecard(id, code, Some(period))?;
+        crate::workforce::collection_date(
+            &json!({"date":period.from}),
+            &self.find_dsp(id)?.timezone,
+        )?;
+        let scope = crate::employee_sync::EmployeeSync {
+            employee_code: code.into(),
+            from: period.from.clone(),
+            to: period.to.clone(),
+        };
+        self.enqueue_for(
+            id,
+            actor,
+            key,
+            Provider::Paycom,
+            &serde_json::to_value(scope)?,
+        )
+    }
     pub fn enqueue_meals(
         &self,
         id: &str,
@@ -249,20 +275,40 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         self.jobs.transaction(|| {
-            let queued = requests.iter().zip(&connections);
-            queued
-                .map(|((key, provider, request), connection)| {
-                    let existing: Option<JobRow> = self.jobs.one_as(
+            let existing = requests
+                .iter()
+                .map(|(key, provider, request)| {
+                    let row: Option<JobRow> = self.jobs.one_as(
                         "SELECT * FROM jobs WHERE dsp_id=? AND idempotency_key=?",
                         [id, key],
                     )?;
-                    if let Some(row) = existing {
+                    if let Some(row) = &row {
                         ensure(
                             row.provider() == *provider
                                 && serde_json::from_str::<Value>(&row.request)? == *request,
                             "idempotency_conflict",
                             409,
                         )?;
+                    }
+                    Ok(row)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            // A manual sync owns the DSP until every job in its batch stops.
+            // Check before inserting any job, in the same transaction, while
+            // allowing retries of a request that already queued successfully.
+            if actor.is_some() && existing.iter().any(Option::is_none) {
+                ensure(
+                    self.jobs.count(ACTIVE_COUNT, [id])? == 0,
+                    "sync_in_progress",
+                    409,
+                )?;
+            }
+            requests
+                .iter()
+                .zip(&connections)
+                .zip(existing)
+                .map(|(((key, provider, request), connection), existing)| {
+                    if let Some(row) = existing {
                         return self.public_job(row);
                     }
                     ensure(self.jobs.count(ACTIVE_COUNT, [id])? < 5, "queue_full", 429)?;

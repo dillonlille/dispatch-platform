@@ -11,6 +11,25 @@ import {
 } from '../dashboard/src/lib/format.js';
 import { backoff } from '../dashboard/src/lib/backoff.js';
 import { messageOf } from '../dashboard/src/lib/errors.js';
+import {
+  hoursAndMinutes,
+  punchTime,
+  timecardDate,
+  timecardPeriod,
+} from '../dashboard/src/lib/timecard-format.js';
+
+test('employee timecards format local clocks and rounded minutes without timezone shifts', () => {
+  assert.equal(hoursAndMinutes(8.5), '8h 30m');
+  assert.equal(hoursAndMinutes(9.999), '10h 00m');
+  assert.equal(hoursAndMinutes(0), '0h 00m');
+  assert.equal(punchTime('00:05'), '12:05 AM');
+  assert.equal(punchTime('12:00'), '12:00 PM');
+  assert.equal(punchTime('17:30:00'), '5:30 PM');
+  assert.equal(punchTime(null), '—');
+  assert.equal(punchTime('Pending'), 'Pending');
+  assert.equal(timecardDate('2026-09-19'), 'Sat, Sep 19');
+  assert.match(timecardPeriod('2026-12-28', '2027-01-10'), /2026.*2027/);
+});
 
 test('timestamps read in the timezone they are given', () => {
   assert.equal(time('2026-09-18T15:03:25Z', 'America/Chicago'), 'Sep 18, 10:03 AM');

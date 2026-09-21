@@ -2,6 +2,8 @@
 @import './styles/reset.css';
 @import './styles/base-components.css';
 @import './paycom-workforce.css';
+@import './employees.css';
+@import './styles/diagnostics.css';
 
 /* Shared native controls. */
 button {
@@ -223,37 +225,6 @@ select {
 .navigation-backdrop {
   display: none;
 }
-.auth-panel form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.auth-panel form > label + label,
-.auth-panel form > button {
-  margin-top: 0;
-}
-.auth-panel label {
-  font-size: 13px;
-  line-height: 18px;
-  gap: 9px;
-}
-.auth-panel button.auth-forgot {
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  justify-content: flex-start;
-  font-weight: 400;
-  color: var(--primary);
-  background: transparent;
-}
-.auth-footer {
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.auth-back {
-  margin-top: 24px;
-}
 .error,
 .notice {
   display: block;
@@ -456,7 +427,8 @@ td small {
 .status-indicator.signing_in > i,
 .status-indicator.queued > i,
 .status-indicator.running > i,
-.status-indicator.needs_verification > i {
+.status-indicator.needs_verification > i,
+.status-indicator.waiting_verification > i {
   background: var(--warning);
 }
 .row-menu {
@@ -481,6 +453,30 @@ td small {
   max-height: calc(100vh - 16px);
   overflow-y: auto;
   visibility: hidden;
+}
+.team-member-column {
+  width: 45%;
+}
+.role-name-column {
+  width: 30%;
+}
+.role-members-column {
+  width: 14%;
+}
+.fleet-dsp-column {
+  width: 28%;
+}
+.cell-end {
+  text-align: right;
+}
+@media (max-width: 700px) {
+  .sticky-column {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--background);
+    border-right: 1px solid var(--border);
+  }
 }
 .settings-section > form,
 .support-visibility {
@@ -597,21 +593,6 @@ td small {
   height: 100%;
   background: var(--primary);
 }
-.employee-link {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font-weight: 500;
-  text-align: left;
-}
-.employee-link:hover {
-  color: var(--primary);
-  background: transparent;
-}
 .workspace-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -686,9 +667,6 @@ td small {
   .restored-tabs {
     gap: 24px;
   }
-  .auth-panel {
-    max-width: calc(100vw - 48px);
-  }
   .modal-backdrop {
     padding: 12px;
   }
@@ -729,27 +707,15 @@ td small {
   margin-top: 8px;
 }
 
-.paycom-day-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-}
 .paycom-date-controls {
   display: flex;
   align-items: flex-end;
   gap: 8px;
   flex-wrap: wrap;
 }
-.paycom-date-controls label {
-  width: 165px;
+.paycom-date-controls .date-field {
+  width: 124px;
   font-size: 13px;
-}
-.paycom-source-note {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--muted-foreground);
 }
 .paycom-day-table {
   min-width: 0;
@@ -793,10 +759,6 @@ td small {
   gap: 16px;
 }
 
-.diagnostics-jobs > .page-heading {
-  display: none;
-}
-
 .paycom-data-table td {
   padding: 14px 18px;
   font-variant-numeric: tabular-nums;
@@ -805,44 +767,14 @@ td small {
   background: var(--muted);
   padding-inline: 18px;
 }
-.paycom-data-table .employee-link {
-  color: var(--primary);
-  min-height: 0;
-}
-.paycom-data-table .employee-link:hover {
-  text-decoration: underline;
-}
-.paycom-workspace-controls {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--border);
-}
-.paycom-controls-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.paycom-controls-row > button {
-  margin-left: auto;
-}
-.paycom-sync-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin-top: 12px;
-  margin-bottom: 20px;
-  font-size: 13px;
-}
 @media (max-width: 600px) {
   .paycom-date-controls {
     width: 100%;
     gap: 6px;
     flex-wrap: nowrap;
   }
-  .paycom-date-controls label {
-    width: 148px;
+  .paycom-date-controls .date-field {
+    width: 124px;
   }
 }
 @media (max-width: 600px) {
@@ -867,28 +799,6 @@ td small {
 }
 .archived-card h3 {
   font-weight: 500;
-}
-.diagnostics-health {
-  margin-bottom: 24px;
-  gap: 12px;
-}
-.runtime-row {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-  width: 100%;
-}
-.test-dsp-list {
-  display: grid;
-  gap: 12px;
-  margin-block: 24px;
-}
-.test-dsp-list .archived-card {
-  padding: 16px;
-  gap: 4px;
 }
 .underlined-link {
   text-decoration: underline;
@@ -997,10 +907,6 @@ td small {
   display: grid;
   gap: 12px;
   margin-top: 24px;
-}
-.onboarding-step {
-  margin-bottom: 12px;
-  font-size: 13px;
 }
 
 .role-table {
@@ -1287,111 +1193,6 @@ td small {
     max-height: 48dvh;
   }
 }
-.job-performance {
-  min-width: 180px;
-}
-.job-performance summary {
-  cursor: pointer;
-  margin-top: 8px;
-}
-.job-attempts {
-  min-width: 260px;
-  max-width: 400px;
-  white-space: normal;
-}
-.job-attempts section {
-  padding-top: 12px;
-}
-.job-attempts dl {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 16px;
-  margin: 12px 0;
-}
-.job-attempts dd {
-  margin: 0;
-  text-align: right;
-}
-.job-attempts p {
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.collection-table td {
-  vertical-align: top;
-}
-.diagnostics-jobs {
-  margin-top: 28px;
-}
-.diagnostics-jobs > h2 {
-  margin: 0 0 16px;
-}
-
-.collection-history {
-  align-items: stretch;
-  margin-bottom: 24px;
-}
-.collection-history-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-.collection-history-heading label {
-  display: grid;
-  gap: 6px;
-  max-width: 100%;
-  font-size: 13px;
-}
-.collection-history-heading select {
-  max-width: 100%;
-}
-.collection-history-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 20px;
-  margin: 24px 0;
-}
-.collection-history-stats dt {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.collection-history-stats dd {
-  margin: 6px 0 0;
-  font-weight: 600;
-}
-.collection-history-trend {
-  margin: 20px 0;
-}
-.collection-history-trend svg {
-  width: 100%;
-  height: 80px;
-  color: var(--primary);
-  overflow: visible;
-}
-.collection-history-trend line {
-  stroke: var(--border);
-}
-.collection-history-trend polyline {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-}
-.collection-history-trend circle {
-  fill: currentColor;
-}
-.collection-history-trend figcaption {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.collection-history > .muted {
-  margin-top: 16px;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
 .paycom-source-status {
   display: flex;
   flex-wrap: wrap;
@@ -1467,8 +1268,8 @@ td small {
   align-items: center;
   flex-wrap: nowrap;
 }
-.paycom-date-controls-compact label {
-  width: 165px;
+.paycom-date-controls-compact .date-field {
+  width: 124px;
   min-width: 0;
 }
 .paycom-date-controls-compact input {
@@ -1555,7 +1356,7 @@ td small {
   .paycom-timecard-footer {
     padding: 12px;
   }
-  .paycom-date-controls-compact label {
+  .paycom-date-controls-compact .date-field {
     width: auto;
     flex: 1;
   }

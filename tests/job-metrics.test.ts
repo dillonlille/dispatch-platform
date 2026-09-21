@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, until } from './support.js';
+import { fixture, until, seedQueuedJob } from './support.js';
 import type { Job } from '../shared/contracts/index.js';
 
 const credentials = {
@@ -19,7 +19,10 @@ test('collection metrics survive restart and an additive upgrade preserves old j
     (await owner.post('/api/dsp/connections/paycom', credentials)).value.status,
     'ready',
   );
-  const id = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-success' })).value.id;
+  // A completed first week supplies seven records for each of the twelve employees.
+  const id = (
+    await owner.post('/api/dsp/jobs', { requestId: 'metrics-success', date: '2026-01-17' })
+  ).value.id;
   let job: Job;
   await until(async () => {
     job = (await owner.get('/api/dsp/jobs')).value.find((j: Job) => j.id === id);
@@ -78,7 +81,7 @@ test('interruption, waiting for verification and cancellation preserve separate 
   const current = async (): Promise<Job> =>
     (await owner.get('/api/dsp/jobs')).value.find((j: Job) => j.id === id);
   await until(async () => (await current()).metrics[0]?.verificationMs! > 0);
-  const queued = (await owner.post('/api/dsp/jobs', { requestId: 'metrics-cancel-queued' })).value;
+  const queued = seedQueuedJob(f, id, 'metrics-cancel-queued');
   const cancelled = (await owner.post(`/api/dsp/jobs/${queued.id}/cancel`)).value;
   assert.equal(cancelled.attempt, 0);
   assert.deepEqual(cancelled.metrics, []);

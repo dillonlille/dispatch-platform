@@ -1,6 +1,6 @@
 //! Data providers. Each is described once, by a `Collector` in its own module, and
 //! reached through `Provider`. Provider identities and paths are compiled code,
-//! never user-controlled paths. See "Adding a data provider" in DEVELOPMENT.md.
+//! never user-controlled paths.
 mod cortex;
 mod paycom;
 use super::{
@@ -451,7 +451,10 @@ mod tests {
         next["employees"][0]["name"] = json!("New Collection");
         reopened.publish(&id, &next).unwrap();
         assert_eq!(
-            reopened.employee(&id, "E001").unwrap()["employee"]["name"],
+            reopened
+                .employee_timecard(&id, "E001", None)
+                .unwrap()
+                .employee["name"],
             "New Collection"
         );
     }

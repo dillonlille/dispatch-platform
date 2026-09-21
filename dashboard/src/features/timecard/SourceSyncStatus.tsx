@@ -3,11 +3,13 @@ import type { Job } from '../../../../shared/contracts/index.js';
 import { Badge } from '../../ui/index.js';
 import { time, timeOfDay, title } from '../../lib/format.js';
 import { localDate } from '../../../../shared/meal-breaks.js';
+import { dateFormatter } from '../../../../shared/date-format.js';
 
 export type SyncSource = {
   enabled: boolean;
   active: boolean;
-  job: Job | null;
+  job: Pick<Job, 'status'> | null;
+  jobDate: string | null;
   collectedAt: string | null;
 };
 
@@ -23,6 +25,15 @@ export function SourceSyncStatus({
   compact?: boolean;
 }) {
   const status = source?.job?.status;
+  const target = source?.active
+    ? source.jobDate
+      ? dateFormatter('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(
+          new Date(`${source.jobDate}T00:00:00Z`),
+        )
+      : name === 'Paycom'
+        ? 'current pay period'
+        : null
+    : null;
   const message = !source
     ? 'Checking…'
     : status === 'failed'
@@ -68,6 +79,7 @@ export function SourceSyncStatus({
             }
           >
             {name} {message === 'Sync complete' ? 'synced' : message.toLowerCase()}
+            {target && ` · ${target}`}
           </Badge>
         )}
         {collectedAt && message === 'Sync complete' && (
@@ -89,6 +101,7 @@ export function SourceSyncStatus({
       <span className="muted">{name}</span>
       <span role="status" aria-label={`${name} sync`}>
         {message}
+        {target && ` · ${target}`}
       </span>
       {source?.collectedAt && (
         <span className="muted">Last successful sync {time(source.collectedAt, timezone)}</span>

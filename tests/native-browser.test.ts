@@ -389,3 +389,73 @@ test(
     assert.equal(job.metrics[0].timecards, 28);
   },
 );
+
+test(
+  'an employee sync reads only the requested historical timecard and preserves it after failure',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 120000 },
+  async (t) => {
+    const f = await paycomFixture();
+    t.after(f.close);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: { name: string }) => d.name === 'Northline Logistics');
+    await owner.select(dsp.id);
+    await owner.post('/api/dsp/connections/paycom', credentials);
+    const complete = async (id: string, expected: string) => {
+      let result: any;
+      await until(async () => {
+        result = (await owner.get('/api/dsp/jobs')).value.find(
+          (job: { id: string }) => job.id === id,
+        );
+        if (!['succeeded', 'failed', 'cancelled'].includes(result.status)) return false;
+        assert.equal(result.status, expected, JSON.stringify(result));
+        return true;
+      }, 60000);
+      return result;
+    };
+    const full = await owner.post('/api/dsp/jobs', { requestId: 'baseline' });
+    await complete(full.value.id, 'succeeded');
+    const latest = (await owner.get('/api/dsp/employees/BB02')).value;
+    const period = latest.previousPeriod;
+    const url = `/api/dsp/employees/BB02?from=${period.from}&to=${period.to}`;
+    const roster = (await owner.get('/api/dsp/employees?limit=all')).value;
+    const other = (await owner.get('/api/dsp/employees/AA01')).value;
+    const rosterRequests = f.state.requests.length;
+    const otherReads = f.state.readsByCode.get('AA01');
+    // A roster failure must not affect a request that only needs one timecard.
+    f.state.incomplete = true;
+    const queued = await owner.post('/api/dsp/employees/BB02/sync', {
+      requestId: 'historical-one',
+      ...period,
+    });
+    assert.equal(queued.status, 202, queued.body);
+    const job = await complete(queued.value.id, 'succeeded');
+    assert.equal(job.metrics[0].employees, 1);
+    assert.equal(job.metrics[0].timecards, 14);
+    assert.equal(f.state.requests.length, rosterRequests);
+    assert.equal(f.state.readsByCode.get('AA01'), otherReads);
+    assert.deepEqual((await owner.get('/api/dsp/employees?limit=all')).value, roster);
+    assert.deepEqual((await owner.get('/api/dsp/employees/AA01')).value, other);
+    const synced = (await owner.get(url)).value;
+    assert.equal(synced.timecards.length, 14);
+    assert.equal(
+      synced.timecards.reduce((total: number, card: { hours: number }) => total + card.hours, 0),
+      16,
+    );
+    assert(
+      synced.timecards[0].sourceUrl.includes(
+        `firstrefno=BB02&perioddates=${period.from}_${period.to}`,
+      ),
+    );
+    f.state.wrongIdentity = true;
+    const failed = await owner.post('/api/dsp/employees/BB02/sync', {
+      requestId: 'wrong-identity',
+      ...period,
+    });
+    await complete(failed.value.id, 'failed');
+    const retained = (await owner.get(url)).value;
+    assert.equal(retained.syncStatus, 'failed');
+    assert.deepEqual(retained.timecards, synced.timecards);
+    assert.equal(retained.collectedAt, synced.collectedAt);
+    assert.equal(f.state.readsByCode.get('AA01'), otherReads);
+  },
+);

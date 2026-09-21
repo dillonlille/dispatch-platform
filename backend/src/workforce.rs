@@ -161,7 +161,7 @@ pub(crate) fn compare(a: &str, b: &str) -> Ordering {
         .compare(a, b)
 }
 
-fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
+pub(crate) fn cards(db: &Db, sql: &str, p: impl rusqlite::Params) -> Result<Vec<Value>> {
     let mut rows = db.all(sql, p)?;
     for row in &mut rows {
         row["punches"] = serde_json::from_str(s(row, "punches"))?;
@@ -364,8 +364,9 @@ impl Store {
         id: &str,
         query: &str,
         offset: usize,
-        limit: usize,
+        limit: Option<usize>,
         desc: bool,
+        active: Option<bool>,
     ) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
         let settings = preferences(&db)?;
@@ -380,7 +381,8 @@ impl Store {
         let publication_id = s(&publication, "id");
         let direction = if desc { "DESC" } else { "ASC" };
         let condition = "publication_id=?1 AND (?2='' OR department=?2) AND (?3='' OR \
-            station=?3) AND (?4='' OR instr(dispatch_lower(dispatch_name(name,?5)||' '||code),?4)>0)";
+            station=?3) AND (?4='' OR instr(dispatch_lower(dispatch_name(name,?5)||' '||code),?4)>0) \
+            AND (?6 IS NULL OR active=?6)";
         let total = db.count(
             &format!("SELECT count(*) FROM employees WHERE {condition}"),
             params![
@@ -388,7 +390,8 @@ impl Store {
                 s(p, "department"),
                 s(p, "station"),
                 query.to_lowercase(),
-                s(p, "name_order")
+                s(p, "name_order"),
+                active
             ],
         )?;
         let mut rows = db.all(
@@ -396,8 +399,8 @@ impl Store {
                 "SELECT code,dispatch_name(name,?5) \
             name,department,position,station,active FROM employees WHERE {condition} ORDER \
             BY name COLLATE dispatch_unicode {direction},code COLLATE dispatch_unicode \
-            {direction} LIMIT ?6 OFFSET \
-            ?7"
+            {direction} LIMIT ?7 OFFSET \
+            ?8"
             ),
             params![
                 publication_id,
@@ -405,7 +408,8 @@ impl Store {
                 s(p, "station"),
                 query.to_lowercase(),
                 s(p, "name_order"),
-                limit as i64,
+                active,
+                limit.map_or(-1, |value| value as i64),
                 offset as i64
             ],
         )?;
@@ -413,34 +417,6 @@ impl Store {
             boolean(row, &["active"]);
         }
         Ok(json!({"employees":rows,"total":total,"collectedAt":publication["collected_at"]}))
-    }
-    pub fn employee(&self, id: &str, code: &str) -> Result<Value> {
-        v::code(code)?;
-        let db = self.collector(id, Provider::Paycom)?;
-        let settings = preferences(&db)?;
-        let mut row = db
-            .one(
-                "SELECT e.* FROM employees e JOIN publications p ON \
-            p.id=e.publication_id WHERE e.code=? ORDER BY p.collected_at DESC LIMIT \
-            1",
-                [code],
-            )?
-            .ok_or_else(|| Error::new("employee_not_found", 404))?;
-        let timecards = cards(
-            &db,
-            "SELECT t.employee_code employeeCode,t.date,t.hours,t.status,t.punches,u.url \
-                sourceUrl FROM timecards t LEFT JOIN timecard_sources u ON \
-                u.publication_id=t.publication_id AND u.employee_code=t.employee_code WHERE \
-                t.publication_id=? AND t.employee_code=? ORDER BY t.date DESC",
-            [s(&row, "publication_id"), code],
-        )?;
-        row.as_object_mut().unwrap().remove("publication_id");
-        boolean(&mut row, &["active"]);
-        row["name"] = json!(display_name(
-            s(&row, "name"),
-            s(&settings["values"], "name_order")
-        ));
-        Ok(json!({"employee":row,"timecards":timecards}))
     }
     /// Overlay only completed employee pages from the current guarded attempt.
     pub fn daily_source(
@@ -473,6 +449,31 @@ impl Store {
                 [s(p, "id"), date],
             )? {
                 rows.insert(s(&row, "employeeCode").to_owned(), row);
+            }
+        }
+        // A completed employee sync overlays only that employee, and only until
+        // a newer full collection supersedes it.
+        for sync in db.all(
+            "SELECT data FROM employee_timecard_syncs WHERE period_from<=? AND period_to>=? \
+             AND collected_at>=? ORDER BY collected_at,employee_code",
+            params![
+                date,
+                date,
+                publication.as_ref().map_or("", |p| s(p, "collected_at"))
+            ],
+        )? {
+            let data: Value = serde_json::from_str(s(&sync, "data"))?;
+            let employee = &data["employees"][0];
+            let code = s(employee, "code");
+            roster.insert(code.into(), json!({"code":code,"name":employee["name"]}));
+            if let Some(mut card) = crate::employee_sync::synced_cards(&data)
+                .into_iter()
+                .find(|card| card["date"] == date)
+            {
+                for key in ["name", "department", "station"] {
+                    card[key] = employee[key].clone();
+                }
+                rows.insert(code.into(), card);
             }
         }
         for (metadata, items) in self.live_results(id, Provider::Paycom, date)? {
@@ -700,8 +701,14 @@ pub fn fixture_date(timezone: &str, selected: Option<chrono::NaiveDate>) -> Resu
         .parse()
         .map_err(|_| Error::new("invalid_timezone", 400))?;
     let today = selected.unwrap_or_else(|| chrono::Utc::now().with_timezone(&tz).date_naive());
+    // Demo periods follow the known Sep 6–19 cycle. Real collections use Paycom's bounds.
+    let anchor = chrono::NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
+    let start = anchor + chrono::Duration::days((today - anchor).num_days().div_euclid(14) * 14);
+    let end = start + chrono::Duration::days(13);
     let dates: Vec<_> = (0..7)
-        .map(|i| (today - chrono::Duration::days(6 - i)).to_string())
+        .map(|i| today - chrono::Duration::days(6 - i))
+        .filter(|date| *date >= start)
+        .map(|date| date.to_string())
         .collect();
     let names = [
         "Avery Morgan",
@@ -731,6 +738,6 @@ pub fn fixture_date(timezone: &str, selected: Option<chrono::NaiveDate>) -> Resu
         "hours":if i%3==0{8.5}else{8.0},"status":"Complete","punches":[{"in":"08:00","out":"12:00","hours":4},
         {"in":"12:30","out":if i%3==0{"17:00"}else{"16:30"},"hours":if i%3==0{4.5}else{4.0}}]}))).collect();
     Ok(
-        json!({"employees":employees,"timecards":timecards,"collectedAt":iso(),"from":dates[0],"to":today.to_string()}),
+        json!({"employees":employees,"timecards":timecards,"collectedAt":iso(),"from":start.to_string(),"to":end.to_string()}),
     )
 }

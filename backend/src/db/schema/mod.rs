@@ -30,6 +30,11 @@ pub const PLATFORM: &[Migration] = &[
         name: "audit_data_and_shown",
         apply: Code(audit_data_and_shown),
     },
+    Migration {
+        id: 5,
+        name: "outbox_context",
+        apply: Code(outbox_context),
+    },
 ];
 pub const JOBS: &[Migration] = &[Migration {
     id: 1,
@@ -41,11 +46,18 @@ pub const DSP: &[Migration] = &[Migration {
     name: "baseline",
     apply: Sql(include_str!("dsp/0001_baseline.sql")),
 }];
-pub const PAYCOM: &[Migration] = &[Migration {
-    id: 1,
-    name: "baseline",
-    apply: Sql(include_str!("paycom/0001_baseline.sql")),
-}];
+pub const PAYCOM: &[Migration] = &[
+    Migration {
+        id: 1,
+        name: "baseline",
+        apply: Sql(include_str!("paycom/0001_baseline.sql")),
+    },
+    Migration {
+        id: 2,
+        name: "employee_timecard_syncs",
+        apply: Sql(include_str!("paycom/0002_employee_timecard_syncs.sql")),
+    },
+];
 pub const CORTEX: &[Migration] = &[Migration {
     id: 1,
     name: "baseline",
@@ -65,6 +77,13 @@ fn role_columns(db: &Db) -> Result<()> {
 // Names the actor once their account is deleted.
 fn audit_actor_name(db: &Db) -> Result<()> {
     add_column(db, "audit", "actor_name", "TEXT")
+}
+// What a queued message was for, so Diagnostics can follow an invitation from the email
+// to the moment it is accepted. Mail queued before this has none.
+fn outbox_context(db: &Db) -> Result<()> {
+    add_column(db, "outbox", "kind", "TEXT")?;
+    add_column(db, "outbox", "invitation_hash", "TEXT")?;
+    add_column(db, "outbox", "user_id", "TEXT")
 }
 // data: who or what an event touched, and the values it changed, as JSON.
 // shown: set when a platform owner acted in a DSP that shows Platform support.

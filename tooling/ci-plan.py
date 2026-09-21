@@ -33,13 +33,19 @@ github = partial(runtime_artifact.github, timeout=20)
 
 def scope(paths):
     # Renames include both paths. New shared modules, contracts, dependencies,
-    # test infrastructure and build configuration deliberately require full CI.
+    # shared test infrastructure and build configuration deliberately require full CI.
     # The dashboard logic tests are the ones the build check runs in dashboard mode.
+    # Everything under tests/browser/, specs and their helpers alike, runs only in the
+    # browser suite, which that mode runs in full.
+    # Documentation is read by no code or test. It still takes the dashboard checks rather
+    # than none: they format-check it and build the artifact Dev installs for every commit.
+    # backend/ is excluded because Rust can embed a file with include_str!.
     dashboard = {"dashboard/index.html", "shared/meal-breaks.ts", *DASHBOARD_TESTS}
     allowed = lambda name: (name in dashboard
                             or name.startswith("dashboard/src/")
                             or name.startswith("dashboard/public/")
-                            or (name.startswith("tests/browser/") and name.endswith(".spec.ts")))
+                            or (name.startswith("tests/browser/") and name.endswith(".ts"))
+                            or (name.endswith(".md") and not name.startswith("backend/")))
     if not paths or not all(allowed(name) for name in paths):
         return "full"
     # This helper is browser-only today. Fail closed if a non-dashboard runtime
@@ -153,7 +159,7 @@ def plan(event_name, ref, event):
         selected = scope(changes(base)) if base else "full"
     except subprocess.SubprocessError:
         selected = "full"
-    return selected, "Dashboard and its tests only" if selected == "dashboard" else "Backend, shared contracts, infrastructure or unknown changes"
+    return selected, "Dashboard, browser tests or documentation only" if selected == "dashboard" else "Backend, shared contracts, infrastructure or unknown changes"
 
 
 def receipt(event, selected):

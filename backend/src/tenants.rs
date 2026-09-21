@@ -3,7 +3,8 @@ use super::{
     Error, Result,
     accounts::{Auth, Context},
     contracts::{
-        ConnectionStatus, Dsp, DspStatus, DspSummary, DspSummaryLegacy, Member, OwnerStatus,
+        ConnectionStatus, Dsp, DspSetupRequest, DspStatus, DspSummary, DspSummaryLegacy, Member,
+        OwnerStatus,
     },
     crypto,
     db::{FromRow, Row, Store, flag, iso, now},
@@ -280,24 +281,27 @@ impl Store {
         self.find_dsp(id)
     }
     pub fn update_dsp(&self, c: &Context, name: &str, timezone: &str) -> Result<Dsp> {
-        let id = c.dsp.id.as_str();
+        self.update_dsp_details(&c.dsp.id, c.actor(), name, timezone)
+    }
+    fn update_dsp_details(&self, id: &str, actor: &str, name: &str, timezone: &str) -> Result<Dsp> {
+        let before = self.find_dsp(id)?;
         self.platform.exec(
             "UPDATE dsps SET name=?,timezone=?,revision=revision+1 WHERE id=?",
             [name, timezone, id],
         )?;
-        if c.dsp.timezone != timezone {
+        if before.timezone != timezone {
             self.retime_schedules(id, timezone)?;
         }
         let changes: Vec<_> = [
-            ("name", c.dsp.name.as_str(), name),
-            ("timezone", c.dsp.timezone.as_str(), timezone),
+            ("name", before.name.as_str(), name),
+            ("timezone", before.timezone.as_str(), timezone),
         ]
         .into_iter()
         .filter(|(_, before, value)| before != value)
         .map(|(field, before, value)| (field, Some(before.to_owned()), Some(value.to_owned())))
         .collect();
         self.audit_with(
-            Some(c.actor()),
+            Some(actor),
             Some(id),
             "dsp.settings_updated",
             "",
@@ -305,6 +309,33 @@ impl Store {
             &changes,
         )?;
         self.find_dsp(id)
+    }
+    pub fn complete_dsp_profile(
+        &self,
+        id: &str,
+        actor: &str,
+        profile: &DspSetupRequest,
+    ) -> Result<()> {
+        self.update_dsp_details(id, actor, &profile.name, &profile.timezone)?;
+        self.set_profile(
+            id,
+            json!({
+                "abbreviation": profile.abbreviation,
+                "stationCode": profile.station_code,
+                "setupRequired": false
+            }),
+        )?;
+        self.audit_with(
+            Some(actor),
+            Some(id),
+            "dsp.profile_completed",
+            "",
+            None,
+            &[
+                ("station", None, Some(profile.station_code.clone())),
+                ("abbreviation", None, Some(profile.abbreviation.clone())),
+            ],
+        )
     }
     pub fn members(&self, id: &str) -> Result<Vec<MemberRow>> {
         self.platform.query_as(MEMBERS, [id])

@@ -56,6 +56,7 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   await expect(page).toHaveTitle('Dispatch');
   await signIn(page);
   await page.getByRole('link', { name: 'Diagnostics', exact: true }).click();
+  await page.getByRole('tab', { name: /^Email/ }).click();
   const mail = page.getByRole('region', { name: 'Email delivery', exact: true });
   const field = (label: string) =>
     mail.getByText(label, { exact: true }).locator('..').locator('dd');
@@ -66,6 +67,10 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   );
   await expect(field('Failed')).toHaveText('1', { timeout: 20000 });
   await expect(field('Pending')).toHaveText('0');
+  const message = mail.getByRole('row').filter({ hasText: 'diagnostics@example.test' });
+  await expect(message).toContainText('Owner invitation');
+  await expect(message).toContainText('Not delivered');
+  await expect(message.getByRole('button', { name: 'Discard', exact: true })).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath('dispatch-mail-diagnostics-desktop.png'),
     fullPage: true,
@@ -84,6 +89,15 @@ test('owner diagnostics shows pending mail, a failed delivery, and later recover
   await expect(field('Last delivered')).not.toHaveText('—', { timeout: 20000 });
   await expect(mail.getByRole('alert')).toHaveCount(0);
   await expect(field('Failed')).toHaveText('1'); // Previous failures remain accounted for.
+  // Retrying hands the failed invitation back to the mailer, which now delivers it.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await message.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(field('Failed')).toHaveText('0');
+  await expect(message).toContainText('Sent', { timeout: 20000 });
+  await page.getByRole('link', { name: 'Audit log', exact: true }).click();
+  await expect(page.getByRole('main')).toContainText(
+    'retried an email to diagnostics@example.test',
+  );
   expect(errors).toEqual([]);
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
 });

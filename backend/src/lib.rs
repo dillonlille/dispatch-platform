@@ -8,6 +8,8 @@ pub mod config;
 pub mod contracts;
 pub mod crypto;
 pub mod db;
+mod employee_sync;
+mod employee_timecards;
 pub mod error;
 pub mod http;
 pub mod job_metrics;

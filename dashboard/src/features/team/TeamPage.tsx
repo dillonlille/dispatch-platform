@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { RefreshCw, Plus, Ellipsis } from 'lucide-react';
 import type { DspView, Membership, Role } from '../../../../shared/contracts/index.js';
 import { api, useData } from '../../app/api.js';
@@ -6,12 +6,16 @@ import {
   Badge,
   ConfirmDialog,
   DataState,
+  DataTable,
   Empty,
   ErrorBox,
   Header,
   Modal,
+  Popover,
   SearchInput,
   Tabs,
+  useDataTable,
+  type TableColumn,
 } from '../../ui/index.js';
 import { time } from '../../lib/format.js';
 import { can } from '../../app/permissions.js';
@@ -22,6 +26,7 @@ import { assignable } from './assignable.js';
 import { useMembers, inviteMember, setMemberRole, useRoles } from '../../app/endpoints.js';
 
 type Invitation = { email: string; role: string; expiresAt: number; accepted: boolean };
+const actions = <span className="sr-only">Actions</span>;
 export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promise<void> }) {
   const { data, error, refresh } = useMembers(10000);
   const canInvite = can(view, 'members.invite'),
@@ -35,7 +40,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
   const [search, setSearch] = useState('');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
-  const [removing, setRemoving] = useState(false);
+  const [removing, setRemoving] = useState<Membership>();
   const [revoking, setRevoking] = useState<Invitation>();
   const revoke = useAction(
     async (invitation: Invitation) => {
@@ -59,15 +64,119 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
     async (member: Membership, role: FormDataEntryValue | null) => {
       await setMemberRole(member.id, role === null ? null : String(role));
       setEditing(undefined);
+      setRemoving(undefined);
       await reopen();
       refresh();
     },
     { success: (_, role) => (role === null ? 'Member removed' : 'Role updated') },
   );
-  const members =
-    data?.filter((member) =>
-      `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase()),
-    ) ?? [];
+  const members = useMemo(
+    () =>
+      data?.filter((member) =>
+        `${member.name} ${member.email}`.toLowerCase().includes(search.toLowerCase()),
+      ) ?? [],
+    [data, search],
+  );
+  const memberColumns: TableColumn<Membership>[] = [
+    {
+      id: 'member',
+      header: 'Member',
+      headerClassName: 'team-member-column',
+      value: (member) => member.name,
+      cell: (member) => (
+        <div className="member-identity">
+          <span className="avatar">
+            {member.name
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((part) => part[0])
+              .join('')}
+          </span>
+          <div>
+            <strong>{member.name}</strong>
+            <small>{member.email}</small>
+          </div>
+        </div>
+      ),
+    },
+    { id: 'role', header: 'Role', value: (member) => member.role, cell: (member) => member.role },
+    {
+      id: 'status',
+      header: 'Status',
+      value: (member) => member.status,
+      cell: (member) => <Badge value={member.status} />,
+    },
+    {
+      id: 'actions',
+      header: actions,
+      className: 'cell-end',
+      cell: (member) =>
+        canManage &&
+        grantable.some((role) => role.id === member.roleId) && (
+          <Popover
+            className="row-menu"
+            label={`Actions for ${member.name}`}
+            trigger={<Ellipsis size={18} />}
+            anchored
+          >
+            <button onClick={() => setEditing(member)}>Change role</button>
+            <button className="danger" onClick={() => setRemoving(member)}>
+              Remove member
+            </button>
+          </Popover>
+        ),
+    },
+  ];
+  const memberTable = useDataTable({
+    columns: memberColumns,
+    rows: members,
+    rowId: (member) => member.id,
+  });
+  const pending = useMemo(
+    () =>
+      invitations.data?.filter(
+        (invitation) => !invitation.accepted && invitation.expiresAt > Date.now(),
+      ) ?? [],
+    [invitations.data],
+  );
+  const invitationColumns: TableColumn<Invitation>[] = [
+    {
+      id: 'email',
+      header: 'Email address',
+      value: (invitation) => invitation.email,
+      cell: (invitation) => invitation.email,
+    },
+    {
+      id: 'role',
+      header: 'Role',
+      value: (invitation) => invitation.role,
+      cell: (invitation) => invitation.role,
+    },
+    {
+      id: 'expires',
+      header: 'Expires',
+      value: (invitation) => invitation.expiresAt,
+      cell: (invitation) => time(new Date(invitation.expiresAt).toISOString(), view.dsp.timezone),
+    },
+    {
+      id: 'actions',
+      header: actions,
+      cell: (invitation) => (
+        <button
+          className="text-button"
+          aria-label={`Revoke invitation for ${invitation.email}`}
+          onClick={() => setRevoking(invitation)}
+        >
+          Revoke
+        </button>
+      ),
+    },
+  ];
+  const invitationTable = useDataTable({
+    columns: invitationColumns,
+    rows: pending,
+    rowId: (invitation, index) => `${invitation.email}:${index}`,
+  });
   return (
     <>
       <Header title="Team & Roles">
@@ -112,57 +221,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
           <DataState data={data}>
             {() => (
               <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: '45%' }}>Member</th>
-                      <th>Role</th>
-                      <th>Status</th>
-                      <th>
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((member) => (
-                      <tr key={member.id}>
-                        <td>
-                          <div className="member-identity">
-                            <span className="avatar">
-                              {member.name
-                                .split(/\s+/)
-                                .slice(0, 2)
-                                .map((part) => part[0])
-                                .join('')}
-                            </span>
-                            <div>
-                              <strong>{member.name}</strong>
-                              <small>{member.email}</small>
-                            </div>
-                          </div>
-                        </td>
-                        <td>{member.role}</td>
-                        <td>
-                          <Badge value={member.status} />
-                        </td>
-                        <td>
-                          {canManage && grantable.some((role) => role.id === member.roleId) && (
-                            <button
-                              className="icon-button"
-                              aria-label={`Edit ${member.name}`}
-                              onClick={() => {
-                                setRemoving(false);
-                                setEditing(member);
-                              }}
-                            >
-                              <Ellipsis size={18} />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable table={memberTable} />
                 {!members.length && (
                   <Empty title="No team members">
                     Invite a member to give them access to this DSP.
@@ -199,45 +258,8 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
             </button>
           </div>
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Email address</th>
-                  <th>Role</th>
-                  <th>Expires</th>
-                  <th>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {invitations.data
-                  ?.filter(
-                    (invitation) => !invitation.accepted && invitation.expiresAt > Date.now(),
-                  )
-                  .map((invitation, index) => (
-                    <tr key={`${invitation.email}:${index}`}>
-                      <td>{invitation.email}</td>
-                      <td>{invitation.role}</td>
-                      <td>
-                        {time(new Date(invitation.expiresAt).toISOString(), view.dsp.timezone)}
-                      </td>
-                      <td>
-                        <button
-                          className="text-button"
-                          aria-label={`Revoke invitation for ${invitation.email}`}
-                          onClick={() => setRevoking(invitation)}
-                        >
-                          Revoke
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-            {(invitations.data?.filter(
-              (invitation) => !invitation.accepted && invitation.expiresAt > Date.now(),
-            ).length ?? 0) === 0 && (
+            <DataTable table={invitationTable} />
+            {!pending.length && (
               <Empty title="No invitations">Invite a team member to get started.</Empty>
             )}
           </div>
@@ -296,7 +318,7 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
         </Modal>
       )}
       {editing && (
-        <Modal variant="sheet" title={`Edit ${editing.name}`} onClose={() => setEditing(undefined)}>
+        <Modal title={`Change role for ${editing.name}`} onClose={() => setEditing(undefined)}>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -313,30 +335,26 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
                 ))}
               </select>
             </label>
-            {removing ? (
-              <div className="form-actions" role="group" aria-label="Remove member confirmation">
-                <span>Remove {editing.name} and delete their account?</span>
-                <button type="button" onClick={() => setRemoving(false)}>
-                  Keep member
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => void assign.run(editing, null)}
-                >
-                  Remove member
-                </button>
-              </div>
-            ) : (
-              <div className="form-actions">
-                <button type="button" className="danger" onClick={() => setRemoving(true)}>
-                  Remove member
-                </button>
-                <button className="primary">Save role</button>
-              </div>
-            )}
+            <div className="form-actions">
+              <button type="button" onClick={() => setEditing(undefined)}>
+                Cancel
+              </button>
+              <button className="primary">Save role</button>
+            </div>
           </form>
         </Modal>
+      )}
+      {removing && (
+        <ConfirmDialog
+          title="Remove member"
+          confirm="Remove member"
+          tone="danger"
+          busy={assign.busy}
+          onConfirm={() => void assign.run(removing, null)}
+          onCancel={() => setRemoving(undefined)}
+        >
+          Remove {removing.name} and delete their account?
+        </ConfirmDialog>
       )}
     </>
   );

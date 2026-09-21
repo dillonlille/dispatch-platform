@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { paycomFixture, credentials } from './browseros-paycom-fixture.js';
-import { until } from './support.js';
+import { until, seedQueuedJob } from './support.js';
 import { processMemory } from './process-memory.js';
 import type { Job } from '../shared/contracts/index.js';
 
@@ -91,8 +91,15 @@ test(
       }
       await Promise.all([firstRequests, pair.ready]);
     };
-    // A second queued job from A must not jump ahead of C's first collection.
+    // A retained queued job from A must not jump ahead of C's first collection.
     for (const index of [0, 0, 1, 2]) {
+      if (jobs.length === 1) {
+        const blocked = await clients[index]!.post('/api/dsp/jobs', { requestId: 'extra-manual' });
+        assert.equal(blocked.status, 409);
+        assert.equal(blocked.value.error, 'sync_in_progress');
+        jobs.push(seedQueuedJob(f, jobs[0]!, 'retained-queued').id);
+        continue;
+      }
       const response = await clients[index]!.post('/api/dsp/jobs', {
         requestId: `capacity-${jobs.length}`,
       });

@@ -1,0 +1,588 @@
+/* Platform Diagnostics: tabs, tiles, the collections source list, run detail and trend charts. */
+.tab-count {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--warning-border);
+  border-radius: 999px;
+  background: var(--warning-surface);
+  color: var(--warning);
+  font-size: 11px;
+}
+.diagnostics-warn {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.diagnostics-bad {
+  flex-shrink: 0;
+  color: var(--destructive);
+}
+.restored-tabs + .error {
+  margin-top: 20px;
+}
+
+/* Pill buttons that pick one of a few: a run's attempts, the mail filters. */
+.diagnostics-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.diagnostics-chips button {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.diagnostics-chips button span {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-chips button[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 500;
+}
+.run-detail > .diagnostics-chips {
+  margin-bottom: 20px;
+}
+
+/* Cards and tiles */
+.diagnostics-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.diagnostics-tile,
+.diagnostics-card,
+.trend-chart {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.diagnostics-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 104px;
+  padding: 20px 22px;
+}
+.diagnostics-tile h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.diagnostics-tile-value {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-tile-value span {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted-foreground);
+}
+.diagnostics-tile small {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.diagnostics-slots {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+.diagnostics-slots span {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+}
+.diagnostics-slots .used {
+  background: var(--primary);
+}
+.diagnostics-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.diagnostics-card {
+  margin-top: 16px;
+  padding: 18px 24px;
+}
+.diagnostics-pair > .diagnostics-card {
+  margin-top: 0;
+}
+.diagnostics-card > h2,
+.diagnostics-card-heading h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.diagnostics-card > h2 {
+  margin-bottom: 14px;
+}
+.diagnostics-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.diagnostics-card-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.diagnostics-card td,
+.diagnostics-card tbody th {
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-card tbody th {
+  padding: var(--table-row-padding) 8px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.diagnostics-card tbody th small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.diagnostics-open {
+  border: 0;
+  color: var(--muted-foreground);
+}
+
+/* Overview */
+.diagnostics-live {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.4fr) 1fr;
+  gap: 18px;
+  align-items: center;
+  padding: 8px 0;
+}
+.diagnostics-live strong {
+  display: block;
+  font-weight: 500;
+}
+.diagnostics-live small {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.diagnostics-live .progress {
+  width: 100%;
+  margin-bottom: 4px;
+}
+.diagnostics-issue {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 12px;
+  width: calc(100% + 48px);
+  min-height: 0;
+  margin-inline: -24px;
+  padding: 12px 24px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+  font-weight: 400;
+}
+.diagnostics-issue svg {
+  margin-top: 2px;
+}
+.diagnostics-issue strong {
+  display: block;
+  font-weight: 500;
+}
+.diagnostics-issue small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Collections */
+.diagnostics-collections {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 20px;
+}
+.diagnostics-sources {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+.diagnostics-sources button {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+}
+.diagnostics-sources button:last-child {
+  border-bottom: 0;
+}
+.diagnostics-sources button:hover {
+  background: var(--accent);
+}
+.diagnostics-sources button[aria-current] {
+  background: var(--selection);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.diagnostics-sources button > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.diagnostics-sources strong {
+  display: block;
+  font-weight: 500;
+}
+.diagnostics-sources small {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-source-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.diagnostics-source-heading h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.diagnostics-source-stats {
+  display: flex;
+  gap: 12px 36px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.diagnostics-source-stats dt {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.diagnostics-source-stats dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-warning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius);
+  background: var(--warning-surface);
+  font-size: 14px;
+}
+.diagnostics-warning svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+/* Runs table and the detail beneath an open run */
+.run-toggle {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.run-toggle:hover {
+  background: transparent;
+  color: var(--primary);
+}
+.run-toggle span {
+  text-align: left;
+}
+.run-toggle small {
+  display: block;
+}
+.run-toggle svg {
+  color: var(--muted-foreground);
+}
+.diagnostics-runs .run-open,
+.diagnostics-runs .run-open:hover,
+.diagnostics-runs .run-detail-row,
+.diagnostics-runs .run-detail-row:hover {
+  background: var(--surface);
+}
+.diagnostics-runs .run-open {
+  border-bottom: 0;
+}
+.run-detail {
+  padding: 0 8px 12px;
+  white-space: normal;
+}
+.run-detail h3 {
+  margin: 24px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.run-detail section > h3:first-child {
+  margin-top: 4px;
+}
+.run-error {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--destructive);
+}
+.run-phases {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+}
+.run-phases span {
+  min-width: 4px;
+  border-radius: 4px;
+}
+.run-phase-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+}
+.run-phase-legend dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.run-phase-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.run-phase-legend dd {
+  margin: 2px 0 0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.phase-queue {
+  background: var(--series-1);
+}
+.phase-sign-in {
+  background: var(--series-2);
+}
+.phase-verification {
+  background: var(--series-3);
+}
+.phase-collection {
+  background: var(--series-4);
+}
+.phase-publishing {
+  background: var(--series-5);
+}
+.run-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 24px;
+  margin: 0;
+}
+.run-facts dt {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.run-facts dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.run-reads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run-reads li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.run-reads svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--warning);
+}
+.run-detail .muted {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+/* Trend charts */
+.trend-chart {
+  margin: 0;
+  padding: 20px 24px 16px;
+}
+.trend-chart figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.trend-chart figcaption strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.trend-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.trend-chart text {
+  font-size: 11px;
+  fill: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.trend-grid {
+  stroke: var(--border);
+}
+.trend-median {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 4 4;
+}
+.trend-chart polyline {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.trend-chart circle {
+  fill: var(--series-1);
+  stroke: var(--card);
+  stroke-width: 2;
+}
+.trend-chart .trend-latest {
+  fill: var(--card);
+  stroke: var(--series-1);
+  stroke-width: 3;
+}
+.trend-chart rect {
+  fill: transparent;
+}
+
+@media (max-width: 1100px) {
+  .diagnostics-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .diagnostics-collections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .diagnostics-pair,
+  .run-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .diagnostics-tile {
+    min-height: 0;
+    padding: 16px;
+  }
+}
+
+/* Email */
+.mail-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  margin: 20px 0 0;
+  padding: 14px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.mail-strip > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mail-strip dt {
+  font-weight: 500;
+}
+.mail-strip dd {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.mail-table td small {
+  display: block;
+}
+.mail-steps {
+  display: flex;
+  gap: 8px 28px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mail-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  flex: 0 0 180px;
+  font-size: 13px;
+}
+.mail-step svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.mail-step small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mail-step-todo {
+  color: var(--muted-foreground);
+}
+.mail-step-done svg {
+  color: var(--success);
+}
+.mail-step-failed svg {
+  color: var(--destructive);
+}
+.mail-step-retrying svg {
+  color: var(--warning);
+}
+.mail-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.mail-actions button + button {
+  margin-left: 16px;
+}
