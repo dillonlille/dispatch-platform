@@ -11,7 +11,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { jobSchema, sessionSchema } from '../shared/contracts/runtime.js';
-import { shiftDate } from '../shared/meal-breaks.js';
 
 const { values } = parseArgs({
   options: {
@@ -24,6 +23,8 @@ const employees = 3000,
   periodDays = 14,
   days = periodDays * 3,
   requests = 240;
+const benchmarkDate = (offset: number) =>
+  new Date(Date.UTC(2026, 6, 26 + offset)).toISOString().slice(0, 10);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function rss(pid: number): number {
   // Synthetic collectors stay inside the core. Native browser memory is checked
@@ -51,12 +52,11 @@ function dataset(root: string) {
       // Keep a large history using complete Paycom periods, not one synthetic month.
       for (let offset = 0; offset < days; offset += periodDays) {
         const id = `pub_${String(offset).padStart(32, '0')}`;
-        const from = shiftDate('2026-07-26', offset);
         publication.run(
           id,
           '2026-09-06T00:00:00.000Z',
-          from,
-          shiftDate(from, periodDays - 1),
+          benchmarkDate(offset),
+          benchmarkDate(offset + periodDays - 1),
           Number(offset + periodDays === days),
         );
         for (let i = 0; i < employees; i++) {
@@ -74,7 +74,7 @@ function dataset(root: string) {
             card.run(
               id,
               code,
-              shiftDate(from, day),
+              benchmarkDate(offset + day),
               8,
               'Complete',
               '[{"in":"08:00","out":"16:00","hours":8}]',
