@@ -367,7 +367,18 @@ fn all_releases(system: &dyn System) -> Result<Vec<Value>> {
     )?)?;
     Ok(pages.into_iter().flatten().collect())
 }
+fn latest_version(listed: &[Value]) -> &str {
+    listed
+        .iter()
+        .filter(|r| r["draft"] == false && r["prerelease"] == false)
+        .filter_map(|r| r["tag_name"].as_str().and_then(|s| s.strip_prefix('v')))
+        .filter_map(|s| releases::version(s).ok().map(|v| (v, s)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, s)| s)
+        .unwrap_or("0.0.0")
+}
 fn unfinished(system: &dyn System, directory: &Path, listed: &[Value]) -> Result<Option<String>> {
+    let latest = releases::version(latest_version(listed))?;
     let pulls: Vec<Value> = serde_json::from_slice(&system.command(
         &[
             "gh",
@@ -425,7 +436,12 @@ fn unfinished(system: &dyn System, directory: &Path, listed: &[Value]) -> Result
                     .join("deployment-verification.json")
                     .try_exists()?
                 && let Some(version) = name.strip_prefix('v')
+                && let Ok(parts) = releases::version(version)
+                && parts >= latest
             {
+                // Legacy history may predate deployment receipts. A newer
+                // published version supersedes it; explicit journals above
+                // still retain unfinished work regardless of release age.
                 found.insert(version.into());
             }
         }
@@ -461,14 +477,7 @@ pub fn run(args: &[String], system: &dyn System) -> Result<Value> {
         .ok_or("Invalid checkout")?
         .to_path_buf();
     let listed = all_releases(system)?;
-    let latest = listed
-        .iter()
-        .filter(|r| r["draft"] == false && r["prerelease"] == false)
-        .filter_map(|r| r["tag_name"].as_str().and_then(|s| s.strip_prefix('v')))
-        .filter_map(|s| releases::version(s).ok().map(|v| (v, s)))
-        .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, s)| s)
-        .unwrap_or("0.0.0");
+    let latest = latest_version(&listed);
     let directory = options
         .releases
         .clone()

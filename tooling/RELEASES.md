@@ -62,3 +62,7 @@ Release and sync worktrees stay under the platform's `worktrees/` directory, inc
 when the launcher is invoked from a feature worktree. Cleanup removes only clean
 worktrees and local branches still at their merged PR heads. Custom notes, changed
 notes, uncommitted work and recovery state are preserved.
+
+Legacy directories older than the latest published version may predate deployment
+receipts; they are retained as history and do not trigger automatic resumption.
+Explicit unfinished journals remain discoverable even for an older version.

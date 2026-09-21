@@ -700,6 +700,40 @@ fn unfinished_discovery_covers_merged_pr_before_draft_and_published_before_verif
 }
 
 #[test]
+fn legacy_history_without_receipts_does_not_reopen_superseded_releases() {
+    let f = Fixture::new();
+    let release = f.release();
+    io::private_directory(&release.directory.join("v0.0.3")).unwrap();
+    let listed = vec![json!({"tag_name":"v1.0.0","draft":false,"prerelease":false})];
+    assert!(
+        unfinished(&f.system, &release.directory, &listed)
+            .unwrap()
+            .is_none()
+    );
+    io::private_directory(&release.output).unwrap();
+    assert_eq!(
+        unfinished(&f.system, &release.directory, &listed)
+            .unwrap()
+            .as_deref(),
+        Some("1.0.0")
+    );
+    fs::remove_dir(&release.output).unwrap();
+    let mut journal = release.journal().unwrap();
+    journal.version = "0.0.3".into();
+    io::write_json(
+        &release.directory.join(".v0.0.3-state.json"),
+        &serde_json::to_value(journal).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        unfinished(&f.system, &release.directory, &listed)
+            .unwrap()
+            .as_deref(),
+        Some("0.0.3")
+    );
+}
+
+#[test]
 fn locking_prevents_overlapping_mutations() {
     let f = Fixture::new();
     let release = f.release();
