@@ -244,10 +244,9 @@
   position: relative;
 }
 .employee-timecard-scroll {
-  /* Reserve the same space for loading, empty, short and long timecards. */
-  height: 384px;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  /* Reserve a header and 14 daily rows while loading; grow for extra punches. */
+  min-height: 675px;
+  overflow-x: auto;
 }
 .employee-timecard-state {
   position: absolute;
