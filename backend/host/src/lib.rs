@@ -11,12 +11,8 @@ mod releases;
 pub mod updater;
 
 pub use cli::run;
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-pub const REPOSITORY: &str = "dillonlille/dispatch-platform";
+pub use dispatch_ci::{REPOSITORY, Result, require};
 pub const MAX_BYTES: u64 = 1024 * 1024 * 1024;
-pub fn require(value: bool, message: &str) -> Result<()> {
-    if value { Ok(()) } else { Err(message.into()) }
-}
 
 #[cfg(test)]
 mod tests;

@@ -32,12 +32,7 @@ pub struct Manifest {
     pub files: Vec<Entry>,
     pub digest: String,
 }
-pub fn hex(value: &str, size: usize) -> bool {
-    value.len() == size
-        && value
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-}
+pub use dispatch_ci::policy::hex;
 pub fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }

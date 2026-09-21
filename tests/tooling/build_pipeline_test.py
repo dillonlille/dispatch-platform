@@ -95,7 +95,6 @@ class PipelineTests(unittest.TestCase):
                     cache.build(release=True)
                 self.assertEqual(len(builds), 3)
 
-
     def test_local_cache_follows_all_rust_inputs_but_not_dashboard_changes(self):
         with tempfile.TemporaryDirectory(prefix="dispatch-cache-test-") as temp:
             roots = [Path(temp) / name for name in ("one", "two")]
