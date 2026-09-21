@@ -4,6 +4,8 @@ import type { DspView as GeneratedDspView } from './generated/DspView';
 export type { PublicUser as User } from './generated/PublicUser';
 export type { Member as Membership } from './generated/Member';
 export const permissions = [
+  'uniforms.adjust',
+  'uniforms.manage',
   'timecard.view',
   'timecard.manage',
   'collections.run',

@@ -4,6 +4,8 @@ export const can = (view: DspView | undefined, permission: Permission) =>
   Boolean(view && (view.role.owner || view.permissions.includes(permission)));
 
 export const permissionLabels: Record<Permission, string> = {
+  'uniforms.adjust': 'Adjust Uniform Inventory',
+  'uniforms.manage': 'Manage Uniforms & Sizes',
   'timecard.view': 'View Timecard',
   'timecard.manage': 'Manage Timecard',
   'collections.run': 'Run Collections',

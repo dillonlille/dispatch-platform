@@ -1,3 +1,10 @@
+import type {
+  UniformUpdates,
+  UniformInventory,
+  UniformInput,
+  UniformAdjustment,
+  UniformHistory,
+} from '../../../shared/contracts/uniforms.js';
 import type { PaycomPreferences, PaycomSettings } from '../../../shared/contracts/paycom.js';
 import type { MealComparison } from '../../../shared/contracts/meals.js';
 // The endpoints whose responses are generated from the backend's Rust types: each address
@@ -142,3 +149,25 @@ export const useAuditPage = (query: URLSearchParams, limit: number) =>
   useData<AuditPage>(`${audit}?${query}&limit=${limit}`, 10000);
 export const exportAudit = (query: URLSearchParams) =>
   api<AuditPage>(`${audit}/export`, Object.fromEntries(query));
+
+// Each active inventory page holds one long poll. Unchanged quantities send no rows.
+export const getUniformUpdates = (after: number | undefined, signal: AbortSignal) =>
+  api<UniformUpdates>(
+    `/api/dsp/uniforms/updates${after === undefined ? '' : `?after=${after}`}`,
+    undefined,
+    signal,
+  );
+export const initializeUniforms = (starter: boolean) =>
+  api<UniformInventory>('/api/dsp/uniforms/initialize', { starter });
+export const saveUniform = (id: string | undefined, input: UniformInput) =>
+  api<UniformInventory>(`/api/dsp/uniforms${id ? `/${id}` : ''}`, input);
+export const archiveUniform = (id: string, revision: number) =>
+  api<UniformInventory>(`/api/dsp/uniforms/${id}/archive`, { revision });
+export const adjustUniform = (id: string, delta: 1 | -1, requestId: string, signal?: AbortSignal) =>
+  api<UniformAdjustment>(`/api/dsp/uniforms/stock/${id}`, { delta, requestId }, signal);
+export const useUniformHistory = (before: number | null, revision: number) =>
+  useData<UniformHistory>(
+    `/api/dsp/uniforms/history${before === null ? '' : `?before=${before}`}`,
+    0,
+    String(revision),
+  );

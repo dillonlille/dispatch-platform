@@ -7,6 +7,7 @@ import {
   House,
   ScrollText,
   Settings,
+  Shirt,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { HomePage } from '../features/home/index.js';
 import { DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../features/platform/index.js';
 import { SettingsPage } from '../features/settings/index.js';
 import { TeamPage } from '../features/team/index.js';
+import { UniformInventoryPage } from '../features/uniforms/index.js';
 import { PaycomPage, PaycomSettingsPage } from '../features/timecard/index.js';
 import { ErrorBox } from '../ui/index.js';
 import { can } from './permissions.js';
@@ -40,6 +42,11 @@ const platformOwner = ({ session }: Access) => session.user.platformOwner;
 
 // Every page declared in route-meta.ts gets its navigation, access and component here.
 const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
+  uniforms: {
+    icon: Shirt,
+    nav: true,
+    render: ({ view }) => <UniformInventoryPage key={view.token} view={view} />,
+  },
   overview: {
     icon: House,
     nav: true,

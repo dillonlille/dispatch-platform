@@ -6,3 +6,4 @@ export * from './jobs.js';
 export * from './platform.js';
 export * from './schedules.js';
 export * from './workforce.js';
+export * from './uniforms.js';

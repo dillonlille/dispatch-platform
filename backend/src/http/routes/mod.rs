@@ -12,6 +12,7 @@ pub mod session;
 pub mod settings;
 pub mod team;
 pub mod timecard;
+pub mod uniforms;
 
 pub fn all() -> Vec<Route> {
     [
@@ -26,6 +27,7 @@ pub fn all() -> Vec<Route> {
         connections::routes(),
         audit::routes(),
         settings::routes(),
+        uniforms::routes(),
     ]
     .into_iter()
     .flatten()
