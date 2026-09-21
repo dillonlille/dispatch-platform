@@ -14,13 +14,9 @@ import {
   useDataTable,
 } from '../../../ui/index.js';
 import { personName, time } from '../../../lib/format.js';
-import {
-  clockLabel,
-  mealPairs,
-  type MealComparison,
-  type MealEmployee,
-} from '../../../../../shared/meal-breaks.js';
-import type { PaycomPreferences } from '../../../../../shared/paycom.js';
+import { clockLabel, mealPairs } from '../../../lib/meal-breaks.js';
+import { type MealComparison, type MealEmployee } from '../../../../../shared/contracts/meals.js';
+import type { PaycomPreferences } from '../../../../../shared/contracts/paycom.js';
 import { PaycomDateControls } from '../DateControls.js';
 import { MealDetail, mealColumns, mealLines } from './mealColumns.js';
 import { LinkEmployees } from './LinkEmployees.js';

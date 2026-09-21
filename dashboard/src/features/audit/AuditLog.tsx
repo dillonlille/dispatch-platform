@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { dateFormatter } from '../../../../shared/date-format.js';
+import { dateFormatter } from '../../lib/date-format.js';
 import type {
   AuditArea,
   AuditChange,

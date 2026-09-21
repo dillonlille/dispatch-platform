@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { csrf } from './api.js';
-import { onActivity } from '../lib/activity.js';
+import { onActivity } from './activity.js';
 import { randomId } from '../lib/random-id.js';
 
 const BEAT = 30_000;

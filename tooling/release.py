@@ -269,7 +269,7 @@ class Release:
         with tempfile.TemporaryDirectory(prefix="dispatch-release-smoke-") as temporary:
             unpack(self.output / self.archive, Path(temporary) / ".build")
             (Path(temporary) / ".build/services/rust/dispatch-backend").chmod(0o700)
-            subprocess.run([str(tsx), str(ROOT / "tooling/browser-check.ts"), "--smoke-only"],
+            subprocess.run([str(tsx), str(ROOT / "tooling/testing/browser-check.ts"), "--smoke-only"],
                            cwd=temporary, check=True, timeout=300)
 
     def publish(self, commit):

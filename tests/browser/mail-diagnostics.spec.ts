@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test as base, expect, signIn } from './fixtures.js';
-import { until } from '../support.js';
+import { until } from '../support/support.js';
 
 // A synthetic mail worker the test can make fail, and a fresh platform that delivers through it.
 const test = base.extend<{ mailWorker: { url: string; reject: boolean } }>({

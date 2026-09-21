@@ -6,7 +6,8 @@ import type {
   DspView,
   EmployeeTimecardResponse,
 } from '../../../../shared/contracts/index.js';
-import { paycomDefaults, type PaycomSettings } from '../../../../shared/paycom.js';
+import { paycomDefaults } from '../../lib/paycom.js';
+import { type PaycomSettings } from '../../../../shared/contracts/paycom.js';
 import { api, useCachedData, useData } from '../../app/api.js';
 import { syncEmployeeTimecard } from '../../app/endpoints.js';
 import { dataCache } from '../../app/data-cache.js';

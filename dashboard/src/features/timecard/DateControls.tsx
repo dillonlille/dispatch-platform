@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { localDate, shiftDate } from '../../../../shared/meal-breaks.js';
+import { localDate, shiftDate } from '../../lib/meal-breaks.js';
 import { DateField } from '../../ui/index.js';
 
 function validDay(value: string, today: string) {

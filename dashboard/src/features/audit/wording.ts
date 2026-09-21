@@ -1,9 +1,9 @@
-import { dateFormatter } from '../../../../shared/date-format.js';
+import { dateFormatter } from '../../lib/date-format.js';
 import type { AuditChange, AuditEvent, Permission } from '../../../../shared/contracts/index.js';
 import { errorLabel } from '../../app/api.js';
 import { elapsed, timeOfDay, title } from '../../lib/format.js';
 import { permissionLabels } from '../../app/permissions.js';
-import { paycomColumns } from '../../../../shared/paycom.js';
+import { paycomColumns } from '../../lib/paycom.js';
 
 export const views = new Set(['dsp.view_opened', 'dsp.owner_view_opened']);
 

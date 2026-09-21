@@ -8,11 +8,11 @@ import {
   useDataTable,
   type TableColumn,
 } from '../../../ui/index.js';
+import { scheduleIssues } from '../../../app/schedule-issues.js';
 import {
-  scheduleIssues,
   type CollectionSchedule,
   type ScheduleInput,
-} from '../../../../../shared/schedules.js';
+} from '../../../../../shared/contracts/schedules.js';
 import { dspHash } from '../../../app/navigation.js';
 import { messageOf } from '../../../lib/errors.js';
 import { LateDas } from './LateDas.js';

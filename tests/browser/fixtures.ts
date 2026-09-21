@@ -1,5 +1,5 @@
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
-import { built, demo, fixture, type FixtureOptions } from '../support.js';
+import { built, demo, fixture, type FixtureOptions } from '../support/support.js';
 
 type Dispatch = Awaited<ReturnType<typeof fixture>>;
 export const test = base.extend<{

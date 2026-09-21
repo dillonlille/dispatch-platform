@@ -1,0 +1,23 @@
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow: 0 5px 20px var(--shadow-color);
+  z-index: 150;
+  font-size: 14px;
+  max-width: calc(100vw - 48px);
+}
+.toast button {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}

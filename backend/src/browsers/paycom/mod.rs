@@ -391,7 +391,7 @@ impl Drives for Driver {
     }
     fn collect<'a>(&'a mut self, run: &'a Run<'a>) -> Pending<'a, Collected> {
         Box::pin(async move {
-            if let Some(scope) = crate::employee_sync::EmployeeSync::parse(run.request)? {
+            if let Some(scope) = crate::workforce::sync::EmployeeSync::parse(run.request)? {
                 let code = scope.employee_code.clone();
                 let job = run.job.to_owned();
                 let owner = run.owner.to_owned();

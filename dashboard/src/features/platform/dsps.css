@@ -1,0 +1,25 @@
+.dsp-panel-identity {
+  align-items: center;
+  gap: 12px;
+  display: inline-flex;
+}
+.dsp-panel-identity .dsp-avatar {
+  flex-basis: 40px;
+  width: 40px;
+  height: 40px;
+}
+.fleet-dsp-column {
+  width: 28%;
+}
+
+.dsp-detail-list {
+  margin-top: 24px;
+}
+.dsp-detail-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+.side-sheet .dsp-detail-list {
+  margin-top: 0;
+}

@@ -1,0 +1,152 @@
+.permission-row {
+  display: flex;
+}
+.permission-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+.team-member-column {
+  width: 45%;
+}
+.role-name-column {
+  width: 30%;
+}
+.role-members-column {
+  width: 14%;
+}
+
+.role-table {
+  overflow: visible;
+}
+.role-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.role-name svg {
+  color: var(--muted-foreground);
+}
+.permission-summary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.permission-more {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.permission-card {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 5;
+  min-width: 220px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+}
+.permission-card ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.permission-summary:hover .permission-card,
+.permission-summary:focus .permission-card {
+  display: block;
+}
+.modal.side-sheet:has(.role-form) {
+  width: 460px;
+}
+.permission-group {
+  min-width: 0;
+  margin: 22px 0 0;
+  padding: 0;
+  border: 0;
+}
+.permission-group legend {
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.permission-rows {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.permission-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  cursor: pointer;
+}
+.permission-row:last-child {
+  border-bottom: 0;
+}
+.permission-row:has(input:disabled) {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.permission-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.permission-row input[role='switch'] {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--input);
+  border-radius: 10px;
+  background: var(--muted);
+  cursor: inherit;
+}
+.permission-row input[role='switch']::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--foreground);
+}
+.permission-row input[role='switch']:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+.permission-row input[role='switch']:checked::before {
+  left: 14px;
+  background: var(--primary-foreground);
+}
+.permission-row input[role='switch']:disabled {
+  opacity: 0.5;
+}

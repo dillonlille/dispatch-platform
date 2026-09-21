@@ -19,7 +19,7 @@ import urllib.request
 import zipfile
 
 REPOSITORY = "dillonlille/dispatch-platform"
-# Top-level names an artifact may contain; tooling/artifact.ts builds from the same list.
+# Top-level names an artifact may contain; tooling/build/artifact.ts builds from the same list.
 MANAGED = {"dashboard", "services", "tooling", "release.json"}
 MAX_BYTES = 1024 * 1024 * 1024
 STABLE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"

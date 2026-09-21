@@ -1,5 +1,5 @@
 import { test, expect, demo, login } from './fixtures.js';
-import { capturedMail } from '../mail-support.js';
+import { capturedMail } from '../support/mail-support.js';
 
 // This flow performs additional sign-ins; like every browser test it owns its server,
 // so its accounts and throttles stay isolated.
