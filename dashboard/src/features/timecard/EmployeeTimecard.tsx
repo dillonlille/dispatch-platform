@@ -4,7 +4,7 @@ import type {
   EmployeeTimecardResponse,
   Timecard,
 } from '../../../../shared/contracts/index.js';
-import { paycomDay } from '../../../../shared/meal-breaks.js';
+import { paycomDay } from '../../lib/meal-breaks.js';
 import { addDays } from '../../lib/calendar.js';
 import { DataState, DataTable, Empty, useDataTable, type TableColumn } from '../../ui/index.js';
 import {

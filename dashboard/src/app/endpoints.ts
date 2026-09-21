@@ -20,7 +20,7 @@ import type {
   Role,
   SessionView,
 } from '../../../shared/contracts/index.js';
-import type { ScheduleInput } from '../../../shared/schedules.js';
+import type { ScheduleInput } from '../../../shared/contracts/schedules.js';
 
 export const getSession = () => api<SessionView>('/api/session');
 export const employeeTimecardUrl = (code: string, period?: EmployeeTimecardPeriod | null) =>

@@ -1,9 +1,9 @@
 import { PaycomDateControls } from './DateControls.js';
-import { localDate } from '../../../../shared/meal-breaks.js';
+import { localDate } from '../../lib/meal-breaks.js';
 import { useMemo, useState } from 'react';
 import { Download, Globe, Info } from 'lucide-react';
 import type { Timecard } from '../../../../shared/contracts/index.js';
-import type { PaycomPreferences } from '../../../../shared/paycom.js';
+import type { PaycomPreferences } from '../../../../shared/contracts/paycom.js';
 import { useCachedData } from '../../app/api.js';
 import { useTableState } from '../../app/useTableState.js';
 import {

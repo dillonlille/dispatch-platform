@@ -2,7 +2,6 @@ node_modules/
 .build/
 package-lock.json
 
-dashboard/src/paycom-workforce.css
 target/
 Cargo.lock
 

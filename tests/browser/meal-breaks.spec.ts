@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
-import type { MealComparison, MealEmployee } from '../../shared/meal-breaks.js';
-import { paycomDefaults } from '../../shared/paycom.js';
+import type { MealComparison, MealEmployee } from '../../shared/contracts/meals.js';
+import { paycomDefaults } from '../../dashboard/src/lib/paycom.js';
 
 const date = '2026-09-15';
 function sample(): MealComparison {

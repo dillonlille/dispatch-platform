@@ -1,5 +1,5 @@
 import { test, expect, demo, login, openDsp, setDate } from './fixtures.js';
-import { capturedMail } from '../mail-support.js';
+import { capturedMail } from '../support/mail-support.js';
 test('owner dashboard, search, workforce, timecards, connection verification and collection', async ({
   page,
   dispatch,

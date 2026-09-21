@@ -1,5 +1,5 @@
 import type { Timecard } from '../../../../shared/contracts/index.js';
-import { paycomColumns, type PaycomColumn } from '../../../../shared/paycom.js';
+import { paycomColumns, type PaycomColumn } from '../../lib/paycom.js';
 import { Badge, type TableColumn } from '../../ui/index.js';
 
 const punches = (card: Timecard, values: (string | null)[]) =>

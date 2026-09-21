@@ -1,5 +1,5 @@
 import { beginBrowserWrite } from './browser-update.js';
-import { scheduleIssues } from '../../../shared/schedules.js';
+import { scheduleIssues } from './schedule-issues.js';
 import { useEffect, useState, useCallback, useRef, useSyncExternalStore } from 'react';
 import { parseApiResponse } from '../../../shared/contracts/runtime.js';
 import { backoff } from '../lib/backoff.js';

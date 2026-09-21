@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, useData } from '../../../app/api.js';
-import type { PaycomSettings } from '../../../../../shared/paycom.js';
+import type { PaycomSettings } from '../../../../../shared/contracts/paycom.js';
 import { messageOf } from '../../../lib/errors.js';
 
 export function LateDas({

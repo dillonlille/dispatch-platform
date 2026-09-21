@@ -8,8 +8,8 @@ use crate::{
         paycom,
     },
     db::{Db, Kind, Store, s},
-    employee_sync::EmployeeSync,
     ensure, validate as v, workforce,
+    workforce::sync::EmployeeSync,
 };
 use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path};

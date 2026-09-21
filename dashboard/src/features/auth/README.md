@@ -5,7 +5,7 @@
 - `sign-in/` owns sign-in, password recovery and its van artwork.
 
 `AuthScreen` and `InvitationScreen` choose the screen. Screen directories never import
-each other; `tests/dashboard-structure.test.ts` enforces that boundary. Shared app and
+each other; `tests/dashboard/dashboard-structure.test.ts` enforces that boundary. Shared app and
 UI primitives are allowed. Similar artwork is maintained separately by each screen.
 
 Member profile acceptance creates the account without logging in. The only navigation

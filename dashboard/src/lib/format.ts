@@ -1,6 +1,7 @@
-import { dateFormatter } from '../../../shared/date-format.js';
-import { fullName } from '../../../shared/meal-breaks.js';
-import { employeeName, type PaycomPreferences } from '../../../shared/paycom.js';
+import { dateFormatter } from './date-format.js';
+import { fullName } from './meal-breaks.js';
+import { employeeName } from './paycom.js';
+import { type PaycomPreferences } from '../../../shared/contracts/paycom.js';
 
 // Platform owner pages span every DSP, so they show the viewer's device time.
 export const deviceTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;

@@ -1,0 +1,71 @@
+.error,
+.notice {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-block: 16px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.error {
+  border-color: color-mix(in srgb, var(--destructive) 30%, var(--border));
+  color: var(--destructive);
+}
+.loading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 32px 0;
+  color: var(--muted-foreground);
+}
+.spin {
+  animation: dispatch-spin 1s linear infinite;
+}
+@keyframes dispatch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 42px 24px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.empty h3 {
+  font-size: 16px;
+  color: var(--foreground);
+  font-weight: 500;
+}
+.empty p {
+  max-width: 440px;
+  font-size: 14px;
+}
+.empty > svg {
+  display: none;
+}
+.status-indicator.error > i {
+  background: var(--destructive);
+}
+.progress {
+  width: 120px;
+  height: 4px;
+  background: var(--muted);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

@@ -1,5 +1,5 @@
 import { test, expect, login } from './fixtures.js';
-import { capturedMail } from '../mail-support.js';
+import { capturedMail } from '../support/mail-support.js';
 
 async function ownerInvitation(page: import('@playwright/test').Page, root: string) {
   await login(page);

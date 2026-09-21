@@ -1,0 +1,187 @@
+.status-indicator.needs_verification > i,
+.status-indicator.waiting_verification > i {
+  background: var(--warning);
+}
+.verification {
+  margin: 0 24px 24px;
+  padding: 20px;
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius);
+}
+.verification p {
+  margin: 8px 0 16px;
+  font-size: 14px;
+}
+.paycom-connect {
+  margin-top: 28px;
+}
+
+.connections-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-block: 24px;
+}
+.connections-view h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.connection-cards {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.archived-connection-card {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding-block: 24px;
+  background: var(--card);
+}
+.archived-connection-card > header,
+.archived-connection-content,
+.archived-connection-card > footer {
+  padding-inline: 24px;
+}
+.archived-connection-card h3,
+.connection-permissions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.archived-connection-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.archived-connection-card header p {
+  margin-top: 8px;
+}
+.archived-connection-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.archived-connection-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+.archived-connection-card .verification {
+  margin: 0;
+}
+@media (max-width: 1023px) {
+  .connection-cards {
+    grid-template-columns: 1fr;
+  }
+}
+.modal.browser-modal {
+  width: 1240px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px;
+}
+.browser-modal .modal-heading {
+  flex: none;
+  margin-bottom: 10px;
+}
+.verification-instructions {
+  margin: 0 0 16px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+.verification-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.verification-toolbar > div {
+  display: flex;
+  gap: 8px;
+}
+.verification-toolbar button {
+  min-height: 32px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.verification-screen {
+  overflow: auto;
+  min-height: 120px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overscroll-behavior: contain;
+}
+.verification-browser {
+  display: block;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 58dvh;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+.verification-browser:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+}
+.verification-screen.zoomed .verification-browser {
+  max-width: none;
+  max-height: none;
+}
+.verification-footer {
+  flex: none;
+  padding-top: 12px;
+}
+.verification-footer > p {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.browser-modal .verification-text {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+}
+.verification-text input {
+  flex: 1;
+  min-width: 0;
+}
+.verification-footer .form-actions {
+  margin-top: 14px;
+}
+.verification-footer .error {
+  margin-top: 12px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .modal.browser-modal {
+    padding: 16px;
+  }
+  .browser-modal .modal-heading h2 {
+    font-size: 17px;
+  }
+  .verification-instructions {
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .verification-toolbar {
+    font-size: 12px;
+    gap: 8px;
+  }
+  .verification-toolbar button {
+    font-size: 12px;
+  }
+  .verification-browser {
+    max-height: 48dvh;
+  }
+}

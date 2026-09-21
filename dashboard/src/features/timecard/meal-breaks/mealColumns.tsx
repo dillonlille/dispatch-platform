@@ -1,11 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import {
-  cortexClock,
-  fullName,
-  mealPairs,
-  type ClockTime,
-  type MealEmployee,
-} from '../../../../../shared/meal-breaks.js';
+import { cortexClock, fullName, mealPairs, type ClockTime } from '../../../lib/meal-breaks.js';
+import { type MealEmployee } from '../../../../../shared/contracts/meals.js';
 import type { TableColumn } from '../../../ui/index.js';
 import { Clock, GapBadge, LunchCell, Source } from './cells.js';
 

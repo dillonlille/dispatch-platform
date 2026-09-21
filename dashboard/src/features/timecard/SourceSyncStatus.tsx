@@ -2,8 +2,8 @@ import { AlertTriangle } from 'lucide-react';
 import type { Job } from '../../../../shared/contracts/index.js';
 import { Badge } from '../../ui/index.js';
 import { time, timeOfDay, title } from '../../lib/format.js';
-import { localDate } from '../../../../shared/meal-breaks.js';
-import { dateFormatter } from '../../../../shared/date-format.js';
+import { localDate } from '../../lib/meal-breaks.js';
+import { dateFormatter } from '../../lib/date-format.js';
 
 export type SyncSource = {
   enabled: boolean;

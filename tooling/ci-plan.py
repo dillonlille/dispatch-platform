@@ -20,7 +20,7 @@ from runtime_artifact import REPOSITORY, latest_run
 WORKFLOW = ".github/workflows/checks.yml"
 # Branches whose merged PR validation may be promoted instead of repeated.
 TRUSTED = {"refs/heads/dev": "dev", "refs/heads/main": "main"}
-DASHBOARD_TESTS = json.loads((Path(__file__).resolve().parent / "test-plan.json").read_text())["dashboard"]
+DASHBOARD_TESTS = json.loads((Path(__file__).resolve().parent / "ci/test-plan.json").read_text())["dashboard"]
 
 
 def git(*args):
@@ -40,7 +40,7 @@ def scope(paths):
     # Documentation is read by no code or test. It still takes the dashboard checks rather
     # than none: they format-check it and build the artifact Dev installs for every commit.
     # backend/ is excluded because Rust can embed a file with include_str!.
-    dashboard = {"dashboard/index.html", "shared/meal-breaks.ts", *DASHBOARD_TESTS}
+    dashboard = {"dashboard/index.html", *DASHBOARD_TESTS}
     allowed = lambda name: (name in dashboard
                             or name.startswith("dashboard/src/")
                             or name.startswith("dashboard/public/")
@@ -48,19 +48,6 @@ def scope(paths):
                             or (name.endswith(".md") and not name.startswith("backend/")))
     if not paths or not all(allowed(name) for name in paths):
         return "full"
-    # This helper is browser-only today. Fail closed if a non-dashboard runtime
-    # starts consuming it, even when that consumer did not change in this PR.
-    if "shared/meal-breaks.ts" in paths:
-        for root in (Path("shared"), Path("tooling"), Path("backend")):
-            for file in root.rglob("*"):
-                if file.is_file() and file.suffix in {".ts", ".tsx", ".js", ".mjs", ".rs"}:
-                    content = file.read_text()
-                    imported = re.search(
-                        r'''(?:from\s*|import\s*\(?|require\s*\()\s*['"][^'"]*meal-breaks(?:\.js|\.ts)?['"]''', content)
-                    embedded = file.suffix == ".rs" and re.search(
-                        r'''include_(?:str|bytes)!\s*\(\s*"[^"]*meal-breaks\.(?:ts|js)"''', content)
-                    if file.as_posix() != "shared/meal-breaks.ts" and (imported or embedded):
-                        return "full"
     return "dashboard"
 
 

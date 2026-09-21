@@ -1,0 +1,115 @@
+.panel-body {
+  padding: 12px 24px 24px;
+  overflow: auto;
+}
+[data-slot='sheet-header'] {
+  gap: 10px;
+  padding: 30px 24px 20px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.modal {
+  width: 560px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  padding: 28px;
+  box-shadow: 0 8px 30px var(--shadow-color);
+}
+.modal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.modal-heading h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.modal form {
+  margin-top: 24px;
+}
+.modal .modal-heading button {
+  min-height: 28px;
+  width: 28px;
+  border: 0;
+  padding: 4px;
+}
+@media (max-width: 760px) {
+  .modal-backdrop {
+    padding: 12px;
+  }
+  .modal {
+    max-height: calc(100dvh - 24px);
+    padding: 24px;
+  }
+}
+
+.sheet-backdrop {
+  justify-content: flex-end;
+  padding: 0;
+}
+.modal.side-sheet {
+  width: 440px;
+  max-width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border: 0;
+  border-left: 1px solid var(--border);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.side-sheet .modal-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 30px 24px 20px;
+  margin: 0;
+}
+.side-sheet .modal-heading h2 {
+  font-size: 16px;
+}
+.side-sheet .panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.side-sheet .panel-body > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin-top: 0;
+}
+.side-sheet .panel-body > form > .form-actions {
+  margin-top: auto;
+  padding-top: 24px;
+}
+.sheet-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
