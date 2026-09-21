@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { PlatformHealth } from '../../../../../shared/contracts/index.js';
 import { hashQuery, replaceHashQuery } from '../../../app/navigation.js';
 import { useData } from '../../../app/api.js';
-import { usePlatformJobs } from '../../../app/endpoints.js';
+import { usePlatformJobs, usePlatformHealth } from '../../../app/endpoints.js';
 import { ErrorBox, Header, Loading, Tabs } from '../../../ui/index.js';
 import { collectionHistory } from './collection-history.js';
 import type { Diagnostics } from './types.js';
@@ -23,7 +22,7 @@ function addressed() {
 }
 
 export function DiagnosticsPage() {
-  const health = useData<PlatformHealth>('/api/platform/health', 10000);
+  const health = usePlatformHealth(10000);
   const diagnostics = useData<Diagnostics>('/api/platform/diagnostics', 5000);
   const jobs = usePlatformJobs(3000);
   const sources = useMemo(() => collectionHistory(jobs.data ?? []), [jobs.data]);

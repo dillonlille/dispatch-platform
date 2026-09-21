@@ -1,6 +1,7 @@
 use super::*;
 text_enum! {
     #[cfg_attr(test, derive(ts_rs::TS))]
+        #[derive(PartialOrd, Ord)]
         pub enum JobStatus {
         Queued => "queued",
         Running => "running",
@@ -161,11 +162,10 @@ pub struct PublicJob {
     pub error: Option<String>,
     pub release: String,
     pub actor_id: Option<String>,
-    #[cfg_attr(test, ts(type = "Array<unknown>"))]
-    pub metrics: Vec<Value>,
+    pub metrics: Vec<JobMetrics>,
 }
 impl PublicJob {
-    pub fn new(row: JobRow, dsp_name: String, metrics: Vec<Value>) -> Result<Self> {
+    pub fn new(row: JobRow, dsp_name: String, metrics: Vec<JobMetrics>) -> Result<Self> {
         ensure(
             (0..=100).contains(&row.progress),
             "invalid_stored_record",

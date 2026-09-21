@@ -1,6 +1,7 @@
 use crate::{
     Result,
-    db::{Store, at, flag, iso, n, now, s},
+    contracts::AuditPage,
+    db::{Store, at, iso, n, now, s},
 };
 use serde_json::{Value, json};
 const EXPORT_LIMIT: i64 = 50_000;
@@ -88,13 +89,13 @@ impl Store {
     }
     // Taking a copy of everyone's activity is itself recorded, after the copy is
     // read so an export never lists itself.
-    pub fn audit_export(&self, actor: &str, query: AuditQuery) -> Result<Value> {
+    pub fn audit_export(&self, actor: &str, query: AuditQuery) -> Result<AuditPage> {
         let page = self.audit_page(&AuditQuery {
             before: 0,
             limit: EXPORT_LIMIT,
             ..query
         })?;
-        let rows = page["events"].as_array().map_or(0, Vec::len);
+        let rows = page.events.len();
         let scope = if query.within.is_empty() {
             query.dsp
         } else {
@@ -120,11 +121,11 @@ impl Store {
     }
     pub fn support_visible(&self, dsp: &str) -> bool {
         self.profile(dsp)
-            .is_ok_and(|profile| flag(&profile, "supportVisible"))
+            .is_ok_and(|profile| profile.support_visible)
     }
     // A DSP's log lists its members' and the system's actions. A platform owner's
     // appear only where the DSP shows Platform support, and never under their name.
-    pub fn audit_page(&self, query: &AuditQuery) -> Result<Value> {
+    pub fn audit_page(&self, query: &AuditQuery) -> Result<AuditPage> {
         // Inside a DSP a platform owner is only ever "Platform support".
         const SUPPORT: &str = "(?1 IS NOT NULL AND COALESCE(u.platform_owner,0)=1)";
         const FROM: &str = "FROM audit a LEFT JOIN users u ON u.id=a.actor_id LEFT JOIN dsps \
@@ -244,7 +245,9 @@ impl Store {
         } else {
             Vec::new()
         };
-        Ok(json!({"events":events,"total":total,"counts":counts,"actors":actors,"dsps":dsps}))
+        Ok(serde_json::from_value(
+            json!({"events":events,"total":total,"counts":counts,"actors":actors,"dsps":dsps}),
+        )?)
     }
 }
 // A changed field with its previous and new value; either side may be absent.

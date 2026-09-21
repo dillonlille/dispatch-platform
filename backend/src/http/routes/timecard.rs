@@ -3,7 +3,7 @@ use super::connections;
 use crate::{
     Result,
     collectors::Provider,
-    contracts::EmployeeTimecardPeriod,
+    contracts::{EmployeeTimecardPeriod, PaycomSettings},
     db::Store,
     http::{
         input::{Input, Reply, descending, optional, optional_text, query_number},
@@ -144,11 +144,11 @@ fn paycom_status(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
 
 // The change history names people, so only those who manage timecards see it.
 fn paycom_settings(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    let mut value = db.preferences(c.dsp_id())?;
+    let mut value: PaycomSettings = serde_json::from_value(db.preferences(c.dsp_id())?)?;
     if !c.can("timecard.manage") {
-        value["history"] = json!([]);
+        value.history.clear();
     }
-    Ok(Reply::json(value))
+    Reply::of(&value)
 }
 
 fn save_paycom_settings(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -156,7 +156,7 @@ fn save_paycom_settings(db: &Store, c: &Member, input: &Input) -> Result<Reply> 
     v::fields(b, &["revision", "values"])?;
     let revision = v::integer(b, "revision", 0, i64::MAX)?;
     let saved = db.save_preferences(c.dsp_id(), c.actor(), revision, &b["values"])?;
-    Ok(Reply::json(saved))
+    Reply::of(&serde_json::from_value::<PaycomSettings>(saved)?)
 }
 
 fn meal_comparison(db: &Store, c: &Member, input: &Input) -> Result<Reply> {

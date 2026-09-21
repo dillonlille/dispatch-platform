@@ -1,3 +1,4 @@
+import type { PaycomPreferences, PaycomSettings } from '../../../shared/contracts/paycom.js';
 import type { MealComparison } from '../../../shared/contracts/meals.js';
 // The endpoints whose responses are generated from the backend's Rust types: each address
 // is written once, next to the type it answers with. Other endpoints still call `api` and
@@ -7,6 +8,8 @@ import { useEffect } from 'react';
 import { prefetchData } from './prefetch.js';
 import { dataCache } from './data-cache.js';
 import type {
+  AuditPage,
+  PlatformHealth,
   CollectionSchedule,
   CollectionSchedules,
   Connection,
@@ -125,3 +128,17 @@ export const mealComparisonUrl = (date: string) =>
   `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
 export const useMealComparison = (date: string, refreshKey?: string | null) =>
   useCachedData<MealComparison>(mealComparisonUrl(date), 0, refreshKey);
+
+const paycomSettings = '/api/dsp/paycom/settings';
+/** Editors use a fresh DSP-scoped read; the timecard view shares its session cache. */
+export const usePaycomSettings = (dspId?: string) =>
+  useData<PaycomSettings>(paycomSettings, 0, dspId, dspId ?? paycomSettings, dspId === undefined);
+export const savePaycomSettings = (revision: number, values: PaycomPreferences) =>
+  api<PaycomSettings>(paycomSettings, { revision, values });
+export const usePlatformHealth = (poll = 0) =>
+  useData<PlatformHealth>('/api/platform/health', poll);
+const audit = '/api/platform/audit';
+export const useAuditPage = (query: URLSearchParams, limit: number) =>
+  useData<AuditPage>(`${audit}?${query}&limit=${limit}`, 10000);
+export const exportAudit = (query: URLSearchParams) =>
+  api<AuditPage>(`${audit}/export`, Object.fromEntries(query));

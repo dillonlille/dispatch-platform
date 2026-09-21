@@ -77,7 +77,14 @@ fn listed_jobs_respect_the_cap_scope_names_and_attempt_order() {
             db.jobs
                 .exec(
                     "INSERT INTO job_metrics(job_id,attempt,owner,metrics) VALUES (?,?,'test',?)",
-                    rusqlite::params![job, attempt, json!({"attempt":attempt}).to_string()],
+                    rusqlite::params![
+                        job,
+                        attempt,
+                        serde_json::to_string(&dispatch_backend::job_metrics::Metrics::new(
+                            &json!({"attempt":attempt})
+                        ))
+                        .unwrap()
+                    ],
                 )
                 .unwrap();
         }
@@ -85,7 +92,15 @@ fn listed_jobs_respect_the_cap_scope_names_and_attempt_order() {
     let recent = db.list_jobs(None).unwrap();
     assert_eq!(recent.as_array().unwrap().len(), 200);
     assert_eq!(recent[0]["id"], "job-203");
-    assert_eq!(recent[0]["metrics"], json!([{"attempt":1},{"attempt":2}]));
+    assert_eq!(
+        recent[0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["attempt"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(1), json!(2)]
+    );
     let dsp = &dsps[0];
     let scoped = db.list_jobs(Some(s(dsp, "id"))).unwrap();
     assert_eq!(scoped.as_array().unwrap().len(), 68);
