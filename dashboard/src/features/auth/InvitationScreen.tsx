@@ -12,9 +12,14 @@ export function InvitationScreen({
   token: string;
   onLogin: () => Promise<void>;
 }) {
-  const invitation = useData<{ email: string; dspName: string; role: string; onboarding: boolean }>(
-    `/api/invitations/${encodeURIComponent(token)}`,
-  );
+  const invitation = useData<{
+    email: string;
+    dspName: string;
+    role: string;
+    stationCode: string;
+    timezone: string;
+    onboarding: boolean;
+  }>(`/api/invitations/${encodeURIComponent(token)}`);
   if (!invitation.data && !invitation.error)
     return (
       <main className="invitation-loading">
@@ -31,6 +36,8 @@ export function InvitationScreen({
       email={invitation.data?.email}
       dspName={invitation.data?.dspName}
       role={invitation.data?.role}
+      stationCode={invitation.data?.stationCode}
+      timezone={invitation.data?.timezone}
       invitationError={invitation.error}
     />
   );

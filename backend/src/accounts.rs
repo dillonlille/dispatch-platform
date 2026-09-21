@@ -32,7 +32,7 @@ const RESET_USER: &str = "SELECT u.* FROM resets r JOIN users u ON u.id=r.user_i
     AND u.status='active'";
 const INVITER: &str = "SELECT u.first_name||' '||u.last_name name,u.platform_owner \
     FROM invitations i JOIN users u ON u.id=i.created_by WHERE i.hash=?";
-const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,r.name role,r.id roleId,\
+const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,d.timezone,r.name role,r.id roleId,\
     r.system owner FROM invitations i JOIN dsps d ON d.id=i.dsp_id \
     JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL \
     AND i.expires_at>? AND d.status='active' AND d.environment=?";
@@ -339,8 +339,9 @@ impl Store {
             .ok_or_else(|| Error::new("invitation_expired", 404))?;
         let owner = flag(&invitation, "owner");
         invitation.as_object_mut().unwrap().remove("owner");
-        invitation["onboarding"] =
-            json!(owner && flag(&self.profile(s(&invitation, "dspId"))?, "setupRequired"));
+        let profile = self.profile(s(&invitation, "dspId"))?;
+        invitation["onboarding"] = json!(owner && flag(&profile, "setupRequired"));
+        invitation["stationCode"] = profile["stationCode"].clone();
         Ok(invitation)
     }
     pub fn recovery(&self, email: &str) -> Result<()> {

@@ -172,6 +172,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(completion).toContainText('JamieMorgan');
     await expect(completion).toContainText('Northline Logistics');
     await expect(completion.locator('.member-completion-role')).toHaveText('Member');
+    await expect(completion.locator('.member-completion-facts')).toContainText('Station');
+    await expect(completion.locator('.member-completion-facts')).toContainText('Central Time');
+    await expect(completion.locator('.member-completion-facts')).toContainText('America/Chicago');
+    await expect(completion.getByText('Status', { exact: true })).toHaveCount(0);
     await expect(page.locator('.member-profile-page')).toHaveAttribute('inert', '');
     // The badge remains readable during its two-second hold after settling.
     await page.waitForTimeout(3600);

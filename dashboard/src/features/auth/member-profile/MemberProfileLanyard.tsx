@@ -1,4 +1,6 @@
 /** Private artwork for member completion; Settings retains its own badge and physics. */
+const STRAP_ANGLE = (Math.atan2(72, 92) * 180) / Math.PI;
+
 export function MemberLanyardStraps() {
   return (
     <svg className="member-lanyard-straps" width="240" height="96" aria-hidden="true">
@@ -15,11 +17,11 @@ export function MemberLanyardStraps() {
           <stop offset="1" stopColor="#000" stopOpacity=".34" />
         </linearGradient>
       </defs>
-      {[-1, 1].map((side) => (
+      {[1, -1].map((side) => (
         <g
           key={side}
           className="member-lanyard-strap"
-          transform={`translate(120 96) rotate(${side * 32})`}
+          transform={`translate(120 92) rotate(${side * STRAP_ANGLE})`}
         >
           <rect className="member-lanyard-cloth" x="-17" y="-1800" width="34" height="1800" />
           <rect x="-17" y="-1800" width="34" height="1800" fill="url(#member-lanyard-weave)" />

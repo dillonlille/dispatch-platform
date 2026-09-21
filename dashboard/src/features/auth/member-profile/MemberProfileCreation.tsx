@@ -16,12 +16,16 @@ export function MemberProfileCreation({
   email,
   dspName,
   role,
+  stationCode,
+  timezone,
   invitationError,
 }: {
   token: string;
   email?: string;
   dspName?: string;
   role?: string;
+  stationCode?: string;
+  timezone?: string;
   invitationError: string;
 }) {
   const [passwordError, setPasswordError] = useState('');
@@ -60,6 +64,8 @@ export function MemberProfileCreation({
           email: accepted.email,
           dspName: dspName ?? '',
           role: role ?? 'Team member',
+          stationCode: stationCode ?? '',
+          timezone: timezone ?? '',
         });
       } catch (error) {
         submitting.current = false;

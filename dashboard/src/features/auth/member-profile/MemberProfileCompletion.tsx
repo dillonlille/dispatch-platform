@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { Check } from 'lucide-react';
+import { timezoneName } from '../../../lib/format.js';
 import { DspAvatar, dspTone } from '../../../ui/DspAvatar.js';
 import { useViewportFit } from '../../../ui/useViewportFit.js';
 import { MemberLanyardClip, MemberLanyardStraps } from './MemberProfileLanyard.js';
@@ -16,6 +16,8 @@ export type MemberIdentity = {
   email: string;
   dspName: string;
   role: string;
+  stationCode: string;
+  timezone: string;
 };
 
 export function MemberProfileCompletion({
@@ -100,11 +102,7 @@ export function MemberProfileCompletion({
     sway.effect!.updateTiming({ fill: 'both' });
     animate(
       sheen.current,
-      [
-        { transform: 'translateX(-70%)', opacity: 0 },
-        { opacity: 0.8, offset: 0.4 },
-        { transform: 'translateX(70%)', opacity: 0 },
-      ],
+      [{ transform: 'translateX(-30%)' }, { transform: 'translateX(0)' }],
       settle,
       fade + drop,
     );
@@ -162,13 +160,22 @@ export function MemberProfileCompletion({
               </h2>
               <p className="member-completion-email">{identity.email}</p>
               <span className="member-completion-role">{identity.role}</span>
-              <div className="member-completion-confirmed">
-                <Check size={16} aria-hidden="true" />
-                Profile created
-              </div>
+              <dl className="member-completion-facts">
+                <div>
+                  <dt>Station</dt>
+                  <dd className="member-completion-station">{identity.stationCode || '—'}</dd>
+                </div>
+                <div>
+                  <dt>Business timezone</dt>
+                  <dd>
+                    {identity.timezone ? timezoneName(identity.timezone) : '—'}
+                    {identity.timezone && <small>{identity.timezone}</small>}
+                  </dd>
+                </div>
+              </dl>
               <div className="member-completion-org">
                 <DspAvatar name={identity.dspName} />
-                {identity.dspName}
+                <span>{identity.dspName}</span>
               </div>
               <span ref={sheen} className="member-completion-sheen" aria-hidden="true" />
             </div>

@@ -1,4 +1,5 @@
-/* Private desktop completion artwork. Card dimensions and materials are adjusted here. */
+/* Settings Profile's badge design, kept private to member completion.
+   This variant omits Status and gives the DSP footer more space. */
 .member-completion {
   position: fixed;
   inset: 0;
@@ -56,7 +57,7 @@
   display: flex;
   flex-direction: column;
   width: 340px;
-  min-height: 480px;
+  min-height: 540px;
   padding: 64px 28px 28px;
   overflow: hidden;
   transform-origin: 50% 0;
@@ -108,8 +109,11 @@
   overflow-wrap: anywhere;
 }
 .member-completion-role {
+  display: inline-flex;
+  align-items: center;
   align-self: flex-start;
-  padding: 3px 9px;
+  min-height: 22px;
+  padding: 0 9px;
   border-radius: 999px;
   background: var(--selection);
   color: var(--primary);
@@ -118,46 +122,59 @@
   overflow-wrap: anywhere;
   max-width: 100%;
 }
-.member-completion-confirmed {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.member-completion-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px 18px;
   margin-top: 32px;
-  padding-top: 24px;
+  padding-top: 26px;
   border-top: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--muted-foreground);
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
-.member-completion-confirmed svg {
-  color: var(--primary);
+.member-completion-facts dt {
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.member-completion-facts dd small {
+  display: block;
+  color: var(--muted-foreground);
+  margin-top: 3px;
+  font-size: 12px;
+}
+.member-completion-station {
+  letter-spacing: -0.5px;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.1;
 }
 .member-completion-org {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin-top: auto;
   padding-top: 32px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .member-completion-org .dsp-avatar {
-  flex: 0 0 32px;
-  width: 32px;
-  height: 32px;
-  font-size: 11px;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  font-size: 13px;
 }
 .member-completion-sheen {
   position: absolute;
   inset: 0;
-  opacity: 0;
-  will-change: transform, opacity;
+  will-change: transform;
   background: linear-gradient(
     112deg,
-    transparent 25%,
-    #ffffff18 46%,
-    #ffffff04 54%,
-    transparent 75%
+    transparent 32%,
+    #ffffff0d 46%,
+    #ffffff03 54%,
+    transparent 66%
   );
 }
 @media (max-width: 700px), (prefers-reduced-motion: reduce) {
