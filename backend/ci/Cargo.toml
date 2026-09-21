@@ -1,21 +1,14 @@
 [package]
-name = "dispatch-host"
+name = "dispatch-ci"
 version = "0.0.14"
 edition = "2024"
 rust-version = "1.94"
 publish = false
 
 [dependencies]
-dispatch-ci = { path = "../ci" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
-flate2 = "1"
-tar = "0.4"
 zip = { version = "8", default-features = false, features = ["deflate"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-fs2 = "0.4"
-libc = "0.2"
-regex = "1"
 tempfile = "3"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+libc = "0.2"

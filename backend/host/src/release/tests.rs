@@ -234,6 +234,7 @@ impl Fixture {
             "package-lock.json",
             "backend/Cargo.toml",
             "backend/host/Cargo.toml",
+            "backend/ci/Cargo.toml",
             "Cargo.lock",
         ] {
             fs::create_dir_all(root.join(name).parent().unwrap()).unwrap();
