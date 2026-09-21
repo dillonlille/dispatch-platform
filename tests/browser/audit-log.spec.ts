@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { Page } from '@playwright/test';
 import { test, expect, login, openDsp } from './fixtures.js';
+import { dspHash, platformHash } from '../../dashboard/src/app/navigation.js';
 import type { AuditEvent, AuditPage } from '../../shared/contracts/index.js';
 
 let next = 100;
@@ -21,8 +22,7 @@ const event = (at: string, action: string, area: AuditEvent['area'], rest: Parti
     ...rest,
   }) satisfies AuditEvent;
 const system = { actorId: null, actorName: 'System' };
-// Northline keeps Chicago time, five hours behind these instants.
-const support = { actorId: null, actorName: 'Platform support' };
+const owner = { actorId: 'usr_owner', actorName: 'Platform Owner' };
 const events: AuditEvent[] = [
   event('2026-09-16T14:44:00Z', 'collection.completed', 'collections', {
     changes: [
@@ -72,12 +72,12 @@ const events: AuditEvent[] = [
     ],
   }),
   event('2026-09-15T17:05:00Z', 'dsp.settings_updated', 'settings', {
-    ...support,
+    ...owner,
     changes: [{ field: 'timezone', from: 'America/Chicago', to: 'America/Denver' }],
   }),
-  event('2026-09-15T17:02:00Z', 'dsp.owner_view_opened', 'team', support),
-  event('2026-09-15T16:40:00Z', 'dsp.owner_view_opened', 'team', support),
-  event('2026-09-15T16:01:00Z', 'dsp.owner_view_opened', 'team', support),
+  event('2026-09-15T17:02:00Z', 'dsp.owner_view_opened', 'team', owner),
+  event('2026-09-15T16:40:00Z', 'dsp.owner_view_opened', 'team', owner),
+  event('2026-09-15T16:01:00Z', 'dsp.owner_view_opened', 'team', owner),
   event('2026-09-15T15:30:00Z', 'dsp.profile_completed', 'settings', {
     changes: [
       { field: 'station', from: null, to: 'DEN4' },
@@ -136,7 +136,7 @@ const exports: URLSearchParams[] = [];
 async function open(page: Page) {
   const requests: URLSearchParams[] = [];
   exports.length = 0;
-  await page.route(/\/api\/dsp\/audit(\/export$|\?)/, (route) => {
+  await page.route(/\/api\/platform\/audit(\/export$|\?)/, (route) => {
     // The page reads with query parameters and exports by posting the same filters.
     const exporting = route.request().method() === 'POST';
     const query = exporting
@@ -163,16 +163,14 @@ async function open(page: Page) {
           { id: 'usr_maria', name: 'Maria Lopez' },
           { id: 'system', name: 'System' },
         ],
-        dsps: [],
+        dsps: [{ id: 'dsp_1', name: 'Northline Logistics' }],
       } satisfies AuditPage,
     });
   });
   await login(page);
-  await openDsp(page, 'Northline Logistics');
   if (page.viewportSize()!.width < 700)
     await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
+  await page.getByRole('link', { name: 'Audit log', exact: true }).click();
   return requests;
 }
 const item = (page: Page, text: string | RegExp) =>
@@ -187,7 +185,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(page.getByRole('heading', { name: /Sep 16/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Sep 15/ })).toBeVisible();
 
-  // Every area is offered, as in the approved design, even before it has events.
+  // Areas with activity are offered in the platform log.
   await expect(page.getByRole('group', { name: 'Area' }).getByRole('button')).toHaveText([
     /^All/,
     /^Team/,
@@ -199,8 +197,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
     /^Failures/,
   ]);
   await expect(page.getByPlaceholder('Search people, roles, schedules…')).toBeVisible();
-  // Northline keeps Chicago time, and says so to a reader who may not.
-  await expect(page.getByText(/^Times in C[SD]T$/)).toBeVisible();
+  await expect(page.getByLabel('DSP', { exact: true })).toBeVisible();
 
   const completed = item(page, 'Paycom collection for Sep 15 completed');
   await expect(completed).toContainText('Requested by Maria Lopez·1m 48s');
@@ -220,19 +217,14 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(item(page, 'updated the role Dispatcher')).toContainText('+ Manage Timecard');
   await expect(item(page, 'updated the role Dispatcher')).toContainText('− Invite Members');
 
-  // Whatever Platform support did is outlined, visits included; members' events are filled.
-  await expect(
-    item(page, 'Platform support updated DSP settings').locator('.audit-icon'),
-  ).toHaveCSS('border-top-style', 'dashed');
   await expect(role.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
-  // A member's visit is theirs, so it reads like the rest of what they do: filled, and not muted.
   const visit = item(page, 'Sam Rivera opened this DSP');
   await expect(visit.locator('.audit-icon')).toHaveCSS('border-top-width', '0px');
   await expect(visit).not.toHaveClass(/quiet/);
   await expect(visit.locator('strong', { hasText: 'Sam Rivera' })).toBeVisible();
-  // Everything Platform support did is muted, not only its visits.
-  await expect(item(page, 'Platform support updated DSP settings')).toHaveClass(/quiet/);
-  const visits = item(page, 'Platform support opened this DSP 3 times');
+  await expect(item(page, 'Platform Owner updated DSP settings')).not.toHaveClass(/quiet/);
+  const visits = item(page, 'Platform Owner opened Northline Logistics 3 times');
+  await expect(visits).toHaveClass(/quiet/);
   await expect(visits).toHaveCount(1);
   await expect(visits).toContainText('11:01 AM – 12:02 PM');
   await visits.getByRole('button').click();
@@ -266,7 +258,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(paycom).toContainText('Late DA time10:01 AM9:45 AM');
   await expect(paycom).toContainText('DepartmentAllDrivers');
   await expect(item(page, 'Meal break collection attempt 1 of 3 failed')).toContainText(
-    'Cortex took too long to respond·Retrying',
+    'Cortex took too long to respond·Northline Logistics·Retrying',
   );
   await expect(item(page, /^Meal break collection failed/)).toContainText('After 3 attempts');
   await expect(item(page, 'Maria Lopez vehicle inspection logged')).toContainText('Van 12');
@@ -279,7 +271,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(page.getByRole('listitem')).toHaveCount(1);
   await page.getByRole('button', { name: 'Stop showing only Jordan Pike' }).click();
   await expect.poll(() => requests.at(-1)?.has('subject')).toBe(false);
-  await expect(item(page, 'Platform support opened this DSP')).toBeVisible();
+  await expect(item(page, 'Platform Owner opened Northline Logistics')).toBeVisible();
 
   await page.getByRole('button', { name: /^Failures/ }).click();
   await expect(page.getByRole('button', { name: /^Failures/ })).toHaveAttribute(
@@ -305,7 +297,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   expect(exports).toHaveLength(1);
   expect(exports[0]!.get('actor')).toBe('usr_maria');
   expect(exports[0]!.get('q')).toBe('role');
-  expect(csv).toContain('Time,Person,Area,Event,Details,Action');
+  expect(csv).toContain('Time,Person,DSP,Area,Event,Details,Action');
   expect(csv).toContain('"Maria Lopez changed Jordan Pike’s role","Role Dispatcher → Manager"');
   expect(errors).toEqual([]);
 });
@@ -320,65 +312,60 @@ test('the audit log fits a phone', async ({ page }) => {
   );
 });
 
-test('a DSP lists Platform support only once the platform owner shows it there', async ({
+test('audit access is only in the Platform Owner Dashboard, including old DSP links', async ({
   page,
 }) => {
   await login(page);
-  const visit = async () => {
-    await page.getByRole('link', { name: 'DSPs', exact: true }).click();
-    await openDsp(page, 'Northline Logistics');
-    await page.getByRole('link', { name: 'Settings', exact: true }).click();
-    await page.getByRole('tab', { name: 'Audit log', exact: true }).click();
-  };
-  await visit();
-  // Hidden by default: the visit that opened this page is not in the log.
-  await expect(page.getByRole('group', { name: 'Area' })).toBeVisible();
-  await expect(page.getByText('Platform support', { exact: false })).toHaveCount(0);
+  await openDsp(page, 'Northline Logistics');
+  const dspId = new URL(page.url()).hash.split('/')[1]!;
+  await page.goto(dspHash(dspId, 'settings', { tab: 'audit' }));
+  await expect(page.getByRole('tab', { name: 'Profile', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Audit log', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Search activity')).toHaveCount(0);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (value) => document.documentElement.setAttribute('data-theme', value),
+      theme,
+    );
+    await page.screenshot({ path: test.info().outputPath(`dsp-settings-${theme}.png`) });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: test.info().outputPath('dsp-settings-mobile.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await page.getByRole('tab', { name: 'Platform support', exact: true }).click();
-  const northline = page.getByRole('switch', { name: 'Northline Logistics', exact: true });
-  await expect(northline).not.toBeChecked();
-  await northline.check();
-  await expect(page.getByText('Platform support shown to Northline Logistics')).toBeVisible();
-  await expect(northline).toBeChecked();
-  await page.screenshot({ path: test.info().outputPath('support-visibility.png') });
-
-  await visit();
-  const row = page.getByRole('listitem').filter({ hasText: 'Platform support opened this DSP' });
-  await expect(row).toHaveCount(1);
-  // Only the visit made after switching it on is listed, and never by name.
-  await expect(row).not.toContainText('times');
-  await expect(page.getByRole('list').filter({ hasText: 'Platform Owner' })).toHaveCount(0);
-  await expect(page.getByLabel('Person')).toContainText('Platform support');
-
-  // Taking a copy of the log is recorded in it.
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export', exact: true }).click();
-  await download;
-  await expect(
-    page.getByRole('listitem').filter({ hasText: 'Platform support exported the audit log' }),
-  ).toContainText(/\d+ events?/, { timeout: 15000 });
-
-  // The platform's own log is in the sidebar, names its owner and narrows to a DSP.
-  await page.getByRole('button', { name: 'Exit view', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Profile', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Platform support', exact: true })).toHaveCount(0);
   await page.getByRole('link', { name: 'Audit log', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Audit log', exact: true })).toBeVisible();
-  await expect(
-    page.getByRole('listitem').filter({ hasText: 'showed Platform support to Northline' }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('listitem').filter({ hasText: 'created Summit Delivery' }),
-  ).toHaveCount(1);
+  await expect(item(page, 'created Summit Delivery')).toHaveCount(1);
   await page.getByLabel('DSP', { exact: true }).selectOption({ label: 'Northline Logistics' });
-  await expect(
-    page.getByRole('listitem').filter({ hasText: 'created Summit Delivery' }),
-  ).toHaveCount(0);
-  await expect(
-    page
-      .getByRole('listitem')
-      .filter({ hasText: 'Platform Owner opened Northline Logistics' })
-      .first(),
-  ).toBeVisible();
+  await expect(item(page, 'created Summit Delivery')).toHaveCount(0);
+  await expect(item(page, 'Platform Owner opened Northline Logistics').first()).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const csv = fs.readFileSync(await (await download).path(), 'utf8');
+  expect(csv).toContain('Northline Logistics');
+  expect(csv).not.toContain('Summit Delivery');
+  await page.getByLabel('DSP', { exact: true }).selectOption('');
+  await expect(item(page, 'Platform Owner exported the audit log')).toContainText(/\d+ events?/, {
+    timeout: 15000,
+  });
+});
+
+test('DSP members cannot open the platform audit page', async ({ page }) => {
+  await login(page, 'member@dispatch.test');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Audit log', exact: true })).toHaveCount(0);
+  await page.goto(platformHash('audit'));
+  await expect(page.getByRole('heading', { name: 'Your DSPs', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Search activity')).toHaveCount(0);
 });

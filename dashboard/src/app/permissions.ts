@@ -12,5 +12,4 @@ export const permissionLabels: Record<Permission, string> = {
   'members.manage': 'Manage Members',
   'roles.manage': 'Manage Roles',
   'settings.manage': 'Manage DSP Settings',
-  'audit.view': 'View Audit Log',
 };

@@ -17,7 +17,7 @@ test('custom roles gate tenant APIs and never grant more than the actor holds', 
   assert.deepEqual(
     (await roles()).map((role) => [role.name, role.owner, role.permissions.length]),
     [
-      ['Owner', true, 9],
+      ['Owner', true, 8],
       ['Manager', false, 2],
       ['Member', false, 1],
     ],
@@ -27,13 +27,14 @@ test('custom roles gate tenant APIs and never grant more than the actor holds', 
   assert.deepEqual(view.permissions, ['timecard.view']);
   assert.deepEqual(view.role, { id: (await named('Member')).id, name: 'Member', owner: false });
   assert.equal((await member.get('/api/dsp/employees')).status, 200);
-  for (const url of ['/api/dsp/jobs', '/api/dsp/roles', '/api/dsp/members', '/api/dsp/audit'])
+  for (const url of ['/api/dsp/jobs', '/api/dsp/roles', '/api/dsp/members'])
     assert.equal((await member.get(url)).status, 403, url);
 
   for (const [body, status] of [
     [{ name: 'Owner', permissions: [] }, 400],
     [{ name: 'Manager', permissions: [] }, 409],
     [{ name: 'Lead', permissions: ['everything'] }, 400],
+    [{ name: 'Auditor', permissions: ['audit.view'] }, 400],
   ] as const)
     assert.equal((await owner.post('/api/dsp/roles', body)).status, status);
   const created = await owner.post('/api/dsp/roles', {

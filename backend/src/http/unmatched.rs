@@ -49,7 +49,6 @@ fn area_permission(input: &Input) -> &'static str {
         ("members", _, true) => "members.manage",
         ("roles", _, true) => "roles.manage",
         ("members" | "roles", _, false) => TEAM,
-        ("audit", ..) => "audit.view",
         ("profile", _, true) => "settings.manage",
         ("paycom", _, true) | ("schedules", ..) => "timecard.manage",
         ("jobs", Some("meal-breaks"), false) => "timecard.view",

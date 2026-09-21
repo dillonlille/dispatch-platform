@@ -478,12 +478,8 @@ td small {
     border-right: 1px solid var(--border);
   }
 }
-.settings-section > form,
-.support-visibility {
+.settings-section > form {
   max-width: 448px;
-}
-.support-visibility {
-  margin-top: 0;
 }
 .settings-section > form > button {
   margin-top: 24px;

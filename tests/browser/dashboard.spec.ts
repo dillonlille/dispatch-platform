@@ -168,7 +168,8 @@ test('the mobile drawer stays open while the DSP behind it finishes loading', as
   await expect(page.getByRole('link', { name: 'Timecard', exact: true })).toBeVisible();
   await expect(settings).toBeVisible();
   await settings.click();
-  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Profile', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Audit log', exact: true })).toHaveCount(0);
   await expect(settings).toBeHidden();
 });
 
