@@ -26,6 +26,18 @@ class SharedToolingTests(unittest.TestCase):
                     "status": "completed", "conclusion": "success",
                     "head_repository": {"full_name": runtime.REPOSITORY}}
 
+    def test_source_verifier_uses_cargos_configured_output_and_never_a_stale_default(self):
+        (self.root / "backend/host").mkdir(parents=True)
+        (self.root / "backend/host/Cargo.toml").touch()
+        (self.root / "tooling").mkdir()
+        custom = self.root / "custom-target"
+        with patch.object(runtime, "__file__", str(self.root / "tooling/runtime_artifact.py")), \
+                patch.object(runtime.subprocess, "check_call") as build, \
+                patch.object(runtime, "command", return_value=json.dumps({"target_directory": str(custom)})):
+            self.assertEqual(runtime.host_binary.__wrapped__(), custom / "release/dispatch-host")
+            build.assert_called_once_with(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"],
+                                          cwd=self.root, stdout=sys.stderr)
+
     def test_only_the_newest_run_of_this_repository_branch_and_commit_decides(self):
         select = lambda runs, **rules: (runtime.latest_run(runs, self.commit, "push", "dev", **rules) or {}).get("id")
         others = [{**self.run, "id": 9, "head_sha": "b" * 40}, {**self.run, "id": 10, "event": "pull_request"},
@@ -83,6 +95,7 @@ class SharedToolingTests(unittest.TestCase):
             self.assertEqual(args, ["gh", "api", f"repos/{runtime.REPOSITORY}/actions/artifacts/42/zip"])
             kwargs["stdout"].write(packed.getvalue())
         directory = Path(tempfile.mkdtemp(dir=self.root))
+        runtime.host_binary()
         with patch.object(runtime.subprocess, "run", side_effect=gh):
             return data.getvalue(), runtime.download_run_artifact(record, directory, commit or self.commit, **options)
 

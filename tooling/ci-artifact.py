@@ -50,17 +50,7 @@ def require_validation(context):
 
 def retarget(candidate, old_commit, new_commit):
     """Only commit metadata changes; preserve every tested application byte."""
-    manifest = runtime.verify_artifact(candidate, old_commit)
-    metadata = candidate / "tooling/build-info.json"
-    metadata.write_text(json.dumps({"commit": new_commit}, separators=(",", ":")) + "\n")
-    for entry in manifest["files"]:
-        if entry["path"] == "tooling/build-info.json":
-            entry["sha256"] = hashlib.sha256(metadata.read_bytes()).hexdigest()
-            entry["size"] = metadata.stat().st_size
-    payload = {key: value for key, value in manifest.items() if key != "digest"}
-    manifest["digest"] = hashlib.sha256(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-    (candidate / "release.json").write_text(json.dumps(manifest) + "\n")
-    runtime.verify_artifact(candidate, new_commit)
+    runtime.host("artifact", "retarget", candidate, old_commit, new_commit)
     (candidate / "services/rust/dispatch-backend").chmod(0o700)
 
 

@@ -85,7 +85,8 @@ def main():
                        {"email": args.owner_email, "password": password, "url": args.origin})
     updates.write_json(root / "config/updater.json",
                        {"service": "dispatch-dev.service", "healthUrl": "http://127.0.0.1:5180/api/health"})
-    updates.DevUpdater(root).status("ready", commit)
+    updates.write_json(root / "data/platform/dev-update.json",
+                       {"status": "ready", "commit": commit, "digest": manifest["digest"]})
     updates.install_management(live)
     print(f"Dev initialized. Initial login is private in {root / 'config/initial-owner.json'}")
     print("Install the reviewed tooling/systemd units separately to start Dev and its updater.")

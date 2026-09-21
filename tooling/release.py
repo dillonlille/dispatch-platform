@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = ROOT.parent
 PRODUCTION = "https://dispatch.dillonlille.com"
 ASSETS = ("release.json", "provenance.json", "SHA256SUMS")
-VERSIONED = ("package.json", "package-lock.json", "backend/Cargo.toml", "Cargo.lock")
+VERSIONED = ("package.json", "package-lock.json", "backend/Cargo.toml", "backend/host/Cargo.toml", "Cargo.lock")
 
 
 def say(message):
@@ -62,8 +62,10 @@ def set_versions(root, version):
         path.write_text(text)
     edit("package.json", r'(\A\{\s*"name": "dispatch-platform",\s*"version": ")[^"]+(")', 1)
     edit("package-lock.json", r'("name": "dispatch-platform",\s*"version": ")[^"]+(")', 2)
-    edit("backend/Cargo.toml", r'(\A\[package\]\nname = "dispatch-backend"\nversion = ")[^"]+(")', 1)
-    edit("Cargo.lock", r'(\[\[package\]\]\nname = "dispatch-backend"\nversion = ")[^"]+(")', 1)
+    for manifest, name in [("backend/Cargo.toml", "dispatch-backend"),
+                           ("backend/host/Cargo.toml", "dispatch-host")]:
+        edit(manifest, rf'(\A\[package\]\nname = "{name}"\nversion = ")[^"]+(")', 1)
+        edit("Cargo.lock", rf'(\[\[package\]\]\nname = "{name}"\nversion = ")[^"]+(")', 1)
 
 
 def current_version(root):

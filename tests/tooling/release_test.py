@@ -37,7 +37,7 @@ class ReleaseTests(unittest.TestCase):
             (self.root / name).write_bytes((ROOT / name).read_bytes())
         release.set_versions(self.root, "9.8.7")
         self.assertEqual(release.current_version(self.root), "9.8.7")
-        for name, changed in zip(release.VERSIONED, (1, 2, 1, 1)):
+        for name, changed in zip(release.VERSIONED, (1, 2, 1, 1, 2)):
             before, after = (ROOT / name).read_text().splitlines(), (self.root / name).read_text().splitlines()
             self.assertEqual(len(before), len(after))
             different = [new for old, new in zip(before, after) if old != new]
