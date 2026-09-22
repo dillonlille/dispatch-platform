@@ -19,11 +19,14 @@ wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
 A PR into `dev` whose head is a commit `main` pushed and passed, such as the sync PR
-after a release, brings a tree `main` validated in full and published. The planner
-selects `reuse` for it: the build job restores `main`'s published branch build
-retargeted to the PR merge and smoke tests it, and the receipt records full
-validation, so the following `dev` push reuses it again. A failed, pending or
-foreign `main` run, a draft, a fork or another base branch keep ordinary checks.
+after a release, brings a tree `main` validated in full and published. When the merge
+changes nothing against that commit, so the merge's tree is exactly `main`'s tree, the
+planner selects `reuse`: the build job restores `main`'s published branch build
+retargeted to the merge and smoke tests it, and the receipt records full validation,
+so the following `dev` push reuses it again. The same applies to a merge queue group
+that consists of that PR alone. A merge that also carries other `dev` commits, a
+failed, pending or foreign `main` run, a draft, a fork or another base branch keep
+ordinary checks.
 
 A merge queue on `dev` runs the workflow on the exact merge commit it will push,
 scoped against the group's base so every PR in the group counts. That run issues

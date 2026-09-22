@@ -64,6 +64,8 @@ fn zip(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
 struct Fake {
     replies: RefCell<BTreeMap<String, Vec<u8>>>,
     paths: RefCell<String>,
+    /// The tree of the merge head's own commit; the merge's tree unless a test moves it.
+    head_tree: RefCell<Option<String>>,
 }
 impl Runner for Fake {
     fn command(&self, args: &[&str], _cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
@@ -72,6 +74,12 @@ impl Runner for Fake {
         if args[0] == "git" {
             return Ok(match args[1] {
                 "rev-list" => format!("{} {} {}\n", c.commit, c.base, c.head).into_bytes(),
+                "rev-parse" if args[2] == format!("{}^{{tree}}", c.head) => self
+                    .head_tree
+                    .borrow()
+                    .clone()
+                    .unwrap_or(c.tree)
+                    .into_bytes(),
                 "rev-parse" => c.tree.into_bytes(),
                 "diff" => self.paths.borrow().as_bytes().to_vec(),
                 _ => panic!("Unexpected git"),
@@ -597,15 +605,6 @@ fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
     release["pull_request"]["base"]["ref"] = "main".into();
     assert_eq!(f.policy().plan(&env, &release).0, "full");
     assert!(f.policy().receipt(&env, &release, "reuse").is_err());
-    assert!(
-        f.policy()
-            .receipt(
-                &environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b"),
-                &queue_event(),
-                "reuse"
-            )
-            .is_err()
-    );
     for change in [
         json!({"conclusion":"failure"}),
         json!({"status":"in_progress"}),
@@ -627,6 +626,28 @@ fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
         assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
     }
     assert!(f.policy().promoted_main("main").unwrap().is_none());
+    // The merge must change nothing against main: a merge that also carries other dev
+    // commits has another tree and gets ordinary checks, as PR and as merge queue group.
+    f.json(&main_endpoint(), json!({"workflow_runs":[main_run()]}));
+    let group = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "reuse");
+    assert_eq!(
+        f.policy().receipt(&group, &queue_event(), "reuse").unwrap(),
+        receipt()
+    );
+    let mut batched = queue_event();
+    batched["merge_group"]["base_sha"] = "e".repeat(40).into();
+    assert_eq!(f.policy().plan(&group, &batched).0, "dashboard");
+    let mut other = queue_event();
+    other["merge_group"]["head_sha"] = "e".repeat(40).into();
+    assert_eq!(f.policy().plan(&group, &other).0, "dashboard");
+    f.fake.head_tree.replace(Some("e".repeat(40)));
+    assert!(f.policy().brings_main(&context()).unwrap().is_none());
+    assert_eq!(f.policy().plan(&env, &event()).0, "dashboard");
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "dashboard");
+    assert!(f.policy().receipt(&env, &event(), "reuse").is_err());
+    assert!(f.policy().receipt(&group, &queue_event(), "reuse").is_err());
+    assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
 }
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {

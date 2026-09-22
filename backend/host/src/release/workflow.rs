@@ -133,6 +133,33 @@ impl Release<'_> {
         }
         Ok(pulls.into_iter().next())
     }
+    /// The merged PR, waiting while a merge queue holds it: the queue tests the actual
+    /// merge before pushing it, so an enqueued PR stays open for a few minutes.
+    fn merged(&self, branch: &str, base: &str) -> Result<Value> {
+        let deadline = self.system.monotonic() + Duration::from_secs(1800);
+        let mut announced = false;
+        loop {
+            let pull = self
+                .pull_request(branch, base)?
+                .ok_or("Pull request disappeared")?;
+            if pull["state"] == "MERGED" {
+                return Ok(pull);
+            }
+            require(
+                pull["state"] == "OPEN",
+                "Pull request was closed without merging",
+            )?;
+            require(
+                self.system.monotonic() < deadline,
+                "Pull request is still queued for merge; rerun once it merges",
+            )?;
+            if !announced {
+                say(format!("Queued for merge: {}", io::text(&pull, "url")));
+                announced = true;
+            }
+            self.system.sleep(Duration::from_secs(10));
+        }
+    }
     fn checkout(&self, worktree: &Path, branch: &str, start: &str) -> Result<()> {
         require(
             worktree.parent() == Some(self.platform.join("worktrees").as_path()),
@@ -383,9 +410,7 @@ impl Release<'_> {
                 None,
                 120,
             )?;
-            pull = self
-                .pull_request(&self.branch, "main")?
-                .ok_or("Release PR disappeared")?;
+            pull = self.merged(&self.branch, "main")?;
         }
         let commit = io::text(&pull["mergeCommit"], "oid");
         require(
@@ -431,7 +456,7 @@ impl Release<'_> {
         ))
     }
     pub(super) fn finish_sync(&self) -> Result<()> {
-        let Some(mut pull) = self.open_sync()? else {
+        let Some(pull) = self.open_sync()? else {
             return Ok(());
         };
         if pull["state"] == "MERGED" {
@@ -480,10 +505,8 @@ impl Release<'_> {
             None,
             120,
         )?;
-        pull = self
-            .pull_request(&self.sync_branch, "dev")?
-            .ok_or("Dev sync PR disappeared")?;
-        require(pull["state"] == "MERGED", "Dev sync PR did not merge")
+        self.merged(&self.sync_branch, "dev")?;
+        Ok(())
     }
     pub(super) fn clean(&self) -> Result<()> {
         for (worktree, branch, base) in [

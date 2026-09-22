@@ -37,18 +37,25 @@ fn require_validation(
         ))),
     }
 }
-/// Main's passed push run of this PR's head: the PR brings a tree main already validated
-/// in full and published, so its build can be reused and only smoke tested.
+/// Whether this run validates a PR merge or merge queue group into dev.
+fn into_dev(env: &Environment) -> bool {
+    match env.get("GITHUB_EVENT_NAME") {
+        "pull_request" => env.get("GITHUB_BASE_REF") == "dev",
+        "merge_group" => env
+            .get("GITHUB_REF")
+            .starts_with("refs/heads/gh-readonly-queue/dev/"),
+        _ => false,
+    }
+}
+/// Main's passed push run when this merge into dev brings exactly main's tree: main already
+/// validated it in full and published it, so its build is reused and only smoke tested.
 fn require_main(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Value> {
-    if context.commit != env.get("GITHUB_SHA")
-        || env.get("GITHUB_EVENT_NAME") != "pull_request"
-        || env.get("GITHUB_BASE_REF") != "dev"
-    {
+    if context.commit != env.get("GITHUB_SHA") || !into_dev(env) {
         return Err(Box::new(ValidationChanged(
             "Actual PR merge into dev required",
         )));
     }
-    match policy.promoted_main(&context.head) {
+    match policy.brings_main(context) {
         Ok(Some(run)) => Ok(run),
         _ => Err(Box::new(ValidationChanged(
             "Cannot confirm main's validation of the PR head; rerun the workflow",
@@ -198,7 +205,7 @@ fn reuse(system: &dyn System, root: &Path, env: &Environment, destination: &Path
         root,
         runner: &runner,
     };
-    let pull = env.get("GITHUB_EVENT_NAME") == "pull_request";
+    let pull = into_dev(env);
     let result = if pull {
         restore_main(system, &policy, env, destination)
     } else {
