@@ -7,8 +7,18 @@ export const test = base.extend<{
   dispatchOptions: Pick<FixtureOptions, 'seed' | 'env'>;
   /** A private server of the built artifact with its own state, port and mail. */
   dispatch: Dispatch;
+  /** Set with `test.use` to load the sign-in van's model, for the tests about it. */
+  signInAnimation: boolean;
 }>({
   dispatchOptions: [{}, { option: true }],
+  signInAnimation: [false, { option: true }],
+  // Chromium renders the van in software here, which costs seconds of every sign-in and
+  // has nothing to do with what most tests assert. They serve the static van instead,
+  // exactly as a browser without WebGL does, while the van's own tests load the model.
+  page: async ({ page, signInAnimation }, use) => {
+    if (!signInAnimation) await page.route('**/*login-van*.glb', (route) => route.abort());
+    await use(page);
+  },
   dispatch: async ({ dispatchOptions }, use) => {
     const app = await fixture({
       ...dispatchOptions,
