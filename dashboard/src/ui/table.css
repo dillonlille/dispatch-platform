@@ -76,6 +76,11 @@
   box-shadow: 0 1px var(--border);
 }
 @media screen {
+  /* Elastic page bounce moves the sticky banner away from fixed column headings. */
+  html:has(.table-sticky-header),
+  body:has(.table-sticky-header) {
+    overscroll-behavior-y: none;
+  }
   .table-sticky-header[data-header-pinned] > thead > tr:first-child {
     position: fixed;
     z-index: 20;

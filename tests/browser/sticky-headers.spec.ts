@@ -88,6 +88,37 @@ async function expectSteadyWhileScrolling(page: Page, table: Locator) {
   expect(Math.max(...samples)).toBeLessThan(1);
 }
 
+async function expectSteadyAtPageEnd(page: Page, table: Locator) {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expectPinned(table);
+  // Linux headless does not render macOS's elastic bounce. Verify its suppression on
+  // the viewport, too; older Chromium versions took this setting from body instead.
+  for (const root of ['html', 'body']) {
+    await expect(page.locator(root)).toHaveCSS('overscroll-behavior-y', 'none');
+    await expect(page.locator(root)).toHaveCSS('overscroll-behavior-x', 'auto');
+  }
+  const bottom = await page.evaluate(() => window.scrollY);
+  await page.mouse.move(page.viewportSize()!.width - 45, 450);
+  await page.mouse.wheel(0, 1200);
+  const samples = await table.evaluate(async (element) => {
+    const samples: { gap: number; scroll: number }[] = [];
+    for (let frame = 0; frame < 12; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const top =
+        document.querySelector('[data-sticky-banner]')?.getBoundingClientRect().bottom ?? 0;
+      samples.push({
+        gap: element.querySelector('thead tr')!.getBoundingClientRect().top - top,
+        scroll: window.scrollY,
+      });
+    }
+    return samples;
+  });
+  expect(samples.every(({ gap, scroll }) => Math.abs(gap) < 1 && scroll === bottom)).toBe(true);
+  await page.mouse.wheel(0, -180);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(bottom);
+  await expectPinned(table);
+}
+
 for (const width of [1440, 390]) {
   for (const banner of [true, false]) {
     test(`column headings stay pinned at ${width}px ${banner ? 'below the DSP banner' : 'without a banner'}`, async ({
@@ -163,6 +194,7 @@ for (const width of [1440, 390]) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
+        await expectSteadyAtPageEnd(page, table);
 
         await page.evaluate(() => window.scrollTo(0, 0));
         await expect
@@ -187,6 +219,8 @@ for (const width of [1440, 390]) {
       }
       await page.getByRole('tab', { name: 'Employees', exact: true }).click();
       await expect(page.locator('.table-sticky-header')).toHaveCount(0);
+      for (const root of ['html', 'body'])
+        await expect(page.locator(root)).toHaveCSS('overscroll-behavior-y', 'auto');
       expect(errors).toEqual([]);
     });
   }
