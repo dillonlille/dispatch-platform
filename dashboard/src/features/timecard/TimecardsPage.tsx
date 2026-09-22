@@ -127,6 +127,7 @@ export function TimecardsPage({
                 <div className="table-wrap">
                   <DataTable
                     table={table}
+                    stickyHeader
                     className="paycom-day-table"
                     label="Daily employee timecards"
                   />
