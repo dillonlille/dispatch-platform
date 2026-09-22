@@ -13,10 +13,18 @@ export const test = base.extend<{
   dispatchOptions: [{}, { option: true }],
   signInAnimation: [false, { option: true }],
   // Chromium renders the van in software here, which costs seconds of every sign-in and
-  // has nothing to do with what most tests assert. They serve the static van instead,
-  // exactly as a browser without WebGL does, while the van's own tests load the model.
+  // has nothing to do with what most tests assert. Its renderer is served as a module
+  // that never starts, so the page keeps the poster it shows until the van is ready and
+  // fetches no model, while the van's own tests get the real one.
   page: async ({ page, signInAnimation }, use) => {
-    if (!signInAnimation) await page.route('**/*login-van*.glb', (route) => route.abort());
+    if (!signInAnimation)
+      await page.route('**/renderer-*.js', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/javascript',
+          body: 'export function startVan() {}\n',
+        }),
+      );
     await use(page);
   },
   dispatch: async ({ dispatchOptions }, use) => {
