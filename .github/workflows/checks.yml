@@ -45,6 +45,9 @@ jobs:
   build:
     outputs:
       rust-key: ${{ steps.tools.outputs.binary-key }}
+      # Named by the attempt that built it. Rerunning only failed jobs keeps this job's
+      # outputs, so the shards and the gate still find the bytes this job uploaded.
+      candidate-artifact: ${{ steps.candidate.outputs.name }}
     needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -91,11 +94,14 @@ jobs:
       # Every run packages its build: browser shards test these exact bytes, and trusted
       # runs pass them to the final gate.
       - name: Package runtime candidate
-        run: tar -czf dispatch-dev.tar.gz -C .build .
+        id: candidate
+        run: |
+          tar -czf dispatch-dev.tar.gz -C .build .
+          echo "name=dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
       - name: Pass candidate to browser shards and the final gate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.candidate.outputs.name }}
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 2
@@ -129,7 +135,7 @@ jobs:
       - name: Retrieve this run's build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.candidate-artifact }}
       - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         if: steps.tools.outputs.fixture-hit != 'true'
@@ -218,7 +224,7 @@ jobs:
         if: needs.plan.outputs.candidate == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.build.outputs.candidate-artifact }}
       - name: Verify candidate source and inventory
         if: needs.plan.outputs.candidate == 'true'
         run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
