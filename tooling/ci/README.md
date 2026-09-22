@@ -29,10 +29,13 @@ failed, pending or foreign `main` run, a draft, a fork or another base branch ke
 ordinary checks.
 
 A merge queue on `dev` runs the workflow on the exact merge commit it will push,
-scoped against the group's base so every PR in the group counts. That run issues
-the receipt and gated build, and the following `dev` push looks for it first: the
-newest merge queue run of the pushed commit decides, and only a commit with no
-queue run falls back to its PR head's run. The preflight stops treating a moved
+scoped against the group's base so every PR in the group counts. A group holding one
+PR that is still current with `dev` merges the same base, head and tree that PR's own
+run validated, so it reuses that run's gated build and only smoke tests it, and its
+receipt records that run's scope. A batched group, a group built on another base and
+a stale PR are validated afresh. That run issues the receipt and gated build, and the
+following `dev` push looks for it first: the newest merge queue run of the pushed
+commit decides, and only a commit with no queue run falls back to its PR head's run. The preflight stops treating a moved
 `dev` or other ready PRs as blockers while the queue exists.
 
 `backend/host/src/ci` promotes builds through that same receipt policy and the
@@ -49,6 +52,10 @@ eligibility, atomic copies, digest checks, locking and pruning live in
 `backend/ci/src/cache`. The fingerprint includes embedded manager launchers,
 Rust sources, schemas, provider scripts, Cargo inputs, compiler identity and
 compiler environment. Schema 3 deliberately invalidates Python-era cache keys.
+
+The fingerprint names the Rust compiler, C compiler and linker by version and the
+runner's distribution, not its weekly image build, so an image rollout that runs two
+builds side by side does not split the cache in half.
 
 Local worktrees share at most eight recently used entries under Git's common
 `dispatch-rust-builds` directory. Each restored binary is a separate copy. Pruning
@@ -78,7 +85,7 @@ after that gate succeeds. Draft PRs produce no validation receipt.
 
 `.github/actions/setup-tools` restores `dispatch-ci`, `dispatch-host` and the browser
 assessment fixture that a trusted branch built from identical inputs, keyed by the Rust
-inputs, the pinned toolchain and the runner image. Launchers use a restored tool only on
+inputs, the pinned toolchain and the runner's distribution. Launchers use a restored tool only on
 CI and only from the workspace's own `.ci-tools` directory; otherwise they build with
 Cargo exactly as before. Only the `tools` job on `dev` and `main` pushes saves those
 caches, and the pinned Playwright browser, off the critical path.

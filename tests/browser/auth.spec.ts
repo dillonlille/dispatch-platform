@@ -135,6 +135,7 @@ test('graphics failure leaves a working sign-in form and a static van', async ({
 });
 
 test.describe('desktop animation lifecycle', () => {
+  test.use({ signInAnimation: true });
   test('autoplays in both themes and releases rendering on mobile and sign-in', async ({
     page,
   }) => {

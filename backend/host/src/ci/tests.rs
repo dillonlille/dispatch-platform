@@ -552,6 +552,52 @@ fn a_pr_bringing_mains_published_commit_reuses_that_build_for_its_own_merge() {
     }
 }
 #[test]
+fn a_merge_queue_group_promotes_the_gated_build_of_the_pr_run_that_validated_it() {
+    let queued = |f: &Fixture, reference: &str| {
+        let mut env = Environment(f.env.0.clone());
+        env.0
+            .insert("GITHUB_EVENT_NAME".into(), "merge_group".into());
+        env.0.insert("GITHUB_REF".into(), reference.into());
+        env
+    };
+    let group = "refs/heads/gh-readonly-queue/dev/pr-1-b";
+    let f = Fixture::new();
+    let env = queued(&f, group);
+    let runner = Runner(&f.system);
+    let policy = Policy {
+        root: f.root(),
+        runner: &runner,
+    };
+    restore(&f.system, &policy, &env, &f.destination()).unwrap();
+    let manifest = artifact::verify(&f.destination(), Some(&context().commit)).unwrap();
+    assert_eq!(manifest.version, "0.1.0");
+    assert_eq!(
+        fs::read(f.destination().join("services/rust/dispatch-backend")).unwrap(),
+        b"tested backend"
+    );
+    // A group queued for another branch, or one whose PR run validated another merge, is not
+    // covered by that run, and neither is a group whose validation was revoked meanwhile.
+    for (reference, revoke) in [
+        ("refs/heads/gh-readonly-queue/main/pr-1-b", false),
+        (group, true),
+    ] {
+        let mut f = Fixture::new();
+        if revoke {
+            f.receipt["tree"] = "f".repeat(40).into();
+            f.refresh();
+        }
+        let env = queued(&f, reference);
+        let runner = Runner(&f.system);
+        let policy = Policy {
+            root: f.root(),
+            runner: &runner,
+        };
+        let error = restore(&f.system, &policy, &env, &f.destination()).unwrap_err();
+        assert!(error.is::<ValidationChanged>(), "{reference} {revoke}");
+        assert!(!f.destination().exists());
+    }
+}
+#[test]
 fn existing_destination_and_symlink_are_never_replaced() {
     for link in [false, true] {
         let f = Fixture::new();

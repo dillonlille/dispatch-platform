@@ -134,7 +134,11 @@ impl Runtime {
         db::write_private(&preferences, &serde_json::to_vec(&settings)?)?;
         let run = RunDirectory::create(&self.runs)?;
         let egress = Egress::start_with_policy(&run.0, policy)?;
-        let child = sandbox::launch(self, &run.0, profile, mode)?;
+        let mut child = sandbox::launch(self, &run.0, profile, mode)?;
+        // What the sandbox itself prints, such as a namespace it could not create, arrives
+        // before its worker can report anything.
+        let sandbox_notes = worker::Notes::default();
+        let drained = sandbox_notes.collect(child.stderr.take());
         let process_id = child.id().expect("new browser supervisor");
         let (sender, requests) = mpsc::channel(QUEUE_SIZE);
         let (stop, cancellation) = watch::channel(false);
@@ -142,7 +146,14 @@ impl Runtime {
         let (ready, started) = oneshot::channel();
         tokio::spawn(async move {
             let mut child = child;
-            serve_child(&mut child, requests, cancellation, ready).await;
+            serve_child(
+                &mut child,
+                requests,
+                cancellation,
+                ready,
+                (sandbox_notes, drained),
+            )
+            .await;
             let exit = stop_child(&mut child).await;
             // Release leases only after reaping the namespace supervisor.
             drop(child);
@@ -404,20 +415,48 @@ async fn cancelled(receiver: &mut watch::Receiver<bool>) {
         }
     }
 }
+/// Why a worker never reported itself ready. The supervisor discards the worker's
+/// standard error, so its own failure code arrives as a frame on this pipe.
+fn start_failure(frame: Option<&Value>, sandbox: &str) -> String {
+    let Some(frame) = frame else {
+        return if sandbox.is_empty() {
+            "worker exited before reporting".into()
+        } else {
+            // The worker never ran or died before its report; the sandbox said why.
+            format!("worker exited before reporting: {sandbox}")
+        };
+    };
+    match frame["error"].as_str() {
+        Some(code) if !code.is_empty() => match frame["detail"].as_str() {
+            // What the browser itself printed before failing, which nothing else keeps.
+            Some(detail) if !detail.is_empty() => format!("{code}: {detail}"),
+            _ => code.into(),
+        },
+        _ => format!("unexpected frame {frame}")
+            .chars()
+            .take(200)
+            .collect(),
+    }
+}
+fn start_failed(reason: String) -> Error {
+    crate::observability::event("error", "browser.start_failed", json!({"reason":reason}));
+    Error::caused("browser_start_failed", 503, reason)
+}
 async fn serve_child(
     child: &mut Child,
     mut requests: mpsc::Receiver<Request>,
     mut cancellation: watch::Receiver<bool>,
     mut ready: oneshot::Sender<Result<()>>,
+    (sandbox, drained): (worker::Notes, Option<tokio::task::JoinHandle<()>>),
 ) {
     let Some(stdout) = child.stdout.take() else {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        let _ = ready.send(Err(start_failed("worker has no output pipe".into())));
         return;
     };
     // Child::wait closes child.stdin before waiting. Own it separately so exit
     // monitoring cannot signal EOF during an otherwise healthy idle session.
     let Some(mut input) = child.stdin.take() else {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        let _ = ready.send(Err(start_failed("worker has no input pipe".into())));
         return;
     };
     let mut reader = BufReader::new(stdout);
@@ -428,7 +467,18 @@ async fn serve_child(
         result = timeout(START_TIMEOUT, read_frame(&mut reader, RESPONSE_BYTES)) => result,
     };
     if !matches!(startup, Ok(Ok(Some(ref value))) if value["ready"] == true) {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        // The sandbox's output closes when it exits; give it a moment to be read in full.
+        if matches!(startup, Ok(Ok(None)))
+            && let Some(drained) = drained
+        {
+            let _ = timeout(Duration::from_secs(1), drained).await;
+        }
+        let reason = match &startup {
+            Err(_) => format!("no report within {}s", START_TIMEOUT.as_secs()),
+            Ok(Err(error)) => format!("unreadable report: {}", error.code),
+            Ok(Ok(frame)) => start_failure(frame.as_ref(), &sandbox.tail()),
+        };
+        let _ = ready.send(Err(start_failed(reason)));
         return;
     }
     if ready.send(Ok(())).is_err() {
@@ -506,4 +556,50 @@ async fn stop_child(child: &mut Child) -> Exit {
 /// Hidden process entrypoint. Must run before Config::load or any database access.
 pub async fn worker_main(mode: &str) -> Result<()> {
     worker::run(mode).await
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_failed_start_names_the_workers_own_reason() {
+        assert_eq!(
+            start_failure(Some(&json!({"error":"browser_display_failed"})), ""),
+            "browser_display_failed"
+        );
+        assert_eq!(start_failure(None, ""), "worker exited before reporting");
+        // When the worker never reports, the sandbox's own complaint explains why.
+        assert_eq!(
+            start_failure(None, "bwrap: setting up uid map: Permission denied"),
+            "worker exited before reporting: bwrap: setting up uid map: Permission denied"
+        );
+        // A worker that did report is the authority; the sandbox's echo of it adds nothing.
+        assert_eq!(
+            start_failure(
+                Some(&json!({"error":"browser_lost"})),
+                "core.failed browser_lost"
+            ),
+            "browser_lost"
+        );
+        // An unexpected frame is kept, bounded, rather than replaced by a generic failure.
+        assert_eq!(
+            start_failure(Some(&json!({"ready":false})), ""),
+            "unexpected frame {\"ready\":false}"
+        );
+        assert_eq!(
+            start_failure(
+                Some(&json!({"error":"browser_lost","detail":"bwrap: no permission"})),
+                ""
+            ),
+            "browser_lost: bwrap: no permission"
+        );
+        assert_eq!(
+            start_failure(Some(&json!({"error":""})), ""),
+            "unexpected frame {\"error\":\"\"}"
+        );
+        assert_eq!(
+            start_failure(Some(&json!({"error":"x".repeat(400)})), "").len(),
+            400
+        );
+        assert!(start_failure(Some(&json!({"note":"y".repeat(400)})), "").len() <= 200);
+    }
 }

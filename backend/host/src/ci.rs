@@ -18,25 +18,6 @@ impl std::fmt::Display for ValidationChanged {
     }
 }
 impl std::error::Error for ValidationChanged {}
-fn require_validation(
-    policy: &Policy<'_>,
-    context: &Context,
-    env: &Environment,
-) -> Result<Validation> {
-    if context.commit != env.get("GITHUB_SHA") || env.get("GITHUB_EVENT_NAME") != "push" {
-        return Err(Box::new(ValidationChanged(
-            "Actual trusted merged commit required",
-        )));
-    }
-    let branch = trusted_branch(env.get("GITHUB_REF"))
-        .ok_or(ValidationChanged("Trusted branch required"))?;
-    match policy.validated(context, branch) {
-        Ok(Some(validation)) => Ok(validation),
-        _ => Err(Box::new(ValidationChanged(
-            "Cannot confirm current PR validation; rerun the workflow",
-        ))),
-    }
-}
 /// Whether this run validates a PR merge or merge queue group into dev.
 fn into_dev(env: &Environment) -> bool {
     match env.get("GITHUB_EVENT_NAME") {
@@ -47,18 +28,46 @@ fn into_dev(env: &Environment) -> bool {
         _ => false,
     }
 }
-/// Main's passed push run when this merge into dev brings exactly main's tree: main already
-/// validated it in full and published it, so its build is reused and only smoke tested.
-fn require_main(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Value> {
-    if context.commit != env.get("GITHUB_SHA") || !into_dev(env) {
+/// The build a reuse run restores, and the run that validated it.
+#[derive(Debug, PartialEq)]
+enum Verified {
+    /// Main's published branch build, for a merge that brings exactly main's tree.
+    Main(Value),
+    /// The gated build of the PR run whose validation covers this merge.
+    Pull(Validation),
+}
+/// What validated the bytes this run may reuse, refusing anything else. Checked again
+/// after the download, so validation revoked meanwhile stops the promotion.
+fn verified(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Verified> {
+    if context.commit != env.get("GITHUB_SHA") {
+        return Err(Box::new(ValidationChanged("Actual merged commit required")));
+    }
+    if into_dev(env) {
+        // A merge that changes nothing against main reuses main's published build. A merge
+        // queue group that is exactly its PR's merge reuses that PR run's gated build.
+        if let Ok(Some(run)) = policy.brings_main(context) {
+            return Ok(Verified::Main(run));
+        }
+        if env.get("GITHUB_EVENT_NAME") == "merge_group"
+            && let Ok(Some(validation)) = policy.validated_pull(context, "dev")
+        {
+            return Ok(Verified::Pull(validation));
+        }
         return Err(Box::new(ValidationChanged(
-            "Actual PR merge into dev required",
+            "Cannot confirm main's validation or this merge's own PR run; rerun the workflow",
         )));
     }
-    match policy.brings_main(context) {
-        Ok(Some(run)) => Ok(run),
+    if env.get("GITHUB_EVENT_NAME") != "push" {
+        return Err(Box::new(ValidationChanged(
+            "Actual trusted merged commit required",
+        )));
+    }
+    let branch = trusted_branch(env.get("GITHUB_REF"))
+        .ok_or(ValidationChanged("Trusted branch required"))?;
+    match policy.validated(context, branch) {
+        Ok(Some(validation)) => Ok(Verified::Pull(validation)),
         _ => Err(Box::new(ValidationChanged(
-            "Cannot confirm main's validation of the PR head; rerun the workflow",
+            "Cannot confirm current PR validation; rerun the workflow",
         ))),
     }
 }
@@ -78,52 +87,6 @@ fn place(candidate: &Path, destination: &Path) -> Result<()> {
     {
         return Err(std::io::Error::last_os_error().into());
     }
-    Ok(())
-}
-fn restore_main(
-    system: &dyn System,
-    policy: &Policy<'_>,
-    env: &Environment,
-    destination: &Path,
-) -> Result<()> {
-    let context = policy
-        .context()?
-        .ok_or(ValidationChanged("Actual PR merge required"))?;
-    let run = require_main(policy, &context, env)?;
-    let id = run["id"].as_u64().ok_or("Invalid run id")?;
-    let artifacts = policy.github(&format!("actions/runs/{id}/artifacts"))?;
-    let name = format!("dispatch-main-{}", context.head);
-    let matches: Vec<_> = artifacts["artifacts"]
-        .as_array()
-        .ok_or("Missing artifacts")?
-        .iter()
-        .filter(|record| record["name"] == name && record["expired"] == false)
-        .collect();
-    require(matches.len() == 1, "Published main build unavailable")?;
-    require(
-        !destination.exists() && !destination.is_symlink(),
-        "Build destination already exists",
-    )?;
-    let temp = tempfile::Builder::new()
-        .prefix("dispatch-main-build-")
-        .tempdir_in(destination.parent().ok_or("Destination parent required")?)?;
-    releases::download_run(system, matches[0], temp.path(), &context.head, None)?;
-    let candidate = temp.path().join("candidate");
-    artifact::retarget(&candidate, &context.head, &context.commit)?;
-    fs::set_permissions(
-        candidate.join("services/rust/dispatch-backend"),
-        fs::Permissions::from_mode(0o700),
-    )?;
-    if require_main(policy, &context, env)? != run {
-        return Err(Box::new(ValidationChanged(
-            "Main's validation changed during download; rerun the workflow",
-        )));
-    }
-    place(&candidate, destination)?;
-    println!(
-        "Reused main's published build from run {id} for {}",
-        context.commit
-    );
     Ok(())
 }
 fn warm_cache(
@@ -153,48 +116,62 @@ fn restore(
     let context = policy
         .context()?
         .ok_or(ValidationChanged("Actual merged commit required"))?;
-    let verified = require_validation(policy, &context, env)?;
-    let run = &verified.run;
-    let receipt = &verified.receipt;
-    let id = run["id"].as_u64().ok_or("Invalid run id")?;
+    let verification = verified(policy, &context, env)?;
+    // Each build is named for the run that produced it and carries that run's source commit.
+    let (id, name, source) = match &verification {
+        Verified::Main(run) => (
+            run["id"].as_u64().ok_or("Invalid run id")?,
+            format!("dispatch-main-{}", context.head),
+            context.head.clone(),
+        ),
+        Verified::Pull(validated) => {
+            let id = validated.run["id"].as_u64().ok_or("Invalid run id")?;
+            (
+                id,
+                format!(
+                    "dispatch-pr-build-{id}-{}",
+                    validated.run["run_attempt"].as_u64().unwrap_or(1)
+                ),
+                validated.receipt["commit"]
+                    .as_str()
+                    .ok_or("Receipt commit required")?
+                    .to_owned(),
+            )
+        }
+    };
     let artifacts = policy.github(&format!("actions/runs/{id}/artifacts"))?;
-    let name = format!(
-        "dispatch-pr-build-{id}-{}",
-        run["run_attempt"].as_u64().unwrap_or(1)
-    );
     let matches: Vec<_> = artifacts["artifacts"]
         .as_array()
         .ok_or("Missing artifacts")?
         .iter()
         .filter(|record| record["name"] == name && record["expired"] == false)
         .collect();
-    require(matches.len() == 1, "Gated PR build unavailable")?;
+    require(matches.len() == 1, "Verified build unavailable")?;
     require(
         !destination.exists() && !destination.is_symlink(),
         "Build destination already exists",
     )?;
     let temp = tempfile::Builder::new()
-        .prefix("dispatch-pr-build-")
+        .prefix("dispatch-verified-build-")
         .tempdir_in(destination.parent().ok_or("Destination parent required")?)?;
-    let old = receipt["commit"]
-        .as_str()
-        .ok_or("Receipt commit required")?;
-    releases::download_run(system, matches[0], temp.path(), old, None)?;
+    releases::download_run(system, matches[0], temp.path(), &source, None)?;
     let candidate = temp.path().join("candidate");
-    artifact::retarget(&candidate, old, &context.commit)?;
+    artifact::retarget(&candidate, &source, &context.commit)?;
     fs::set_permissions(
         candidate.join("services/rust/dispatch-backend"),
         fs::Permissions::from_mode(0o700),
     )?;
-    if require_validation(policy, &context, env)? != verified {
+    if verified(policy, &context, env)? != verification {
         return Err(Box::new(ValidationChanged(
-            "PR validation changed during download; rerun the workflow",
+            "Validation changed during download; rerun the workflow",
         )));
     }
-    warm_cache(system, policy.root, &candidate, receipt)?;
+    if let Verified::Pull(validated) = &verification {
+        warm_cache(system, policy.root, &candidate, &validated.receipt)?;
+    }
     place(&candidate, destination)?;
     println!(
-        "Reused tested PR build from run {id} for {}",
+        "Reused the verified build from run {id} for {}",
         context.commit
     );
     Ok(())
@@ -205,24 +182,14 @@ fn reuse(system: &dyn System, root: &Path, env: &Environment, destination: &Path
         root,
         runner: &runner,
     };
-    let pull = into_dev(env);
-    let result = if pull {
-        restore_main(system, &policy, env, destination)
-    } else {
-        restore(system, &policy, env, destination)
-    };
-    match result {
+    match restore(system, &policy, env, destination) {
         Ok(()) => Ok(true),
         Err(error) if error.is::<ValidationChanged>() => Err(error),
         Err(_) => {
             let context = policy
                 .context()?
                 .ok_or(ValidationChanged("Actual merged commit required"))?;
-            if pull {
-                require_main(&policy, &context, env)?;
-            } else {
-                require_validation(&policy, &context, env)?;
-            }
+            verified(&policy, &context, env)?;
             println!("Verified build unavailable; validation is current, building normally.");
             Ok(false)
         }

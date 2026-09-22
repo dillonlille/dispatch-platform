@@ -59,7 +59,39 @@ impl System for Fake {
         self.calls
             .borrow_mut()
             .push(args.iter().map(|s| s.to_string()).collect());
-        let value = if args[0] == "gh" && args[1] == "api" {
+        let value = if args.starts_with(&["gh", "api", "graphql"]) {
+            let field = |name: &str| {
+                args.iter()
+                    .find_map(|a| a.strip_prefix(&format!("{name}=")))
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            let query = field("query");
+            if query.contains("mergeQueue(branch:") {
+                let queued = self.queue.get() > 0 && query.contains("branch: \"dev\"");
+                json!({"data":{"repository":{"mergeQueue":if queued { json!({"id":"MQ_dev"}) } else { Value::Null }}}})
+            } else if query.contains("enqueuePullRequest") {
+                let number = if field("id") == "PR_8" { "8" } else { "sync" };
+                let pulls = if number == "8" {
+                    self.pull.borrow()
+                } else {
+                    self.sync.borrow()
+                };
+                let pull = pulls.as_ref().ok_or("No pull")?;
+                require(
+                    pull["id"] == field("id").as_str(),
+                    "Unknown pull request id",
+                )?;
+                require(
+                    pull["headRefOid"] == field("head").as_str(),
+                    "PR head moved",
+                )?;
+                self.merging.replace(Some(number.into()));
+                json!({"data":{"enqueuePullRequest":{"mergeQueueEntry":{"position":1}}}})
+            } else {
+                return Err(format!("Unexpected GraphQL {query}").into());
+            }
+        } else if args[0] == "gh" && args[1] == "api" {
             let endpoint = args[2]
                 .strip_prefix(&format!("repos/{REPOSITORY}/"))
                 .ok_or("Wrong repository")?;
@@ -135,7 +167,7 @@ impl System for Fake {
         } else if args.starts_with(&["gh", "pr", "create"]) {
             let branch = args[args.iter().position(|s| *s == "--head").unwrap() + 1];
             let head = git(cwd.unwrap(), &["rev-parse", branch]);
-            let pull = json!({"number":8,"state":"OPEN","url":"https://example.invalid/pr/8","headRefOid":head,"mergeCommit":null,"isCrossRepository":false});
+            let pull = json!({"id":"PR_8","number":8,"state":"OPEN","url":"https://example.invalid/pr/8","headRefOid":head,"mergeCommit":null,"isCrossRepository":false});
             self.pull.replace(Some(pull));
             self.maybe_fail("create-pr")?;
             return Ok(b"https://example.invalid/pr/8\n".to_vec());
@@ -152,14 +184,13 @@ impl System for Fake {
                 .unwrap()
                 + 1];
             require(pull["headRefOid"] == head, "PR head moved")?;
-            if self.queue.get() > 0 {
-                // Enqueued: the PR stays open until the queue's own run passes.
-                self.merging
-                    .replace(Some(if args[3] == "8" { "8" } else { "sync" }.into()));
-            } else {
-                pull["state"] = json!("MERGED");
-                pull["mergeCommit"] = json!({"oid":self.commit});
-            }
+            // With a queue and auto-merge off, GitHub refuses a direct gh merge into dev.
+            require(
+                self.queue.get() == 0 || args[3] == "8",
+                "Auto merge is not allowed for this repository",
+            )?;
+            pull["state"] = json!("MERGED");
+            pull["mergeCommit"] = json!({"oid":self.commit});
             Value::Null
         } else if args.starts_with(&["gh", "release", "create"]) {
             self.listed.replace(vec![json!({"id":9,"tag_name":"v1.0.0","draft":true,"prerelease":false,
@@ -334,10 +365,10 @@ impl Fixture {
             hide_release_once: Cell::new(false),
             comparison: RefCell::new("ahead".into()),
             pull: RefCell::new(Some(
-                json!({"number":8,"state":"MERGED","headRefOid":commit,"mergeCommit":{"oid":commit},"isCrossRepository":false}),
+                json!({"id":"PR_8","number":8,"state":"MERGED","headRefOid":commit,"mergeCommit":{"oid":commit},"isCrossRepository":false}),
             )),
             sync: RefCell::new(Some(
-                json!({"number":10,"state":"MERGED","headRefOid":commit,"isCrossRepository":false}),
+                json!({"id":"PR_10","number":10,"state":"MERGED","headRefOid":commit,"isCrossRepository":false}),
             )),
         };
         Self { temp, root, system }
@@ -627,7 +658,7 @@ fn prepare_stops_at_draft_and_publish_checks_again_then_completes() {
 
 #[test]
 fn queued_merges_are_awaited_before_the_release_continues() {
-    let sync_pull = |commit: &str, state: &str| json!({"number":10,"state":state,"url":"https://example.invalid/pr/10","headRefOid":commit,"isCrossRepository":false});
+    let sync_pull = |commit: &str, state: &str| json!({"id":"PR_10","number":10,"state":state,"url":"https://example.invalid/pr/10","headRefOid":commit,"isCrossRepository":false});
     let passed_sync_run = |commit: &str| {
         json!({"id":6,"run_attempt":1,"head_sha":commit,"event":"pull_request","head_branch":"chore/sync-main-v1.0.0",
             "status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/6"})
@@ -646,7 +677,13 @@ fn queued_merges_are_awaited_before_the_release_continues() {
         .push(passed_sync_run(&f.system.commit));
     f.system.queue.set(3);
     release.finish_sync().unwrap();
-    assert!(f.system.has_call(&["gh", "pr", "merge", "10"]));
+    // dev's queue is joined through the enqueue API at the checked head, never gh pr merge.
+    assert!(!f.system.has_call(&["gh", "pr", "merge", "10"]));
+    assert!(f.system.calls.borrow().iter().any(|call| {
+        call.iter().any(|word| word.contains("enqueuePullRequest"))
+            && call.contains(&"id=PR_10".to_string())
+            && call.contains(&format!("head={}", f.system.commit))
+    }));
     assert_eq!(f.system.sync.borrow().as_ref().unwrap()["state"], "MERGED");
     assert!(f.system.elapsed.get() >= Duration::from_secs(20));
     // A PR the queue never merges stops the release after the deadline, resumable later.
@@ -706,6 +743,39 @@ fn publication_response_loss_and_production_failure_resume_without_republishing_
     }
 }
 
+#[test]
+fn the_sync_pr_opens_only_after_mains_checks_pass() {
+    let sync = ["--head", "chore/sync-main-v1.0.0"];
+    let f = Fixture::new();
+    let release = f.release();
+    io::private_directory(&release.directory).unwrap();
+    fs::write(&release.notes, "Notes").unwrap();
+    f.system.runs.borrow_mut()[0]["conclusion"] = json!("failure");
+    assert!(release.execute(Stage::Prepare, None).is_err());
+    assert!(!f.system.has_call(&sync));
+    f.system.runs.borrow_mut()[0]["conclusion"] = json!("success");
+    f.system.calls.borrow_mut().clear();
+    assert_eq!(
+        release.execute(Stage::Prepare, None).unwrap()["stage"],
+        "draft-verified"
+    );
+    let calls = f.system.calls.borrow();
+    let checked = calls
+        .iter()
+        .position(|call| {
+            call.iter()
+                .any(|word| word.contains("event=push&head_sha="))
+        })
+        .unwrap();
+    let opened = calls
+        .iter()
+        .position(|call| call.windows(2).any(|pair| pair == sync))
+        .unwrap();
+    assert!(
+        checked < opened,
+        "the sync PR was looked up before main's checks"
+    );
+}
 #[test]
 fn smoke_failure_stops_draft_creation_and_publish_needs_preparation() {
     let f = Fixture::new();

@@ -571,9 +571,10 @@ fn production_download_rechecks_publication_and_records_failed_release() {
     }
 }
 #[test]
-fn production_installs_releases_published_under_the_organization_name() {
-    // After the move GitHub reports asset URLs under the new owner; the old API path redirects.
-    let moved = "dispatch-systems/dispatch-platform";
+fn production_installs_releases_published_under_either_repository_name() {
+    // A release can report asset URLs under the name the repository had when it was made.
+    let moved = "dillonlille/dispatch-platform";
+    assert_ne!(moved, REPOSITORY);
     let f = Fixture::new(Environment::Production);
     let mut release = f.production_release();
     for asset in release["assets"].as_array_mut().unwrap() {
@@ -613,8 +614,12 @@ fn production_installs_releases_published_under_the_organization_name() {
     }
 }
 #[test]
-fn the_latest_release_shortcut_follows_the_move_to_the_organization() {
-    let moved = "dispatch-systems/dispatch-platform";
+fn the_latest_release_shortcut_follows_a_move_between_repository_names() {
+    // An updater asking under one name is redirected to the same page under the other.
+    let moved = REPOSITORIES
+        .into_iter()
+        .find(|name| *name != REPOSITORY)
+        .unwrap();
     let f = Fixture::new(Environment::Production);
     let old = format!("https://github.com/{REPOSITORY}/releases/latest");
     let new = format!("https://github.com/{moved}/releases/latest");
@@ -724,6 +729,51 @@ fn installed_management_survives_old_runtime_and_source_rollback() {
     management::refresh(&u).unwrap();
     assert_eq!(fs::read(installed).unwrap(), bytes);
     u.verify().unwrap();
+}
+#[test]
+fn production_adopts_the_updater_of_each_release_it_installs_and_only_then() {
+    let f = Fixture::new(Environment::Production);
+    let u = f.updater();
+    // Today's updater came from the running release.
+    artifact(&u.active, &f.old, "0.1.0", true);
+    management::install(&u).unwrap();
+    let installed = management::directory(&u).join("dispatch-host");
+    let original = fs::read(&installed).unwrap();
+    // An ordinary check leaves a hand-restored updater alone, even when it differs.
+    fs::write(
+        &installed,
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # restored\n",
+    )
+    .unwrap();
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
+    );
+    u.run_locked().unwrap();
+    assert!(fs::read_to_string(&installed).unwrap().contains("restored"));
+    fs::write(&installed, &original).unwrap();
+    // The next release brings its own updater, which replaces the installed one.
+    let backend = f.candidate.join("services/rust/dispatch-backend");
+    fs::write(
+        &backend,
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # 0.1.1\n",
+    )
+    .unwrap();
+    fs::write(
+        f.candidate.join("tooling/build-info.json"),
+        json!({"commit":f.new,"hostManagement":1}).to_string(),
+    )
+    .unwrap();
+    artifact::write_manifest(&f.candidate, "0.1.1").unwrap();
+    let release = f.production_release();
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![release],
+    );
+    u.run_locked().unwrap();
+    assert_eq!(artifact::verify(&u.active, None).unwrap().version, "0.1.1");
+    assert!(!management::drift(&u).unwrap());
+    assert!(fs::read_to_string(&installed).unwrap().contains("# 0.1.1"));
 }
 #[test]
 fn broken_management_self_check_preserves_working_copy() {

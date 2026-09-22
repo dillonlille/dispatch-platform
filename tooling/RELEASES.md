@@ -21,15 +21,16 @@ stable `X.Y.Z` versions. Multiple unfinished releases require an explicit versio
 | Command                     | Effects and stopping point                                                                                                                                                                                                                                 |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `status [X.Y.Z]`            | Reads GitHub, verifies saved preparation and reports public health as JSON. Does not fetch Git refs, create release directories or write receipts. Defaults to the unfinished release, otherwise the latest published stable version.                      |
-| `prepare [X.Y.Z]`           | Pins the accepted Dev commit, opens and merges the release PR after checks, opens the Dev sync PR, downloads the checked main artifact, smoke tests it, uploads and verifies a draft. Stops before publication.                                            |
+| `prepare [X.Y.Z]`           | Pins the accepted Dev commit, opens and merges the release PR after checks, downloads the checked main artifact, opens the Dev sync PR, smoke tests it, uploads and verifies a draft. Stops before publication.                                            |
 | `publish [X.Y.Z]`           | Requires existing preparation and a draft or published release. Rechecks local bytes, tag identity and draft checks, completes missing uploads, publishes, verifies Production health and dashboard assets, finishes Dev sync and cleans merged worktrees. |
 | `run [X.Y.Z]` or no command | Performs preparation and publication together, preserving the legacy invocation.                                                                                                                                                                           |
 
 `prepare` includes the release merge into main; use it only when that release work
 is authorized. A branch with a merge queue holds a merged PR open until the queue's own
 run passes; the command waits up to thirty minutes for that and resumes if it stops. `publish` includes publication and the release's Dev sync merge.
-Neither command changes Production host configuration or installs its manager.
-The installed updater activates the published release using its existing policy.
+Neither command changes Production host configuration. The installed updater
+activates the published release using its existing policy, then replaces itself with
+that release's own copy once it passes a self-check.
 
 # Recovery and stored state
 

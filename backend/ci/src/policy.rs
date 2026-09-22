@@ -241,6 +241,25 @@ impl Policy<'_> {
         let tree = self.git(&["rev-parse", &format!("{}^{{tree}}", context.head)])?;
         Ok((tree.trim() == context.tree).then_some(run))
     }
+    /// The validation the PR run of this merge's head recorded, when its receipt binds
+    /// exactly this base, head and tree. A merge queue group asks for this directly: its
+    /// own run is the newest run of the group commit and would otherwise shadow the PR's.
+    pub fn validated_pull(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
+        let pulls = self.github(&format!(
+            "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+            context.head
+        ))?;
+        let Some(run) = latest_run(
+            &pulls["workflow_runs"],
+            &context.head,
+            "pull_request",
+            None,
+            true,
+        ) else {
+            return Ok(None);
+        };
+        self.receipted(run, &context.head.clone(), context, base_ref)
+    }
     pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
         require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
         // A merge queue tested this exact merge commit; its newest run decides, even when it
@@ -249,32 +268,26 @@ impl Policy<'_> {
             "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
             context.commit
         ))?;
-        let pulls;
-        let (run, sha) = match latest_run(
+        match latest_run(
             &queued["workflow_runs"],
             &context.commit,
             "merge_group",
             None,
             true,
         ) {
-            Some(run) => (run, context.commit.as_str()),
-            None => {
-                pulls = self.github(&format!(
-                    "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
-                    context.head
-                ))?;
-                let Some(run) = latest_run(
-                    &pulls["workflow_runs"],
-                    &context.head,
-                    "pull_request",
-                    None,
-                    true,
-                ) else {
-                    return Ok(None);
-                };
-                (run, context.head.as_str())
-            }
-        };
+            Some(run) => self.receipted(run, &context.commit.clone(), context, base_ref),
+            None => self.validated_pull(context, base_ref),
+        }
+    }
+    /// The receipt `run` published for `sha`, when it binds exactly this merge.
+    fn receipted(
+        &self,
+        run: &Value,
+        sha: &str,
+        context: &Context,
+        base_ref: &str,
+    ) -> Result<Option<Validation>> {
+        require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
         if !trusted_run(run, sha) {
             return Ok(None);
         }
@@ -364,18 +377,30 @@ impl Policy<'_> {
             pr["base"]["sha"].as_str()
         } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
             let group = &event["merge_group"];
+            // A group of one PR that is still current with dev merges the same base, head and
+            // tree its own run already validated; a batched or stale group does not.
             if let Ok(Some(context)) = self.context()
                 && group["head_sha"] == context.commit
                 && group["base_sha"] == context.base
-                && let Ok(Some(run)) = self.brings_main(&context)
             {
-                return (
-                    "reuse",
-                    format!(
-                        "Group brings exactly main's verified tree, published by push run {}",
-                        run["id"]
-                    ),
-                );
+                if let Ok(Some(run)) = self.brings_main(&context) {
+                    return (
+                        "reuse",
+                        format!(
+                            "Group brings exactly main's verified tree, published by push run {}",
+                            run["id"]
+                        ),
+                    );
+                }
+                if let Ok(Some(validation)) = self.validated_pull(&context, "dev") {
+                    return (
+                        "reuse",
+                        format!(
+                            "Group is exactly the merge validated by PR run {}",
+                            validation.run["id"]
+                        ),
+                    );
+                }
             }
             // Every PR in the group is between the group's base and this merge commit.
             group["base_sha"].as_str()
@@ -425,14 +450,30 @@ impl Policy<'_> {
                 && pr["base"]["sha"] == context.base
                 && pr["head"]["sha"] == context.head
         };
-        // A PR whose head is main's verified commit reused main's published build and only
-        // smoke tested it; its receipt carries the full validation main recorded.
+        // A reuse run only smoke tested bytes another run validated, so its receipt carries
+        // that run's validation: main's full validation for a merge that brings main's tree,
+        // and otherwise the scope the PR run recorded for this very merge.
         let selected = if selected == "reuse" {
             require(
-                source && base_ref == "dev" && self.brings_main(&context)?.is_some(),
-                "Reuse receipts require a merge that brings exactly main's verified tree",
+                source && base_ref == "dev",
+                "Reuse receipts require a same-repository merge into dev",
             )?;
-            "full"
+            if self.brings_main(&context)?.is_some() {
+                "full"
+            } else {
+                let validated = self
+                    .validated_pull(&context, "dev")?
+                    .ok_or("Reuse receipts require main's tree or this merge's own PR run")?;
+                require(
+                    queued && group["base_sha"] == context.base,
+                    "Only a merge queue group reuses its PR run's validation",
+                )?;
+                match validated.receipt["scope"].as_str() {
+                    Some("full") => "full",
+                    Some("dashboard") => "dashboard",
+                    _ => return Err("Reused validation has no usable scope".into()),
+                }
+            }
         } else {
             selected
         };

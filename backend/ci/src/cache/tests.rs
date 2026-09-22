@@ -58,7 +58,7 @@ impl Runner for Fixture {
     fn command(&self, args: &[&str], cwd: Option<&Path>, _timeout: u64) -> Result<Vec<u8>> {
         assert_eq!(cwd, Some(self.root.as_path()));
         match args[0] {
-            "rustc" | "cc" => Ok(b"pinned compiler".to_vec()),
+            "rustc" | "cc" | "ld" => Ok(format!("pinned {}", args[0]).into_bytes()),
             "git" => Ok(self.root.join(".git").to_str().unwrap().as_bytes().to_vec()),
             "cargo" => {
                 self.builds.set(self.builds.get() + 1);
@@ -332,4 +332,36 @@ fn promoted_binary_can_only_seed_its_original_eligible_compiler_key() {
     seed(&f.root, &source, &key, &f.env, &f).unwrap();
     let binary = store::cached_binary(&f.root.join(".ci-rust-cache").join(key)).unwrap();
     assert_eq!(fs::read(binary).unwrap(), b"verified backend");
+}
+
+#[test]
+fn runner_image_builds_share_entries_but_the_toolchain_and_distribution_do_not() {
+    let f = Fixture::new();
+    let base = fingerprint(&f.root, "release", "compiler", &f.env).unwrap();
+    // GitHub rolls a new image build out over days, with both builds serving jobs.
+    let mut rolled = f.env.clone();
+    rolled.insert("ImageVersion".into(), "20260920.314.1".into());
+    assert_eq!(
+        fingerprint(&f.root, "release", "compiler", &rolled).unwrap(),
+        base
+    );
+    let mut distribution = f.env.clone();
+    distribution.insert("ImageOS".into(), "ubuntu26".into());
+    assert_ne!(
+        fingerprint(&f.root, "release", "compiler", &distribution).unwrap(),
+        base
+    );
+    // The toolchain is named by version, so a linker update changes the key directly.
+    let toolchain = key::compiler(&f.root, &f).unwrap();
+    assert_eq!(toolchain, "pinned rustc\npinned cc\npinned ld");
+    assert_ne!(
+        fingerprint(&f.root, "release", &toolchain, &f.env).unwrap(),
+        fingerprint(
+            &f.root,
+            "release",
+            "pinned rustc\npinned cc\npinned ld 2",
+            &f.env
+        )
+        .unwrap()
+    );
 }

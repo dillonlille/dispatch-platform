@@ -210,6 +210,8 @@ jobs:
       - name: Record PR validation
         if: needs.plan.outputs.trusted-pr == 'true'
         env:
+          # A reuse receipt names the run whose bytes were reused, which means asking GitHub.
+          GH_TOKEN: ${{ github.token }}
           CI_RUST_KEY: ${{ needs.build.outputs.rust-key }}
         run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
       - name: Upload PR validation
