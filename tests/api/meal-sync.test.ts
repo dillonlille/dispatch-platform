@@ -146,20 +146,22 @@ test('simultaneous manual requests from separate sessions reserve one DSP sync',
   // Another DSP retains its own collector access.
   const other = owner.session.dsps.find((d: any) => d.name === 'Northline Logistics');
   await otherSession.select(other.id);
-  assert.equal(
-    (await otherSession.post('/api/dsp/jobs', { requestId: 'independent' })).status,
-    202,
-  );
+  const independent = await otherSession.post('/api/dsp/jobs', { requestId: 'independent' });
+  assert.equal(independent.status, 202);
   // Cancel the queued Flex job first so it cannot start as Paycom stops.
   for (const job of [...accepted.jobs].reverse())
     assert.equal((await owner.post(`/api/dsp/jobs/${job.id}/cancel`)).status, 200);
-  assert.equal(
-    (
-      await owner.post('/api/dsp/jobs/meal-breaks', {
-        requestId: 'after-cancellation',
-        date: '2026-01-13',
-      })
-    ).status,
-    202,
-  );
+  const restarted = await owner.post('/api/dsp/jobs/meal-breaks', {
+    requestId: 'after-cancellation',
+    date: '2026-01-13',
+  });
+  assert.equal(restarted.status, 202);
+  // Leave nothing running: the server waits for a started job, and this test ends by
+  // starting two. A job that already finished answers 409, which is equally quiet.
+  for (const [client, ids] of [
+    [owner, restarted.value.jobs.map((job: any) => job.id)],
+    [otherSession, [independent.value.id]],
+  ] as const)
+    for (const id of [...ids].reverse())
+      assert.ok([200, 409].includes((await client.post(`/api/dsp/jobs/${id}/cancel`)).status));
 });
