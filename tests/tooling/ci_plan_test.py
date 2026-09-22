@@ -31,7 +31,9 @@ class CiLauncherTests(unittest.TestCase):
                 launch.assert_called_once_with(*args)
 
     def test_bootstrap_builds_only_small_ci_binary_and_uses_configured_cargo_target(self):
-        with patch.object(ci_tool.subprocess, "check_call") as build, \
+        # Without a restored tool of its own, which CI has whenever that cache hits.
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(ci_tool.subprocess, "check_call") as build, \
                 patch.object(ci_tool.subprocess, "check_output", return_value=json.dumps({"target_directory": "/custom target"})), \
                 patch.object(ci_tool.os, "execv") as execute:
             ci_tool.launch("plan")

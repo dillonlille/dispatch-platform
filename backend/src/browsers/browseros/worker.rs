@@ -38,7 +38,57 @@ async fn proxy() -> Result<Proxy> {
     })))
 }
 
+/// The last of what the browser printed before it failed. Draining it continuously keeps
+/// a full pipe from blocking the browser, and the tail is all a failure report needs.
+#[derive(Clone, Default)]
+pub(super) struct Notes(Arc<std::sync::Mutex<String>>);
+impl Notes {
+    const KEEP: usize = 2000;
+    fn collect(&self, output: Option<impl tokio::io::AsyncRead + Unpin + Send + 'static>) {
+        let Some(output) = output else { return };
+        let notes = self.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(output);
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.is_ok_and(|read| read > 0) {
+                if let Ok(mut kept) = notes.0.lock() {
+                    kept.push_str(&line);
+                    while kept.len() > Self::KEEP {
+                        let over = kept.len() - Self::KEEP;
+                        let cut = (over..=kept.len())
+                            .find(|index| kept.is_char_boundary(*index))
+                            .unwrap_or(kept.len());
+                        kept.drain(..cut);
+                    }
+                }
+                line.clear();
+            }
+        });
+    }
+    fn tail(&self) -> String {
+        self.0
+            .lock()
+            .map(|kept| kept.trim().replace('\n', " | "))
+            .unwrap_or_default()
+    }
+}
+/// Report why this worker is stopping. Its standard error is closed, so the supervisor
+/// only learns the reason from a frame on the pipe it already reads.
+async fn report(error: &Error, notes: &Notes) {
+    let mut output = tokio::io::stdout();
+    let report = format!("{}\n", json!({"error":error.code,"detail":notes.tail()}));
+    let _ = output.write_all(report.as_bytes()).await;
+    let _ = output.flush().await;
+}
 pub(super) async fn run(mode: &str) -> Result<()> {
+    let notes = Notes::default();
+    let result = serve(mode, &notes).await;
+    if let Err(error) = &result {
+        report(error, &notes).await;
+    }
+    result
+}
+async fn serve(mode: &str, notes: &Notes) -> Result<()> {
     ensure(
         ["headless", "windowed"].contains(&mode),
         "invalid_browser_mode",
@@ -103,7 +153,7 @@ pub(super) async fn run(mode: &str) -> Result<()> {
         .await
         .map_err(|_| Error::new("browser_display_failed", 503))?;
     }
-    let (mut child, mut cdp) = browser(mode).await?;
+    let (mut child, mut cdp) = browser(mode, notes).await?;
     cdp.command("Browser.getTabs", json!({}), None).await?;
     let mut input = BufReader::new(tokio::io::stdin());
     let mut output = tokio::io::stdout();
@@ -174,7 +224,7 @@ fn pipe_descriptor(socket: &UnixStream) -> Result<OwnedFd> {
     }
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
-async fn browser(mode: &str) -> Result<(tokio::process::Child, Cdp)> {
+async fn browser(mode: &str, notes: &Notes) -> Result<(tokio::process::Child, Cdp)> {
     let (client, server) = UnixStream::pair()?;
     let descriptor = pipe_descriptor(&server)?;
     let mut command = Command::new("/browser/browseros");
@@ -213,7 +263,8 @@ async fn browser(mode: &str) -> Result<(tokio::process::Child, Cdp)> {
         .arg("about:blank")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        // Kept and drained, so a failed start can say what the browser complained about.
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     // Only async-signal-safe syscalls run after fork. Browser CDP reads fd 3 and writes fd 4.
     unsafe {
@@ -226,7 +277,8 @@ async fn browser(mode: &str) -> Result<(tokio::process::Child, Cdp)> {
             Ok(())
         });
     }
-    let child = command.spawn()?;
+    let mut child = command.spawn()?;
+    notes.collect(child.stderr.take());
     drop(command);
     drop(server);
     Ok((child, Cdp::new(client)?))

@@ -7,8 +7,26 @@ export const test = base.extend<{
   dispatchOptions: Pick<FixtureOptions, 'seed' | 'env'>;
   /** A private server of the built artifact with its own state, port and mail. */
   dispatch: Dispatch;
+  /** Set with `test.use` to load the sign-in van's model, for the tests about it. */
+  signInAnimation: boolean;
 }>({
   dispatchOptions: [{}, { option: true }],
+  signInAnimation: [false, { option: true }],
+  // Chromium renders the van in software here, which costs seconds of every sign-in and
+  // has nothing to do with what most tests assert. Its renderer is served as a module
+  // that never starts, so the page keeps the poster it shows until the van is ready and
+  // fetches no model, while the van's own tests get the real one.
+  page: async ({ page, signInAnimation }, use) => {
+    if (!signInAnimation)
+      await page.route('**/renderer-*.js', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/javascript',
+          body: 'export function startVan() {}\n',
+        }),
+      );
+    await use(page);
+  },
   dispatch: async ({ dispatchOptions }, use) => {
     const app = await fixture({
       ...dispatchOptions,
