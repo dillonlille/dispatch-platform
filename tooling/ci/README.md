@@ -59,7 +59,9 @@ python3 -m unittest discover -s tests/tooling -p '*_test.py'
 ```
 
 The final `platform` job requires every expected job result, including every
-collector shard and Rust advisories. Artifact publication still happens only
+browser shard, every collector shard and Rust advisories. The build job packages
+its build for every run; four `browser` jobs, three workers each, test those exact
+bytes in parallel while `core` and the collectors run, and reuse runs skip them. Artifact publication still happens only
 after that gate succeeds. Draft PRs produce no validation receipt.
 
 `.github/actions/setup-tools` restores `dispatch-ci`, `dispatch-host` and the browser

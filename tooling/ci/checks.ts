@@ -3,8 +3,11 @@ import os from 'node:os';
 import { coreTests, dashboardTests } from './test-plan.js';
 
 const mode = process.argv[2] ?? 'full';
-if (!['full', 'build-full', 'build-dashboard', 'build-reuse', 'core'].includes(mode))
+if (!['full', 'build-full', 'build-dashboard', 'build-reuse', 'core', 'browser'].includes(mode))
   throw new Error('Unknown validation mode');
+// CI runs the browser suite as separate shard jobs against the packaged build; the build
+// check then skips it. Locally the build check still runs the whole suite.
+const shardedBrowser = process.env.DISPATCH_CI_BROWSER_SHARDS !== undefined && mode !== 'browser';
 const started = Date.now();
 const failures: string[] = [];
 async function run(name: string, command: string, args: string[], env = process.env) {
@@ -28,12 +31,7 @@ async function build(scope: string) {
     if (await built) await npm('test:smoke');
     return;
   }
-  const browsers = run('browser setup', 'npx', [
-    'playwright',
-    'install',
-    ...(process.env.CI === 'true' ? ['--with-deps'] : []),
-    'chromium',
-  ]);
+  const browsers = shardedBrowser ? Promise.resolve(true) : installBrowsers();
   await Promise.all([
     built,
     browsers,
@@ -51,7 +49,9 @@ async function build(scope: string) {
         ),
       ]);
     }),
-    Promise.all([built, browsers]).then(([ok, installed]) => ok && installed && npm('test:ui')),
+    Promise.all([built, browsers]).then(
+      ([ok, installed]) => ok && installed && !shardedBrowser && npm('test:ui'),
+    ),
   ]);
   // Measure after the other build checks finish so this process does not compete
   // with browser tests or compilers on the same runner.
@@ -65,6 +65,23 @@ async function build(scope: string) {
       '--output',
       '/tmp/dispatch-rust-benchmark.json',
     ]);
+}
+function installBrowsers() {
+  return run('browser setup', 'npx', [
+    'playwright',
+    'install',
+    ...(process.env.CI === 'true' ? ['--with-deps'] : []),
+    'chromium',
+  ]);
+}
+/** One shard of the browser suite against the build already in `.build`. */
+async function browser() {
+  const shard = process.argv[3];
+  if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard ?? '')) throw new Error('Browser shard required, as 1/3');
+  // Three workers on a four-core runner: the fourth core keeps the private servers and the
+  // sign-in animation responsive, so long multi-login tests stay well inside their budget.
+  if (await installBrowsers())
+    await run('test:ui', 'npm', ['run', 'test:ui', '--', `--shard=${shard}`, '--workers=3']);
 }
 async function core() {
   const python = run('Python tests', 'python3', [
@@ -95,6 +112,7 @@ async function core() {
   await Promise.all([python, audit]);
 }
 if (mode === 'core') await core();
+else if (mode === 'browser') await browser();
 else if (mode === 'full') {
   // CI shards compile on separate runners; local runs share Cargo's build lock.
   await core();

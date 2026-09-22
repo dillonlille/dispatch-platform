@@ -135,6 +135,14 @@ pub fn gate(needs: &Value) -> Result<&str> {
     for (job, result) in [
         ("plan", "success"),
         ("build", "success"),
+        (
+            "browser",
+            if mode == "reuse" {
+                "skipped"
+            } else {
+                "success"
+            },
+        ),
         ("rust-advisories", "success"),
         ("core", if mode == "full" { "success" } else { "skipped" }),
         (
