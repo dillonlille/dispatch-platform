@@ -77,21 +77,19 @@ pub fn public_github(system: &dyn System, endpoint: &str) -> Result<Value> {
     )?)
 }
 pub fn latest_tag(system: &dyn System) -> Option<String> {
-    let response = system
-        .request(
-            &format!("https://github.com/{REPOSITORY}/releases/latest"),
-            true,
-            false,
-            15,
-        )
-        .ok()?;
-    if response.status != 302 {
-        return None;
+    let mut url = format!("https://github.com/{REPOSITORY}/releases/latest");
+    // A moved repository first redirects to the same page under its new name.
+    for _ in 0..2 {
+        let response = system.request(&url, true, false, 15).ok()?;
+        let location = response.location?;
+        let path = crate::web_path(&location)?;
+        match response.status {
+            302 => return path.strip_prefix("releases/tag/").map(str::to_owned),
+            301 | 307 | 308 if path == "releases/latest" => url = location,
+            _ => return None,
+        }
     }
-    response
-        .location?
-        .strip_prefix(&format!("https://github.com/{REPOSITORY}/releases/tag/"))
-        .map(str::to_owned)
+    None
 }
 pub fn release_commit(system: &dyn System, tag: &str) -> Result<String> {
     require(tag.starts_with('v'), "Version tag required")?;
@@ -136,12 +134,14 @@ pub fn download_asset(
     let asset = assets[0];
     let size = asset["size"].as_u64().unwrap_or(0);
     require(size > 0 && size <= MAX_BYTES, "Invalid release asset size")?;
-    let url = format!(
-        "https://github.com/{REPOSITORY}/releases/download/{}/{name}",
-        io::text(release, "tag_name")
-    );
+    // The URL GitHub reports, under any of this repository's names, for exactly this asset.
+    let url = io::text(asset, "browser_download_url");
     require(
-        asset["browser_download_url"] == url,
+        crate::web_path(&url)
+            == Some(&format!(
+                "releases/download/{}/{name}",
+                io::text(release, "tag_name")
+            )),
         "Unexpected release asset URL",
     )?;
     let expected = io::text(asset, "digest");

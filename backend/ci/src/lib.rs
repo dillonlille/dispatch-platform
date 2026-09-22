@@ -6,7 +6,26 @@ pub mod process;
 pub mod runs;
 use std::path::Path;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+/// Where API calls, receipts and provenance name this repository today.
 pub const REPOSITORY: &str = "dillonlille/dispatch-platform";
+/// Every name this repository answers to across its move into the organization. Only
+/// their owners can create repositories under these names, so identity checks accept
+/// any of them and a transfer never strands CI, Dev or an installed Production updater.
+pub const REPOSITORIES: [&str; 2] = [
+    "dillonlille/dispatch-platform",
+    "dispatch-systems/dispatch-platform",
+];
+/// Whether GitHub named this repository, under any of its names.
+pub fn ours(name: &serde_json::Value) -> bool {
+    name.as_str()
+        .is_some_and(|name| REPOSITORIES.contains(&name))
+}
+/// A GitHub web URL for this repository under any of its names, as the path after it.
+pub fn web_path(url: &str) -> Option<&str> {
+    REPOSITORIES
+        .iter()
+        .find_map(|name| url.strip_prefix(&format!("https://github.com/{name}/")))
+}
 pub fn require(value: bool, message: &str) -> Result<()> {
     if value { Ok(()) } else { Err(message.into()) }
 }

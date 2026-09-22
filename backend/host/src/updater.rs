@@ -1,5 +1,5 @@
 use crate::{
-    REPOSITORY, Result,
+    Result,
     artifact::{self, Manifest},
     io::{self, System},
     management, releases, require,
@@ -131,8 +131,10 @@ impl<'a> Updater<'a> {
         )?;
         let origin = self.git(&["remote", "get-url", "origin"])?;
         require(
-            origin == format!("https://github.com/{REPOSITORY}.git")
-                || origin == format!("git@github.com:{REPOSITORY}.git"),
+            crate::REPOSITORIES.iter().any(|name| {
+                origin == format!("https://github.com/{name}.git")
+                    || origin == format!("git@github.com:{name}.git")
+            }),
             "Unexpected repository origin",
         )?;
         self.check_source("HEAD")

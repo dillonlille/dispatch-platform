@@ -12,7 +12,7 @@ mod setup;
 pub mod updater;
 
 pub use cli::run;
-pub use dispatch_ci::{REPOSITORY, Result, require};
+pub use dispatch_ci::{REPOSITORIES, REPOSITORY, Result, require, web_path};
 pub const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[cfg(test)]
