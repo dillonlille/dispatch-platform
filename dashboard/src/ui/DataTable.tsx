@@ -98,6 +98,30 @@ export function DataTable<T>({
     );
   }
   if (open) body.push(detail(open));
+  const headings = columns.map((column) => {
+    const direction = table.sort?.id === column.id ? (table.sort.desc ? 'desc' : 'asc') : undefined;
+    return column.sortable ? (
+      <SortHeader
+        key={column.id}
+        scope={column.scope}
+        direction={direction}
+        onSort={() => table.toggleSort(column.id)}
+        className={column.sortHeader?.className}
+        headerClassName={classes(column.headerClassName, column.sticky && 'sticky-column')}
+        indicator={column.sortHeader?.indicator?.(direction ?? 'asc')}
+      >
+        {column.header}
+      </SortHeader>
+    ) : (
+      <th
+        key={column.id}
+        scope={column.scope}
+        className={classes(column.headerClassName, column.sticky && 'sticky-column')}
+      >
+        {column.header}
+      </th>
+    );
+  });
   return (
     <table
       ref={tableRef}
@@ -106,33 +130,12 @@ export function DataTable<T>({
     >
       {caption && <caption className="sr-only">{caption}</caption>}
       <thead>
-        <tr>
-          {columns.map((column) => {
-            const direction =
-              table.sort?.id === column.id ? (table.sort.desc ? 'desc' : 'asc') : undefined;
-            return column.sortable ? (
-              <SortHeader
-                key={column.id}
-                scope={column.scope}
-                direction={direction}
-                onSort={() => table.toggleSort(column.id)}
-                className={column.sortHeader?.className}
-                headerClassName={classes(column.headerClassName, column.sticky && 'sticky-column')}
-                indicator={column.sortHeader?.indicator?.(direction ?? 'asc')}
-              >
-                {column.header}
-              </SortHeader>
-            ) : (
-              <th
-                key={column.id}
-                scope={column.scope}
-                className={classes(column.headerClassName, column.sticky && 'sticky-column')}
-              >
-                {column.header}
-              </th>
-            );
-          })}
-        </tr>
+        <tr>{headings}</tr>
+        {stickyHeader && (
+          <tr className="table-header-placeholder" aria-hidden="true" inert>
+            {headings}
+          </tr>
+        )}
       </thead>
       <tbody onKeyDown={moveBetweenRows}>{body}</tbody>
     </table>

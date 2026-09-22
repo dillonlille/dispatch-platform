@@ -36,7 +36,7 @@ async function expectPinned(table: Locator) {
       table.evaluate((element) => {
         const banner = document.querySelector('[data-sticky-banner]');
         return Math.abs(
-          element.querySelector('thead')!.getBoundingClientRect().top -
+          element.querySelector('thead tr')!.getBoundingClientRect().top -
             (banner?.getBoundingClientRect().bottom ?? 0),
         );
       }),
@@ -53,6 +53,39 @@ async function expectPinned(table: Locator) {
     });
   });
   expect(aligned).toBe(true);
+}
+
+async function expectSteadyWhileScrolling(page: Page, table: Locator) {
+  // Sample as scroll events arrive, before a scroll-following animation can catch up.
+  await table.evaluate((element) => {
+    const samples: number[] = [];
+    const record = () => {
+      const top =
+        document.querySelector('[data-sticky-banner]')?.getBoundingClientRect().bottom ?? 0;
+      samples.push(Math.abs(element.querySelector('thead tr')!.getBoundingClientRect().top - top));
+    };
+    Object.assign(window, {
+      stickyScrollSamples: samples,
+      stopStickyScroll: () => window.removeEventListener('scroll', record),
+    });
+    window.addEventListener('scroll', record, { passive: true });
+  });
+  await page.mouse.move(page.viewportSize()!.width - 45, 450);
+  for (const delta of [180, 180, -240, 120, -180]) {
+    const before = await page.evaluate(() => window.scrollY);
+    await page.mouse.wheel(0, delta);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).not.toBe(before);
+  }
+  const samples = await page.evaluate(() => {
+    const state = window as typeof window & {
+      stickyScrollSamples: number[];
+      stopStickyScroll: () => void;
+    };
+    state.stopStickyScroll();
+    return state.stickyScrollSamples;
+  });
+  expect(samples.length).toBeGreaterThanOrEqual(5);
+  expect(Math.max(...samples)).toBeLessThan(1);
 }
 
 for (const width of [1440, 390]) {
@@ -80,7 +113,7 @@ for (const width of [1440, 390]) {
         const table = page.locator(selector);
         await expect(table.locator('tbody > tr')).toHaveCount(80);
         await expect(table.getByRole('columnheader')).toHaveCount(columns);
-        const header = table.locator('thead');
+        const header = table.locator('thead > tr').first();
         const initial = await header.boundingBox();
         expect(initial!.y).toBeGreaterThan(100);
 
@@ -88,11 +121,19 @@ for (const width of [1440, 390]) {
           window.scrollBy(0, element.getBoundingClientRect().top + 950),
         );
         await expectPinned(table);
+        await expectSteadyWhileScrolling(page, table);
+        await expect(table.getByRole('columnheader')).toHaveCount(columns);
         await page.screenshot({
           path: test.info().outputPath(`${tab}-${width}-${banner ? 'banner' : 'member'}.png`),
         });
 
         if (width < 700) {
+          if (tab === 'Timecard') {
+            const scrolled = await page.evaluate(() => window.scrollY);
+            await table.getByRole('columnheader').last().getByRole('button').focus();
+            await expect(table.getByRole('columnheader').last()).toBeInViewport();
+            expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+          }
           expect(
             await table.evaluate((element) => {
               const wrap = element.parentElement!;
