@@ -20,6 +20,8 @@ const ROLE_USES: &str = "SELECT (SELECT count(*) FROM memberships WHERE role_id=
 // Every permission a DSP owner can grant. Owners implicitly hold all of them,
 // so additions here reach owners without touching stored roles.
 pub const PERMISSIONS: &[&str] = &[
+    "uniforms.adjust",
+    "uniforms.manage",
     "timecard.view",
     "timecard.manage",
     "collections.run",

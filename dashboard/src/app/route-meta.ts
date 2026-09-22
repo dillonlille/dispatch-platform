@@ -28,6 +28,11 @@ export const routeMeta = [
     parent: 'paycom',
   },
   {
+    id: 'uniforms',
+    scope: 'dsp',
+    label: 'Uniform Inventory',
+  },
+  {
     id: 'team',
     scope: 'dsp',
     label: 'Team & Roles',

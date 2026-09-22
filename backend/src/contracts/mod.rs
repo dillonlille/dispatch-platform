@@ -29,6 +29,7 @@ mod metrics;
 mod platform;
 mod requests;
 mod settings;
+mod uniforms;
 mod workforce;
 
 pub use accounts::*;
@@ -41,6 +42,7 @@ pub use metrics::*;
 pub use platform::*;
 pub use requests::*;
 pub use settings::*;
+pub use uniforms::*;
 pub use workforce::*;
 
 text_enum! {

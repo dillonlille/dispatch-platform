@@ -372,7 +372,13 @@ mod tests {
         let db = Db::create(&file, Kind::Dsp, "").unwrap();
         migrate(&db, Kind::Dsp).unwrap();
         Db::open(&file, Kind::Dsp).unwrap();
-        assert_eq!(ids(&db), vec![1, 9000]);
+        let mut expected: Vec<i64> = Kind::Dsp
+            .migrations()
+            .iter()
+            .map(|m| i64::from(m.id))
+            .collect();
+        expected.push(9000);
+        assert_eq!(ids(&db), expected);
         db.one("SELECT count(*) FROM from_the_next_release", [])
             .unwrap();
     }
@@ -383,19 +389,16 @@ mod tests {
         let file = root.path().join("dsp.sqlite");
         let db = Db::create(&file, Kind::Dsp, "").unwrap();
         let before = dump(&db);
+        let before_ids = ids(&db);
+        let next = Kind::Dsp.migrations().last().unwrap().id + 1;
         let list = [
             Migration {
-                id: 1,
-                name: "baseline",
-                apply: Apply::Sql(""),
-            },
-            Migration {
-                id: 2,
+                id: next,
                 name: "fine",
                 apply: Apply::Sql("CREATE TABLE fine (id TEXT);"),
             },
             Migration {
-                id: 3,
+                id: next + 1,
                 name: "broken",
                 apply: Apply::Sql("CREATE TABLE half (id TEXT); INSERT INTO missing VALUES (1);"),
             },
@@ -405,7 +408,7 @@ mod tests {
             "migration_failed"
         );
         assert_eq!(dump(&db), before);
-        assert_eq!(ids(&db), vec![1]);
+        assert_eq!(ids(&db), before_ids);
         assert!(db.0.is_autocommit());
     }
 
@@ -413,20 +416,14 @@ mod tests {
     fn connections_racing_to_open_first_apply_each_migration_once() {
         let root = private();
         // Neither statement can run twice.
-        const LIST: &[Migration] = &[
-            Migration {
-                id: 1,
-                name: "baseline",
-                apply: Apply::Sql(""),
-            },
-            Migration {
-                id: 2,
-                name: "once",
-                apply: Apply::Sql(
-                    "CREATE TABLE once (id INTEGER PRIMARY KEY); INSERT INTO once VALUES (1);",
-                ),
-            },
-        ];
+        let next = Kind::Dsp.migrations().last().unwrap().id + 1;
+        let list: &[Migration] = &[Migration {
+            id: next,
+            name: "once",
+            apply: Apply::Sql(
+                "CREATE TABLE once (id INTEGER PRIMARY KEY); INSERT INTO once VALUES (1);",
+            ),
+        }];
         for round in 0..8 {
             let file = root.path().join(format!("race-{round}.sqlite"));
             let barrier = std::sync::Barrier::new(4);
@@ -441,12 +438,18 @@ mod tests {
                             "INSERT INTO settings VALUES ('seeded','1');",
                         )
                         .unwrap();
-                        run(&db, "test", LIST).unwrap();
+                        run(&db, "test", list).unwrap();
                     });
                 }
             });
             let db = Db::open(&file, Kind::Dsp).unwrap();
-            assert_eq!(ids(&db), vec![1, 2]);
+            let mut expected: Vec<i64> = Kind::Dsp
+                .migrations()
+                .iter()
+                .map(|m| i64::from(m.id))
+                .collect();
+            expected.push(i64::from(next));
+            assert_eq!(ids(&db), expected);
             assert_eq!(
                 db.all("SELECT * FROM once", []).unwrap(),
                 vec![json!({"id":1})]

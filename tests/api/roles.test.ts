@@ -17,7 +17,7 @@ test('custom roles gate tenant APIs and never grant more than the actor holds', 
   assert.deepEqual(
     (await roles()).map((role) => [role.name, role.owner, role.permissions.length]),
     [
-      ['Owner', true, 8],
+      ['Owner', true, 10],
       ['Manager', false, 2],
       ['Member', false, 1],
     ],

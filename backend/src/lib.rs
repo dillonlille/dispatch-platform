@@ -13,6 +13,7 @@ pub mod http;
 pub mod job_metrics;
 pub mod jobs;
 pub mod live_collection;
+pub mod live_updates;
 pub mod mail;
 pub mod meals;
 pub mod observability;
@@ -22,6 +23,7 @@ pub mod proxy;
 pub mod roles;
 pub mod schedules;
 pub mod tenants;
+pub mod uniforms;
 pub mod validate;
 pub mod workforce;
 
@@ -42,7 +44,8 @@ pub struct State {
     pub password_slots: Arc<Semaphore>,
     pub mail_transport: Mutex<mail::TransportHealth>,
     pub browsers: browsers::Manager,
-    pub updates: live_collection::Updates,
+    pub updates: live_updates::Updates,
+    pub uniform_updates: live_updates::Updates,
     pub presence: presence::Presence,
 }
 impl State {
@@ -69,7 +72,8 @@ impl State {
             password_slots: Arc::new(Semaphore::new(2)),
             mail_transport: Mutex::new(mail::TransportHealth::default()),
             browsers: browsers::Manager::default(),
-            updates: live_collection::Updates::new()?,
+            updates: live_updates::Updates::new()?,
+            uniform_updates: live_updates::Updates::new()?,
             presence: presence::Presence::default(),
         }))
     }
