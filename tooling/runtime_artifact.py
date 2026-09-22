@@ -1,10 +1,10 @@
-"""Shared GitHub access, runtime inventory verification, safe extraction and the
-service lifecycle of the host updaters.
+"""CI/release adapters and the one-time Python-to-Rust host handoff.
 
-Installed beside the host updaters, so it imports only the standard library.
+Artifact policy and updater state machines live in backend/host. The bootstrap
+verifier is retained only for already-installed Python units to install their
+first trusted Rust management copy after a successful legacy activation.
 """
-
-import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -12,21 +12,14 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
-import tarfile
+import sys
 import tempfile
-import time
-import urllib.request
-import zipfile
 
 REPOSITORY = "dillonlille/dispatch-platform"
-# Top-level names an artifact may contain; tooling/build/artifact.ts builds from the same list.
 MANAGED = {"dashboard", "services", "tooling", "release.json"}
 MAX_BYTES = 1024 * 1024 * 1024
 STABLE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
-# Both trusted branches retain the historical package name so an already
-# installed Dev updater continues to work unchanged.
 PACKAGE = "dispatch-dev.tar.gz"
-
 
 def require(value, message):
     if not value:
@@ -45,24 +38,6 @@ def github(endpoint, *args, binary=False, timeout=120):
     """Authenticated repository API through the GitHub CLI."""
     data = command("gh", "api", f"repos/{REPOSITORY}/{endpoint}", *args, binary=binary, timeout=timeout)
     return data if binary else json.loads(data)
-
-
-def latest_run(runs, sha, event, branch=None, skipped=False):
-    """The newest run of this repository for the commit, whatever its outcome.
-
-    A newer failed or pending rerun always replaces an older success. A skipped run
-    checked nothing, so it neither passes nor fails the commit; callers that must
-    not look past one (a PR returned to draft) count it with skipped=True.
-    """
-    runs = [r for r in runs if r.get("head_sha") == sha and r.get("event") == event
-            and (skipped or r.get("conclusion") != "skipped")
-            and (branch is None or r.get("head_branch") == branch)
-            and (r.get("head_repository") or {}).get("full_name") == REPOSITORY]
-    return max(runs, key=lambda r: (r["id"], r.get("run_attempt", 1)), default=None)
-
-
-def passed(run):
-    return bool(run) and run.get("status") == "completed" and run.get("conclusion") == "success"
 
 
 def private_directory(directory):
@@ -103,35 +78,7 @@ def safe_path(name):
     return name
 
 
-def unpack(archive, destination):
-    """Extract regular files only; do not trust tar paths, links or modes."""
-    private_directory(destination)
-    seen, total = set(), 0
-    with tarfile.open(archive, "r:gz") as bundle:
-        for member in bundle:
-            name = member.name
-            if name in (".", "./") and member.isdir():
-                continue
-            if name.startswith("./"):
-                name = name[2:]
-            name = safe_path(name.rstrip("/") if member.isdir() else name)
-            require(name not in seen, "Duplicate artifact entry")
-            seen.add(name)
-            require(len(seen) <= 50000, "Artifact has too many files")
-            target = destination / name
-            if member.isdir():
-                private_directory(target)
-            else:
-                require(member.isfile() and not member.issparse(), "Artifact links/special files denied")
-                total += member.size
-                require(total <= MAX_BYTES, "Artifact is too large")
-                private_directory(target.parent)
-                with bundle.extractfile(member) as source, target.open("xb") as output:
-                    shutil.copyfileobj(source, output)
-                target.chmod(0o600)
-
-
-def verify_artifact(directory, commit=None):
+def _bootstrap_verify(directory, commit=None):
     directory = Path(directory)
     require(directory.resolve() == directory.absolute(), "Artifact symlink denied")
     manifest = json.loads((directory / "release.json").read_text())
@@ -178,126 +125,92 @@ def verify_artifact(directory, commit=None):
     return manifest
 
 
-def download_run_artifact(artifact, directory, commit, package=None):
-    """Fetch one Actions artifact and return its verified, unpacked runtime.
-
-    GitHub's recorded size and digest must describe the downloaded bytes. The inner
-    package is kept at `package` when given. Returns the candidate directory inside
-    the caller's private temporary `directory` and its manifest.
-    """
-    directory = Path(directory)
-    require(0 < artifact["size_in_bytes"] <= MAX_BYTES, "Invalid artifact size")
-    download = directory / "artifact.zip"
-    with download.open("xb") as output:
-        subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
-                       stdout=output, stderr=subprocess.PIPE, check=True, timeout=180)
-    require(download.stat().st_size == artifact["size_in_bytes"] and
-            artifact.get("digest") == "sha256:" + hashlib.sha256(download.read_bytes()).hexdigest(),
-            "GitHub artifact digest mismatch")
-    package = Path(package) if package else directory / "build.tar.gz"
-    with zipfile.ZipFile(download) as bundle:
-        require(bundle.namelist() == [PACKAGE], "Unexpected artifact package")
-        require(bundle.getinfo(PACKAGE).file_size <= MAX_BYTES, "Package is too large")
-        with bundle.open(PACKAGE) as source, package.open("xb") as target:
-            shutil.copyfileobj(source, target)
-    candidate = directory / "candidate"
-    unpack(package, candidate)
-    return candidate, verify_artifact(candidate, commit)
-
-
-class RuntimeUpdater:
-    """Stopping, switching, starting and rolling back one environment's service.
-
-    A subclass names its systemd user unit, what its health endpoint must report and its
-    lock file, and sets `platform`, `previous`, `receipt` and `config`. What may be
-    installed, and everything about where it comes from, stays with each updater.
-    """
-
-    SERVICE = None
-    # What /api/health must report beside the expected release digest.
-    HEALTH = {}
-    LOCK = None
-
-    def load_config(self, filename, service_message, health_message):
-        self.config = json.loads(Path(filename).read_text())
-        require(self.config["service"] == self.SERVICE, service_message)
-        require(re.fullmatch(r"http://127\.0\.0\.1:\d+/api/health", self.config["healthUrl"]),
-                health_message)
-
-    def service(self, action):
-        command("systemctl", "--user", action, self.config["service"], timeout=90)
-
-    def healthy(self, digest, timeout=40):
-        expected = {"status": "ready", **self.HEALTH, "release": digest}
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(self.config["healthUrl"], timeout=2) as response:
-                    data = json.load(response)
-                if all(data.get(key) == value for key, value in expected.items()):
-                    return True
-            except (OSError, ValueError):
-                pass
-            time.sleep(1)
-        return False
-
-    def switch(self, candidate, active, record, digest, failure, stopped=None, switched=None, ready=None):
-        """Replace `active` with `candidate`, keeping the old runtime until the new one is healthy.
-
-        `record` is written as the activation receipt before anything changes, so an
-        interrupted switch is rolled back by `recover` on the next run. `stopped` runs
-        once the service is down, `switched` once the runtimes are exchanged and `ready`
-        once the new one answers; any failure, in them too, recovers and is raised again.
-        """
-        if self.previous.exists():
-            require(self.previous.resolve() == self.previous and not self.previous.is_symlink(),
-                    "Unsafe rollback path")
-            shutil.rmtree(self.previous)
-        write_json(self.receipt, record)
+@functools.cache
+def host_binary():
+    tooling = Path(__file__).resolve().parent
+    root = tooling.parent
+    if (root / "backend/host/Cargo.toml").is_file():
+        # Build from this checkout, never search the candidate being verified.
+        subprocess.check_call(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"], cwd=root,
+                              stdout=sys.stderr)
+        metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version=1", cwd=root))
+        return Path(metadata["target_directory"]) / "release/dispatch-host"
+    require(tooling.name == "management", "Run host tooling from a checkout or installed management directory")
+    binary = tooling / "dispatch-host"
+    if not binary.exists():
+        environment = "dev" if root.name == ".runtime" else "production"
+        live = root.parent if environment == "dev" else root
+        require(live.name == ("dev" if environment == "dev" else "public"), "Invalid environment root")
+        active = live / (".build" if environment == "dev" else "live")
+        receipt = json.loads((live / f"data/platform/{environment}-update.json").read_text())
+        require(receipt.get("status") == "ready", "Rust handoff requires a healthy completed activation")
+        manifest = _bootstrap_verify(active, receipt.get("commit"))
+        require(manifest["digest"] == receipt.get("digest"), "Handoff runtime differs from activation receipt")
+        metadata = json.loads((active / "tooling/build-info.json").read_text())
+        require(metadata.get("hostManagement") == 1, "Active runtime has no Rust host management")
+        if environment == "dev":
+            require(command("git", "branch", "--show-current", cwd=live) == "dev"
+                    and not command("git", "status", "--porcelain", "--untracked-files=all", cwd=live),
+                    "Clean Dev checkout required for handoff")
+            require(command("git", "rev-parse", "HEAD", cwd=live) == metadata["commit"], "Handoff source differs")
+        private_directory(tooling)
+        fd, staged = tempfile.mkstemp(prefix=".host-", dir=tooling)
         try:
-            self.service("stop")
-            if stopped:
-                stopped()
-            active.rename(self.previous)
-            candidate.rename(active)
-            if switched:
-                switched()
-            self.service("start")
-            require(self.healthy(digest), failure)
-            if ready:
-                ready()
-            self.receipt.unlink()
-        except BaseException:
-            self.recover()
-            raise
-
-    def roll_back(self, active, verify, digest, unsafe, failure, restored=None):
-        """Stop, put the retained runtime back and start it; the caller then clears the receipt.
-
-        `verify(path)` raises unless `path` holds the runtime the receipt names. It sees
-        the retained copy, or `active` when the interruption came before the exchange.
-        `restored` runs with its result before the service starts.
-        """
-        self.service("stop")
-        if self.previous.exists():
-            old = verify(self.previous)
-            if active.exists():
-                require(active.resolve() == active and not active.is_symlink(), unsafe)
-                shutil.rmtree(active)
-            self.previous.rename(active)
-        else:
-            old = verify(active)
-        if restored:
-            restored(old)
-        self.service("start")
-        require(self.healthy(digest), failure)
-        return old
-
-    def run_locked(self):
-        """One update at a time; a timer tick that finds another one running does nothing."""
-        with (self.platform / self.LOCK).open("a") as lock:
+            with os.fdopen(fd, "wb") as out, (active / "services/rust/dispatch-backend").open("rb") as source:
+                shutil.copyfileobj(source, out)
+                out.flush()
+                os.fsync(out.fileno())
+            require(hashlib.sha256(Path(staged).read_bytes()).hexdigest() == next(
+                entry["sha256"] for entry in manifest["files"] if entry["path"] == "services/rust/dispatch-backend"),
+                "Host management copy changed")
+            os.chmod(staged, 0o700)
+            require(json.loads(command(staged, "host", "capabilities"))["hostManagement"] == 1,
+                    "Host updater does not start")
+            os.replace(staged, binary)
+            fd = os.open(tooling, os.O_RDONLY)
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return
-            self.update()
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            Path(staged).unlink(missing_ok=True)
+    info = binary.lstat()
+    require(binary.is_file() and not binary.is_symlink() and info.st_nlink == 1
+            and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0,
+            "Private installed host executable required")
+    return binary
+
+
+def host(*args, value=None):
+    process = subprocess.Popen([str(host_binary()), "host", *map(str, args)],
+                               stdin=subprocess.PIPE if value is not None else subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        stdout, stderr = process.communicate(None if value is None else json.dumps(value), timeout=600)
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    require(process.returncode == 0, stderr.strip() or "Host management failed")
+    return json.loads(stdout)
+
+
+def verify_artifact(directory, commit=None):
+    return host("artifact", "verify", directory, *([commit] if commit else []))
+
+
+def unpack(archive, destination):
+    return host("artifact", "unpack", archive, destination)
+
+
+def install_management(live, environment="dev", tooling=None):
+    """Compatibility adapter; Rust installs the binary and embedded launchers together."""
+    host(environment, "--root", Path(live), "--install-management")
+
+
+if __name__ == "__main__":
+    try:
+        print(json.dumps(host(*sys.argv[1:])))
+    except (OSError, ValueError, RuntimeError) as error:
+        print(error, file=sys.stderr)
+        sys.exit(1)

@@ -23,6 +23,15 @@ test(
       env: { DISPATCH_ARTIFACT_ROOT: artifact },
     });
     t.after(f.close);
+    // Host commands use the shipped executable without taking the running app's data lock.
+    assert.deepEqual(JSON.parse(f.cli(['host', 'capabilities'])), {
+      hostManagement: 1,
+      artifactFormat: 3,
+    });
+    assert.equal(
+      JSON.parse(f.cli(['host', 'artifact', 'verify', artifact])).digest,
+      manifest.digest,
+    );
     assert.equal((await f.request('/api/health')).value.release, manifest.digest);
     const owner = await f.client();
     await owner.select(owner.session.dsps[0].id);
@@ -118,7 +127,7 @@ test(
     fs.appendFileSync(path.join(scratch, 'artifact/services/rust/dispatch-backend'), 'tampered');
     assert.throws(
       () => verifyArtifact(path.join(scratch, 'artifact')),
-      /artifact inventory changed/,
+      /Artifact file verification failed/,
     );
   },
 );

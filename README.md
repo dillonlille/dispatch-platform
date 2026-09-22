@@ -5,6 +5,8 @@ Run commands from the repository root.
 
 | Directory                                     | Owns                                                                         |
 | --------------------------------------------- | ---------------------------------------------------------------------------- |
+| `backend/ci/`                                 | Rust CI policy, build cache, PR preflight and shared process execution       |
+| `backend/host/`                               | Rust artifacts, releases, host setup and Dev/Production management           |
 | `backend/src/`                                | HTTP, accounts, workforce, meals, jobs, providers and storage                |
 | `dashboard/src/features/`                     | Product screens, their styles and artwork                                    |
 | `dashboard/src/app/`, `shell/`, `ui/`, `lib/` | App infrastructure, navigation frame, reusable controls and pure helpers     |
@@ -28,7 +30,12 @@ TypeScript tests recursively; Python tooling tests use
 tests verify them without rewriting files. Generated types, schema snapshots and
 approved artwork remain with their owners.
 
-The Python entry points at the top of `tooling/` retain their installed/CI paths.
+The Python entry points at the top of `tooling/` retain their installed/CI paths;
+CI policy, build caching and PR preflight delegate to the small `dispatch-ci` executable.
+Artifact verification and promotion, releases, fresh setup and updaters delegate to
+the Rust host manager.
+See [CI policy](tooling/ci/README.md) for validation and artifact reuse rules.
+The [release command guide](tooling/RELEASES.md) covers preparation, publication and recovery.
 See [the Dev host guide](tooling/DEV-HOST.md) for that layout. The development and
 release guides remain outside Git at `/home/thepickle/dispatch-platform/docs/`,
 routed by the `dispatch-development` skill.

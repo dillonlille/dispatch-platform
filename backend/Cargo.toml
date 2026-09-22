@@ -1,11 +1,12 @@
 [package]
 name = "dispatch-backend"
-version = "0.0.12"
+version = "0.0.15"
 edition = "2024"
 rust-version = "1.94"
 publish = false
 
 [dependencies]
+dispatch-host = { path = "host" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 rusqlite = { version = "0.40", features = ["bundled", "functions", "collation"] }
 serde = { version = "1", features = ["derive"] }
