@@ -6,11 +6,12 @@ pub mod process;
 pub mod runs;
 use std::path::Path;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-/// Where API calls, receipts and provenance name this repository today.
-pub const REPOSITORY: &str = "dillonlille/dispatch-platform";
-/// Every name this repository answers to across its move into the organization. Only
-/// their owners can create repositories under these names, so identity checks accept
-/// any of them and a transfer never strands CI, Dev or an installed Production updater.
+/// Where API calls, receipts and provenance name this repository.
+pub const REPOSITORY: &str = "dispatch-systems/dispatch-platform";
+/// Every name this repository answers to: its organization name and the personal account
+/// it moved from, whose URLs GitHub still redirects. Only their owners can create
+/// repositories under these names, so identity checks accept either, and receipts,
+/// provenance and installed Production updaters from before the move stay valid.
 pub const REPOSITORIES: [&str; 2] = [
     "dillonlille/dispatch-platform",
     "dispatch-systems/dispatch-platform",
