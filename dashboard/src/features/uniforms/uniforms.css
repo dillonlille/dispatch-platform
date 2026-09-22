@@ -1,3 +1,6 @@
+.page-container:has(.uniform-browser, .uniform-empty) {
+  max-width: none;
+}
 .uniform-page-actions {
   display: flex;
   align-items: center;
@@ -22,35 +25,26 @@
 }
 .uniform-browser {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
-  min-height: 620px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--card);
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: calc(100dvh - 240px);
 }
 .uniform-list {
   display: flex;
   flex-direction: column;
-  padding: 16px 12px;
+  padding: 0 24px 0 0;
   border-right: 1px solid var(--border);
-  background: var(--surface);
   min-width: 0;
 }
 .uniform-list > .search {
-  margin: 0 4px 18px;
+  margin: 0 0 22px;
   width: auto;
 }
 .uniform-list .search input {
   font-size: 12px;
   min-width: 0;
 }
-.uniform-list-items {
-  max-height: 620px;
-  overflow-y: auto;
-}
 .uniform-list-group + .uniform-list-group {
-  margin-top: 20px;
+  margin-top: 22px;
 }
 .uniform-list-group h2 {
   margin: 0 12px 6px;
@@ -99,14 +93,14 @@
 }
 .uniform-detail {
   min-width: 0;
+  padding-left: 30px;
 }
 .uniform-detail-heading {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 22px 26px;
-  min-height: 82px;
-  border-bottom: 1px solid var(--border);
+  padding: 0 0 20px;
+  min-height: 60px;
 }
 .uniform-detail-heading h2 {
   font-size: 19px;
@@ -116,12 +110,9 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 32px;
+  width: 22px;
   height: 32px;
-  background: var(--surface);
   color: var(--muted-foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 .uniform-detail-actions {
   display: flex;
@@ -153,7 +144,6 @@
 .uniform-stock-table thead th {
   text-align: center;
   padding: 12px 16px;
-  background: var(--surface);
   color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 500;
@@ -162,11 +152,11 @@
 .uniform-stock-table th:first-child {
   width: 18%;
   text-align: left;
-  padding-left: 26px;
+  padding-left: 0;
 }
 .uniform-stock-table td,
 .uniform-stock-table tbody th {
-  height: 46px;
+  height: 52px;
   padding: 7px 12px;
   text-align: center;
   font-weight: 450;
@@ -174,6 +164,10 @@
 }
 .uniform-stock-table tbody th {
   overflow-wrap: anywhere;
+  white-space: normal;
+}
+.uniform-stock-table tbody tr {
+  background: transparent;
 }
 .uniform-stock-table tbody tr:last-child > * {
   border-bottom: 0;
@@ -237,7 +231,7 @@
   justify-content: space-between;
   gap: 12px;
   border-top: 1px solid var(--border);
-  padding: 14px 26px;
+  padding: 16px 0;
   color: var(--muted-foreground);
   font-size: 12px;
 }
@@ -248,8 +242,6 @@
   display: none;
 }
 .uniform-empty {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   padding: 24px;
 }
 .uniform-empty .form-actions {
@@ -352,8 +344,10 @@
     grid-template-columns: 220px minmax(0, 1fr);
   }
   .uniform-detail-heading {
-    padding: 20px;
     flex-wrap: wrap;
+  }
+  .uniform-detail {
+    padding-left: 24px;
   }
   .uniform-stock-table .uniform-availability {
     display: none;
@@ -382,20 +376,21 @@
   }
   .uniform-mobile-picker {
     display: block;
-    padding: 14px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    padding: 0 0 22px;
   }
   .uniform-mobile-picker select {
     width: 100%;
     font-size: 13px;
   }
   .uniform-detail-heading {
-    padding: 18px 14px;
+    padding: 0 0 16px;
     gap: 10px;
   }
   .uniform-detail-heading h2 {
     font-size: 16px;
+  }
+  .uniform-detail {
+    padding: 0;
   }
   .uniform-detail-actions {
     gap: 8px;
@@ -413,7 +408,7 @@
   }
   .uniform-stock-table th:first-child {
     width: 17%;
-    padding-left: 12px;
+    padding-left: 0;
   }
   .uniform-stock-table td,
   .uniform-stock-table tbody th {
@@ -428,9 +423,6 @@
   .uniform-counter output {
     min-width: 25px;
     padding: 0 3px;
-  }
-  .uniform-detail-footer {
-    padding: 14px;
   }
   .uniform-fit-picker {
     gap: 14px;
