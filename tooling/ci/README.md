@@ -18,6 +18,13 @@ run and attempt, target branch and validation scope. The newest matching run
 wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
+A merge queue on `dev` runs the workflow on the exact merge commit it will push,
+scoped against the group's base so every PR in the group counts. That run issues
+the receipt and gated build, and the following `dev` push looks for it first: the
+newest merge queue run of the pushed commit decides, and only a commit with no
+queue run falls back to its PR head's run. The preflight stops treating a moved
+`dev` or other ready PRs as blockers while the queue exists.
+
 `backend/host/src/ci` promotes builds through that same receipt policy and the
 host artifact verifier. It checks the artifact's GitHub record, file inventory
 and original source commit, changes only commit metadata, then rechecks PR

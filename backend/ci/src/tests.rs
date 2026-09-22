@@ -21,6 +21,19 @@ fn context() -> Context {
 fn run() -> Value {
     json!({"id":5,"run_attempt":1,"head_sha":context().head,"event":"pull_request","head_branch":"feature/test","status":"completed","conclusion":"success","path":WORKFLOW,"head_repository":{"full_name":REPOSITORY}})
 }
+fn queue_run() -> Value {
+    let mut run = run();
+    run["event"] = "merge_group".into();
+    run["head_sha"] = context().commit.into();
+    run["head_branch"] = "gh-readonly-queue/dev/pr-1-b".into();
+    run
+}
+fn queue_endpoint() -> String {
+    format!(
+        "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
+        context().commit
+    )
+}
 fn receipt() -> Value {
     let c = context();
     json!({"format":1,"repository":REPOSITORY,"workflow":WORKFLOW,"baseRef":"dev","runId":5,"attempt":1,"scope":"full","commit":c.commit,"base":c.base,"head":c.head,"tree":c.tree})
@@ -76,6 +89,7 @@ impl Fixture {
         )
         .unwrap();
         result.fake.paths.replace("dashboard/src/app.ts\0".into());
+        result.json(&queue_endpoint(), json!({"workflow_runs":[]}));
         result.json(
             &format!(
                 "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
@@ -124,6 +138,10 @@ fn environment(event: &str, reference: &str) -> Environment {
 fn event() -> Value {
     let c = context();
     json!({"before":c.base,"pull_request":{"draft":false,"base":{"ref":"dev","sha":c.base,"repo":{"full_name":REPOSITORY}},"head":{"sha":c.head,"repo":{"full_name":REPOSITORY}}}})
+}
+fn queue_event() -> Value {
+    let c = context();
+    json!({"merge_group":{"head_sha":c.commit,"base_sha":c.base,"base_ref":"refs/heads/dev","head_ref":"refs/heads/gh-readonly-queue/dev/pr-1-b"}})
 }
 
 #[test]
@@ -323,6 +341,46 @@ fn planner_reuses_only_current_validated_merges_and_defaults_conservatively() {
     }
     fixture.fake.replies.borrow_mut().clear();
     assert_eq!(fixture.policy().plan(&env, &event()).0, "dashboard");
+    // A merge queue run of the pushed commit itself is reused, and its newest run decides
+    // even when the PR head's own run passed.
+    let queued = Fixture::new();
+    queued.json(&queue_endpoint(), json!({"workflow_runs":[queue_run()]}));
+    assert_eq!(queued.policy().plan(&env, &event()).0, "reuse");
+    queued.json(
+        &format!(
+            "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+            context().head
+        ),
+        json!({"workflow_runs":[]}),
+    );
+    assert_eq!(queued.policy().plan(&env, &event()).0, "reuse");
+    for change in [
+        json!({"conclusion":"failure"}),
+        json!({"status":"in_progress"}),
+        json!({"conclusion":"skipped"}),
+    ] {
+        let mut newer = queue_run();
+        newer["id"] = 6.into();
+        newer
+            .as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        let blocked = Fixture::new();
+        blocked.json(
+            &queue_endpoint(),
+            json!({"workflow_runs":[queue_run(),newer]}),
+        );
+        assert_eq!(blocked.policy().plan(&env, &event()).0, "dashboard");
+    }
+    // Merge queue runs scope every PR in the group against the group's base.
+    let group = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    assert_eq!(fixture.policy().plan(&group, &queue_event()).0, "dashboard");
+    fixture.fake.paths.replace("backend/src/lib.rs\0".into());
+    assert_eq!(fixture.policy().plan(&group, &queue_event()).0, "full");
+    fixture.fake.paths.replace("dashboard/src/app.ts\0".into());
+    let mut main_group = queue_event();
+    main_group["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert_eq!(fixture.policy().plan(&group, &main_group).0, "full");
     assert_eq!(
         fixture
             .policy()
@@ -465,6 +523,39 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
         env.0.insert(key.into(), value.into());
         assert!(f.policy().receipt(&env, &good, "full").is_err(), "{key}");
     }
+    // A merge queue group binds the exact merge commit the queue pushes.
+    f.fake.paths.replace("dashboard/src/app.ts\0".into());
+    let env = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    let group = queue_event();
+    assert_eq!(f.policy().receipt(&env, &group, "full").unwrap(), receipt());
+    assert!(f.policy().receipt(&env, &group, "dashboard").is_ok());
+    f.fake.paths.replace("backend/src/lib.rs\0".into());
+    assert!(f.policy().receipt(&env, &group, "dashboard").is_err());
+    assert!(f.policy().receipt(&env, &group, "full").is_ok());
+    f.fake.paths.replace("dashboard/src/app.ts\0".into());
+    for (pointer, value) in [
+        ("/merge_group/head_sha", "other"),
+        ("/merge_group/base_sha", "other"),
+        ("/merge_group/base_ref", "refs/heads/feature"),
+    ] {
+        let mut wrong = group.clone();
+        *wrong.pointer_mut(pointer).unwrap() = value.into();
+        assert!(
+            f.policy().receipt(&env, &wrong, "full").is_err(),
+            "{pointer}"
+        );
+    }
+    let mut wrong = group.clone();
+    wrong["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert!(f.policy().receipt(&env, &wrong, "dashboard").is_err());
+    assert!(f.policy().receipt(&env, &wrong, "full").is_ok());
+    assert!(
+        f.policy().receipt(&env, &good, "full").is_err(),
+        "a PR payload is not a group"
+    );
+    let mut env = env;
+    env.0.insert("GITHUB_SHA".into(), "other".into());
+    assert!(f.policy().receipt(&env, &group, "full").is_err());
 }
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {
