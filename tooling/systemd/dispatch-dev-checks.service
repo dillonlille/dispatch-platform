@@ -5,6 +5,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/gh workflow run checks.yml --repo dillonlille/dispatch-platform --ref dev
+ExecStart=%h/.local/bin/gh workflow run checks.yml --repo dispatch-systems/dispatch-platform --ref dev
 TimeoutStartSec=1min
 UMask=0077

@@ -571,9 +571,10 @@ fn production_download_rechecks_publication_and_records_failed_release() {
     }
 }
 #[test]
-fn production_installs_releases_published_under_the_organization_name() {
-    // After the move GitHub reports asset URLs under the new owner; the old API path redirects.
-    let moved = "dispatch-systems/dispatch-platform";
+fn production_installs_releases_published_under_either_repository_name() {
+    // A release can report asset URLs under the name the repository had when it was made.
+    let moved = "dillonlille/dispatch-platform";
+    assert_ne!(moved, REPOSITORY);
     let f = Fixture::new(Environment::Production);
     let mut release = f.production_release();
     for asset in release["assets"].as_array_mut().unwrap() {
@@ -613,8 +614,12 @@ fn production_installs_releases_published_under_the_organization_name() {
     }
 }
 #[test]
-fn the_latest_release_shortcut_follows_the_move_to_the_organization() {
-    let moved = "dispatch-systems/dispatch-platform";
+fn the_latest_release_shortcut_follows_a_move_between_repository_names() {
+    // An updater asking under one name is redirected to the same page under the other.
+    let moved = REPOSITORIES
+        .into_iter()
+        .find(|name| *name != REPOSITORY)
+        .unwrap();
     let f = Fixture::new(Environment::Production);
     let old = format!("https://github.com/{REPOSITORY}/releases/latest");
     let new = format!("https://github.com/{moved}/releases/latest");
