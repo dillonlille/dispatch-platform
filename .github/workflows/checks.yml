@@ -2,6 +2,10 @@ name: Platform checks
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  # The dev merge queue tests the exact merge commit it will push; that run's receipt and
+  # build are what the following dev push reuses.
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main, dev]
   workflow_dispatch:
@@ -22,10 +26,11 @@ jobs:
     timeout-minutes: 3
     outputs:
       mode: ${{ steps.validation.outputs.mode }}
-      # A PR from this repository into a trusted branch: its validation and build may be promoted.
-      trusted-pr: ${{ github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository }}
-      # Runs whose build is packaged for the final gate: trusted pushes and trusted PRs.
-      candidate: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
+      # A PR from this repository into a trusted branch, or a merge queue group of such PRs:
+      # its validation and build may be promoted.
+      trusted-pr: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Runs whose build is packaged for the final gate: trusted pushes, groups and trusted PRs.
+      candidate: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

@@ -74,9 +74,11 @@ pub fn scope(paths: &[String], dashboard_tests: &[String]) -> &'static str {
         "full"
     }
 }
-pub fn trusted_run(run: &Value, head: &str) -> bool {
-    run["head_sha"] == head
-        && run["event"] == "pull_request"
+/// A passed run of this workflow for `sha`: a same-repository PR run of that head, or a
+/// merge queue run of that exact merge commit.
+pub fn trusted_run(run: &Value, sha: &str) -> bool {
+    run["head_sha"] == sha
+        && (run["event"] == "pull_request" || run["event"] == "merge_group")
         && crate::runs::passed(run)
         && run["path"] == WORKFLOW
         && run["head_repository"]["full_name"] == REPOSITORY
@@ -207,20 +209,39 @@ impl Policy<'_> {
     }
     pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
         require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
-        let runs = self.github(&format!(
-            "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
-            context.head
+        // A merge queue tested this exact merge commit; its newest run decides, even when it
+        // failed. Without one, the PR head's run counts for an identical merge.
+        let queued = self.github(&format!(
+            "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
+            context.commit
         ))?;
-        let Some(run) = latest_run(
-            &runs["workflow_runs"],
-            &context.head,
-            "pull_request",
+        let pulls;
+        let (run, sha) = match latest_run(
+            &queued["workflow_runs"],
+            &context.commit,
+            "merge_group",
             None,
             true,
-        ) else {
-            return Ok(None);
+        ) {
+            Some(run) => (run, context.commit.as_str()),
+            None => {
+                pulls = self.github(&format!(
+                    "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+                    context.head
+                ))?;
+                let Some(run) = latest_run(
+                    &pulls["workflow_runs"],
+                    &context.head,
+                    "pull_request",
+                    None,
+                    true,
+                ) else {
+                    return Ok(None);
+                };
+                (run, context.head.as_str())
+            }
         };
-        if !trusted_run(run, &context.head) {
+        if !trusted_run(run, sha) {
             return Ok(None);
         }
         let id = run["id"].as_u64().ok_or("Invalid run id")?;
@@ -293,6 +314,9 @@ impl Policy<'_> {
             event["before"].as_str()
         } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
             event["pull_request"]["base"]["sha"].as_str()
+        } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
+            // Every PR in the group is between the group's base and this merge commit.
+            event["merge_group"]["base_sha"].as_str()
         } else {
             return (
                 "full",
@@ -316,22 +340,44 @@ impl Policy<'_> {
     pub fn receipt(&self, env: &Environment, event: &Value, selected: &str) -> Result<Value> {
         let context = self.context()?.ok_or("Actual PR merge required")?;
         let pr = &event["pull_request"];
-        let base_ref = pr["base"]["ref"].as_str().unwrap_or("");
-        require(
+        let group = &event["merge_group"];
+        // A merge queue group is this repository's own merge of PRs whose checks passed; its
+        // head is the exact commit the queue pushes, so it is bound instead of the PR parents.
+        let queued = env.get("GITHUB_EVENT_NAME") == "merge_group";
+        let base_ref = if queued {
+            group["base_ref"]
+                .as_str()
+                .and_then(|reference| reference.strip_prefix("refs/heads/"))
+                .unwrap_or("")
+        } else {
+            pr["base"]["ref"].as_str().unwrap_or("")
+        };
+        let source = if queued {
+            group["head_sha"] == context.commit
+                && group["base_sha"].as_str().is_some_and(|sha| hex(sha, 40))
+        } else {
             env.get("GITHUB_EVENT_NAME") == "pull_request"
                 && pr["draft"] == false
+                && pr["base"]["repo"]["full_name"] == REPOSITORY
+                && pr["head"]["repo"]["full_name"] == REPOSITORY
+                && pr["base"]["sha"] == context.base
+                && pr["head"]["sha"] == context.head
+        };
+        require(
+            source
                 && matches!(selected, "full" | "dashboard")
                 && matches!(base_ref, "dev" | "main")
                 && (base_ref == "dev" || selected == "full")
-                && pr["base"]["repo"]["full_name"] == REPOSITORY
-                && pr["head"]["repo"]["full_name"] == REPOSITORY
-                && context.commit == env.get("GITHUB_SHA")
-                && pr["base"]["sha"] == context.base
-                && pr["head"]["sha"] == context.head,
+                && context.commit == env.get("GITHUB_SHA"),
             "Validation receipt requires the actual same-repository PR merge",
         )?;
+        let changed_since = if queued {
+            group["base_sha"].as_str().unwrap_or("")
+        } else {
+            &context.base
+        };
         require(
-            selected == "full" || selected == self.scope(&context.base)?,
+            selected == "full" || selected == self.scope(changed_since)?,
             "Insufficient validation scope",
         )?;
         let run: u64 = env.get("GITHUB_RUN_ID").parse()?;

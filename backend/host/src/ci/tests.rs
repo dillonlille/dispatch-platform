@@ -35,6 +35,12 @@ fn runs_endpoint() -> String {
         context().head
     ))
 }
+fn queue_endpoint() -> String {
+    endpoint(&format!(
+        "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
+        context().commit
+    ))
+}
 impl System for Fake {
     fn command(
         &self,
@@ -157,6 +163,10 @@ impl Fixture {
             "validation.json",
             &serde_json::to_vec(&self.receipt).unwrap(),
         );
+        self.system
+            .json
+            .borrow_mut()
+            .insert(queue_endpoint(), vec![json!({"workflow_runs":[]})].into());
         self.system.json.borrow_mut().insert(
             runs_endpoint(),
             vec![json!({"workflow_runs":[run_record()]})].into(),
