@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import { coreTests, dashboardTests } from './test-plan.js';
 
 const mode = process.argv[2] ?? 'full';
@@ -84,7 +85,8 @@ async function core() {
       run('core API tests', process.execPath, [
         'node_modules/tsx/dist/cli.mjs',
         '--test',
-        '--test-concurrency=1',
+        // Every test file owns its servers, ports, state and mail, so files run in parallel.
+        `--test-concurrency=${os.availableParallelism()}`,
         // The build check owns the dashboard logic tests, in dashboard-only mode too.
         ...coreTests(),
       ]),
