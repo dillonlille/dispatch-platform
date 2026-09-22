@@ -67,6 +67,38 @@
   width: 100%;
   overflow-x: auto;
 }
+.table-header-placeholder {
+  display: none;
+  visibility: hidden;
+}
+.table-sticky-header > thead th {
+  background: var(--muted);
+  box-shadow: 0 1px var(--border);
+}
+@media screen {
+  /* Elastic page bounce moves the sticky banner away from fixed column headings. */
+  html:has(.table-sticky-header),
+  body:has(.table-sticky-header) {
+    overscroll-behavior-y: none;
+  }
+  .table-sticky-header[data-header-pinned] > thead > tr:first-child {
+    position: fixed;
+    z-index: 20;
+    display: table;
+    table-layout: fixed;
+    border-spacing: 0;
+    background: var(--muted);
+  }
+  .table-sticky-header[data-header-pinned] .table-header-placeholder {
+    display: table-row;
+  }
+}
+@media screen and (max-width: 700px) {
+  .table-sticky-header[data-header-pinned] > thead > tr:first-child > .sticky-column {
+    position: relative;
+    left: var(--table-header-scroll);
+  }
+}
 table {
   width: 100%;
   border-collapse: collapse;

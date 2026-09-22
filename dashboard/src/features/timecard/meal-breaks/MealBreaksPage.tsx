@@ -233,6 +233,7 @@ export function MealBreaksPage({
               >
                 <DataTable
                   table={table}
+                  stickyHeader
                   className="meal-table"
                   caption={`Meal breaks for ${shownDate}. Paycom local clock times and Flex station-local times, compared to the minute.`}
                   rowClassName={(_, { depth }) => (depth ? 'meal-extra' : undefined)}
