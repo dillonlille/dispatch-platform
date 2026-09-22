@@ -19,10 +19,28 @@ fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let command = args.first().ok_or("Choose plan, receipt or gate")?;
     let mut root = std::env::current_dir()?;
+    let mut release = false;
+    let mut cache_key = false;
+    let mut concurrent = false;
     let mut scope = None;
     let mut output = None;
     let mut options = args[1..].iter();
     while let Some(option) = options.next() {
+        match option.as_str() {
+            "--release" => {
+                release = true;
+                continue;
+            }
+            "--cache-key" => {
+                cache_key = true;
+                continue;
+            }
+            "--allow-concurrent" => {
+                concurrent = true;
+                continue;
+            }
+            _ => {}
+        }
         let value = options.next().ok_or("Missing option value")?;
         match option.as_str() {
             "--root" => root = PathBuf::from(value),
@@ -30,6 +48,22 @@ fn run() -> Result<()> {
             "--output" => output = Some(PathBuf::from(value)),
             _ => return Err("Unknown CI option".into()),
         }
+    }
+    if command == "build" {
+        let env = std::env::vars().collect();
+        if cache_key {
+            let key = if release && dispatch_ci::cache::eligible(&root, &env, true)? {
+                dispatch_ci::cache::key(&root, "release", &env, &Native)?
+            } else {
+                String::new()
+            };
+            println!("key={key}");
+            return Ok(());
+        }
+        return dispatch_ci::cache::build(&root, release, &env, &Native);
+    }
+    if command == "preflight" {
+        return dispatch_ci::preflight::run(&root, concurrent, &Native);
     }
     if command == "gate" {
         let needs = serde_json::from_str(&std::env::var("CI_NEEDS")?)?;

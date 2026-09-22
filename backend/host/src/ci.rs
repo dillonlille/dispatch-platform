@@ -42,48 +42,18 @@ fn warm_cache(
     candidate: &Path,
     receipt: &serde_json::Value,
 ) -> Result<()> {
-    let Some(expected) = receipt["rustKey"]
-        .as_str()
-        .filter(|key| artifact::hex(key, 64))
-    else {
+    let Some(expected) = receipt["rustKey"].as_str() else {
         return Ok(());
     };
-    // Cargo's bootstrap helper owns compiler/input fingerprints. Rust owns the
-    // promotion decision: a verified binary can only seed its original input key.
-    let bytes = system.command(
-        &[
-            "python3",
-            "tooling/cargo-build.py",
-            "--release",
-            "--cache-key",
-        ],
-        Some(root),
-        30,
-        None,
-    )?;
-    let key = String::from_utf8(bytes)?;
-    if key.trim() != format!("key={expected}") {
-        return Ok(());
-    }
-    let cache = root.join(".ci-rust-cache");
-    fs::create_dir_all(&cache)?;
-    artifact::real_directory(&cache)?;
-    let entry = cache.join(expected);
-    fs::create_dir_all(&entry)?;
-    artifact::real_directory(&entry)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(&entry)?;
-    let source = candidate.join("services/rust/dispatch-backend");
-    std::io::copy(&mut fs::File::open(&source)?, &mut temporary)?;
-    temporary
-        .as_file()
-        .set_permissions(fs::Permissions::from_mode(0o700))?;
-    temporary.persist(entry.join("dispatch-backend"))?;
-    fs::write(
-        entry.join("sha256"),
-        format!("{}\n", artifact::file_hash(&source)?),
-    )?;
-    Ok(())
+    dispatch_ci::cache::seed(
+        root,
+        &candidate.join("services/rust/dispatch-backend"),
+        expected,
+        &std::env::vars().collect(),
+        &Runner(system),
+    )
 }
+
 fn restore(
     system: &dyn System,
     policy: &Policy<'_>,

@@ -204,20 +204,8 @@ def unpack(archive, destination):
 
 
 def install_management(live, environment="dev", tooling=None):
-    live = Path(live)
-    host(environment, "--root", live, "--install-management")
-    target = private_directory(live / (".runtime/management" if environment == "dev" else "management"))
-    source = Path(tooling) if tooling else Path(__file__).parent
-    for name in ("runtime_artifact.py", f"update-{environment}.py"):
-        fd, temporary = tempfile.mkstemp(prefix=".install-", dir=target)
-        try:
-            with os.fdopen(fd, "wb") as out:
-                out.write((source / name).read_bytes())
-                out.flush()
-                os.fsync(out.fileno())
-            os.replace(temporary, target / name)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+    """Compatibility adapter; Rust installs the binary and embedded launchers together."""
+    host(environment, "--root", Path(live), "--install-management")
 
 
 if __name__ == "__main__":

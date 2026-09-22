@@ -7,7 +7,8 @@
     "tests/dashboard/diagnostics.test.ts",
     "tests/dashboard/meal-breaks.test.ts",
     "tests/dashboard/response-cache.test.ts",
-    "tests/dashboard/unused-css.test.ts"
+    "tests/dashboard/unused-css.test.ts",
+    "tests/dashboard/uniforms.test.ts"
   ],
   "native": {
     "paycom": ["tests/providers/paycom-worker.test.ts", "tests/providers/native-browser.test.ts"],

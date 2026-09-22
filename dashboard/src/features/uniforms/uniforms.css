@@ -1,0 +1,430 @@
+.page-container:has(.uniform-browser, .uniform-empty) {
+  max-width: none;
+}
+.uniform-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.uniform-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.uniform-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.uniform-live-ready {
+  color: var(--success);
+}
+.uniform-browser {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: calc(100dvh - 240px);
+}
+.uniform-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 0 0;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.uniform-list > .search {
+  margin: 0 0 22px;
+  width: auto;
+}
+.uniform-list .search input {
+  font-size: 12px;
+  min-width: 0;
+}
+.uniform-list-group + .uniform-list-group {
+  margin-top: 22px;
+}
+.uniform-list-group h2 {
+  margin: 0 12px 6px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.uniform-choice {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 450;
+  text-align: left;
+}
+.uniform-choice > span:first-child {
+  overflow-wrap: anywhere;
+}
+.uniform-choice[aria-pressed='true'] {
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 550;
+}
+.uniform-list-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.uniform-list-add {
+  align-self: flex-start;
+  margin: 18px 12px 0;
+  font-size: 12px;
+}
+.uniform-no-results {
+  padding: 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.uniform-detail {
+  min-width: 0;
+  padding-left: 30px;
+}
+.uniform-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 20px;
+  min-height: 60px;
+}
+.uniform-detail-heading h2 {
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+.uniform-symbol {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 32px;
+  color: var(--muted-foreground);
+}
+.uniform-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.uniform-detail-actions > button {
+  font-size: 12px;
+  min-height: 34px;
+}
+.uniform-category {
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  max-width: 120px;
+  overflow-wrap: anywhere;
+}
+.uniform-table-wrap {
+  overflow-x: auto;
+}
+.uniform-stock-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.uniform-stock-table thead th {
+  text-align: center;
+  padding: 12px 16px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.uniform-stock-table th:first-child {
+  width: 18%;
+  text-align: left;
+  padding-left: 0;
+}
+.uniform-stock-table td,
+.uniform-stock-table tbody th {
+  height: 52px;
+  padding: 7px 12px;
+  text-align: center;
+  font-weight: 450;
+  border-bottom: 1px solid var(--border);
+}
+.uniform-stock-table tbody th {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.uniform-stock-table tbody tr {
+  background: transparent;
+}
+.uniform-stock-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.uniform-stock-table .uniform-availability {
+  width: 22%;
+}
+.uniform-stock-status {
+  display: inline-block;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.uniform-stock-empty {
+  color: var(--warning);
+  background: var(--warning-surface);
+  border-color: var(--warning-border);
+}
+.uniform-counter {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--background);
+  vertical-align: middle;
+}
+.uniform-counter button {
+  width: 30px;
+  min-height: 30px;
+  padding: 5px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--primary);
+}
+.uniform-counter button:hover:not(:disabled) {
+  background: var(--selection);
+}
+.uniform-counter button:disabled {
+  color: var(--muted-foreground);
+  opacity: 0.4;
+}
+.uniform-counter output {
+  min-width: 34px;
+  padding: 0 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.uniform-counter[aria-busy='true'] {
+  border-color: var(--primary);
+}
+.uniform-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 16px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.uniform-detail-footer button {
+  font-size: 12px;
+}
+.uniform-mobile-picker {
+  display: none;
+}
+.uniform-empty {
+  padding: 24px;
+}
+.uniform-empty .form-actions {
+  justify-content: center;
+  margin: 0 0 24px;
+}
+.uniform-editor {
+  max-height: 70dvh;
+  overflow-y: auto;
+}
+.uniform-editor > fieldset > label + label {
+  margin-top: 20px;
+}
+.uniform-fit-picker {
+  display: flex;
+  gap: 18px;
+  margin-top: 20px;
+}
+.uniform-fit-picker legend {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.uniform-fit-picker label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.uniform-size-editor {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.uniform-size-editor legend {
+  font-size: 13px;
+  font-weight: 550;
+  padding-right: 8px;
+}
+.uniform-size-presets {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 8px;
+}
+.uniform-size-presets button {
+  font-size: 12px;
+}
+.uniform-size-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.uniform-size-chips button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--selection);
+  color: var(--primary);
+}
+.uniform-size-editor input {
+  font-size: 12px;
+}
+.uniform-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--border);
+  padding: 16px 0;
+}
+.uniform-history li:first-child {
+  padding-top: 0;
+}
+.uniform-history strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+}
+.uniform-history span,
+.uniform-history small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.uniform-history small {
+  font-size: 11px;
+}
+.uniform-history-add {
+  color: var(--success);
+}
+.uniform-history-paging {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 20px;
+}
+@media (max-width: 1200px) {
+  .uniform-browser {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .uniform-detail-heading {
+    flex-wrap: wrap;
+  }
+  .uniform-detail {
+    padding-left: 24px;
+  }
+  .uniform-stock-table .uniform-availability {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .uniform-page-actions {
+    width: 100%;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .uniform-page-actions .uniform-live {
+    margin-right: auto;
+  }
+  .uniform-page-actions > button {
+    font-size: 12px;
+    padding: 7px 10px;
+    min-height: 36px;
+  }
+  .uniform-browser {
+    display: block;
+    min-height: 0;
+  }
+  .uniform-list {
+    display: none;
+  }
+  .uniform-mobile-picker {
+    display: block;
+    padding: 0 0 22px;
+  }
+  .uniform-mobile-picker select {
+    width: 100%;
+    font-size: 13px;
+  }
+  .uniform-detail-heading {
+    padding: 0 0 16px;
+    gap: 10px;
+  }
+  .uniform-detail-heading h2 {
+    font-size: 16px;
+  }
+  .uniform-detail {
+    padding: 0;
+  }
+  .uniform-detail-actions {
+    gap: 8px;
+  }
+  .uniform-detail-actions .uniform-category {
+    display: none;
+  }
+  .uniform-detail-actions > button {
+    min-height: 32px;
+    padding: 6px 9px;
+  }
+  .uniform-stock-table thead th {
+    text-align: center;
+    padding: 12px 5px;
+  }
+  .uniform-stock-table th:first-child {
+    width: 17%;
+    padding-left: 0;
+  }
+  .uniform-stock-table td,
+  .uniform-stock-table tbody th {
+    height: 54px;
+    padding: 8px 3px;
+  }
+  .uniform-counter button {
+    width: 28px;
+    min-height: 36px;
+    padding: 4px;
+  }
+  .uniform-counter output {
+    min-width: 25px;
+    padding: 0 3px;
+  }
+  .uniform-fit-picker {
+    gap: 14px;
+  }
+}

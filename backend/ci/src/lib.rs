@@ -1,5 +1,7 @@
 //! CI decisions shared by the lightweight planner and the host artifact verifier.
+pub mod cache;
 pub mod policy;
+pub mod preflight;
 pub mod process;
 pub mod runs;
 use std::path::Path;

@@ -1,5 +1,11 @@
 import { paycomSettingsSchema } from './runtime-settings.js';
 import { auditPageSchema } from './runtime-audit.js';
+import {
+  uniformInventorySchema,
+  uniformAdjustmentSchema,
+  uniformUpdatesSchema,
+  uniformHistorySchema,
+} from './runtime-uniforms.js';
 import { platformHealthSchema } from './runtime-platform.js';
 import {
   dailyTimecardsSchema,
@@ -173,6 +179,9 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
   let schema: z.ZodType | undefined;
   if (method === 'GET') {
     if (route === '/api/session') schema = sessionSchema;
+    else if (route === '/api/dsp/uniforms') schema = uniformInventorySchema;
+    else if (route === '/api/dsp/uniforms/updates') schema = uniformUpdatesSchema;
+    else if (route === '/api/dsp/uniforms/history') schema = uniformHistorySchema;
     else if (route === '/api/platform/dsps') schema = z.array(dspSummary);
     else if (route === '/api/dsp/paycom/settings') schema = paycomSettingsSchema;
     else if (route === '/api/platform/audit') schema = auditPageSchema;
@@ -195,6 +204,9 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
     )
       schema = okSchema;
     else if (route === '/api/session/dsp') schema = viewSchema;
+    else if (route?.startsWith('/api/dsp/uniforms/stock/')) schema = uniformAdjustmentSchema;
+    else if (route === '/api/dsp/uniforms' || route?.startsWith('/api/dsp/uniforms/'))
+      schema = uniformInventorySchema;
     else if (route === '/api/dsp/paycom/settings') schema = paycomSettingsSchema;
     else if (route === '/api/platform/audit/export') schema = auditPageSchema;
     else if (route === '/api/dsp/jobs' || route === '/api/dsp/cortex/meal-breaks/collect')

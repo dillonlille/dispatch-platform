@@ -14,7 +14,6 @@ use std::{
 struct Fake {
     json: RefCell<BTreeMap<String, VecDeque<Value>>>,
     bytes: RefCell<BTreeMap<String, Vec<u8>>>,
-    cache: RefCell<String>,
 }
 fn context() -> Context {
     Context {
@@ -69,13 +68,6 @@ impl System for Fake {
                 queue.front().ok_or("No reply")?.clone()
             };
             return Ok(serde_json::to_vec(&value)?);
-        }
-        if args[0] == "python3" {
-            assert_eq!(
-                &args[1..],
-                ["tooling/cargo-build.py", "--release", "--cache-key"]
-            );
-            return Ok(self.cache.borrow().as_bytes().to_vec());
         }
         Native.command(args, cwd, timeout, output)
     }
@@ -372,35 +364,5 @@ fn existing_destination_and_symlink_are_never_replaced() {
             fs::read_to_string(f.destination().join("keep")).unwrap(),
             "unchanged"
         );
-    }
-}
-#[test]
-fn rust_cache_requires_the_exact_original_compiler_and_input_key() {
-    for kind in ["match", "different", "ineligible", "absent"] {
-        let mut f = Fixture::new();
-        let key = "f".repeat(64);
-        if kind != "absent" {
-            f.receipt["rustKey"] = key.clone().into();
-            f.refresh();
-        }
-        f.system.cache.replace(match kind {
-            "match" | "absent" => format!("key={key}\n"),
-            "different" => format!("key={}\n", "e".repeat(64)),
-            _ => "key=\n".into(),
-        });
-        assert!(f.reuse().unwrap());
-        let entry = f.root().join(".ci-rust-cache").join(&key);
-        if kind == "match" {
-            assert_eq!(
-                fs::read(entry.join("dispatch-backend")).unwrap(),
-                b"tested backend"
-            );
-            assert_eq!(
-                fs::read_to_string(entry.join("sha256")).unwrap().trim(),
-                artifact::hash(b"tested backend")
-            );
-        } else {
-            assert!(!entry.exists());
-        }
     }
 }

@@ -15,6 +15,27 @@ pub fn command(
     timeout: u64,
     output: Option<&Path>,
 ) -> Result<Vec<u8>> {
+    execute(args, cwd, timeout, output, None)
+}
+/// Run bootstrap with only explicitly supplied environment and private stdin.
+/// Child output is never included in an error that could expose initial credentials.
+pub fn isolated(
+    args: &[&str],
+    cwd: &Path,
+    timeout: u64,
+    env: &std::collections::BTreeMap<String, String>,
+    input: &[u8],
+) -> Result<()> {
+    execute(args, Some(cwd), timeout, None, Some((env, input))).map(|_| ())
+}
+type PrivateInput<'a> = (&'a std::collections::BTreeMap<String, String>, &'a [u8]);
+fn execute(
+    args: &[&str],
+    cwd: Option<&Path>,
+    timeout: u64,
+    output: Option<&Path>,
+    private: Option<PrivateInput<'_>>,
+) -> Result<Vec<u8>> {
     let stdout = tempfile::tempfile()?;
     let stderr = tempfile::tempfile()?;
     let output_file = output
@@ -36,6 +57,13 @@ pub fn command(
         .process_group(0);
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
+    }
+    if let Some((env, bytes)) = private {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut input = tempfile::tempfile()?;
+        input.write_all(bytes)?;
+        input.seek(SeekFrom::Start(0))?;
+        command.env_clear().envs(env).stdin(input);
     }
     let deadline = Instant::now() + Duration::from_secs(timeout);
     let spawn_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
@@ -71,6 +99,9 @@ pub fn command(
         std::thread::sleep(Duration::from_millis(10));
     };
     if !status.success() {
+        if private.is_some() {
+            return Err("Bootstrap command failed; initial credentials remain private".into());
+        }
         use std::io::{Seek, SeekFrom};
         let mut stderr = stderr;
         stderr.seek(SeekFrom::Start(
