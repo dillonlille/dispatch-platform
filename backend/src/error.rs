@@ -137,7 +137,7 @@ impl Error {
             cause: None,
         }
     }
-    fn caused(code: &str, status: u16, cause: impl Into<Cause>) -> Self {
+    pub(crate) fn caused(code: &str, status: u16, cause: impl Into<Cause>) -> Self {
         Self {
             cause: Some(cause.into()),
             ..Self::new(code, status)

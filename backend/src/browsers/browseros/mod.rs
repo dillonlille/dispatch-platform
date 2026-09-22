@@ -404,6 +404,28 @@ async fn cancelled(receiver: &mut watch::Receiver<bool>) {
         }
     }
 }
+/// Why a worker never reported itself ready. The supervisor discards the worker's
+/// standard error, so its own failure code arrives as a frame on this pipe.
+fn start_failure(frame: Option<&Value>) -> String {
+    let Some(frame) = frame else {
+        return "worker exited before reporting".into();
+    };
+    match frame["error"].as_str() {
+        Some(code) if !code.is_empty() => match frame["detail"].as_str() {
+            // What the browser itself printed before failing, which nothing else keeps.
+            Some(detail) if !detail.is_empty() => format!("{code}: {detail}"),
+            _ => code.into(),
+        },
+        _ => format!("unexpected frame {frame}")
+            .chars()
+            .take(200)
+            .collect(),
+    }
+}
+fn start_failed(reason: String) -> Error {
+    crate::observability::event("error", "browser.start_failed", json!({"reason":reason}));
+    Error::caused("browser_start_failed", 503, reason)
+}
 async fn serve_child(
     child: &mut Child,
     mut requests: mpsc::Receiver<Request>,
@@ -411,13 +433,13 @@ async fn serve_child(
     mut ready: oneshot::Sender<Result<()>>,
 ) {
     let Some(stdout) = child.stdout.take() else {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        let _ = ready.send(Err(start_failed("worker has no output pipe".into())));
         return;
     };
     // Child::wait closes child.stdin before waiting. Own it separately so exit
     // monitoring cannot signal EOF during an otherwise healthy idle session.
     let Some(mut input) = child.stdin.take() else {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        let _ = ready.send(Err(start_failed("worker has no input pipe".into())));
         return;
     };
     let mut reader = BufReader::new(stdout);
@@ -428,7 +450,12 @@ async fn serve_child(
         result = timeout(START_TIMEOUT, read_frame(&mut reader, RESPONSE_BYTES)) => result,
     };
     if !matches!(startup, Ok(Ok(Some(ref value))) if value["ready"] == true) {
-        let _ = ready.send(Err(Error::new("browser_start_failed", 503)));
+        let reason = match &startup {
+            Err(_) => format!("no report within {}s", START_TIMEOUT.as_secs()),
+            Ok(Err(error)) => format!("unreadable report: {}", error.code),
+            Ok(Ok(frame)) => start_failure(frame.as_ref()),
+        };
+        let _ = ready.send(Err(start_failed(reason)));
         return;
     }
     if ready.send(Ok(())).is_err() {
@@ -506,4 +533,36 @@ async fn stop_child(child: &mut Child) -> Exit {
 /// Hidden process entrypoint. Must run before Config::load or any database access.
 pub async fn worker_main(mode: &str) -> Result<()> {
     worker::run(mode).await
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_failed_start_names_the_workers_own_reason() {
+        assert_eq!(
+            start_failure(Some(&json!({"error":"browser_display_failed"}))),
+            "browser_display_failed"
+        );
+        assert_eq!(start_failure(None), "worker exited before reporting");
+        // An unexpected frame is kept, bounded, rather than replaced by a generic failure.
+        assert_eq!(
+            start_failure(Some(&json!({"ready":false}))),
+            "unexpected frame {\"ready\":false}"
+        );
+        assert_eq!(
+            start_failure(Some(
+                &json!({"error":"browser_lost","detail":"bwrap: no permission"})
+            )),
+            "browser_lost: bwrap: no permission"
+        );
+        assert_eq!(
+            start_failure(Some(&json!({"error":""}))),
+            "unexpected frame {\"error\":\"\"}"
+        );
+        assert_eq!(
+            start_failure(Some(&json!({"error":"x".repeat(400)}))).len(),
+            400
+        );
+        assert!(start_failure(Some(&json!({"note":"y".repeat(400)}))).len() <= 200);
+    }
 }
