@@ -3,6 +3,9 @@ use std::io::Write;
 
 // The platform version is package.json's; crate versions stay fixed so a release bump
 // leaves the Rust inputs, and the cached release backend, unchanged.
+// Joins a merge queue without auto-merge, refusing a PR whose head moved.
+const ENQUEUE: &str = "query=mutation($id: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { position } } }";
+
 const VERSIONED: [&str; 2] = ["package.json", "package-lock.json"];
 
 fn set_versions(root: &Path, version: &str) -> Result<()> {
@@ -81,7 +84,7 @@ impl Release<'_> {
                 "--limit",
                 "100",
                 "--json",
-                "number,state,url,headRefOid,mergeCommit,isCrossRepository",
+                "id,number,state,url,headRefOid,mergeCommit,isCrossRepository",
             ],
             None,
             120,
@@ -97,6 +100,65 @@ impl Release<'_> {
             )?;
         }
         Ok(pulls.into_iter().next())
+    }
+    /// Whether `base` requires a merge queue.
+    fn merge_queue(&self, base: &str) -> Result<bool> {
+        let (owner, name) = REPOSITORY
+            .split_once('/')
+            .ok_or("Invalid repository name")?;
+        let query = format!(
+            "query={{ repository(owner: \"{owner}\", name: \"{name}\") {{ mergeQueue(branch: \"{base}\") {{ id }} }} }}"
+        );
+        let reply: Value = serde_json::from_str(&self.command(
+            &["gh", "api", "graphql", "-f", &query],
+            None,
+            120,
+        )?)?;
+        require(
+            reply["data"]["repository"].is_object(),
+            "Merge queue lookup failed",
+        )?;
+        Ok(reply["data"]["repository"]["mergeQueue"]["id"].is_string())
+    }
+    /// Merge the PR at exactly `head`. A branch with a merge queue gets the PR enqueued
+    /// through GitHub's API, since auto-merge stays off and `gh pr merge` needs it there.
+    fn merge_pull(&self, pull: &Value, base: &str, head: &str) -> Result<()> {
+        if self.merge_queue(base)? {
+            let id = io::text(pull, "id");
+            require(!id.is_empty(), "Pull request id required to enqueue")?;
+            self.command(
+                &[
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    ENQUEUE,
+                    "-f",
+                    &format!("id={id}"),
+                    "-f",
+                    &format!("head={head}"),
+                ],
+                None,
+                120,
+            )?;
+            return Ok(());
+        }
+        self.command(
+            &[
+                "gh",
+                "pr",
+                "merge",
+                &pull["number"].to_string(),
+                "--repo",
+                REPOSITORY,
+                "--merge",
+                "--match-head-commit",
+                head,
+            ],
+            None,
+            120,
+        )?;
+        Ok(())
     }
     /// The merged PR, waiting while a merge queue holds it: the queue tests the actual
     /// merge before pushing it, so an enqueued PR stays open for a few minutes.
@@ -360,21 +422,7 @@ impl Release<'_> {
             }
             require(artifact::hex(&head, 40), "Invalid release PR head")?;
             self.checks(&head, "pull_request", Some(&self.branch), true)?;
-            self.command(
-                &[
-                    "gh",
-                    "pr",
-                    "merge",
-                    &pull["number"].to_string(),
-                    "--repo",
-                    REPOSITORY,
-                    "--merge",
-                    "--match-head-commit",
-                    &head,
-                ],
-                None,
-                120,
-            )?;
+            self.merge_pull(&pull, "main", &head)?;
             pull = self.merged(&self.branch, "main")?;
         }
         let commit = io::text(&pull["mergeCommit"], "oid");
@@ -455,21 +503,7 @@ impl Release<'_> {
         }
         require(artifact::hex(&head, 40), "Invalid Dev sync PR head")?;
         self.checks(&head, "pull_request", Some(&self.sync_branch), true)?;
-        self.command(
-            &[
-                "gh",
-                "pr",
-                "merge",
-                &pull["number"].to_string(),
-                "--repo",
-                REPOSITORY,
-                "--merge",
-                "--match-head-commit",
-                &head,
-            ],
-            None,
-            120,
-        )?;
+        self.merge_pull(&pull, "dev", &head)?;
         self.merged(&self.sync_branch, "dev")?;
         Ok(())
     }
