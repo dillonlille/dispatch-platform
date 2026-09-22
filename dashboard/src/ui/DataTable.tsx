@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode } from 'react';
 import { Pagination } from './Pagination.js';
 import { SortHeader } from './SortHeader.js';
+import { useStickyTableHeader } from './useStickyTableHeader.js';
 import type { DataTable as Table, RowContext, TableColumn } from './useDataTable.js';
 
 const classes = (...names: (string | false | undefined)[]) =>
@@ -39,6 +40,7 @@ export function DataTable<T>({
   label,
   caption,
   className,
+  stickyHeader = false,
   rowClassName,
   renderDetail,
   detailClassName,
@@ -48,11 +50,14 @@ export function DataTable<T>({
   /** Read by assistive technology only. */
   caption?: ReactNode;
   className?: string;
+  /** Pin column headings during page scroll, below any data-sticky-banner element. */
+  stickyHeader?: boolean;
   rowClassName?: (row: T, context: RowContext) => string | undefined;
   /** Drawn across the full width beneath an expanded row and its sub-rows. */
   renderDetail?: (row: T) => ReactNode;
   detailClassName?: string;
 }) {
+  const tableRef = useStickyTableHeader(stickyHeader);
   const columns = table.columns;
   const cellClass = (column: TableColumn<T>, row: T, context: RowContext) =>
     classes(
@@ -94,7 +99,11 @@ export function DataTable<T>({
   }
   if (open) body.push(detail(open));
   return (
-    <table className={className} aria-label={label}>
+    <table
+      ref={tableRef}
+      className={classes(className, stickyHeader && 'table-sticky-header')}
+      aria-label={label}
+    >
       {caption && <caption className="sr-only">{caption}</caption>}
       <thead>
         <tr>

@@ -67,6 +67,20 @@
   width: 100%;
   overflow-x: auto;
 }
+.table-sticky-header > thead {
+  position: relative;
+  z-index: 2;
+  transform: translateY(var(--table-header-offset, 0px));
+}
+.table-sticky-header > thead th {
+  background: var(--muted);
+  box-shadow: 0 1px var(--border);
+}
+@media print {
+  .table-sticky-header > thead {
+    transform: none;
+  }
+}
 table {
   width: 100%;
   border-collapse: collapse;

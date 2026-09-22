@@ -134,7 +134,12 @@ export function Shell({
       </aside>
       <div className="main-area" inert={mobile}>
         {view && session.user.platformOwner && (
-          <div className="dsp-view-banner" role="region" aria-label="DSP viewing mode">
+          <div
+            className="dsp-view-banner"
+            data-sticky-banner
+            role="region"
+            aria-label="DSP viewing mode"
+          >
             <Eye aria-hidden="true" />
             <div>
               <strong>
