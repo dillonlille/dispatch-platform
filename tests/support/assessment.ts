@@ -14,8 +14,12 @@ function assess(input: {
   rows?: MealSource[];
   timecards?: Timecard[];
 }): { rows: MealComparison['rows']; timecards: EmployeeTimecard[] } {
+  if (!executable && process.env.DISPATCH_ASSESSMENT_FIXTURE) {
+    // test:ui names the copy it restored or built before starting browser workers.
+    executable = process.env.DISPATCH_ASSESSMENT_FIXTURE;
+  }
   if (!executable) {
-    // test:ui builds this test-only companion before starting browser workers.
+    // Otherwise the test-only companion is the debug example built in this checkout.
     const metadata = JSON.parse(
       execFileSync('cargo', ['metadata', '--no-deps', '--format-version=1', '--locked'], {
         encoding: 'utf8',
