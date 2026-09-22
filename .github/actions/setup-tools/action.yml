@@ -26,10 +26,12 @@ runs:
     - name: Identify the tool inputs
       id: keys
       shell: bash
-      # The pinned toolchain file and runner image identify the compiler and linker;
-      # the host embeds the Python launchers, so they are inputs too.
+      # The pinned toolchain file and the distribution identify the compiler and system
+      # libraries. The weekly image build is left out: GitHub runs two of them while it
+      # rolls one out, and keying on it made about half the jobs miss and compile again.
+      # The host embeds the Python launchers, so they are inputs too.
       run: |
-        image="${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}-${ImageVersion:-unknown}"
+        image="${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}"
         echo "tools=dispatch-tools-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/ci/**', 'backend/host/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
         echo "fixture=dispatch-fixture-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
         echo "DISPATCH_CI_TOOLS=$GITHUB_WORKSPACE/.ci-tools" >> "$GITHUB_ENV"

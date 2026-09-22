@@ -59,8 +59,9 @@ fn flags(env: &Environment) -> Environment {
                     "LDFLAGS",
                     "AR",
                     "RANLIB",
+                    // The distribution, not the weekly image build: the compiler, C compiler and
+                    // linker versions that image updates can change are fingerprinted directly.
                     "ImageOS",
-                    "ImageVersion",
                     "RUNNER_OS",
                     "RUNNER_ARCH",
                 ]
@@ -199,11 +200,13 @@ pub fn eligible(root: &Path, env: &Environment, allow_ci: bool) -> Result<bool> 
     }
     Ok(true)
 }
+/// The toolchain that shapes the binary: Rust, the C compiler and the linker, by version.
 pub(super) fn compiler(root: &Path, runner: &dyn Runner) -> Result<String> {
     Ok(format!(
-        "{}\n{}",
+        "{}\n{}\n{}",
         String::from_utf8(runner.command(&["rustc", "-vV"], Some(root), 30)?)?.trim(),
-        String::from_utf8(runner.command(&["cc", "--version"], Some(root), 30)?)?.trim()
+        String::from_utf8(runner.command(&["cc", "--version"], Some(root), 30)?)?.trim(),
+        String::from_utf8(runner.command(&["ld", "--version"], Some(root), 30)?)?.trim()
     ))
 }
 pub fn key(root: &Path, profile: &str, env: &Environment, runner: &dyn Runner) -> Result<String> {
