@@ -232,6 +232,15 @@ impl Policy<'_> {
                 .cloned(),
         )
     }
+    /// Main's passed push run when this merge brings exactly main's tree: its head is main's
+    /// commit and merging changed nothing, so main's published build is this merge's build.
+    pub fn brings_main(&self, context: &Context) -> Result<Option<Value>> {
+        let Some(run) = self.promoted_main(&context.head)? else {
+            return Ok(None);
+        };
+        let tree = self.git(&["rev-parse", &format!("{}^{{tree}}", context.head)])?;
+        Ok((tree.trim() == context.tree).then_some(run))
+    }
     pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
         require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
         // A merge queue tested this exact merge commit; its newest run decides, even when it
@@ -340,21 +349,36 @@ impl Policy<'_> {
         } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
             let pr = &event["pull_request"];
             if pr["head"]["repo"]["full_name"] == REPOSITORY
-                && let Some(head) = pr["head"]["sha"].as_str()
-                && let Ok(Some(run)) = self.promoted_main(head)
+                && let Ok(Some(context)) = self.context()
+                && pr["head"]["sha"] == context.head
+                && let Ok(Some(run)) = self.brings_main(&context)
             {
                 return (
                     "reuse",
                     format!(
-                        "Head is main's verified commit, published by push run {}",
+                        "Merge brings exactly main's verified tree, published by push run {}",
                         run["id"]
                     ),
                 );
             }
             pr["base"]["sha"].as_str()
         } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
+            let group = &event["merge_group"];
+            if let Ok(Some(context)) = self.context()
+                && group["head_sha"] == context.commit
+                && group["base_sha"] == context.base
+                && let Ok(Some(run)) = self.brings_main(&context)
+            {
+                return (
+                    "reuse",
+                    format!(
+                        "Group brings exactly main's verified tree, published by push run {}",
+                        run["id"]
+                    ),
+                );
+            }
             // Every PR in the group is between the group's base and this merge commit.
-            event["merge_group"]["base_sha"].as_str()
+            group["base_sha"].as_str()
         } else {
             return (
                 "full",
@@ -405,11 +429,8 @@ impl Policy<'_> {
         // smoke tested it; its receipt carries the full validation main recorded.
         let selected = if selected == "reuse" {
             require(
-                source
-                    && !queued
-                    && base_ref == "dev"
-                    && self.promoted_main(&context.head)?.is_some(),
-                "Reuse receipts require main's verified commit as the PR head",
+                source && base_ref == "dev" && self.brings_main(&context)?.is_some(),
+                "Reuse receipts require a merge that brings exactly main's verified tree",
             )?;
             "full"
         } else {

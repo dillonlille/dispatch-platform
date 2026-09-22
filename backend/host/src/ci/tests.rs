@@ -14,6 +14,8 @@ use std::{
 struct Fake {
     json: RefCell<BTreeMap<String, VecDeque<Value>>>,
     bytes: RefCell<BTreeMap<String, Vec<u8>>>,
+    /// The tree of the merge head's own commit; the merge's tree unless a test moves it.
+    head_tree: RefCell<Option<String>>,
 }
 fn context() -> Context {
     Context {
@@ -66,6 +68,12 @@ impl System for Fake {
             let c = context();
             return Ok(match args[1] {
                 "rev-list" => format!("{} {} {}", c.commit, c.base, c.head).into_bytes(),
+                "rev-parse" if args[2] == format!("{}^{{tree}}", c.head) => self
+                    .head_tree
+                    .borrow()
+                    .clone()
+                    .unwrap_or(c.tree)
+                    .into_bytes(),
                 "rev-parse" => c.tree.into_bytes(),
                 "diff" => b"backend/src/main.rs\0".to_vec(),
                 _ => panic!("Unexpected git"),
@@ -513,6 +521,34 @@ fn a_pr_bringing_mains_published_commit_reuses_that_build_for_its_own_merge() {
         f.via_main();
         f.env.0.insert(key.into(), value.into());
         assert!(f.reuse().unwrap_err().is::<ValidationChanged>(), "{key}");
+    }
+    // A merge that changed the tree against main is not main's build.
+    let mut f = Fixture::new();
+    f.via_main();
+    f.system.head_tree.replace(Some("e".repeat(40)));
+    assert!(f.reuse().unwrap_err().is::<ValidationChanged>());
+    assert!(!f.destination().exists());
+    // A merge queue group into dev takes the same route; one into another branch does not.
+    for (reference, ok) in [
+        ("refs/heads/gh-readonly-queue/dev/pr-1-b", true),
+        ("refs/heads/gh-readonly-queue/main/pr-1-b", false),
+    ] {
+        let mut f = Fixture::new();
+        f.via_main();
+        f.env
+            .0
+            .insert("GITHUB_EVENT_NAME".into(), "merge_group".into());
+        f.env.0.remove("GITHUB_BASE_REF");
+        f.env.0.insert("GITHUB_REF".into(), reference.into());
+        if ok {
+            assert!(f.reuse().unwrap(), "{reference}");
+            artifact::verify(&f.destination(), Some(&context().commit)).unwrap();
+        } else {
+            assert!(
+                f.reuse().unwrap_err().is::<ValidationChanged>(),
+                "{reference}"
+            );
+        }
     }
 }
 #[test]
