@@ -469,9 +469,16 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {
     for mode in ["full", "dashboard", "reuse"] {
-        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
+        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"browser":{"result":if mode=="reuse"{"skipped"}else{"success"}},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
         assert_eq!(gate(&needs).unwrap(), mode);
-        for job in ["plan", "build", "rust-advisories", "core", "collectors"] {
+        for job in [
+            "plan",
+            "build",
+            "browser",
+            "rust-advisories",
+            "core",
+            "collectors",
+        ] {
             let mut missing = needs.clone();
             missing.as_object_mut().unwrap().remove(job);
             assert!(gate(&missing).is_err());

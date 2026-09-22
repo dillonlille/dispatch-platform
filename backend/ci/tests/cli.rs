@@ -28,7 +28,7 @@ fn native_entry_point_appends_plan_outputs_and_fails_closed_at_the_gate() {
         "previous=value\nmode=full\n"
     );
     assert!(fs::read_to_string(&summary).unwrap().contains("**full**"));
-    let needs = json!({"plan":{"result":"success","outputs":{"mode":"full"}},"build":{"result":"success"},"core":{"result":"success"},"collectors":{"result":"success"},"rust-advisories":{"result":"success"}});
+    let needs = json!({"plan":{"result":"success","outputs":{"mode":"full"}},"build":{"result":"success"},"browser":{"result":"success"},"core":{"result":"success"},"collectors":{"result":"success"},"rust-advisories":{"result":"success"}});
     for valid in [true, false] {
         let mut value = needs.clone();
         if !valid {
