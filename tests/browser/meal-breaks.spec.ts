@@ -676,7 +676,9 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await timecards.click();
   await sync.click();
   await expect(sync).toBeDisabled();
-  expect(syncRequests).toBe(2);
+  // The button disables before its request reaches the route, and the route resets the
+  // status below, so wait for exactly the second request before moving on.
+  await expect.poll(() => syncRequests).toBe(2);
   syncStatus = flexStatus = 'succeeded';
   await page.getByRole('tab', { name: 'Employees', exact: true }).click();
   await meals.click();
