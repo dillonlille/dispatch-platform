@@ -119,11 +119,17 @@ impl<'a> Updater<'a> {
                 .to_owned(),
         )
     }
+    /// The branch Dev follows: whichever of `main` or `dev` its checkout is on. Moving the
+    /// checkout onto main at the running commit switches Dev over without reinstalling.
+    pub fn tracked_branch(&self) -> Result<&'static str> {
+        let branch = self.git(&["branch", "--show-current"])?;
+        ["main", "dev"]
+            .into_iter()
+            .find(|trusted| *trusted == branch)
+            .ok_or_else(|| "Dev checkout must be on main or dev".into())
+    }
     pub fn clean_checkout(&self) -> Result<()> {
-        require(
-            self.git(&["branch", "--show-current"])? == "dev",
-            "Dev checkout is on another branch",
-        )?;
+        self.tracked_branch()?;
         require(
             self.git(&["status", "--porcelain", "--untracked-files=all"])?
                 .is_empty(),
@@ -303,7 +309,8 @@ impl<'a> Updater<'a> {
         )?;
         if let Some(current) = &current {
             self.git(&["merge-base", "--is-ancestor", current, commit])?;
-            self.git(&["merge-base", "--is-ancestor", commit, "origin/dev"])?;
+            let tracked = format!("origin/{}", self.tracked_branch()?);
+            self.git(&["merge-base", "--is-ancestor", commit, &tracked])?;
         } else {
             require(
                 releases::version(&manifest.version)? > releases::version(&old.version)?,
@@ -373,9 +380,11 @@ impl<'a> Updater<'a> {
     }
     fn update_dev(&self) -> Result<()> {
         self.clean_checkout()?;
+        let branch = self.tracked_branch()?;
+        let tracked = format!("origin/{branch}");
         management::refresh(self)?;
-        self.git(&["fetch", "origin", "dev"])?;
-        let commit = self.git(&["rev-parse", "origin/dev"])?;
+        self.git(&["fetch", "origin", branch])?;
+        let commit = self.git(&["rev-parse", &tracked])?;
         let current = self.git(&["rev-parse", "HEAD"])?;
         if commit == current {
             return Ok(());
@@ -384,12 +393,13 @@ impl<'a> Updater<'a> {
         let runs = io::github(
             self.system,
             &format!(
-                "actions/workflows/checks.yml/runs?branch=dev&event=push&head_sha={commit}&per_page=20"
+                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
             ),
         )?;
-        let run = releases::latest_run(&runs["workflow_runs"], &commit, "push", Some("dev"), false)
-            .cloned()
-            .unwrap_or(Value::Null);
+        let run =
+            releases::latest_run(&runs["workflow_runs"], &commit, "push", Some(branch), false)
+                .cloned()
+                .unwrap_or(Value::Null);
         if !releases::passed(&run) {
             return self.status(
                 if run["status"] == "completed" {
@@ -407,15 +417,15 @@ impl<'a> Updater<'a> {
             .as_array()
             .ok_or("Missing artifacts")?
             .iter()
-            .filter(|a| a["name"] == format!("dispatch-dev-{commit}") && a["expired"] == false)
+            .filter(|a| a["name"] == format!("dispatch-{branch}-{commit}") && a["expired"] == false)
             .collect();
         require(matches.len() == 1, "Verified Dev artifact unavailable")?;
         let temp = tempfile::Builder::new()
             .prefix("update-")
             .tempdir_in(&self.runtime)?;
         releases::download_run(self.system, matches[0], temp.path(), &commit, None)?;
-        self.git(&["fetch", "origin", "dev"])?;
-        if self.git(&["rev-parse", "origin/dev"])? != commit {
+        self.git(&["fetch", "origin", branch])?;
+        if self.git(&["rev-parse", &tracked])? != commit {
             return self.status(
                 "waiting_for_checks",
                 &current_manifest,
@@ -426,14 +436,14 @@ impl<'a> Updater<'a> {
         let recheck = io::github(
             self.system,
             &format!(
-                "actions/workflows/checks.yml/runs?branch=dev&event=push&head_sha={commit}&per_page=20"
+                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
             ),
         )?;
         if releases::latest_run(
             &recheck["workflow_runs"],
             &commit,
             "push",
-            Some("dev"),
+            Some(branch),
             false,
         ) != Some(&run)
         {
