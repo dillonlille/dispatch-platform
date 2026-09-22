@@ -1,5 +1,5 @@
 [workspace]
-members = ["backend", "backend/host"]
+members = ["backend", "backend/host", "backend/ci"]
 resolver = "3"
 
 [profile.release]

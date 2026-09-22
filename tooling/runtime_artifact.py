@@ -40,24 +40,6 @@ def github(endpoint, *args, binary=False, timeout=120):
     return data if binary else json.loads(data)
 
 
-def latest_run(runs, sha, event, branch=None, skipped=False):
-    """The newest run of this repository for the commit, whatever its outcome.
-
-    A newer failed or pending rerun always replaces an older success. A skipped run
-    checked nothing, so it neither passes nor fails the commit; callers that must
-    not look past one (a PR returned to draft) count it with skipped=True.
-    """
-    runs = [r for r in runs if r.get("head_sha") == sha and r.get("event") == event
-            and (skipped or r.get("conclusion") != "skipped")
-            and (branch is None or r.get("head_branch") == branch)
-            and (r.get("head_repository") or {}).get("full_name") == REPOSITORY]
-    return max(runs, key=lambda r: (r["id"], r.get("run_attempt", 1)), default=None)
-
-
-def passed(run):
-    return bool(run) and run.get("status") == "completed" and run.get("conclusion") == "success"
-
-
 def private_directory(directory):
     directory = Path(directory)
     require(not directory.is_symlink(), "Private directory cannot be a symlink")
@@ -219,20 +201,6 @@ def verify_artifact(directory, commit=None):
 
 def unpack(archive, destination):
     return host("artifact", "unpack", archive, destination)
-
-
-def download_run_artifact(artifact, directory, commit, package=None):
-    require(0 < artifact["size_in_bytes"] <= MAX_BYTES, "Invalid artifact size")
-    directory = Path(directory)
-    download = directory / "artifact.zip"
-    with download.open("xb") as output:
-        subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
-                       stdout=output, stderr=subprocess.PIPE, check=True, timeout=180)
-    package = Path(package) if package else directory / "build.tar.gz"
-    if package.exists():
-        raise FileExistsError(str(package))
-    manifest = host("artifact", "actions", download, directory, package, commit, value=artifact)
-    return directory / "candidate", manifest
 
 
 def install_management(live, environment="dev", tooling=None):
