@@ -644,10 +644,81 @@ fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
     f.fake.head_tree.replace(Some("e".repeat(40)));
     assert!(f.policy().brings_main(&context()).unwrap().is_none());
     assert_eq!(f.policy().plan(&env, &event()).0, "dashboard");
-    assert_eq!(f.policy().plan(&group, &queue_event()).0, "dashboard");
     assert!(f.policy().receipt(&env, &event(), "reuse").is_err());
-    assert!(f.policy().receipt(&group, &queue_event(), "reuse").is_err());
     assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
+    // Without main's tree a group falls back to its own PR run, covered by its own test.
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "reuse");
+}
+#[test]
+fn groups_reuse_the_pr_run_that_validated_exactly_this_merge() {
+    let f = Fixture::new();
+    let group = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    // The fixture's PR run recorded this base, head and tree, so the group merges what it
+    // already validated. Its own run is newer, so the lookup must ask for the PR's directly.
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "reuse");
+    let recorded = f.policy().receipt(&group, &queue_event(), "reuse").unwrap();
+    assert_eq!(recorded["scope"], "full");
+    assert_eq!(recorded["commit"], context().commit);
+    // The receipt carries the scope that run recorded, never more.
+    let mut narrow = receipt();
+    narrow["scope"] = "dashboard".into();
+    f.set_receipt(narrow);
+    assert_eq!(
+        f.policy().receipt(&group, &queue_event(), "reuse").unwrap()["scope"],
+        "dashboard"
+    );
+    f.set_receipt(receipt());
+    // A batched group, or one built on another base, merges more than that run tested.
+    for pointer in ["/merge_group/base_sha", "/merge_group/head_sha"] {
+        let mut moved = queue_event();
+        *moved.pointer_mut(pointer).unwrap() = "e".repeat(40).into();
+        assert_eq!(f.policy().plan(&group, &moved).0, "dashboard", "{pointer}");
+        assert!(
+            f.policy().receipt(&group, &moved, "reuse").is_err(),
+            "{pointer}"
+        );
+    }
+    // Only a merge queue group reuses a PR run this way; a push uses its own lookup.
+    assert!(
+        f.policy()
+            .receipt(&environment("push", "refs/heads/dev"), &event(), "reuse")
+            .is_err()
+    );
+    // The newest PR run of that head decides: a failed, pending, skipped or foreign-workflow
+    // run is not validation, even when an older run passed.
+    for change in [
+        json!({"conclusion":"failure"}),
+        json!({"status":"in_progress"}),
+        json!({"conclusion":"skipped"}),
+        json!({"path":"other.yml"}),
+    ] {
+        let mut newer = run();
+        newer["id"] = 7.into();
+        newer
+            .as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        let blocked = Fixture::new();
+        blocked.json(
+            &format!(
+                "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+                context().head
+            ),
+            json!({"workflow_runs":[run(),newer]}),
+        );
+        assert_eq!(
+            blocked.policy().plan(&group, &queue_event()).0,
+            "dashboard",
+            "{change}"
+        );
+        assert!(
+            blocked
+                .policy()
+                .receipt(&group, &queue_event(), "reuse")
+                .is_err(),
+            "{change}"
+        );
+    }
 }
 #[test]
 fn both_repository_names_are_this_repository_and_nothing_else_is() {
