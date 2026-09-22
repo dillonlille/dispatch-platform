@@ -10,8 +10,10 @@ The planner chooses full validation for backend, shared, infrastructure or
 unknown changes. Dashboard code, listed dashboard tests, browser TypeScript and
 Markdown outside the backend can use dashboard validation. `test-plan.json`
 remains the shared list of executed dashboard tests. Renames count both paths.
-Release PRs and main pushes require full validation unless they can reuse a
-matching full receipt. API failures fall back to ordinary check selection.
+`main` and `dev` are treated alike: PRs, merge queue groups and pushes on either are
+scoped by what they change and reuse a matching receipt. A release separately
+requires the full suite on the exact commit it publishes. API failures fall back to
+ordinary check selection.
 
 A receipt binds the same-repository PR merge's base, head and tree, workflow,
 run and attempt, target branch and validation scope. The newest matching run
