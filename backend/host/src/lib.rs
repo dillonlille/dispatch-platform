@@ -8,6 +8,7 @@ pub mod io;
 mod management;
 mod release;
 mod releases;
+mod setup;
 pub mod updater;
 
 pub use cli::run;

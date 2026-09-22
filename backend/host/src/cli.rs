@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use std::{io::Read, path::Path};
 
 pub fn run(args: &[String]) -> Result<()> {
+    if args.first().is_some_and(|s| s == "setup") {
+        return crate::setup::run(&args[1..], &Native);
+    }
     if args.first().is_some_and(|s| s == "ci") {
         return crate::ci::run(&args[1..], &Native);
     }
@@ -104,7 +107,7 @@ pub fn run(args: &[String]) -> Result<()> {
                         "Installed host updater differs from the active runtime",
                     )?;
                 }
-                "--install-management" => management::install(&updater)?,
+                "--install-management" => management::install_bundle(&updater)?,
                 _ => updater.run_locked()?,
             }
             Value::Null

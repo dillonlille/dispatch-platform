@@ -33,12 +33,20 @@ compatible. A rollback to a runtime predating Rust management keeps the installe
 manager. Service startup runs `--verify`; management drift never blocks recovery.
 
 For fresh setup, use `tooling/setup-dev.py` with a verified `.build` artifact, then
-install the reviewed `tooling/systemd/dispatch-dev*` units separately. To explicitly
+install the reviewed `tooling/systemd/dispatch-dev*` units separately. Both setup
+launchers delegate to `host setup`; see [fresh host setup](HOST-SETUP.md) for
+arguments and recovery. To explicitly
 install or repair management from a clean, activated supporting checkout:
 
 ```bash
 python3 tooling/update-dev.py --root /home/thepickle/dispatch-platform/dev --install-management
 ```
+
+Explicit installation verifies the active runtime and self-checks a staged manager,
+then atomically replaces the complete manager/launcher directory under the updater
+lock. An existing installation is retained at
+`.runtime/.management-install-*/previous-management` for manual recovery. Automatic
+Dev refresh continues to replace only the verified manager executable.
 
 Verify the runtime and installed manager:
 
