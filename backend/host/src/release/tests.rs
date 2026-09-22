@@ -26,6 +26,9 @@ struct Fake {
     pull: RefCell<Option<Value>>,
     sync: RefCell<Option<Value>>,
     comparison: RefCell<String>,
+    /// A merge queue: listings before a merge command shows its PR merged.
+    queue: Cell<u32>,
+    merging: RefCell<Option<String>>,
 }
 impl Fake {
     fn fail(&self, point: &str) {
@@ -103,10 +106,31 @@ impl System for Fake {
                 } else {
                     json!([])
                 }
-            } else if args.contains(&"release/v1.0.0") {
-                json!(self.pull.borrow().iter().collect::<Vec<_>>())
             } else {
-                json!(self.sync.borrow().iter().collect::<Vec<_>>())
+                let number = if args.contains(&"release/v1.0.0") {
+                    "8"
+                } else {
+                    "sync"
+                };
+                if self.merging.borrow().as_deref() == Some(number) {
+                    self.queue.set(self.queue.get() - 1);
+                    if self.queue.get() == 0 {
+                        self.merging.replace(None);
+                        let mut pulls = if number == "8" {
+                            self.pull.borrow_mut()
+                        } else {
+                            self.sync.borrow_mut()
+                        };
+                        let pull = pulls.as_mut().unwrap();
+                        pull["state"] = json!("MERGED");
+                        pull["mergeCommit"] = json!({"oid":self.commit});
+                    }
+                }
+                if number == "8" {
+                    json!(self.pull.borrow().iter().collect::<Vec<_>>())
+                } else {
+                    json!(self.sync.borrow().iter().collect::<Vec<_>>())
+                }
             }
         } else if args.starts_with(&["gh", "pr", "create"]) {
             let branch = args[args.iter().position(|s| *s == "--head").unwrap() + 1];
@@ -128,8 +152,14 @@ impl System for Fake {
                 .unwrap()
                 + 1];
             require(pull["headRefOid"] == head, "PR head moved")?;
-            pull["state"] = json!("MERGED");
-            pull["mergeCommit"] = json!({"oid":self.commit});
+            if self.queue.get() > 0 {
+                // Enqueued: the PR stays open until the queue's own run passes.
+                self.merging
+                    .replace(Some(if args[3] == "8" { "8" } else { "sync" }.into()));
+            } else {
+                pull["state"] = json!("MERGED");
+                pull["mergeCommit"] = json!({"oid":self.commit});
+            }
             Value::Null
         } else if args.starts_with(&["gh", "release", "create"]) {
             self.listed.replace(vec![json!({"id":9,"tag_name":"v1.0.0","draft":true,"prerelease":false,
@@ -298,6 +328,8 @@ impl Fixture {
             unhealthy: Cell::new(false),
             health_error: Cell::new(false),
             asset_error: Cell::new(false),
+            queue: Cell::new(0),
+            merging: RefCell::new(None),
             wrong_tag: Cell::new(false),
             hide_release_once: Cell::new(false),
             comparison: RefCell::new("ahead".into()),
@@ -593,6 +625,57 @@ fn prepare_stops_at_draft_and_publish_checks_again_then_completes() {
     assert!(release.journal().unwrap().complete);
 }
 
+#[test]
+fn queued_merges_are_awaited_before_the_release_continues() {
+    let sync_pull = |commit: &str, state: &str| json!({"number":10,"state":state,"url":"https://example.invalid/pr/10","headRefOid":commit,"isCrossRepository":false});
+    let passed_sync_run = |commit: &str| {
+        json!({"id":6,"run_attempt":1,"head_sha":commit,"event":"pull_request","head_branch":"chore/sync-main-v1.0.0",
+            "status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/6"})
+    };
+    // A merge queue holds the sync PR open for three listings after the merge command.
+    let f = Fixture::new();
+    let release = f.release();
+    f.system
+        .sync
+        .replace(Some(sync_pull(&f.system.commit, "OPEN")));
+    f.system
+        .runs
+        .borrow_mut()
+        .as_array_mut()
+        .unwrap()
+        .push(passed_sync_run(&f.system.commit));
+    f.system.queue.set(3);
+    release.finish_sync().unwrap();
+    assert!(f.system.has_call(&["gh", "pr", "merge", "10"]));
+    assert_eq!(f.system.sync.borrow().as_ref().unwrap()["state"], "MERGED");
+    assert!(f.system.elapsed.get() >= Duration::from_secs(20));
+    // A PR the queue never merges stops the release after the deadline, resumable later.
+    let f = Fixture::new();
+    let release = f.release();
+    f.system
+        .sync
+        .replace(Some(sync_pull(&f.system.commit, "OPEN")));
+    f.system
+        .runs
+        .borrow_mut()
+        .as_array_mut()
+        .unwrap()
+        .push(passed_sync_run(&f.system.commit));
+    f.system.queue.set(u32::MAX);
+    let error = release.finish_sync().unwrap_err().to_string();
+    assert!(error.contains("still queued"), "{error}");
+    assert!(f.system.elapsed.get() >= Duration::from_secs(1800));
+    assert_eq!(f.system.sync.borrow().as_ref().unwrap()["state"], "OPEN");
+    // A PR closed without merging is an error, not a wait.
+    let f = Fixture::new();
+    let release = f.release();
+    f.system
+        .sync
+        .replace(Some(sync_pull(&f.system.commit, "CLOSED")));
+    let error = release.finish_sync().unwrap_err().to_string();
+    assert!(error.contains("closed without merging"), "{error}");
+    assert_eq!(f.system.elapsed.get(), Duration::ZERO);
+}
 #[test]
 fn publication_response_loss_and_production_failure_resume_without_republishing_or_smoking() {
     for failure in ["publication", "health", "assets"] {

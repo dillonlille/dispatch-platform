@@ -1,12 +1,15 @@
 use crate::{REPOSITORY, Result, Runner};
 use serde_json::Value;
 use std::path::Path;
+/// Problems that stop a push. With a merge queue on `dev`, the queue validates the actual
+/// merged state, so a moved `dev` and other ready PRs no longer block.
 pub fn blockers(
     branch: &str,
     dirty: bool,
     current: bool,
     pulls: &[Value],
     concurrent: bool,
+    queued: bool,
 ) -> Vec<String> {
     let mut problems = vec![];
     if matches!(branch, "dev" | "main" | "HEAD") {
@@ -15,7 +18,7 @@ pub fn blockers(
     if dirty {
         problems.push("Commit the completed changes before starting final validation.".into());
     }
-    if !current {
+    if !current && !queued {
         problems.push("origin/dev has advanced. Incorporate it once, review the combined change, then rerun this preflight.".into());
     }
     let others: Vec<_> = pulls
@@ -23,7 +26,7 @@ pub fn blockers(
         .filter(|pr| pr["headRefName"] != branch && pr["isDraft"] != true)
         .map(|pr| format!("#{}", pr["number"]))
         .collect();
-    if !concurrent && !others.is_empty() {
+    if !concurrent && !queued && !others.is_empty() {
         problems.push(format!("Finish the ready Dev PRs first, or leave this PR as a draft: {}. Use --allow-concurrent when overlap is intentional.",others.join(", ")));
     }
     problems
@@ -53,7 +56,8 @@ pub fn run(root: &Path, concurrent: bool, runner: &dyn Runner) -> Result<()> {
         "--json",
         "number,headRefName,isDraft,statusCheckRollup",
     ])?)?;
-    let problems = blockers(&branch, dirty, base == ancestor, &pulls, concurrent);
+    let queued = merge_queue(&command);
+    let problems = blockers(&branch, dirty, base == ancestor, &pulls, concurrent, queued);
     if !problems.is_empty() {
         return Err(format!(
             "PR preparation needs attention:\n- {}",
@@ -68,6 +72,11 @@ pub fn run(root: &Path, concurrent: bool, runner: &dyn Runner) -> Result<()> {
         "Ready for final validation against {}.",
         command(&["git", "rev-parse", "--short", "origin/dev"])?
     );
+    if queued {
+        println!(
+            "dev has a merge queue: merging enqueues the PR, and the queue validates the actual merged state."
+        );
+    }
     let running = pulls
         .iter()
         .find(|pr| pr["headRefName"] == branch)
@@ -91,6 +100,17 @@ pub fn run(root: &Path, concurrent: bool, runner: &dyn Runner) -> Result<()> {
     );
     Ok(())
 }
+/// Whether `dev` requires a merge queue. Any failure or unexpected answer counts as no queue.
+fn merge_queue(command: &dyn Fn(&[&str]) -> Result<String>) -> bool {
+    let (owner, name) = REPOSITORY.split_once('/').unwrap_or((REPOSITORY, ""));
+    let query = format!(
+        "query={{ repository(owner: \"{owner}\", name: \"{name}\") {{ mergeQueue(branch: \"dev\") {{ id }} }} }}"
+    );
+    command(&["gh", "api", "graphql", "-f", &query])
+        .ok()
+        .and_then(|reply| serde_json::from_str::<Value>(&reply).ok())
+        .is_some_and(|reply| reply["data"]["repository"]["mergeQueue"]["id"].is_string())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,15 +118,37 @@ mod tests {
     #[test]
     fn preflight_coordinates_ready_branches_without_blocking_drafts() {
         let mut pull = json!({"number":1,"headRefName":"another","isDraft":true});
-        assert!(blockers("feature", false, true, &[pull.clone()], false).is_empty());
+        assert!(blockers("feature", false, true, &[pull.clone()], false, false).is_empty());
         pull["isDraft"] = false.into();
-        assert!(!blockers("feature", false, true, &[pull.clone()], false).is_empty());
-        assert!(blockers("feature", false, true, &[pull.clone()], true).is_empty());
-        assert!(blockers("another", false, true, &[pull], false).is_empty());
+        assert!(!blockers("feature", false, true, &[pull.clone()], false, false).is_empty());
+        assert!(blockers("feature", false, true, &[pull.clone()], true, false).is_empty());
+        assert!(blockers("another", false, true, &[pull.clone()], false, false).is_empty());
         for branch in ["dev", "main", "HEAD"] {
-            assert!(!blockers(branch, false, true, &[], false).is_empty());
+            assert!(!blockers(branch, false, true, &[], false, false).is_empty());
         }
-        assert!(!blockers("feature", true, true, &[], true).is_empty());
-        assert!(!blockers("feature", false, false, &[], true).is_empty());
+        assert!(!blockers("feature", true, true, &[], true, false).is_empty());
+        assert!(!blockers("feature", false, false, &[], true, false).is_empty());
+        // A merge queue validates the merged state: a moved dev and other ready PRs are fine,
+        // but the branch and a dirty tree still block.
+        assert!(blockers("feature", false, false, &[pull], false, true).is_empty());
+        assert!(!blockers("feature", true, true, &[], true, true).is_empty());
+        assert!(!blockers("dev", false, true, &[], true, true).is_empty());
+    }
+    #[test]
+    fn merge_queue_is_detected_only_from_a_well_formed_answer() {
+        let answer = |reply: &'static str| {
+            merge_queue(&|args: &[&str]| {
+                assert_eq!(&args[..3], ["gh", "api", "graphql"]);
+                assert!(args[4].contains("mergeQueue(branch: \"dev\")"));
+                Ok(reply.into())
+            })
+        };
+        assert!(answer(
+            r#"{"data":{"repository":{"mergeQueue":{"id":"MQ_1"}}}}"#
+        ));
+        assert!(!answer(r#"{"data":{"repository":{"mergeQueue":null}}}"#));
+        assert!(!answer("[]"));
+        assert!(!answer("not json"));
+        assert!(!merge_queue(&|_: &[&str]| Err("offline".into())));
     }
 }

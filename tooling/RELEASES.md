@@ -26,7 +26,8 @@ stable `X.Y.Z` versions. Multiple unfinished releases require an explicit versio
 | `run [X.Y.Z]` or no command | Performs preparation and publication together, preserving the legacy invocation.                                                                                                                                                                           |
 
 `prepare` includes the release merge into main; use it only when that release work
-is authorized. `publish` includes publication and the release's Dev sync merge.
+is authorized. A branch with a merge queue holds a merged PR open until the queue's own
+run passes; the command waits up to thirty minutes for that and resumes if it stops. `publish` includes publication and the release's Dev sync merge.
 Neither command changes Production host configuration or installs its manager.
 The installed updater activates the published release using its existing policy.
 

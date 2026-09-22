@@ -18,6 +18,23 @@ run and attempt, target branch and validation scope. The newest matching run
 wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
+A PR into `dev` whose head is a commit `main` pushed and passed, such as the sync PR
+after a release, brings a tree `main` validated in full and published. When the merge
+changes nothing against that commit, so the merge's tree is exactly `main`'s tree, the
+planner selects `reuse`: the build job restores `main`'s published branch build
+retargeted to the merge and smoke tests it, and the receipt records full validation,
+so the following `dev` push reuses it again. The same applies to a merge queue group
+that consists of that PR alone. A merge that also carries other `dev` commits, a
+failed, pending or foreign `main` run, a draft, a fork or another base branch keep
+ordinary checks.
+
+A merge queue on `dev` runs the workflow on the exact merge commit it will push,
+scoped against the group's base so every PR in the group counts. That run issues
+the receipt and gated build, and the following `dev` push looks for it first: the
+newest merge queue run of the pushed commit decides, and only a commit with no
+queue run falls back to its PR head's run. The preflight stops treating a moved
+`dev` or other ready PRs as blockers while the queue exists.
+
 `backend/host/src/ci` promotes builds through that same receipt policy and the
 host artifact verifier. It checks the artifact's GitHub record, file inventory
 and original source commit, changes only commit metadata, then rechecks PR
@@ -52,5 +69,16 @@ python3 -m unittest discover -s tests/tooling -p '*_test.py'
 ```
 
 The final `platform` job requires every expected job result, including every
-collector shard and Rust advisories. Artifact publication still happens only
+browser shard, every collector shard and Rust advisories. The build job packages
+its build for every run; four `browser` jobs, three workers each, test those exact
+bytes in parallel while `core` and the collectors run, and reuse runs skip them.
+The build job names that artifact after its own attempt and passes the name as an
+output, so rerunning only failed jobs still finds the bytes it uploaded. Artifact publication still happens only
 after that gate succeeds. Draft PRs produce no validation receipt.
+
+`.github/actions/setup-tools` restores `dispatch-ci`, `dispatch-host` and the browser
+assessment fixture that a trusted branch built from identical inputs, keyed by the Rust
+inputs, the pinned toolchain and the runner image. Launchers use a restored tool only on
+CI and only from the workspace's own `.ci-tools` directory; otherwise they build with
+Cargo exactly as before. Only the `tools` job on `dev` and `main` pushes saves those
+caches, and the pinned Playwright browser, off the critical path.

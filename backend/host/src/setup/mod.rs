@@ -230,8 +230,10 @@ fn prepare(options: &Options, system: &dyn System) -> Result<transaction::Journa
         )?;
         let origin = git(&["remote", "get-url", "origin"])?;
         require(
-            origin == format!("https://github.com/{}.git", crate::REPOSITORY)
-                || origin == format!("git@github.com:{}.git", crate::REPOSITORY),
+            crate::REPOSITORIES.iter().any(|name| {
+                origin == format!("https://github.com/{name}.git")
+                    || origin == format!("git@github.com:{name}.git")
+            }),
             "Unexpected repository origin",
         )?;
         require(

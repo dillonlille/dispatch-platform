@@ -1,0 +1,48 @@
+name: Prebuilt CI tools
+description: >-
+  Restore dispatch-ci, dispatch-host and the browser assessment fixture that a trusted
+  branch built from identical inputs. Nothing is compiled here; launchers build with
+  Cargo when a tool is absent, and the tools job on dev and main refills the caches.
+inputs:
+  fixture:
+    description: Also restore the assessment fixture the browser suite uses.
+    default: 'false'
+outputs:
+  tools-key:
+    description: Cache key of the planner, gate and host tools.
+    value: ${{ steps.keys.outputs.tools }}
+  tools-hit:
+    description: Whether the tools were restored.
+    value: ${{ steps.tools.outputs.cache-hit }}
+  fixture-key:
+    description: Cache key of the assessment fixture.
+    value: ${{ steps.keys.outputs.fixture }}
+  fixture-hit:
+    description: Whether the fixture was restored.
+    value: ${{ steps.fixture.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - name: Identify the tool inputs
+      id: keys
+      shell: bash
+      # The pinned toolchain file and runner image identify the compiler and linker;
+      # the host embeds the Python launchers, so they are inputs too.
+      run: |
+        image="${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}-${ImageVersion:-unknown}"
+        echo "tools=dispatch-tools-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/ci/**', 'backend/host/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
+        echo "fixture=dispatch-fixture-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
+        echo "DISPATCH_CI_TOOLS=$GITHUB_WORKSPACE/.ci-tools" >> "$GITHUB_ENV"
+    - name: Restore the planner, gate and host tools
+      id: tools
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .ci-tools/tools/
+        key: ${{ steps.keys.outputs.tools }}
+    - name: Restore the assessment fixture
+      id: fixture
+      if: inputs.fixture == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: .ci-tools/fixture/
+        key: ${{ steps.keys.outputs.fixture }}

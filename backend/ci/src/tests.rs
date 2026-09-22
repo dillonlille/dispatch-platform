@@ -21,6 +21,32 @@ fn context() -> Context {
 fn run() -> Value {
     json!({"id":5,"run_attempt":1,"head_sha":context().head,"event":"pull_request","head_branch":"feature/test","status":"completed","conclusion":"success","path":WORKFLOW,"head_repository":{"full_name":REPOSITORY}})
 }
+fn queue_run() -> Value {
+    let mut run = run();
+    run["event"] = "merge_group".into();
+    run["head_sha"] = context().commit.into();
+    run["head_branch"] = "gh-readonly-queue/dev/pr-1-b".into();
+    run
+}
+fn queue_endpoint() -> String {
+    format!(
+        "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
+        context().commit
+    )
+}
+fn main_run() -> Value {
+    let mut run = run();
+    run["id"] = 9.into();
+    run["event"] = "push".into();
+    run["head_branch"] = "main".into();
+    run
+}
+fn main_endpoint() -> String {
+    format!(
+        "actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={}&per_page=5",
+        context().head
+    )
+}
 fn receipt() -> Value {
     let c = context();
     json!({"format":1,"repository":REPOSITORY,"workflow":WORKFLOW,"baseRef":"dev","runId":5,"attempt":1,"scope":"full","commit":c.commit,"base":c.base,"head":c.head,"tree":c.tree})
@@ -38,6 +64,8 @@ fn zip(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
 struct Fake {
     replies: RefCell<BTreeMap<String, Vec<u8>>>,
     paths: RefCell<String>,
+    /// The tree of the merge head's own commit; the merge's tree unless a test moves it.
+    head_tree: RefCell<Option<String>>,
 }
 impl Runner for Fake {
     fn command(&self, args: &[&str], _cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
@@ -46,6 +74,12 @@ impl Runner for Fake {
         if args[0] == "git" {
             return Ok(match args[1] {
                 "rev-list" => format!("{} {} {}\n", c.commit, c.base, c.head).into_bytes(),
+                "rev-parse" if args[2] == format!("{}^{{tree}}", c.head) => self
+                    .head_tree
+                    .borrow()
+                    .clone()
+                    .unwrap_or(c.tree)
+                    .into_bytes(),
                 "rev-parse" => c.tree.into_bytes(),
                 "diff" => self.paths.borrow().as_bytes().to_vec(),
                 _ => panic!("Unexpected git"),
@@ -76,6 +110,8 @@ impl Fixture {
         )
         .unwrap();
         result.fake.paths.replace("dashboard/src/app.ts\0".into());
+        result.json(&queue_endpoint(), json!({"workflow_runs":[]}));
+        result.json(&main_endpoint(), json!({"workflow_runs":[]}));
         result.json(
             &format!(
                 "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
@@ -124,6 +160,10 @@ fn environment(event: &str, reference: &str) -> Environment {
 fn event() -> Value {
     let c = context();
     json!({"before":c.base,"pull_request":{"draft":false,"base":{"ref":"dev","sha":c.base,"repo":{"full_name":REPOSITORY}},"head":{"sha":c.head,"repo":{"full_name":REPOSITORY}}}})
+}
+fn queue_event() -> Value {
+    let c = context();
+    json!({"merge_group":{"head_sha":c.commit,"base_sha":c.base,"base_ref":"refs/heads/dev","head_ref":"refs/heads/gh-readonly-queue/dev/pr-1-b"}})
 }
 
 #[test]
@@ -323,6 +363,46 @@ fn planner_reuses_only_current_validated_merges_and_defaults_conservatively() {
     }
     fixture.fake.replies.borrow_mut().clear();
     assert_eq!(fixture.policy().plan(&env, &event()).0, "dashboard");
+    // A merge queue run of the pushed commit itself is reused, and its newest run decides
+    // even when the PR head's own run passed.
+    let queued = Fixture::new();
+    queued.json(&queue_endpoint(), json!({"workflow_runs":[queue_run()]}));
+    assert_eq!(queued.policy().plan(&env, &event()).0, "reuse");
+    queued.json(
+        &format!(
+            "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+            context().head
+        ),
+        json!({"workflow_runs":[]}),
+    );
+    assert_eq!(queued.policy().plan(&env, &event()).0, "reuse");
+    for change in [
+        json!({"conclusion":"failure"}),
+        json!({"status":"in_progress"}),
+        json!({"conclusion":"skipped"}),
+    ] {
+        let mut newer = queue_run();
+        newer["id"] = 6.into();
+        newer
+            .as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        let blocked = Fixture::new();
+        blocked.json(
+            &queue_endpoint(),
+            json!({"workflow_runs":[queue_run(),newer]}),
+        );
+        assert_eq!(blocked.policy().plan(&env, &event()).0, "dashboard");
+    }
+    // Merge queue runs scope every PR in the group against the group's base.
+    let group = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    assert_eq!(fixture.policy().plan(&group, &queue_event()).0, "dashboard");
+    fixture.fake.paths.replace("backend/src/lib.rs\0".into());
+    assert_eq!(fixture.policy().plan(&group, &queue_event()).0, "full");
+    fixture.fake.paths.replace("dashboard/src/app.ts\0".into());
+    let mut main_group = queue_event();
+    main_group["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert_eq!(fixture.policy().plan(&group, &main_group).0, "full");
     assert_eq!(
         fixture
             .policy()
@@ -465,13 +545,169 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
         env.0.insert(key.into(), value.into());
         assert!(f.policy().receipt(&env, &good, "full").is_err(), "{key}");
     }
+    // A merge queue group binds the exact merge commit the queue pushes.
+    f.fake.paths.replace("dashboard/src/app.ts\0".into());
+    let env = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    let group = queue_event();
+    assert_eq!(f.policy().receipt(&env, &group, "full").unwrap(), receipt());
+    assert!(f.policy().receipt(&env, &group, "dashboard").is_ok());
+    f.fake.paths.replace("backend/src/lib.rs\0".into());
+    assert!(f.policy().receipt(&env, &group, "dashboard").is_err());
+    assert!(f.policy().receipt(&env, &group, "full").is_ok());
+    f.fake.paths.replace("dashboard/src/app.ts\0".into());
+    for (pointer, value) in [
+        ("/merge_group/head_sha", "other"),
+        ("/merge_group/base_sha", "other"),
+        ("/merge_group/base_ref", "refs/heads/feature"),
+    ] {
+        let mut wrong = group.clone();
+        *wrong.pointer_mut(pointer).unwrap() = value.into();
+        assert!(
+            f.policy().receipt(&env, &wrong, "full").is_err(),
+            "{pointer}"
+        );
+    }
+    let mut wrong = group.clone();
+    wrong["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert!(f.policy().receipt(&env, &wrong, "dashboard").is_err());
+    assert!(f.policy().receipt(&env, &wrong, "full").is_ok());
+    assert!(
+        f.policy().receipt(&env, &good, "full").is_err(),
+        "a PR payload is not a group"
+    );
+    let mut env = env;
+    env.0.insert("GITHUB_SHA".into(), "other".into());
+    assert!(f.policy().receipt(&env, &group, "full").is_err());
+}
+#[test]
+fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
+    let f = Fixture::new();
+    let env = environment("pull_request", "refs/pull/1/merge");
+    assert_eq!(f.policy().plan(&env, &event()).0, "dashboard");
+    f.json(&main_endpoint(), json!({"workflow_runs":[main_run()]}));
+    assert_eq!(f.policy().plan(&env, &event()).0, "reuse");
+    assert_eq!(
+        f.policy().promoted_main(&context().head).unwrap().unwrap()["id"],
+        9
+    );
+    // The receipt records the full validation main recorded, never reuse itself.
+    assert_eq!(
+        f.policy().receipt(&env, &event(), "reuse").unwrap(),
+        receipt()
+    );
+    let mut fork = event();
+    fork["pull_request"]["head"]["repo"]["full_name"] = "other/fork".into();
+    assert_eq!(f.policy().plan(&env, &fork).0, "dashboard");
+    let mut draft = event();
+    draft["pull_request"]["draft"] = true.into();
+    assert_eq!(f.policy().plan(&env, &draft).0, "draft");
+    let mut release = event();
+    release["pull_request"]["base"]["ref"] = "main".into();
+    assert_eq!(f.policy().plan(&env, &release).0, "full");
+    assert!(f.policy().receipt(&env, &release, "reuse").is_err());
+    for change in [
+        json!({"conclusion":"failure"}),
+        json!({"status":"in_progress"}),
+        json!({"event":"pull_request"}),
+        json!({"head_branch":"dev"}),
+        json!({"path":"other.yml"}),
+        json!({"head_repository":{"full_name":"other/fork"}}),
+    ] {
+        let mut run = main_run();
+        run.as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        f.json(&main_endpoint(), json!({"workflow_runs":[run]}));
+        assert_eq!(f.policy().plan(&env, &event()).0, "dashboard", "{change}");
+        assert!(
+            f.policy().receipt(&env, &event(), "reuse").is_err(),
+            "{change}"
+        );
+        assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
+    }
+    assert!(f.policy().promoted_main("main").unwrap().is_none());
+    // The merge must change nothing against main: a merge that also carries other dev
+    // commits has another tree and gets ordinary checks, as PR and as merge queue group.
+    f.json(&main_endpoint(), json!({"workflow_runs":[main_run()]}));
+    let group = environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b");
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "reuse");
+    assert_eq!(
+        f.policy().receipt(&group, &queue_event(), "reuse").unwrap(),
+        receipt()
+    );
+    let mut batched = queue_event();
+    batched["merge_group"]["base_sha"] = "e".repeat(40).into();
+    assert_eq!(f.policy().plan(&group, &batched).0, "dashboard");
+    let mut other = queue_event();
+    other["merge_group"]["head_sha"] = "e".repeat(40).into();
+    assert_eq!(f.policy().plan(&group, &other).0, "dashboard");
+    f.fake.head_tree.replace(Some("e".repeat(40)));
+    assert!(f.policy().brings_main(&context()).unwrap().is_none());
+    assert_eq!(f.policy().plan(&env, &event()).0, "dashboard");
+    assert_eq!(f.policy().plan(&group, &queue_event()).0, "dashboard");
+    assert!(f.policy().receipt(&env, &event(), "reuse").is_err());
+    assert!(f.policy().receipt(&group, &queue_event(), "reuse").is_err());
+    assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
+}
+#[test]
+fn both_repository_names_are_this_repository_and_nothing_else_is() {
+    for name in REPOSITORIES {
+        assert!(ours(&json!(name)), "{name}");
+        assert_eq!(
+            web_path(&format!("https://github.com/{name}/releases/latest")),
+            Some("releases/latest")
+        );
+    }
+    for other in [
+        json!("other/dispatch-platform"),
+        json!("dispatch-systems/dispatch-platform-fork"),
+        json!("dispatch-systems"),
+        json!(""),
+        json!(null),
+        json!(["dispatch-systems/dispatch-platform"]),
+    ] {
+        assert!(!ours(&other), "{other}");
+    }
+    for url in [
+        "https://github.com/dispatch-systems/dispatch-platform-fork/releases/latest",
+        "https://github.com/dispatch-systems/dispatch-platform",
+        "http://github.com/dispatch-systems/dispatch-platform/releases/latest",
+        "https://github.com.evil/dispatch-systems/dispatch-platform/releases/latest",
+    ] {
+        assert_eq!(web_path(url), None, "{url}");
+    }
+    // Runs, PRs and receipts reported under the organization name keep validating.
+    let moved = "dispatch-systems/dispatch-platform";
+    let f = Fixture::new();
+    let mut run = run();
+    run["head_repository"]["full_name"] = moved.into();
+    assert!(trusted_run(&run, &context().head));
+    let mut receipt = receipt();
+    receipt["repository"] = moved.into();
+    assert!(matches(&receipt, &run, &context(), "full", "dev"));
+    let mut pr = event();
+    pr["pull_request"]["base"]["repo"]["full_name"] = moved.into();
+    pr["pull_request"]["head"]["repo"]["full_name"] = moved.into();
+    let env = environment("pull_request", "refs/pull/1/merge");
+    assert!(f.policy().receipt(&env, &pr, "full").is_ok());
+    pr["pull_request"]["head"]["repo"]["full_name"] = "other/dispatch-platform".into();
+    assert!(f.policy().receipt(&env, &pr, "full").is_err());
+    run["head_repository"]["full_name"] = "other/dispatch-platform".into();
+    assert!(!trusted_run(&run, &context().head));
 }
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {
     for mode in ["full", "dashboard", "reuse"] {
-        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
+        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"browser":{"result":if mode=="reuse"{"skipped"}else{"success"}},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
         assert_eq!(gate(&needs).unwrap(), mode);
-        for job in ["plan", "build", "rust-advisories", "core", "collectors"] {
+        for job in [
+            "plan",
+            "build",
+            "browser",
+            "rust-advisories",
+            "core",
+            "collectors",
+        ] {
             let mut missing = needs.clone();
             missing.as_object_mut().unwrap().remove(job);
             assert!(gate(&missing).is_err());

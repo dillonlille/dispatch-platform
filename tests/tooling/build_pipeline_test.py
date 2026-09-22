@@ -47,6 +47,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(files), len(set(files)))
         self.assertEqual(set(files), {
             "tests/providers/paycom-worker.test.ts", "tests/providers/native-browser.test.ts",
+            "tests/providers/native-browser-recovery.test.ts",
             "tests/providers/cortex-worker.test.ts", "tests/providers/cortex-meals-worker.test.ts",
             "tests/providers/multi-dsp-browser.test.ts", "tests/providers/collection-throughput.test.ts",
         })

@@ -125,12 +125,30 @@ def _bootstrap_verify(directory, commit=None):
     return manifest
 
 
+def prebuilt_host(root):
+    """The host a trusted branch built from identical inputs and CI restored into this checkout.
+
+    Only the workspace's own `.ci-tools` directory is trusted, and only on CI. This file is also
+    installed alone under `management`, so the rule is kept here rather than imported.
+    """
+    tools = os.environ.get("DISPATCH_CI_TOOLS")
+    if os.environ.get("CI") != "true" or not tools or Path(tools) != root / ".ci-tools":
+        return None
+    binary = root / ".ci-tools/tools/dispatch-host"
+    if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
+        return None
+    return binary
+
+
 @functools.cache
 def host_binary():
     tooling = Path(__file__).resolve().parent
     root = tooling.parent
     if (root / "backend/host/Cargo.toml").is_file():
         # Build from this checkout, never search the candidate being verified.
+        restored = prebuilt_host(root)
+        if restored is not None:
+            return restored
         subprocess.check_call(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"], cwd=root,
                               stdout=sys.stderr)
         metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version=1", cwd=root))

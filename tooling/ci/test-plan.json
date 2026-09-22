@@ -12,6 +12,7 @@
   ],
   "native": {
     "paycom": ["tests/providers/paycom-worker.test.ts", "tests/providers/native-browser.test.ts"],
+    "paycom-recovery": ["tests/providers/native-browser-recovery.test.ts"],
     "cortex": [
       "tests/providers/cortex-worker.test.ts",
       "tests/providers/cortex-meals-worker.test.ts"

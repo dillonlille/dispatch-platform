@@ -123,9 +123,18 @@ impl System for Fake {
         } else {
             queue.front().unwrap().clone()
         };
+        // A HEAD reply is its redirect target, or {status, location} for another redirect.
+        let (status, location) = match (head, value.as_object()) {
+            (true, Some(redirect)) => (
+                redirect["status"].as_u64().unwrap() as u16,
+                redirect["location"].as_str().map(Into::into),
+            ),
+            (true, None) => (302, value.as_str().map(Into::into)),
+            (false, _) => (200, None),
+        };
         Ok(Response {
-            status: if head { 302 } else { 200 },
-            location: head.then(|| value.as_str().unwrap().into()),
+            status,
+            location,
             body: Box::new(Cursor::new(serde_json::to_vec(&value)?)),
         })
     }
@@ -559,6 +568,83 @@ fn production_download_rechecks_publication_and_records_failed_release() {
             }
             f.assert_old();
         }
+    }
+}
+#[test]
+fn production_installs_releases_published_under_the_organization_name() {
+    // After the move GitHub reports asset URLs under the new owner; the old API path redirects.
+    let moved = "dispatch-systems/dispatch-platform";
+    let f = Fixture::new(Environment::Production);
+    let mut release = f.production_release();
+    for asset in release["assets"].as_array_mut().unwrap() {
+        let old = asset["browser_download_url"].as_str().unwrap().to_owned();
+        let new = old.replace(REPOSITORY, moved);
+        let bytes = f.system.bodies.borrow_mut().remove(&old).unwrap();
+        f.system.bodies.borrow_mut().insert(new.clone(), bytes);
+        asset["browser_download_url"] = json!(new);
+    }
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![release],
+    );
+    f.updater().run_locked().unwrap();
+    assert_eq!(
+        artifact::verify(&f.updater().active, None).unwrap(),
+        f.new_manifest
+    );
+    // Only this repository's names count, never a look-alike or another path.
+    for url in [
+        format!("https://github.com/{moved}-mirror/releases/download/v0.1.1/release.json"),
+        "https://github.com/other/dispatch-platform/releases/download/v0.1.1/release.json"
+            .to_string(),
+        format!("https://github.com/{moved}/releases/download/v0.1.0/release.json"),
+        format!("https://github.com/{moved}/releases/download/v0.1.1/other.json"),
+    ] {
+        let f = Fixture::new(Environment::Production);
+        let mut release = f.production_release();
+        release["assets"][1]["browser_download_url"] = json!(url);
+        f.system.reply(
+            &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+            vec![release],
+        );
+        assert!(f.updater().run_locked().is_err(), "{url}");
+        assert!(f.system.actions().is_empty(), "{url}");
+        f.assert_old();
+    }
+}
+#[test]
+fn the_latest_release_shortcut_follows_the_move_to_the_organization() {
+    let moved = "dispatch-systems/dispatch-platform";
+    let f = Fixture::new(Environment::Production);
+    let old = format!("https://github.com/{REPOSITORY}/releases/latest");
+    let new = format!("https://github.com/{moved}/releases/latest");
+    f.system
+        .reply(&old, vec![json!({"status":301,"location":new})]);
+    f.system.reply(
+        &new,
+        vec![json!(format!(
+            "https://github.com/{moved}/releases/tag/v0.1.1"
+        ))],
+    );
+    assert_eq!(releases::latest_tag(&f.system).as_deref(), Some("v0.1.1"));
+    // Before the move the shortcut answers directly.
+    f.system.reply(
+        &old,
+        vec![json!(format!(
+            "https://github.com/{REPOSITORY}/releases/tag/v0.1.2"
+        ))],
+    );
+    assert_eq!(releases::latest_tag(&f.system).as_deref(), Some("v0.1.2"));
+    // Redirects elsewhere, loops and tags under another repository are not answers.
+    for reply in [
+        json!({"status":301,"location":"https://github.com/other/dispatch-platform/releases/latest"}),
+        json!({"status":301,"location":old}),
+        json!({"status":301,"location":format!("https://github.com/{moved}/releases/tag/v0.1.1")}),
+        json!("https://github.com/other/dispatch-platform/releases/tag/v0.1.1"),
+        json!({"status":200,"location":format!("https://github.com/{moved}/releases/tag/v0.1.1")}),
+    ] {
+        f.system.reply(&old, vec![reply.clone()]);
+        assert_eq!(releases::latest_tag(&f.system), None, "{reply}");
     }
 }
 #[test]

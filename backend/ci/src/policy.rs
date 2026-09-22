@@ -46,6 +46,7 @@ impl Environment {
                 "GITHUB_SHA",
                 "GITHUB_RUN_ID",
                 "GITHUB_RUN_ATTEMPT",
+                "GITHUB_BASE_REF",
                 "CI_RUST_KEY",
             ]
             .into_iter()
@@ -74,12 +75,14 @@ pub fn scope(paths: &[String], dashboard_tests: &[String]) -> &'static str {
         "full"
     }
 }
-pub fn trusted_run(run: &Value, head: &str) -> bool {
-    run["head_sha"] == head
-        && run["event"] == "pull_request"
+/// A passed run of this workflow for `sha`: a same-repository PR run of that head, or a
+/// merge queue run of that exact merge commit.
+pub fn trusted_run(run: &Value, sha: &str) -> bool {
+    run["head_sha"] == sha
+        && (run["event"] == "pull_request" || run["event"] == "merge_group")
         && crate::runs::passed(run)
         && run["path"] == WORKFLOW
-        && run["head_repository"]["full_name"] == REPOSITORY
+        && crate::ours(&run["head_repository"]["full_name"])
 }
 pub fn read_receipt(archive: &[u8], digest: &str) -> Result<Value> {
     require(
@@ -108,7 +111,7 @@ pub fn matches(
     base_ref: &str,
 ) -> bool {
     receipt["format"] == 1
-        && receipt["repository"] == REPOSITORY
+        && crate::ours(&receipt["repository"])
         && receipt["workflow"] == WORKFLOW
         && receipt["baseRef"] == base_ref
         && receipt["runId"].as_u64().is_some()
@@ -133,6 +136,14 @@ pub fn gate(needs: &Value) -> Result<&str> {
     for (job, result) in [
         ("plan", "success"),
         ("build", "success"),
+        (
+            "browser",
+            if mode == "reuse" {
+                "skipped"
+            } else {
+                "success"
+            },
+        ),
         ("rust-advisories", "success"),
         ("core", if mode == "full" { "success" } else { "skipped" }),
         (
@@ -205,22 +216,66 @@ impl Policy<'_> {
     pub fn github(&self, endpoint: &str) -> Result<Value> {
         Ok(serde_json::from_slice(&self.github_bytes(endpoint)?)?)
     }
-    pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
-        require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
+    /// Main's passed push run of exactly `sha`. Main only passes with full validation, so
+    /// a PR whose head is that commit, such as the sync PR after a release, brings a tree
+    /// main already validated and published.
+    pub fn promoted_main(&self, sha: &str) -> Result<Option<Value>> {
+        if !hex(sha, 40) {
+            return Ok(None);
+        }
         let runs = self.github(&format!(
-            "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
-            context.head
+            "actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={sha}&per_page=5"
         ))?;
-        let Some(run) = latest_run(
-            &runs["workflow_runs"],
-            &context.head,
-            "pull_request",
-            None,
-            true,
-        ) else {
+        Ok(
+            latest_run(&runs["workflow_runs"], sha, "push", Some("main"), false)
+                .filter(|run| crate::runs::passed(run) && run["path"] == WORKFLOW)
+                .cloned(),
+        )
+    }
+    /// Main's passed push run when this merge brings exactly main's tree: its head is main's
+    /// commit and merging changed nothing, so main's published build is this merge's build.
+    pub fn brings_main(&self, context: &Context) -> Result<Option<Value>> {
+        let Some(run) = self.promoted_main(&context.head)? else {
             return Ok(None);
         };
-        if !trusted_run(run, &context.head) {
+        let tree = self.git(&["rev-parse", &format!("{}^{{tree}}", context.head)])?;
+        Ok((tree.trim() == context.tree).then_some(run))
+    }
+    pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
+        require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
+        // A merge queue tested this exact merge commit; its newest run decides, even when it
+        // failed. Without one, the PR head's run counts for an identical merge.
+        let queued = self.github(&format!(
+            "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
+            context.commit
+        ))?;
+        let pulls;
+        let (run, sha) = match latest_run(
+            &queued["workflow_runs"],
+            &context.commit,
+            "merge_group",
+            None,
+            true,
+        ) {
+            Some(run) => (run, context.commit.as_str()),
+            None => {
+                pulls = self.github(&format!(
+                    "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
+                    context.head
+                ))?;
+                let Some(run) = latest_run(
+                    &pulls["workflow_runs"],
+                    &context.head,
+                    "pull_request",
+                    None,
+                    true,
+                ) else {
+                    return Ok(None);
+                };
+                (run, context.head.as_str())
+            }
+        };
+        if !trusted_run(run, sha) {
             return Ok(None);
         }
         let id = run["id"].as_u64().ok_or("Invalid run id")?;
@@ -292,7 +347,38 @@ impl Policy<'_> {
             }
             event["before"].as_str()
         } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
-            event["pull_request"]["base"]["sha"].as_str()
+            let pr = &event["pull_request"];
+            if crate::ours(&pr["head"]["repo"]["full_name"])
+                && let Ok(Some(context)) = self.context()
+                && pr["head"]["sha"] == context.head
+                && let Ok(Some(run)) = self.brings_main(&context)
+            {
+                return (
+                    "reuse",
+                    format!(
+                        "Merge brings exactly main's verified tree, published by push run {}",
+                        run["id"]
+                    ),
+                );
+            }
+            pr["base"]["sha"].as_str()
+        } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
+            let group = &event["merge_group"];
+            if let Ok(Some(context)) = self.context()
+                && group["head_sha"] == context.commit
+                && group["base_sha"] == context.base
+                && let Ok(Some(run)) = self.brings_main(&context)
+            {
+                return (
+                    "reuse",
+                    format!(
+                        "Group brings exactly main's verified tree, published by push run {}",
+                        run["id"]
+                    ),
+                );
+            }
+            // Every PR in the group is between the group's base and this merge commit.
+            group["base_sha"].as_str()
         } else {
             return (
                 "full",
@@ -316,22 +402,55 @@ impl Policy<'_> {
     pub fn receipt(&self, env: &Environment, event: &Value, selected: &str) -> Result<Value> {
         let context = self.context()?.ok_or("Actual PR merge required")?;
         let pr = &event["pull_request"];
-        let base_ref = pr["base"]["ref"].as_str().unwrap_or("");
-        require(
+        let group = &event["merge_group"];
+        // A merge queue group is this repository's own merge of PRs whose checks passed; its
+        // head is the exact commit the queue pushes, so it is bound instead of the PR parents.
+        let queued = env.get("GITHUB_EVENT_NAME") == "merge_group";
+        let base_ref = if queued {
+            group["base_ref"]
+                .as_str()
+                .and_then(|reference| reference.strip_prefix("refs/heads/"))
+                .unwrap_or("")
+        } else {
+            pr["base"]["ref"].as_str().unwrap_or("")
+        };
+        let source = if queued {
+            group["head_sha"] == context.commit
+                && group["base_sha"].as_str().is_some_and(|sha| hex(sha, 40))
+        } else {
             env.get("GITHUB_EVENT_NAME") == "pull_request"
                 && pr["draft"] == false
+                && crate::ours(&pr["base"]["repo"]["full_name"])
+                && crate::ours(&pr["head"]["repo"]["full_name"])
+                && pr["base"]["sha"] == context.base
+                && pr["head"]["sha"] == context.head
+        };
+        // A PR whose head is main's verified commit reused main's published build and only
+        // smoke tested it; its receipt carries the full validation main recorded.
+        let selected = if selected == "reuse" {
+            require(
+                source && base_ref == "dev" && self.brings_main(&context)?.is_some(),
+                "Reuse receipts require a merge that brings exactly main's verified tree",
+            )?;
+            "full"
+        } else {
+            selected
+        };
+        require(
+            source
                 && matches!(selected, "full" | "dashboard")
                 && matches!(base_ref, "dev" | "main")
                 && (base_ref == "dev" || selected == "full")
-                && pr["base"]["repo"]["full_name"] == REPOSITORY
-                && pr["head"]["repo"]["full_name"] == REPOSITORY
-                && context.commit == env.get("GITHUB_SHA")
-                && pr["base"]["sha"] == context.base
-                && pr["head"]["sha"] == context.head,
+                && context.commit == env.get("GITHUB_SHA"),
             "Validation receipt requires the actual same-repository PR merge",
         )?;
+        let changed_since = if queued {
+            group["base_sha"].as_str().unwrap_or("")
+        } else {
+            &context.base
+        };
         require(
-            selected == "full" || selected == self.scope(&context.base)?,
+            selected == "full" || selected == self.scope(changed_since)?,
             "Insufficient validation scope",
         )?;
         let run: u64 = env.get("GITHUB_RUN_ID").parse()?;

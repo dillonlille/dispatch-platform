@@ -1,8 +1,10 @@
 """Policy and trust cases live in backend/ci/src/tests.rs; these test the bootstrap."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -36,6 +38,36 @@ class CiLauncherTests(unittest.TestCase):
             build.assert_called_once_with(["cargo", "build", "--locked", "-p", "dispatch-ci"], cwd=ROOT, stdout=sys.stderr)
             execute.assert_called_once_with(Path("/custom target/debug/dispatch-ci"),
                                             ["/custom target/debug/dispatch-ci", "plan", "--root", str(ROOT)])
+
+    def test_bootstrap_runs_a_restored_tool_without_cargo_and_only_from_its_own_ci_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tools = root / ".ci-tools"
+            binary = tools / "tools/dispatch-ci"
+            trusted = {"CI": "true", "DISPATCH_CI_TOOLS": str(tools)}
+            with patch.dict(os.environ, trusted, clear=False):
+                self.assertIsNone(ci_tool.prebuilt(root, "dispatch-ci"), "nothing restored yet")
+                binary.parent.mkdir(parents=True)
+                binary.write_text("#!/bin/sh\n")
+                binary.chmod(0o600)
+                self.assertIsNone(ci_tool.prebuilt(root, "dispatch-ci"), "a non-executable file is not a tool")
+                binary.chmod(0o700)
+                self.assertEqual(ci_tool.prebuilt(root, "dispatch-ci"), binary)
+                self.assertIsNone(ci_tool.prebuilt(root, "dispatch-host"), "each tool is named exactly")
+            for untrusted in [{"DISPATCH_CI_TOOLS": str(tools)}, {"CI": "true"},
+                              {"CI": "true", "DISPATCH_CI_TOOLS": str(root / "elsewhere")}]:
+                with patch.dict(os.environ, untrusted, clear=True):
+                    self.assertIsNone(ci_tool.prebuilt(root, "dispatch-ci"), untrusted)
+            with patch.dict(os.environ, trusted, clear=False):
+                binary.unlink()
+                binary.symlink_to("/bin/sh")
+                self.assertIsNone(ci_tool.prebuilt(root, "dispatch-ci"), "a symlink is not a tool")
+            with patch.object(ci_tool, "prebuilt", return_value=binary), \
+                    patch.object(ci_tool.subprocess, "check_call") as build, \
+                    patch.object(ci_tool.os, "execv") as execute:
+                ci_tool.launch("gate")
+                build.assert_not_called()
+                execute.assert_called_once_with(binary, [str(binary), "gate", "--root", str(ROOT)])
 
 
 if __name__ == "__main__":

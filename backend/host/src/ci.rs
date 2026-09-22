@@ -1,6 +1,7 @@
 //! Artifact promotion uses the planner's policy and the host's existing verifier.
 use crate::{Result, artifact, io::System, releases, require};
 use dispatch_ci::policy::{Context, Environment, Policy, Validation, trusted_branch};
+use serde_json::Value;
 use std::{fs, io::Write, os::unix::fs::PermissionsExt, path::Path};
 
 struct Runner<'a>(&'a dyn System);
@@ -35,6 +36,95 @@ fn require_validation(
             "Cannot confirm current PR validation; rerun the workflow",
         ))),
     }
+}
+/// Whether this run validates a PR merge or merge queue group into dev.
+fn into_dev(env: &Environment) -> bool {
+    match env.get("GITHUB_EVENT_NAME") {
+        "pull_request" => env.get("GITHUB_BASE_REF") == "dev",
+        "merge_group" => env
+            .get("GITHUB_REF")
+            .starts_with("refs/heads/gh-readonly-queue/dev/"),
+        _ => false,
+    }
+}
+/// Main's passed push run when this merge into dev brings exactly main's tree: main already
+/// validated it in full and published it, so its build is reused and only smoke tested.
+fn require_main(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Value> {
+    if context.commit != env.get("GITHUB_SHA") || !into_dev(env) {
+        return Err(Box::new(ValidationChanged(
+            "Actual PR merge into dev required",
+        )));
+    }
+    match policy.brings_main(context) {
+        Ok(Some(run)) => Ok(run),
+        _ => Err(Box::new(ValidationChanged(
+            "Cannot confirm main's validation of the PR head; rerun the workflow",
+        ))),
+    }
+}
+fn place(candidate: &Path, destination: &Path) -> Result<()> {
+    // No replacement, including a destination created while the artifact downloaded.
+    let from = std::ffi::CString::new(candidate.as_os_str().as_encoded_bytes())?;
+    let to = std::ffi::CString::new(destination.as_os_str().as_encoded_bytes())?;
+    if unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+fn restore_main(
+    system: &dyn System,
+    policy: &Policy<'_>,
+    env: &Environment,
+    destination: &Path,
+) -> Result<()> {
+    let context = policy
+        .context()?
+        .ok_or(ValidationChanged("Actual PR merge required"))?;
+    let run = require_main(policy, &context, env)?;
+    let id = run["id"].as_u64().ok_or("Invalid run id")?;
+    let artifacts = policy.github(&format!("actions/runs/{id}/artifacts"))?;
+    let name = format!("dispatch-main-{}", context.head);
+    let matches: Vec<_> = artifacts["artifacts"]
+        .as_array()
+        .ok_or("Missing artifacts")?
+        .iter()
+        .filter(|record| record["name"] == name && record["expired"] == false)
+        .collect();
+    require(matches.len() == 1, "Published main build unavailable")?;
+    require(
+        !destination.exists() && !destination.is_symlink(),
+        "Build destination already exists",
+    )?;
+    let temp = tempfile::Builder::new()
+        .prefix("dispatch-main-build-")
+        .tempdir_in(destination.parent().ok_or("Destination parent required")?)?;
+    releases::download_run(system, matches[0], temp.path(), &context.head, None)?;
+    let candidate = temp.path().join("candidate");
+    artifact::retarget(&candidate, &context.head, &context.commit)?;
+    fs::set_permissions(
+        candidate.join("services/rust/dispatch-backend"),
+        fs::Permissions::from_mode(0o700),
+    )?;
+    if require_main(policy, &context, env)? != run {
+        return Err(Box::new(ValidationChanged(
+            "Main's validation changed during download; rerun the workflow",
+        )));
+    }
+    place(&candidate, destination)?;
+    println!(
+        "Reused main's published build from run {id} for {}",
+        context.commit
+    );
+    Ok(())
 }
 fn warm_cache(
     system: &dyn System,
@@ -102,21 +192,7 @@ fn restore(
         )));
     }
     warm_cache(system, policy.root, &candidate, receipt)?;
-    // No replacement, including a destination created while the artifact downloaded.
-    let from = std::ffi::CString::new(candidate.as_os_str().as_encoded_bytes())?;
-    let to = std::ffi::CString::new(destination.as_os_str().as_encoded_bytes())?;
-    if unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            from.as_ptr(),
-            libc::AT_FDCWD,
-            to.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    } != 0
-    {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    place(&candidate, destination)?;
     println!(
         "Reused tested PR build from run {id} for {}",
         context.commit
@@ -129,15 +205,25 @@ fn reuse(system: &dyn System, root: &Path, env: &Environment, destination: &Path
         root,
         runner: &runner,
     };
-    match restore(system, &policy, env, destination) {
+    let pull = into_dev(env);
+    let result = if pull {
+        restore_main(system, &policy, env, destination)
+    } else {
+        restore(system, &policy, env, destination)
+    };
+    match result {
         Ok(()) => Ok(true),
         Err(error) if error.is::<ValidationChanged>() => Err(error),
         Err(_) => {
             let context = policy
                 .context()?
                 .ok_or(ValidationChanged("Actual merged commit required"))?;
-            require_validation(&policy, &context, env)?;
-            println!("PR build reuse unavailable; validation is current, building normally.");
+            if pull {
+                require_main(&policy, &context, env)?;
+            } else {
+                require_validation(&policy, &context, env)?;
+            }
+            println!("Verified build unavailable; validation is current, building normally.");
             Ok(false)
         }
     }

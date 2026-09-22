@@ -1,14 +1,9 @@
 use super::*;
 use std::io::Write;
 
-const VERSIONED: [&str; 6] = [
-    "package.json",
-    "package-lock.json",
-    "backend/Cargo.toml",
-    "backend/host/Cargo.toml",
-    "backend/ci/Cargo.toml",
-    "Cargo.lock",
-];
+// The platform version is package.json's; crate versions stay fixed so a release bump
+// leaves the Rust inputs, and the cached release backend, unchanged.
+const VERSIONED: [&str; 2] = ["package.json", "package-lock.json"];
 
 fn set_versions(root: &Path, version: &str) -> Result<()> {
     releases::version(version)?;
@@ -26,36 +21,6 @@ fn set_versions(root: &Path, version: &str) -> Result<()> {
             "package-lock.json",
             r#"("name": "dispatch-platform",\s*"version": ")[^"]+(")"#.to_string(),
             2,
-        ),
-        (
-            "backend/Cargo.toml",
-            r#"(\A\[package\]\nname = "dispatch-backend"\nversion = ")[^"]+(")"#.to_string(),
-            1,
-        ),
-        (
-            "backend/host/Cargo.toml",
-            r#"(\A\[package\]\nname = "dispatch-host"\nversion = ")[^"]+(")"#.to_string(),
-            1,
-        ),
-        (
-            "Cargo.lock",
-            r#"(\[\[package\]\]\nname = "dispatch-backend"\nversion = ")[^"]+(")"#.to_string(),
-            1,
-        ),
-        (
-            "Cargo.lock",
-            r#"(\[\[package\]\]\nname = "dispatch-host"\nversion = ")[^"]+(")"#.to_string(),
-            1,
-        ),
-        (
-            "backend/ci/Cargo.toml",
-            r#"(\A\[package\]\nname = "dispatch-ci"\nversion = ")[^"]+(")"#.to_string(),
-            1,
-        ),
-        (
-            "Cargo.lock",
-            r#"(\[\[package\]\]\nname = "dispatch-ci"\nversion = ")[^"]+(")"#.to_string(),
-            1,
         ),
     ];
     for (name, pattern, count) in patterns {
@@ -132,6 +97,33 @@ impl Release<'_> {
             )?;
         }
         Ok(pulls.into_iter().next())
+    }
+    /// The merged PR, waiting while a merge queue holds it: the queue tests the actual
+    /// merge before pushing it, so an enqueued PR stays open for a few minutes.
+    fn merged(&self, branch: &str, base: &str) -> Result<Value> {
+        let deadline = self.system.monotonic() + Duration::from_secs(1800);
+        let mut announced = false;
+        loop {
+            let pull = self
+                .pull_request(branch, base)?
+                .ok_or("Pull request disappeared")?;
+            if pull["state"] == "MERGED" {
+                return Ok(pull);
+            }
+            require(
+                pull["state"] == "OPEN",
+                "Pull request was closed without merging",
+            )?;
+            require(
+                self.system.monotonic() < deadline,
+                "Pull request is still queued for merge; rerun once it merges",
+            )?;
+            if !announced {
+                say(format!("Queued for merge: {}", io::text(&pull, "url")));
+                announced = true;
+            }
+            self.system.sleep(Duration::from_secs(10));
+        }
     }
     fn checkout(&self, worktree: &Path, branch: &str, start: &str) -> Result<()> {
         require(
@@ -383,9 +375,7 @@ impl Release<'_> {
                 None,
                 120,
             )?;
-            pull = self
-                .pull_request(&self.branch, "main")?
-                .ok_or("Release PR disappeared")?;
+            pull = self.merged(&self.branch, "main")?;
         }
         let commit = io::text(&pull["mergeCommit"], "oid");
         require(
@@ -431,7 +421,7 @@ impl Release<'_> {
         ))
     }
     pub(super) fn finish_sync(&self) -> Result<()> {
-        let Some(mut pull) = self.open_sync()? else {
+        let Some(pull) = self.open_sync()? else {
             return Ok(());
         };
         if pull["state"] == "MERGED" {
@@ -480,10 +470,8 @@ impl Release<'_> {
             None,
             120,
         )?;
-        pull = self
-            .pull_request(&self.sync_branch, "dev")?
-            .ok_or("Dev sync PR disappeared")?;
-        require(pull["state"] == "MERGED", "Dev sync PR did not merge")
+        self.merged(&self.sync_branch, "dev")?;
+        Ok(())
     }
     pub(super) fn clean(&self) -> Result<()> {
         for (worktree, branch, base) in [
@@ -556,7 +544,7 @@ mod tests {
             fs::copy(source.join(name), temp.path().join(name)).unwrap();
         }
         set_versions(temp.path(), "9.8.7").unwrap();
-        for (name, count) in VERSIONED.into_iter().zip([1, 2, 1, 1, 1, 3]) {
+        for (name, count) in VERSIONED.into_iter().zip([1, 2]) {
             let before = fs::read_to_string(source.join(name)).unwrap();
             let after = fs::read_to_string(temp.path().join(name)).unwrap();
             assert_eq!(before.lines().count(), after.lines().count());
@@ -568,7 +556,7 @@ mod tests {
             assert_eq!(changes.len(), count, "{name}");
             assert!(changes.iter().all(|(_, line)| line.contains("9.8.7")));
         }
-        fs::write(temp.path().join("Cargo.lock"), "broken").unwrap();
+        fs::write(temp.path().join("package-lock.json"), "broken").unwrap();
         assert!(set_versions(temp.path(), "9.8.8").is_err());
         assert_eq!(
             io::read_json(&temp.path().join("package.json")).unwrap()["version"],
