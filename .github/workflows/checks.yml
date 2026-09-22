@@ -64,7 +64,7 @@ jobs:
         if: steps.reuse.outputs.reused != 'true'
         env:
           # The browser suite runs as shard jobs against the packaged build below.
-          DISPATCH_CI_BROWSER_SHARDS: '3'
+          DISPATCH_CI_BROWSER_SHARDS: '4'
         run: npm run check:ci -- build-${{ needs.plan.outputs.mode }}
       - name: Smoke test the promoted build
         if: steps.reuse.outputs.reused == 'true'
@@ -102,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -132,8 +132,8 @@ jobs:
           shared-key: dispatch-debug
           cache-bin: 'false'
           save-if: 'false'
-      - name: Browser suite shard ${{ matrix.shard }} of 3
-        run: npm run check:ci -- browser ${{ matrix.shard }}/3
+      - name: Browser suite shard ${{ matrix.shard }} of 4
+        run: npm run check:ci -- browser ${{ matrix.shard }}/4
       - name: Preserve failure traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

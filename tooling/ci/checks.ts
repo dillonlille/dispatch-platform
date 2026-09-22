@@ -78,8 +78,10 @@ function installBrowsers() {
 async function browser() {
   const shard = process.argv[3];
   if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard ?? '')) throw new Error('Browser shard required, as 1/3');
+  // Three workers on a four-core runner: the fourth core keeps the private servers and the
+  // sign-in animation responsive, so long multi-login tests stay well inside their budget.
   if (await installBrowsers())
-    await run('test:ui', 'npm', ['run', 'test:ui', '--', `--shard=${shard}`]);
+    await run('test:ui', 'npm', ['run', 'test:ui', '--', `--shard=${shard}`, '--workers=3']);
 }
 async function core() {
   const python = run('Python tests', 'python3', [
