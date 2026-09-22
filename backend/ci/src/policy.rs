@@ -46,6 +46,7 @@ impl Environment {
                 "GITHUB_SHA",
                 "GITHUB_RUN_ID",
                 "GITHUB_RUN_ATTEMPT",
+                "GITHUB_BASE_REF",
                 "CI_RUST_KEY",
             ]
             .into_iter()
@@ -215,6 +216,22 @@ impl Policy<'_> {
     pub fn github(&self, endpoint: &str) -> Result<Value> {
         Ok(serde_json::from_slice(&self.github_bytes(endpoint)?)?)
     }
+    /// Main's passed push run of exactly `sha`. Main only passes with full validation, so
+    /// a PR whose head is that commit, such as the sync PR after a release, brings a tree
+    /// main already validated and published.
+    pub fn promoted_main(&self, sha: &str) -> Result<Option<Value>> {
+        if !hex(sha, 40) {
+            return Ok(None);
+        }
+        let runs = self.github(&format!(
+            "actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={sha}&per_page=5"
+        ))?;
+        Ok(
+            latest_run(&runs["workflow_runs"], sha, "push", Some("main"), false)
+                .filter(|run| crate::runs::passed(run) && run["path"] == WORKFLOW)
+                .cloned(),
+        )
+    }
     pub fn validated(&self, context: &Context, base_ref: &str) -> Result<Option<Validation>> {
         require(matches!(base_ref, "dev" | "main"), "Untrusted base branch")?;
         // A merge queue tested this exact merge commit; its newest run decides, even when it
@@ -321,7 +338,20 @@ impl Policy<'_> {
             }
             event["before"].as_str()
         } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
-            event["pull_request"]["base"]["sha"].as_str()
+            let pr = &event["pull_request"];
+            if pr["head"]["repo"]["full_name"] == REPOSITORY
+                && let Some(head) = pr["head"]["sha"].as_str()
+                && let Ok(Some(run)) = self.promoted_main(head)
+            {
+                return (
+                    "reuse",
+                    format!(
+                        "Head is main's verified commit, published by push run {}",
+                        run["id"]
+                    ),
+                );
+            }
+            pr["base"]["sha"].as_str()
         } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
             // Every PR in the group is between the group's base and this merge commit.
             event["merge_group"]["base_sha"].as_str()
@@ -370,6 +400,20 @@ impl Policy<'_> {
                 && pr["head"]["repo"]["full_name"] == REPOSITORY
                 && pr["base"]["sha"] == context.base
                 && pr["head"]["sha"] == context.head
+        };
+        // A PR whose head is main's verified commit reused main's published build and only
+        // smoke tested it; its receipt carries the full validation main recorded.
+        let selected = if selected == "reuse" {
+            require(
+                source
+                    && !queued
+                    && base_ref == "dev"
+                    && self.promoted_main(&context.head)?.is_some(),
+                "Reuse receipts require main's verified commit as the PR head",
+            )?;
+            "full"
+        } else {
+            selected
         };
         require(
             source

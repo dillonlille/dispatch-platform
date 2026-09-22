@@ -34,6 +34,19 @@ fn queue_endpoint() -> String {
         context().commit
     )
 }
+fn main_run() -> Value {
+    let mut run = run();
+    run["id"] = 9.into();
+    run["event"] = "push".into();
+    run["head_branch"] = "main".into();
+    run
+}
+fn main_endpoint() -> String {
+    format!(
+        "actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={}&per_page=5",
+        context().head
+    )
+}
 fn receipt() -> Value {
     let c = context();
     json!({"format":1,"repository":REPOSITORY,"workflow":WORKFLOW,"baseRef":"dev","runId":5,"attempt":1,"scope":"full","commit":c.commit,"base":c.base,"head":c.head,"tree":c.tree})
@@ -90,6 +103,7 @@ impl Fixture {
         .unwrap();
         result.fake.paths.replace("dashboard/src/app.ts\0".into());
         result.json(&queue_endpoint(), json!({"workflow_runs":[]}));
+        result.json(&main_endpoint(), json!({"workflow_runs":[]}));
         result.json(
             &format!(
                 "actions/workflows/checks.yml/runs?event=pull_request&head_sha={}&per_page=5",
@@ -556,6 +570,63 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
     let mut env = env;
     env.0.insert("GITHUB_SHA".into(), "other".into());
     assert!(f.policy().receipt(&env, &group, "full").is_err());
+}
+#[test]
+fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
+    let f = Fixture::new();
+    let env = environment("pull_request", "refs/pull/1/merge");
+    assert_eq!(f.policy().plan(&env, &event()).0, "dashboard");
+    f.json(&main_endpoint(), json!({"workflow_runs":[main_run()]}));
+    assert_eq!(f.policy().plan(&env, &event()).0, "reuse");
+    assert_eq!(
+        f.policy().promoted_main(&context().head).unwrap().unwrap()["id"],
+        9
+    );
+    // The receipt records the full validation main recorded, never reuse itself.
+    assert_eq!(
+        f.policy().receipt(&env, &event(), "reuse").unwrap(),
+        receipt()
+    );
+    let mut fork = event();
+    fork["pull_request"]["head"]["repo"]["full_name"] = "other/fork".into();
+    assert_eq!(f.policy().plan(&env, &fork).0, "dashboard");
+    let mut draft = event();
+    draft["pull_request"]["draft"] = true.into();
+    assert_eq!(f.policy().plan(&env, &draft).0, "draft");
+    let mut release = event();
+    release["pull_request"]["base"]["ref"] = "main".into();
+    assert_eq!(f.policy().plan(&env, &release).0, "full");
+    assert!(f.policy().receipt(&env, &release, "reuse").is_err());
+    assert!(
+        f.policy()
+            .receipt(
+                &environment("merge_group", "refs/heads/gh-readonly-queue/dev/pr-1-b"),
+                &queue_event(),
+                "reuse"
+            )
+            .is_err()
+    );
+    for change in [
+        json!({"conclusion":"failure"}),
+        json!({"status":"in_progress"}),
+        json!({"event":"pull_request"}),
+        json!({"head_branch":"dev"}),
+        json!({"path":"other.yml"}),
+        json!({"head_repository":{"full_name":"other/fork"}}),
+    ] {
+        let mut run = main_run();
+        run.as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        f.json(&main_endpoint(), json!({"workflow_runs":[run]}));
+        assert_eq!(f.policy().plan(&env, &event()).0, "dashboard", "{change}");
+        assert!(
+            f.policy().receipt(&env, &event(), "reuse").is_err(),
+            "{change}"
+        );
+        assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
+    }
+    assert!(f.policy().promoted_main("main").unwrap().is_none());
 }
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {

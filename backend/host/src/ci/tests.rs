@@ -35,6 +35,19 @@ fn runs_endpoint() -> String {
         context().head
     ))
 }
+fn main_endpoint() -> String {
+    endpoint(&format!(
+        "actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={}&per_page=5",
+        context().head
+    ))
+}
+fn main_run() -> Value {
+    let mut run = run_record();
+    run["id"] = 9.into();
+    run["event"] = "push".into();
+    run["head_branch"] = "main".into();
+    run
+}
 fn queue_endpoint() -> String {
     endpoint(&format!(
         "actions/workflows/checks.yml/runs?event=merge_group&head_sha={}&per_page=5",
@@ -180,6 +193,47 @@ impl Fixture {
             .bytes
             .borrow_mut()
             .insert(endpoint("actions/artifacts/42/zip"), self.archive.clone());
+    }
+    /// A PR into dev whose head is main's published commit: main's push run and its
+    /// branch build, built from that head, replace the PR receipt and gated build.
+    fn via_main(&mut self) {
+        let source = self.root().join("source");
+        fs::write(
+            source.join("tooling/build-info.json"),
+            json!({"commit":context().head,"hostManagement":1}).to_string(),
+        )
+        .unwrap();
+        artifact::write_manifest(&source, "0.1.0").unwrap();
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+            vec![],
+            flate2::Compression::default(),
+        ));
+        tar.append_dir_all(".", &source).unwrap();
+        self.archive = zip(
+            "dispatch-dev.tar.gz",
+            &tar.into_inner().unwrap().finish().unwrap(),
+        );
+        self.record = json!({"name":format!("dispatch-main-{}",context().head),"id":43,"expired":false,"size_in_bytes":self.archive.len(),"digest":format!("sha256:{}",artifact::hash(&self.archive))});
+        self.env
+            .0
+            .insert("GITHUB_EVENT_NAME".into(), "pull_request".into());
+        self.env
+            .0
+            .insert("GITHUB_REF".into(), "refs/pull/1/merge".into());
+        self.env.0.insert("GITHUB_BASE_REF".into(), "dev".into());
+        self.refresh();
+        self.system.json.borrow_mut().insert(
+            main_endpoint(),
+            vec![json!({"workflow_runs":[main_run()]})].into(),
+        );
+        self.system.json.borrow_mut().insert(
+            endpoint("actions/runs/9/artifacts"),
+            vec![json!({"artifacts":[self.record]})].into(),
+        );
+        self.system
+            .bytes
+            .borrow_mut()
+            .insert(endpoint("actions/artifacts/43/zip"), self.archive.clone());
     }
     fn reuse(&self) -> Result<bool> {
         reuse(&self.system, self.root(), &self.env, &self.destination())
@@ -356,6 +410,110 @@ fn only_trusted_pushes_with_the_actual_source_and_matching_base_can_reuse() {
     f.receipt["baseRef"] = "main".into();
     f.refresh();
     assert!(f.reuse().unwrap());
+}
+#[test]
+fn a_pr_bringing_mains_published_commit_reuses_that_build_for_its_own_merge() {
+    let mut f = Fixture::new();
+    f.via_main();
+    assert!(f.reuse().unwrap());
+    let root = f.destination();
+    let manifest = artifact::verify(&root, Some(&context().commit)).unwrap();
+    assert_eq!(manifest.version, "0.1.0");
+    assert_eq!(
+        fs::read(root.join("dashboard/index.html")).unwrap(),
+        b"tested dashboard"
+    );
+    assert_eq!(
+        root.join("services/rust/dispatch-backend")
+            .metadata()
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert!(!fs::read_dir(f.root()).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("dispatch-main-build-")
+    }));
+    // An unavailable or foreign build falls back to compilation while main's validation holds.
+    for problem in ["expired", "name", "digest", "commit"] {
+        let mut f = Fixture::new();
+        f.via_main();
+        match problem {
+            "expired" => f.record["expired"] = true.into(),
+            "name" => f.record["name"] = "dispatch-dev-other".into(),
+            "digest" => f.record["digest"] = "sha256:bad".into(),
+            "commit" => {
+                f.env
+                    .0
+                    .insert("GITHUB_SHA".into(), context().commit.clone());
+                let source = f.root().join("source");
+                fs::write(
+                    source.join("tooling/build-info.json"),
+                    json!({"commit":"f".repeat(40),"hostManagement":1}).to_string(),
+                )
+                .unwrap();
+                artifact::write_manifest(&source, "0.1.0").unwrap();
+                let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+                    vec![],
+                    flate2::Compression::default(),
+                ));
+                tar.append_dir_all(".", source).unwrap();
+                f.archive = zip(
+                    "dispatch-dev.tar.gz",
+                    &tar.into_inner().unwrap().finish().unwrap(),
+                );
+                f.record["size_in_bytes"] = f.archive.len().into();
+                f.record["digest"] = format!("sha256:{}", artifact::hash(&f.archive)).into();
+                f.system
+                    .bytes
+                    .borrow_mut()
+                    .insert(endpoint("actions/artifacts/43/zip"), f.archive.clone());
+            }
+            _ => unreachable!(),
+        }
+        f.system.json.borrow_mut().insert(
+            endpoint("actions/runs/9/artifacts"),
+            vec![json!({"artifacts":[f.record]})].into(),
+        );
+        assert!(!f.reuse().unwrap(), "{problem}");
+        assert!(!f.destination().exists(), "{problem}");
+    }
+    // Without main's passed run of the head, or into another base, nothing is reused or built.
+    for state in ["failure", "pending", "missing", "during"] {
+        let mut f = Fixture::new();
+        f.via_main();
+        let mut bad = main_run();
+        bad["conclusion"] = state.into();
+        if state == "pending" {
+            bad["status"] = "in_progress".into();
+            bad["conclusion"] = Value::Null;
+        }
+        let queue = match state {
+            "missing" => vec![json!({"workflow_runs":[]})],
+            "during" => vec![
+                json!({"workflow_runs":[main_run()]}),
+                json!({"workflow_runs":[bad]}),
+            ],
+            _ => vec![json!({"workflow_runs":[bad]})],
+        };
+        f.system
+            .json
+            .borrow_mut()
+            .insert(main_endpoint(), queue.into());
+        assert!(f.reuse().unwrap_err().is::<ValidationChanged>(), "{state}");
+        assert!(!f.destination().exists(), "{state}");
+    }
+    for (key, value) in [("GITHUB_BASE_REF", "main"), ("GITHUB_SHA", "wrong")] {
+        let mut f = Fixture::new();
+        f.via_main();
+        f.env.0.insert(key.into(), value.into());
+        assert!(f.reuse().unwrap_err().is::<ValidationChanged>(), "{key}");
+    }
 }
 #[test]
 fn existing_destination_and_symlink_are_never_replaced() {
