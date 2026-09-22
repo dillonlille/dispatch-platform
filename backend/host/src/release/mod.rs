@@ -305,8 +305,11 @@ impl<'a> Release<'a> {
         } else if stage != Stage::Publish {
             let commit = self.merge_release(dev_commit)?;
             self.record_commit(&commit)?;
-            self.open_sync()?;
             let prepared = self.prepare(&commit)?;
+            // Only now has main passed its checks for this commit, so the sync PR's own run
+            // can reuse main's published build instead of validating the same tree again.
+            // It runs while the release is smoke tested, published and installed.
+            self.open_sync()?;
             self.smoke(&prepared)?;
             self.ensure_draft(&prepared)?;
             if stage == Stage::Prepare {
