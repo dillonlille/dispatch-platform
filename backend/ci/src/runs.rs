@@ -1,4 +1,3 @@
-use crate::REPOSITORY;
 use serde_json::Value;
 
 pub fn latest_run<'a>(
@@ -15,7 +14,7 @@ pub fn latest_run<'a>(
                 && r["event"] == event
                 && (skipped || r["conclusion"] != "skipped")
                 && branch.is_none_or(|b| r["head_branch"] == b)
-                && r["head_repository"]["full_name"] == REPOSITORY
+                && crate::ours(&r["head_repository"]["full_name"])
         })
         .max_by_key(|r| {
             (

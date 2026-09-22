@@ -65,7 +65,7 @@ impl Release<'_> {
         let prepared: Prepared =
             serde_json::from_value(io::read_json(&directory.join("provenance.json"))?)?;
         require(
-            prepared.repository == REPOSITORY
+            crate::REPOSITORIES.contains(&prepared.repository.as_str())
                 && prepared.version == self.version
                 && artifact::hex(&prepared.commit, 40)
                 && commit.is_none_or(|c| c == prepared.commit)

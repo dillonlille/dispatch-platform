@@ -82,7 +82,7 @@ pub fn trusted_run(run: &Value, sha: &str) -> bool {
         && (run["event"] == "pull_request" || run["event"] == "merge_group")
         && crate::runs::passed(run)
         && run["path"] == WORKFLOW
-        && run["head_repository"]["full_name"] == REPOSITORY
+        && crate::ours(&run["head_repository"]["full_name"])
 }
 pub fn read_receipt(archive: &[u8], digest: &str) -> Result<Value> {
     require(
@@ -111,7 +111,7 @@ pub fn matches(
     base_ref: &str,
 ) -> bool {
     receipt["format"] == 1
-        && receipt["repository"] == REPOSITORY
+        && crate::ours(&receipt["repository"])
         && receipt["workflow"] == WORKFLOW
         && receipt["baseRef"] == base_ref
         && receipt["runId"].as_u64().is_some()
@@ -348,7 +348,7 @@ impl Policy<'_> {
             event["before"].as_str()
         } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
             let pr = &event["pull_request"];
-            if pr["head"]["repo"]["full_name"] == REPOSITORY
+            if crate::ours(&pr["head"]["repo"]["full_name"])
                 && let Ok(Some(context)) = self.context()
                 && pr["head"]["sha"] == context.head
                 && let Ok(Some(run)) = self.brings_main(&context)
@@ -420,8 +420,8 @@ impl Policy<'_> {
         } else {
             env.get("GITHUB_EVENT_NAME") == "pull_request"
                 && pr["draft"] == false
-                && pr["base"]["repo"]["full_name"] == REPOSITORY
-                && pr["head"]["repo"]["full_name"] == REPOSITORY
+                && crate::ours(&pr["base"]["repo"]["full_name"])
+                && crate::ours(&pr["head"]["repo"]["full_name"])
                 && pr["base"]["sha"] == context.base
                 && pr["head"]["sha"] == context.head
         };

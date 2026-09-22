@@ -650,6 +650,52 @@ fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
     assert!(f.policy().receipt(&env, &event(), "dashboard").is_ok());
 }
 #[test]
+fn both_repository_names_are_this_repository_and_nothing_else_is() {
+    for name in REPOSITORIES {
+        assert!(ours(&json!(name)), "{name}");
+        assert_eq!(
+            web_path(&format!("https://github.com/{name}/releases/latest")),
+            Some("releases/latest")
+        );
+    }
+    for other in [
+        json!("other/dispatch-platform"),
+        json!("dispatch-systems/dispatch-platform-fork"),
+        json!("dispatch-systems"),
+        json!(""),
+        json!(null),
+        json!(["dispatch-systems/dispatch-platform"]),
+    ] {
+        assert!(!ours(&other), "{other}");
+    }
+    for url in [
+        "https://github.com/dispatch-systems/dispatch-platform-fork/releases/latest",
+        "https://github.com/dispatch-systems/dispatch-platform",
+        "http://github.com/dispatch-systems/dispatch-platform/releases/latest",
+        "https://github.com.evil/dispatch-systems/dispatch-platform/releases/latest",
+    ] {
+        assert_eq!(web_path(url), None, "{url}");
+    }
+    // Runs, PRs and receipts reported under the organization name keep validating.
+    let moved = "dispatch-systems/dispatch-platform";
+    let f = Fixture::new();
+    let mut run = run();
+    run["head_repository"]["full_name"] = moved.into();
+    assert!(trusted_run(&run, &context().head));
+    let mut receipt = receipt();
+    receipt["repository"] = moved.into();
+    assert!(matches(&receipt, &run, &context(), "full", "dev"));
+    let mut pr = event();
+    pr["pull_request"]["base"]["repo"]["full_name"] = moved.into();
+    pr["pull_request"]["head"]["repo"]["full_name"] = moved.into();
+    let env = environment("pull_request", "refs/pull/1/merge");
+    assert!(f.policy().receipt(&env, &pr, "full").is_ok());
+    pr["pull_request"]["head"]["repo"]["full_name"] = "other/dispatch-platform".into();
+    assert!(f.policy().receipt(&env, &pr, "full").is_err());
+    run["head_repository"]["full_name"] = "other/dispatch-platform".into();
+    assert!(!trusted_run(&run, &context().head));
+}
+#[test]
 fn gate_requires_every_expected_job_in_every_mode() {
     for mode in ["full", "dashboard", "reuse"] {
         let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"browser":{"result":if mode=="reuse"{"skipped"}else{"success"}},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
