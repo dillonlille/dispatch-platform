@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::{
     fs::{self, File},
     io::{Read, Write},
-    os::unix::fs::{DirBuilderExt, MetadataExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -23,6 +23,15 @@ pub trait System {
         timeout: u64,
         output: Option<&Path>,
     ) -> Result<Vec<u8>>;
+    fn bootstrap(
+        &self,
+        _args: &[&str],
+        _cwd: &Path,
+        _env: &std::collections::BTreeMap<String, String>,
+        _input: &[u8],
+    ) -> Result<()> {
+        Err("Bootstrap execution unavailable".into())
+    }
     fn request(&self, url: &str, head: bool, follow: bool, timeout: u64) -> Result<Response>;
     fn now(&self) -> f64 {
         SystemTime::now()
@@ -48,6 +57,16 @@ impl System for Native {
         output: Option<&Path>,
     ) -> Result<Vec<u8>> {
         dispatch_ci::process::command(args, cwd, timeout, output)
+    }
+
+    fn bootstrap(
+        &self,
+        args: &[&str],
+        cwd: &Path,
+        env: &std::collections::BTreeMap<String, String>,
+        input: &[u8],
+    ) -> Result<()> {
+        dispatch_ci::process::isolated(args, cwd, 120, env, input)
     }
 
     fn request(&self, url: &str, head: bool, follow: bool, timeout: u64) -> Result<Response> {
@@ -140,4 +159,23 @@ pub fn remove_receipt(filename: &Path) -> Result<()> {
 }
 pub fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or("").into()
+}
+
+pub struct ExclusiveLock(fs::File);
+impl ExclusiveLock {
+    pub fn acquire(path: &Path) -> Result<Self> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)?;
+        fs2::FileExt::try_lock_exclusive(&file)?;
+        Ok(Self(file))
+    }
+}
+impl Drop for ExclusiveLock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
 }

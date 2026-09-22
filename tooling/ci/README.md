@@ -1,10 +1,10 @@
 # CI policy
 
 `backend/ci` owns conservative check selection, PR validation receipts and the
-required-job gate. It builds as `dispatch-ci` in the debug profile so the planner
+required-job gate, Rust build cache and PR preflight. It builds as `dispatch-ci` in the debug profile so the planner
 can start inside its existing three-minute job budget without compiling the host
-manager's networking stack. The existing `ci-plan.py` and `ci-gate.py` command
-paths are bootstrap adapters. Cargo selects the configured target directory.
+manager's networking stack. The existing `ci-plan.py`, `ci-gate.py`, `cargo-build.py` and
+`ci/pr-prepare.py` paths are bootstrap adapters. Cargo selects the configured target directory.
 
 The planner chooses full validation for backend, shared, infrastructure or
 unknown changes. Dashboard code, listed dashboard tests, browser TypeScript and
@@ -27,8 +27,22 @@ validation again; revoked or unavailable validation fails the job because other
 suites may already have been skipped.
 
 A promoted binary seeds the Rust build cache only when Cargo's current compiler
-and source fingerprint equals the key recorded by the PR. `cargo-build.py`
-continues to own build bootstrap and fingerprint calculation.
+and source fingerprint equals the key recorded by the PR. Fingerprints, cache
+eligibility, atomic copies, digest checks, locking and pruning live in
+`backend/ci/src/cache`. The fingerprint includes embedded manager launchers,
+Rust sources, schemas, provider scripts, Cargo inputs, compiler identity and
+compiler environment. Schema 3 deliberately invalidates Python-era cache keys.
+
+Local worktrees share at most eight recently used entries under Git's common
+`dispatch-rust-builds` directory. Each restored binary is a separate copy. Pruning
+skips locked entries; readers recheck lock identity after concurrent pruning.
+Custom build scripts, Cargo configuration, compiler overrides and dependencies
+outside `backend` disable reuse. CI reuse additionally requires the explicit
+`.ci-rust-cache` path and the selected key to match current inputs.
+
+`npm run pr:prepare` checks the feature branch, committed changes, fetched Dev
+ancestry and other ready PRs through Rust. `--allow-concurrent` retains the
+explicit override for intentional overlapping work.
 
 Run policy and promotion tests with:
 
