@@ -54,3 +54,10 @@ python3 -m unittest discover -s tests/tooling -p '*_test.py'
 The final `platform` job requires every expected job result, including every
 collector shard and Rust advisories. Artifact publication still happens only
 after that gate succeeds. Draft PRs produce no validation receipt.
+
+`.github/actions/setup-tools` restores `dispatch-ci`, `dispatch-host` and the browser
+assessment fixture that a trusted branch built from identical inputs, keyed by the Rust
+inputs, the pinned toolchain and the runner image. Launchers use a restored tool only on
+CI and only from the workspace's own `.ci-tools` directory; otherwise they build with
+Cargo exactly as before. Only the `tools` job on `dev` and `main` pushes saves those
+caches, and the pinned Playwright browser, off the critical path.

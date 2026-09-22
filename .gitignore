@@ -29,3 +29,6 @@ target/
 /.platform.lock
 
 .ci-rust-cache/
+
+# Prebuilt CI tools restored by .github/actions/setup-tools.
+.ci-tools/
