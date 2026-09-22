@@ -44,10 +44,14 @@ async fn proxy() -> Result<Proxy> {
 pub(super) struct Notes(Arc<std::sync::Mutex<String>>);
 impl Notes {
     const KEEP: usize = 2000;
-    fn collect(&self, output: Option<impl tokio::io::AsyncRead + Unpin + Send + 'static>) {
-        let Some(output) = output else { return };
+    /// Keep draining `output` into the tail; the handle finishes when the output closes.
+    pub(super) fn collect(
+        &self,
+        output: Option<impl tokio::io::AsyncRead + Unpin + Send + 'static>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let output = output?;
         let notes = self.clone();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             let mut reader = BufReader::new(output);
             let mut line = String::new();
             while reader.read_line(&mut line).await.is_ok_and(|read| read > 0) {
@@ -63,9 +67,9 @@ impl Notes {
                 }
                 line.clear();
             }
-        });
+        }))
     }
-    fn tail(&self) -> String {
+    pub(super) fn tail(&self) -> String {
         self.0
             .lock()
             .map(|kept| kept.trim().replace('\n', " | "))
