@@ -56,5 +56,8 @@ remove that journal or the private state to force a retry.
 
 Fresh setup installs all manager files together. Later explicit
 `--install-management` operations retain the previous complete installation for
-recovery, as described in [the Dev host guide](DEV-HOST.md). Production manager
-updates remain separate from runtime releases and require explicit authorization.
+recovery, as described in [the Dev host guide](DEV-HOST.md). After each healthy
+activation of a verified release, Production adopts that release's own updater once
+it passes a self-check, as Dev does on every check. It never does so on an ordinary
+check, so an updater restored by hand stays until the next release, and the previous
+release's copy remains in its retained runtime.

@@ -731,6 +731,51 @@ fn installed_management_survives_old_runtime_and_source_rollback() {
     u.verify().unwrap();
 }
 #[test]
+fn production_adopts_the_updater_of_each_release_it_installs_and_only_then() {
+    let f = Fixture::new(Environment::Production);
+    let u = f.updater();
+    // Today's updater came from the running release.
+    artifact(&u.active, &f.old, "0.1.0", true);
+    management::install(&u).unwrap();
+    let installed = management::directory(&u).join("dispatch-host");
+    let original = fs::read(&installed).unwrap();
+    // An ordinary check leaves a hand-restored updater alone, even when it differs.
+    fs::write(
+        &installed,
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # restored\n",
+    )
+    .unwrap();
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
+    );
+    u.run_locked().unwrap();
+    assert!(fs::read_to_string(&installed).unwrap().contains("restored"));
+    fs::write(&installed, &original).unwrap();
+    // The next release brings its own updater, which replaces the installed one.
+    let backend = f.candidate.join("services/rust/dispatch-backend");
+    fs::write(
+        &backend,
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # 0.1.1\n",
+    )
+    .unwrap();
+    fs::write(
+        f.candidate.join("tooling/build-info.json"),
+        json!({"commit":f.new,"hostManagement":1}).to_string(),
+    )
+    .unwrap();
+    artifact::write_manifest(&f.candidate, "0.1.1").unwrap();
+    let release = f.production_release();
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![release],
+    );
+    u.run_locked().unwrap();
+    assert_eq!(artifact::verify(&u.active, None).unwrap().version, "0.1.1");
+    assert!(!management::drift(&u).unwrap());
+    assert!(fs::read_to_string(&installed).unwrap().contains("# 0.1.1"));
+}
+#[test]
 fn broken_management_self_check_preserves_working_copy() {
     let f = Fixture::new(Environment::Dev);
     let u = f.updater();

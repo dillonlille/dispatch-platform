@@ -530,6 +530,10 @@ impl<'a> Updater<'a> {
             }
             return Err(error);
         }
-        Ok(())
+        // Adopt the updater the release just proved healthy, as Dev does. Only after an
+        // activation, never on an ordinary tick, so an operator who restores the previous
+        // updater by hand keeps it until the next release. A copy that fails its own
+        // self-check is not installed and the running updater stays.
+        management::refresh(self)
     }
 }
