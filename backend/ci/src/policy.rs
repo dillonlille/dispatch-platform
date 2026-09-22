@@ -174,7 +174,10 @@ impl Policy<'_> {
         )?)?)
     }
     pub fn changes(&self, base: &str) -> Result<Vec<String>> {
-        let output = self.git(&["diff", "--no-renames", "--name-only", "-z", base, "HEAD"])?;
+        self.changes_between(base, "HEAD")
+    }
+    pub fn changes_between(&self, base: &str, head: &str) -> Result<Vec<String>> {
+        let output = self.git(&["diff", "--no-renames", "--name-only", "-z", base, head])?;
         require(
             output.is_empty() || output.ends_with('\0'),
             "Incomplete changed paths",
@@ -182,18 +185,28 @@ impl Policy<'_> {
         Ok(output.split_terminator('\0').map(str::to_owned).collect())
     }
     pub fn scope(&self, base: &str) -> Result<&'static str> {
+        self.scope_between(base, "HEAD")
+    }
+    pub fn scope_between(&self, base: &str, head: &str) -> Result<&'static str> {
         let plan: Value =
             serde_json::from_slice(&fs::read(self.root.join("tooling/ci/test-plan.json"))?)?;
         let tests: Vec<String> = serde_json::from_value(plan["dashboard"].clone())?;
-        Ok(scope(&self.changes(base)?, &tests))
+        Ok(scope(&self.changes_between(base, head)?, &tests))
     }
     pub fn context(&self) -> Result<Option<Context>> {
-        let output = self.git(&["rev-list", "--parents", "-n", "1", "HEAD"])?;
+        self.context_at("HEAD")
+    }
+    /// The merge `rev` records: its parents and tree. None for a commit that is not a merge.
+    pub fn context_at(&self, rev: &str) -> Result<Option<Context>> {
+        let output = self.git(&["rev-list", "--parents", "-n", "1", rev])?;
         let parts: Vec<_> = output.split_whitespace().collect();
         if parts.len() != 3 {
             return Ok(None);
         }
-        let tree = self.git(&["rev-parse", "HEAD^{tree}"])?.trim().to_owned();
+        let tree = self
+            .git(&["rev-parse", &format!("{rev}^{{tree}}")])?
+            .trim()
+            .to_owned();
         require(
             parts.iter().all(|p| hex(p, 40)) && hex(&tree, 40),
             "Invalid merge context",
@@ -318,11 +331,7 @@ impl Policy<'_> {
             "Validation archive size mismatch",
         )?;
         let receipt = read_receipt(&archive, record["digest"].as_str().unwrap_or(""))?;
-        let expected = if base_ref == "dev" {
-            self.scope(&context.base)?
-        } else {
-            "full"
-        };
+        let expected = self.scope_between(&context.base, &context.commit)?;
         Ok(
             matches(&receipt, run, context, expected, base_ref).then(|| Validation {
                 run: run.clone(),
@@ -352,16 +361,17 @@ impl Policy<'_> {
                     ),
                 );
             }
-            if reference != "refs/heads/dev" {
-                return (
-                    "full",
-                    "Full validation for a release without reusable PR validation".into(),
-                );
-            }
             event["before"].as_str()
-        } else if name == "pull_request" && event["pull_request"]["base"]["ref"] == "dev" {
+        } else if name == "pull_request"
+            && matches!(
+                event["pull_request"]["base"]["ref"].as_str(),
+                Some("dev" | "main")
+            )
+        {
             let pr = &event["pull_request"];
-            if crate::ours(&pr["head"]["repo"]["full_name"])
+            // Bringing main back into dev after a release: main's own build is this merge's.
+            if pr["base"]["ref"] == "dev"
+                && crate::ours(&pr["head"]["repo"]["full_name"])
                 && let Ok(Some(context)) = self.context()
                 && pr["head"]["sha"] == context.head
                 && let Ok(Some(run)) = self.brings_main(&context)
@@ -375,15 +385,27 @@ impl Policy<'_> {
                 );
             }
             pr["base"]["sha"].as_str()
-        } else if name == "merge_group" && event["merge_group"]["base_ref"] == "refs/heads/dev" {
+        } else if name == "merge_group"
+            && matches!(
+                event["merge_group"]["base_ref"].as_str(),
+                Some("refs/heads/dev" | "refs/heads/main")
+            )
+        {
             let group = &event["merge_group"];
-            // A group of one PR that is still current with dev merges the same base, head and
-            // tree its own run already validated; a batched or stale group does not.
+            let base_ref = if group["base_ref"] == "refs/heads/main" {
+                "main"
+            } else {
+                "dev"
+            };
+            // A group of one PR that is still current with its branch merges the same base,
+            // head and tree its own run already validated; a batched or stale group does not.
             if let Ok(Some(context)) = self.context()
                 && group["head_sha"] == context.commit
                 && group["base_sha"] == context.base
             {
-                if let Ok(Some(run)) = self.brings_main(&context) {
+                if base_ref == "dev"
+                    && let Ok(Some(run)) = self.brings_main(&context)
+                {
                     return (
                         "reuse",
                         format!(
@@ -392,7 +414,7 @@ impl Policy<'_> {
                         ),
                     );
                 }
-                if let Ok(Some(validation)) = self.validated_pull(&context, "dev") {
+                if let Ok(Some(validation)) = self.validated_pull(&context, base_ref) {
                     return (
                         "reuse",
                         format!(
@@ -455,14 +477,14 @@ impl Policy<'_> {
         // and otherwise the scope the PR run recorded for this very merge.
         let selected = if selected == "reuse" {
             require(
-                source && base_ref == "dev",
-                "Reuse receipts require a same-repository merge into dev",
+                source && matches!(base_ref, "dev" | "main"),
+                "Reuse receipts require a same-repository merge into a trusted branch",
             )?;
-            if self.brings_main(&context)?.is_some() {
+            if base_ref == "dev" && self.brings_main(&context)?.is_some() {
                 "full"
             } else {
                 let validated = self
-                    .validated_pull(&context, "dev")?
+                    .validated_pull(&context, base_ref)?
                     .ok_or("Reuse receipts require main's tree or this merge's own PR run")?;
                 require(
                     queued && group["base_sha"] == context.base,
@@ -481,7 +503,6 @@ impl Policy<'_> {
             source
                 && matches!(selected, "full" | "dashboard")
                 && matches!(base_ref, "dev" | "main")
-                && (base_ref == "dev" || selected == "full")
                 && context.commit == env.get("GITHUB_SHA"),
             "Validation receipt requires the actual same-repository PR merge",
         )?;

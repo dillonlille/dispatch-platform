@@ -575,8 +575,21 @@ fn a_merge_queue_group_promotes_the_gated_build_of_the_pr_run_that_validated_it(
         fs::read(f.destination().join("services/rust/dispatch-backend")).unwrap(),
         b"tested backend"
     );
-    // A group queued for another branch, or one whose PR run validated another merge, is not
-    // covered by that run, and neither is a group whose validation was revoked meanwhile.
+    // main's queue works the same way once the PR run recorded main as its target.
+    let mut f = Fixture::new();
+    f.receipt["baseRef"] = "main".into();
+    f.refresh();
+    let env = queued(&f, "refs/heads/gh-readonly-queue/main/pr-1-b");
+    let runner = Runner(&f.system);
+    let policy = Policy {
+        root: f.root(),
+        runner: &runner,
+    };
+    restore(&f.system, &policy, &env, &f.destination()).unwrap();
+    artifact::verify(&f.destination(), Some(&context().commit)).unwrap();
+    // A group queued for another branch than its PR run recorded, or one whose PR run
+    // validated another merge, is not covered by that run, and neither is a group whose
+    // validation was revoked meanwhile.
     for (reference, revoke) in [
         ("refs/heads/gh-readonly-queue/main/pr-1-b", false),
         (group, true),
