@@ -115,7 +115,9 @@ pub(super) fn launch(runtime: &Runtime, run: &Path, profile: &Path, mode: Mode) 
         .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Drained into a short tail by the supervisor, so a sandbox that fails before its
+        // worker runs can still say why.
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
     Ok(command.spawn()?)
 }
