@@ -1,6 +1,8 @@
+# The platform version lives in package.json. Crate versions stay fixed so a release
+# bump leaves the Rust inputs, and the cached release backend, unchanged.
 [package]
 name = "dispatch-ci"
-version = "0.0.17"
+version = "0.0.0"
 edition = "2024"
 rust-version = "1.94"
 publish = false
