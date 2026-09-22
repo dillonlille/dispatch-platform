@@ -744,6 +744,39 @@ fn publication_response_loss_and_production_failure_resume_without_republishing_
 }
 
 #[test]
+fn the_sync_pr_opens_only_after_mains_checks_pass() {
+    let sync = ["--head", "chore/sync-main-v1.0.0"];
+    let f = Fixture::new();
+    let release = f.release();
+    io::private_directory(&release.directory).unwrap();
+    fs::write(&release.notes, "Notes").unwrap();
+    f.system.runs.borrow_mut()[0]["conclusion"] = json!("failure");
+    assert!(release.execute(Stage::Prepare, None).is_err());
+    assert!(!f.system.has_call(&sync));
+    f.system.runs.borrow_mut()[0]["conclusion"] = json!("success");
+    f.system.calls.borrow_mut().clear();
+    assert_eq!(
+        release.execute(Stage::Prepare, None).unwrap()["stage"],
+        "draft-verified"
+    );
+    let calls = f.system.calls.borrow();
+    let checked = calls
+        .iter()
+        .position(|call| {
+            call.iter()
+                .any(|word| word.contains("event=push&head_sha="))
+        })
+        .unwrap();
+    let opened = calls
+        .iter()
+        .position(|call| call.windows(2).any(|pair| pair == sync))
+        .unwrap();
+    assert!(
+        checked < opened,
+        "the sync PR was looked up before main's checks"
+    );
+}
+#[test]
 fn smoke_failure_stops_draft_creation_and_publish_needs_preparation() {
     let f = Fixture::new();
     let release = f.release();

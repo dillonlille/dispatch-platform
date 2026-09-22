@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 
-REPOSITORY = "dillonlille/dispatch-platform"
+REPOSITORY = "dispatch-systems/dispatch-platform"
 MANAGED = {"dashboard", "services", "tooling", "release.json"}
 MAX_BYTES = 1024 * 1024 * 1024
 STABLE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
