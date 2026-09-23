@@ -70,7 +70,7 @@ fn employees(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
         _ => None,
     };
     let page = db.employees(c.dsp_id(), query, offset, limit, desc, active)?;
-    Ok(Reply::json(serde_json::to_value(page)?))
+    Reply::of(&page)
 }
 
 fn employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -89,11 +89,7 @@ fn employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     } else {
         None
     };
-    Ok(Reply::json(serde_json::to_value(db.employee_timecard(
-        c.dsp_id(),
-        input.param("code"),
-        period.as_ref(),
-    )?)?))
+    Reply::of(&db.employee_timecard(c.dsp_id(), input.param("code"), period.as_ref())?)
 }
 
 fn timecards(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -101,12 +97,7 @@ fn timecards(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(q, &["date", "sort", "direction"])?;
     let sort = optional(q, "sort", |q, key| v::choice(q, key, SORTS))?.unwrap_or("name");
     let date = v::text(q, "date", 10, 10)?;
-    Ok(Reply::json(serde_json::to_value(db.daily(
-        c.dsp_id(),
-        date,
-        sort,
-        descending(q)?,
-    )?)?))
+    Reply::of(&db.daily(c.dsp_id(), date, sort, descending(q)?)?)
 }
 
 fn sync_employee(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
@@ -162,14 +153,14 @@ fn save_paycom_settings(db: &Store, c: &Member, input: &Input) -> Result<Reply> 
 fn meal_comparison(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(&input.query, &["date"])?;
     let date = v::text(&input.query, "date", 10, 10)?;
-    let comparison = c.state.read_cache.read(
+    let comparison = c.state.read_cache.json(
         format!("meals:{}:{}:{}", c.dsp_id(), date, c.dsp.timezone),
         c.state
             .data_revision
             .load(std::sync::atomic::Ordering::Relaxed),
         || db.meal_comparison(c.dsp_id(), date, c.dsp.timezone.as_str()),
     )?;
-    Ok(Reply::json(serde_json::to_value(comparison)?))
+    Ok(Reply::encoded(comparison))
 }
 
 fn save_employee_links(db: &Store, c: &Member, input: &Input) -> Result<Reply> {

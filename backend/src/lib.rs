@@ -139,7 +139,9 @@ impl State {
                 lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
                 work_started = std::time::Instant::now();
                 // Advance even on errors: a multi-database operation may have partially written.
-                state.data_revision.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                state
+                    .data_revision
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 f(&db)
             } else {
                 let _guard = state
@@ -152,7 +154,14 @@ impl State {
             };
             let work_ms = work_started.elapsed().as_secs_f64() * 1000.0;
             if queued_ms + lock_ms + work_ms >= 25.0 {
-                observability::event("info", "database.slow", serde_json::json!({"write":write,"queueMs":queued_ms,"lockMs":lock_ms,"workMs":work_ms,"totalMs":started.elapsed().as_secs_f64()*1000.0}));
+                observability::event(
+                    "info",
+                    "database.slow",
+                    serde_json::json!({
+                        "write":write, "queueMs":queued_ms, "lockMs":lock_ms, "workMs":work_ms,
+                        "totalMs":started.elapsed().as_secs_f64()*1000.0
+                    }),
+                );
             }
             state
                 .pool

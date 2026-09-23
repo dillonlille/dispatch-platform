@@ -2,6 +2,7 @@
 use crate::{Error, Result, accounts::SessionLifetime, ensure, validate as v};
 use axum::{
     Json,
+    body::Bytes,
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -48,8 +49,13 @@ impl Input {
     }
 }
 
+enum Payload {
+    Value(Value),
+    Encoded(Bytes),
+}
+
 pub struct Reply {
-    value: Value,
+    value: Payload,
     status: u16,
     cookie: Option<String>,
 }
@@ -62,15 +68,27 @@ impl Reply {
         Self::of_status(value, 200)
     }
     pub fn of_status<T: serde::Serialize>(value: &T, status: u16) -> Result<Self> {
-        Ok(Self::status(serde_json::to_value(value)?, status))
+        Ok(Self {
+            value: Payload::Encoded(Bytes::from(serde_json::to_vec(value)?)),
+            status,
+            cookie: None,
+        })
     }
     pub fn ok() -> Self {
         Self::json(json!({"ok":true}))
     }
     pub fn status(value: Value, status: u16) -> Self {
         Self {
-            value,
+            value: Payload::Value(value),
             status,
+            cookie: None,
+        }
+    }
+    /// JSON already serialized by a trusted response producer, never raw request input.
+    pub(super) fn encoded(value: Bytes) -> Self {
+        Self {
+            value: Payload::Encoded(value),
+            status: 200,
             cookie: None,
         }
     }
@@ -93,8 +111,16 @@ impl Reply {
 }
 impl IntoResponse for Reply {
     fn into_response(self) -> Response {
-        let mut response =
-            (StatusCode::from_u16(self.status).unwrap(), Json(self.value)).into_response();
+        let status = StatusCode::from_u16(self.status).unwrap();
+        let mut response = match self.value {
+            Payload::Value(value) => (status, Json(value)).into_response(),
+            Payload::Encoded(value) => (
+                status,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                value,
+            )
+                .into_response(),
+        };
         if let Some(cookie) = self.cookie
             && let Ok(value) = cookie.parse()
         {
@@ -130,4 +156,22 @@ pub fn query_number(q: &Value, key: &str, default: usize, min: usize, max: usize
     };
     ensure((min..=max).contains(&n), "invalid_input", 400)?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn encoded_replies_preserve_json_status_and_cookies() {
+        let value = json!({"rows":[{"name":"Álvaro","hours":8.5}]});
+        let reply = Reply::of_status(&value, 201)
+            .unwrap()
+            .cookie("test=value".into())
+            .into_response();
+        assert_eq!(reply.status(), 201);
+        assert_eq!(reply.headers()["content-type"], "application/json");
+        assert_eq!(reply.headers()["set-cookie"], "test=value");
+        let body = axum::body::to_bytes(reply.into_body(), 1024).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), value);
+    }
 }

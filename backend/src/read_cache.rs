@@ -27,6 +27,31 @@ impl ReadCache {
         revision: u64,
         load: impl FnOnce() -> Result<T>,
     ) -> Result<T> {
+        self.read_sized(key, revision, load, |value| {
+            Ok(serde_json::to_vec(value)?.len().saturating_mul(2))
+        })
+    }
+    /// Retain one encoded response; Bytes clones share its allocation across viewers.
+    pub fn json<T: Serialize>(
+        &self,
+        key: String,
+        revision: u64,
+        load: impl FnOnce() -> Result<T>,
+    ) -> Result<axum::body::Bytes> {
+        self.read_sized(
+            key,
+            revision,
+            || Ok(axum::body::Bytes::from(serde_json::to_vec(&load()?)?)),
+            |bytes| Ok(bytes.len()),
+        )
+    }
+    fn read_sized<T: Clone + Send + 'static>(
+        &self,
+        key: String,
+        revision: u64,
+        load: impl FnOnce() -> Result<T>,
+        size: impl FnOnce(&T) -> Result<usize>,
+    ) -> Result<T> {
         // Do not serialize unrelated readers behind an expensive calculation.
         if let Ok(mut entries) = self.entries.lock() {
             entries.retain(|entry| {
@@ -42,7 +67,7 @@ impl ReadCache {
             }
         }
         let value = load()?;
-        let bytes = serde_json::to_vec(&value)?.len().saturating_mul(2);
+        let bytes = size(&value)?;
         const BYTES: usize = 8 * 1024 * 1024;
         if bytes <= BYTES
             && let Ok(mut entries) = self.entries.lock()
@@ -82,6 +107,23 @@ mod tests {
         );
         assert_eq!(cache.read("dsp:b:day".into(), 1, || Ok(9)).unwrap(), 9);
         assert_eq!(cache.read("dsp:a:day".into(), 2, || Ok(10)).unwrap(), 10);
+    }
+    #[test]
+    fn encoded_results_share_storage_and_remain_json() {
+        let cache = ReadCache::default();
+        let first = cache
+            .json("meals".into(), 1, || {
+                Ok(serde_json::json!({"rows":[1,2,3]}))
+            })
+            .unwrap();
+        let second = cache
+            .json("meals".into(), 1, || -> Result<()> { panic!("must reuse") })
+            .unwrap();
+        assert_eq!(first.as_ptr(), second.as_ptr());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&second).unwrap(),
+            serde_json::json!({"rows":[1,2,3]})
+        );
     }
     #[test]
     fn oversized_results_and_errors_are_not_cached() {

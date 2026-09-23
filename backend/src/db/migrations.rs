@@ -302,7 +302,14 @@ mod tests {
         let root = private();
         let file = root.path().join("paycom.sqlite");
         let db = Db::create(&file, Kind::Paycom, "").unwrap();
-        let plan = db.all("EXPLAIN QUERY PLAN SELECT p.id FROM publications p JOIN employees e ON e.publication_id=p.id WHERE e.code='E001' ORDER BY p.period_to DESC LIMIT 1", []).unwrap();
+        let plan = db
+            .all(
+                "EXPLAIN QUERY PLAN SELECT p.id FROM publications p \
+            JOIN employees e ON e.publication_id=p.id WHERE e.code='E001' \
+            ORDER BY p.period_to DESC LIMIT 1",
+                [],
+            )
+            .unwrap();
         assert!(
             plan.iter().any(|row| row["detail"]
                 .as_str()
