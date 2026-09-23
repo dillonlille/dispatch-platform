@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import {
   Building2,
   CalendarDays,
@@ -11,22 +11,42 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
-import { AuditPage } from '../features/audit/index.js';
-import { HomePage } from '../features/home/index.js';
-import { DiagnosticsPage, DspList, DspPicker } from '../features/platform/index.js';
-import { SettingsPage } from '../features/settings/index.js';
-import { TeamPage } from '../features/team/index.js';
-import { UniformInventoryPage } from '../features/uniforms/index.js';
-import { PaycomPage, PaycomSettingsPage } from '../features/timecard/index.js';
-import { ErrorBox } from '../ui/index.js';
+import { ErrorBox, Loading, PageBoundary } from '../ui/index.js';
 import { can } from './permissions.js';
 import { routeMeta, type DspRouteId, type PlatformRouteId, type RouteMeta } from './route-meta.js';
+
+const loadAudit = () => import('../features/audit/index.js');
+const AuditPage = lazy(() => loadAudit().then((module) => ({ default: module.AuditPage })));
+const loadHome = () => import('../features/home/index.js');
+const HomePage = lazy(() => loadHome().then((module) => ({ default: module.HomePage })));
+const loadPlatform = () => import('../features/platform/index.js');
+const DiagnosticsPage = lazy(() =>
+  loadPlatform().then((module) => ({ default: module.DiagnosticsPage })),
+);
+const DspList = lazy(() => loadPlatform().then((module) => ({ default: module.DspList })));
+const DspPicker = lazy(() => loadPlatform().then((module) => ({ default: module.DspPicker })));
+const loadSettings = () => import('../features/settings/index.js');
+const SettingsPage = lazy(() =>
+  loadSettings().then((module) => ({ default: module.SettingsPage })),
+);
+const loadTeam = () => import('../features/team/index.js');
+const TeamPage = lazy(() => loadTeam().then((module) => ({ default: module.TeamPage })));
+const loadUniforms = () => import('../features/uniforms/index.js');
+const UniformInventoryPage = lazy(() =>
+  loadUniforms().then((module) => ({ default: module.UniformInventoryPage })),
+);
+const loadTimecard = () => import('../features/timecard/index.js');
+const PaycomPage = lazy(() => loadTimecard().then((module) => ({ default: module.PaycomPage })));
+const PaycomSettingsPage = lazy(() =>
+  loadTimecard().then((module) => ({ default: module.PaycomSettingsPage })),
+);
 
 type Access = { session: SessionView; view?: DspView };
 type PageContext = { session: SessionView };
 type DspPageContext = PageContext & { view: DspView; reopen: () => Promise<void> };
 type Entry<Context> = {
   icon?: LucideIcon;
+  preload: () => Promise<unknown>;
   /** Whether the sidebar lists the page. */
   nav: boolean | ((access: Access) => boolean);
   /** Who may open the page; omitted means everyone in the scope. */
@@ -42,16 +62,19 @@ const platformOwner = ({ session }: Access) => session.user.platformOwner;
 // Every page declared in route-meta.ts gets its navigation, access and component here.
 const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
   uniforms: {
+    preload: loadUniforms,
     icon: Shirt,
     nav: true,
     render: ({ view }) => <UniformInventoryPage key={view.token} view={view} />,
   },
   overview: {
+    preload: loadHome,
     icon: House,
     nav: true,
     render: () => <HomePage />,
   },
   paycom: {
+    preload: loadTimecard,
     icon: CalendarDays,
     nav: true,
     // The link stays put while a view loads; the page itself waits for the view.
@@ -59,11 +82,13 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
     render: ({ view }) => <PaycomPage view={view} />,
   },
   'paycom-settings': {
+    preload: loadTimecard,
     nav: false,
     permission: ({ view }) => can(view, 'timecard.manage'),
     render: ({ view }) => <PaycomSettingsPage dspId={view.dsp.id} />,
   },
   team: {
+    preload: loadTeam,
     icon: Users,
     nav: true,
     permission: ({ view }) =>
@@ -71,6 +96,7 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
     render: ({ view, reopen }) => <TeamPage view={view} reopen={reopen} />,
   },
   settings: {
+    preload: loadSettings,
     icon: Settings,
     nav: true,
     render: ({ session, view }) => <SettingsPage session={session} view={view} />,
@@ -78,24 +104,28 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
 };
 const platformPages: Record<PlatformRouteId, Entry<PageContext>> = {
   dsps: {
+    preload: loadPlatform,
     icon: Building2,
     nav: true,
     render: ({ session }) =>
       session.user.platformOwner ? <DspList /> : <DspPicker session={session} />,
   },
   jobs: {
+    preload: loadPlatform,
     icon: FlaskConical,
     nav: true,
     permission: platformOwner,
     render: () => <DiagnosticsPage />,
   },
   audit: {
+    preload: loadAudit,
     icon: ScrollText,
     nav: true,
     permission: platformOwner,
     render: () => <AuditPage />,
   },
   account: {
+    preload: loadSettings,
     icon: Settings,
     nav: platformOwner,
     render: ({ session }) => <SettingsPage session={session} />,
@@ -118,7 +148,7 @@ export const navigation = (scope: Route['scope'], access: Access) =>
   );
 
 /** The page for an address, or the app's wording for one this person cannot open. */
-export function Page({
+function PageContent({
   page,
   reopen,
   ...context
@@ -138,5 +168,15 @@ export function Page({
     <ErrorBox message="Page not found." />
   ) : (
     <DspPicker session={session} />
+  );
+}
+
+export function Page(props: Parameters<typeof PageContent>[0]) {
+  return (
+    <PageBoundary key={props.page}>
+      <Suspense fallback={<Loading />}>
+        <PageContent {...props} />
+      </Suspense>
+    </PageBoundary>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { UniformAdjustment, UniformInventory } from '../../../../shared/contracts/uniforms.js';
+import { dataCache } from '../../app/data-cache.js';
 import { ApiError } from '../../app/api.js';
 import { getUniformUpdates } from '../../app/endpoints.js';
 import { backoff } from '../../lib/backoff.js';
@@ -13,7 +14,13 @@ import {
 export type InventoryStatus = 'connecting' | 'live' | 'reconnecting' | 'paused' | 'unavailable';
 
 export function useUniformInventory(token: string) {
-  const [data, setData] = useState<UniformInventory>();
+  const cacheKey = `/api/dsp/uniforms/snapshot?view=${encodeURIComponent(token)}`;
+  const [data, setData] = useState<UniformInventory | undefined>(
+    () => dataCache.peek(cacheKey).data as UniformInventory | undefined,
+  );
+  useEffect(() => {
+    if (data) dataCache.put(cacheKey, data);
+  }, [cacheKey, data]);
   const [status, setStatus] = useState<InventoryStatus>('connecting');
   const [error, setError] = useState('');
   const [generation, setGeneration] = useState(0);

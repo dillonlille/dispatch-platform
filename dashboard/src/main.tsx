@@ -1,15 +1,27 @@
-import { useBrowserUpdate } from './app/browser-update.js';
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useBrowserUpdate, clearNavigationState } from './app/browser-update.js';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { DspView, SessionView } from '../../shared/contracts/index.js';
 import { api, credentials, ApiError } from './app/api.js';
 import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
-import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
+import {
+  dspHash,
+  navigate,
+  parseHash,
+  platformHash,
+  rememberDestination,
+} from './app/navigation.js';
 import { Page, findRoute, navigation } from './app/routes.js';
+import type { DspRouteId } from './app/route-meta.js';
 import { routeLabel } from './app/route-meta.js';
-import { AuthScreen, DspOnboarding } from './features/auth/index.js';
+const AuthScreen = lazy(() =>
+  import('./features/auth/index.js').then((module) => ({ default: module.AuthScreen })),
+);
+const DspOnboarding = lazy(() =>
+  import('./features/auth/index.js').then((module) => ({ default: module.DspOnboarding })),
+);
 import { messageOf } from './lib/errors.js';
-import { Loading } from './ui/index.js';
+import { Loading, PageBoundary } from './ui/index.js';
 import { can } from './app/permissions.js';
 import './styles.css';
 import { Shell } from './shell/Shell.js';
@@ -22,8 +34,19 @@ function App() {
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [address, setAddress] = useState(() => parseHash(window.location.hash)),
-    [switching, setSwitching] = useState(false);
+    [switching, setSwitching] = useState(false),
+    [sessionError, setSessionError] = useState(''),
+    [online, setOnline] = useState(navigator.onLine);
   const { perform, fail } = useFeedback();
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
   const setupRequired = Boolean(view?.profile?.setupRequired && can(view, 'settings.manage'));
   const showAuth =
     session === null ||
@@ -44,6 +67,7 @@ function App() {
   }, [session?.user.id, onboarding]);
   const load = useCallback(
     async (afterLogin = false) => {
+      setSessionError('');
       try {
         const next = await getSession();
         credentials(next.csrf);
@@ -59,7 +83,10 @@ function App() {
         if (error instanceof ApiError && error.status === 401) {
           credentials('');
           setSession(null);
-        } else fail(messageOf(error));
+        } else {
+          setSessionError(messageOf(error));
+          fail(messageOf(error));
+        }
       }
     },
     [fail],
@@ -74,6 +101,20 @@ function App() {
     return () => window.removeEventListener('hashchange', changed);
   }, [load, fail]);
   const { route, dspId, page } = address;
+  useEffect(() => {
+    if (session && !showAuth)
+      void findRoute(dspId ? 'dsp' : 'platform', page)
+        ?.preload()
+        .catch(() => undefined);
+  }, [session, showAuth, dspId, page]);
+  useEffect(() => {
+    if (
+      view &&
+      dspId &&
+      navigation('dsp', { session: session!, view }).some((route) => route.id === page)
+    )
+      rememberDestination(dspId, page as DspRouteId);
+  }, [view, dspId, page, session]);
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
   // A platform owner looking into a DSP is never shown to its team.
   usePresence(session?.user.platformOwner ? undefined : view?.token);
@@ -128,7 +169,7 @@ function App() {
   if (session === undefined)
     return (
       <>
-        <Loading />
+        {sessionError ? <button onClick={() => void load()}>Retry connection</button> : <Loading />}
         <FeedbackMessages />
       </>
     );
@@ -164,11 +205,17 @@ function App() {
       logout={() => void perform(logout)}
       exitView={() => navigate(platformHash())}
       viewAs={(roleId) => {
+        clearNavigationState();
         saveRole(dspId, roleId);
         void perform(reopen);
       }}
     >
       <FeedbackMessages />
+      {!online && (
+        <p role="status">
+          You’re offline. Showing the last loaded data; updates resume when you reconnect.
+        </p>
+      )}
       {dspId ? (
         switching ? (
           <Loading />
@@ -176,7 +223,9 @@ function App() {
           <div key={`${view.dsp.id}:${view.dsp.revision}:${view.role.id}`}>
             <Page session={session} view={view} page={page} reopen={reopen} />
           </div>
-        ) : null
+        ) : (
+          <button onClick={() => void perform(reopen)}>Retry connection</button>
+        )
       ) : (
         <Page session={session} page={page} reopen={reopen} />
       )}
@@ -185,6 +234,10 @@ function App() {
 }
 createRoot(document.getElementById('root')!).render(
   <FeedbackProvider>
-    <App />
+    <PageBoundary>
+      <Suspense fallback={<Loading />}>
+        <App />
+      </Suspense>
+    </PageBoundary>
   </FeedbackProvider>,
 );

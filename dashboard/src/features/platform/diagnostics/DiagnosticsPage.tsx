@@ -22,11 +22,14 @@ function addressed() {
 }
 
 export function DiagnosticsPage() {
-  const health = usePlatformHealth(10000);
-  const diagnostics = useData<Diagnostics>('/api/platform/diagnostics', 5000);
-  const jobs = usePlatformJobs(3000);
-  const sources = useMemo(() => collectionHistory(jobs.data ?? []), [jobs.data]);
   const [place, setPlace] = useState(addressed);
+  const health = usePlatformHealth(['overview', 'email'].includes(place.tab) ? 10000 : 0);
+  const diagnostics = useData<Diagnostics>(
+    '/api/platform/diagnostics',
+    ['overview', 'test-dsps'].includes(place.tab) ? 15000 : 0,
+  );
+  const jobs = usePlatformJobs(['overview', 'collections'].includes(place.tab) ? 5000 : -1);
+  const sources = useMemo(() => collectionHistory(jobs.data ?? []), [jobs.data]);
   // A link to another tab changes only the address's query, which does not remount the page.
   useEffect(() => {
     const changed = () => setPlace(addressed());

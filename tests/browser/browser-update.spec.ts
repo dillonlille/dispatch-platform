@@ -1,5 +1,15 @@
 import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+
+async function clockVisible(page: Page, locator: Locator) {
+  // Dynamic routes commit through Suspense; let those timers run under the frozen test clock.
+  await expect
+    .poll(async () => {
+      await page.clock.runFor(500);
+      return locator.isVisible();
+    })
+    .toBe(true);
+}
 
 async function loginWithClock(page: Page) {
   await page.clock.install();
@@ -25,11 +35,11 @@ test('completed update waits for two idle seconds, restores filters, and reloads
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.getByLabel('Search DSPs').fill('Summit');
   const initialLoads = loads;
-  await page.clock.runFor(6000);
+  await page.clock.runFor(35000);
   expect(loads).toBe(initialLoads);
   ready = true;
   const before = checks;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 34; i++) {
     await page.mouse.move(50 + i, 50);
     await page.clock.runFor(1000);
   }
@@ -49,6 +59,7 @@ test('completed update waits for two idle seconds, restores filters, and reloads
       return loads;
     })
     .toBe(initialLoads + 1);
+  await clockVisible(page, page.getByLabel('Search DSPs'));
   await expect(page.getByLabel('Search DSPs')).toHaveValue('Summit');
   await expect(page.locator('tbody tr')).toHaveCount(1);
   await page.clock.runFor(12000);
@@ -74,6 +85,7 @@ test('the audit log keeps its filters through an automatic update', async ({ pag
   await expect(page.getByRole('listitem').filter({ hasText: 'created Northline' })).toBeVisible();
   const initialLoads = loads;
   ready = true;
+  await page.clock.runFor(30000);
   await expect
     .poll(async () => {
       await page.clock.runFor(1000);
@@ -102,7 +114,7 @@ test('open editing dialog protects input until it closes', async ({ page }) => {
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   const before = loads;
   ready = true;
-  await page.clock.runFor(10000);
+  await page.clock.runFor(35000);
   expect(loads).toBe(before);
   await expect(dialog.locator('input[type="email"]')).toHaveValue('unsaved@example.test');
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -128,14 +140,16 @@ test('unavailable update check does not refresh or interrupt sign in', async ({ 
   await page.clock.install({ time: new Date('2026-09-20T12:00:00Z') });
   await page.clock.pauseAt(new Date('2026-09-20T12:01:00Z'));
   await page.goto('/');
+  await clockVisible(page, page.getByLabel('Email address'));
   await page.getByLabel('Email address').fill(demo.email);
-  await page.clock.runFor(10000);
+  await page.clock.runFor(35000);
   expect(loads).toBe(1);
   await expect(page.getByLabel('Email address')).toHaveValue(demo.email);
   await page.getByLabel('Password', { exact: true }).fill(demo.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await clockVisible(page, page.getByRole('heading', { name: 'DSPs', exact: true }));
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
-  await page.clock.runFor(15000);
+  await page.clock.runFor(35000);
   expect(loads).toBe(1);
 });
 
@@ -166,7 +180,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   const before = loads;
   ready = true;
-  await page.clock.runFor(6000);
+  await page.clock.runFor(35000);
   await page.clock.runFor(500);
   await expect
     .poll(async () => {
@@ -174,6 +188,7 @@ test('reload preserves DSP, meal tab, selected date and search on mobile', async
       return loads;
     })
     .toBe(before + 1);
+  await clockVisible(page, page.getByRole('tab', { name: 'Meal Breaks', exact: true }));
   await expect(page).toHaveURL(new RegExp(`dsp/${dsp.id}/paycom`));
   await expect(page.getByRole('tab', { name: 'Meal Breaks', exact: true })).toHaveAttribute(
     'aria-selected',

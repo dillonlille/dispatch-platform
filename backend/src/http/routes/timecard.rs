@@ -162,7 +162,13 @@ fn save_paycom_settings(db: &Store, c: &Member, input: &Input) -> Result<Reply> 
 fn meal_comparison(db: &Store, c: &Member, input: &Input) -> Result<Reply> {
     v::fields(&input.query, &["date"])?;
     let date = v::text(&input.query, "date", 10, 10)?;
-    let comparison = db.meal_comparison(c.dsp_id(), date, c.dsp.timezone.as_str())?;
+    let comparison = c.state.read_cache.read(
+        format!("meals:{}:{}:{}", c.dsp_id(), date, c.dsp.timezone),
+        c.state
+            .data_revision
+            .load(std::sync::atomic::Ordering::Relaxed),
+        || db.meal_comparison(c.dsp_id(), date, c.dsp.timezone.as_str()),
+    )?;
     Ok(Reply::json(serde_json::to_value(comparison)?))
 }
 

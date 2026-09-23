@@ -10,15 +10,3 @@
 @import './ui/menu.css';
 @import './ui/feedback.css';
 @import './app/feedback.css';
-@import './features/home/home.css';
-@import './features/settings/settings.css';
-@import './features/settings/profile.css';
-@import './features/team/team.css';
-@import './features/settings/theme.css';
-@import './features/platform/dsps.css';
-@import './features/connections/connections.css';
-@import './features/timecard/workforce.css';
-@import './features/timecard/employees.css';
-@import './features/platform/diagnostics/diagnostics.css';
-@import './features/timecard/timecards.css';
-@import './features/uniforms/uniforms.css';

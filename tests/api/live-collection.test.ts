@@ -25,7 +25,10 @@ test('collection notifications require a current DSP view, wake on collection, a
   assert.equal(queued.status, 202);
   const event = await waiting;
   assert.notEqual(event.value.revision, initial.value.revision);
-  assert.deepEqual(Object.keys(event.value), ['revision']);
+  assert.deepEqual(Object.keys(event.value).sort(), ['changes', 'revision']);
+  assert(event.value.changes.length > 0);
+  assert(event.value.changes.every((change: { provider: string }) => change.provider === 'paycom'));
+  assert.equal(initial.value.changes[0].provider, 'all');
   assert.equal(
     (await other.get('/api/dsp/collection-updates?after=')).value.revision,
     otherRevision,

@@ -46,6 +46,17 @@ test(
     const url = new URL(asset, f.env.DISPATCH_ORIGIN!);
     const get = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
     const bytes = await get.arrayBuffer();
+    assert(
+      bytes.byteLength < 400_000,
+      'main dashboard JavaScript stays below 400 KB before compression',
+    );
+    const stylesheet = document.match(/href="(\.?\/assets\/[^"]+\.css)"/)![1]!;
+    const styles = await fetch(new URL(stylesheet, f.env.DISPATCH_ORIGIN));
+    assert(
+      (await styles.arrayBuffer()).byteLength < 30_000,
+      'initial common CSS stays below 30 KB; feature CSS loads with its route',
+    );
+
     assert.equal(get.headers.get('cache-control'), 'public, max-age=31536000, immutable');
     const head = await fetch(url, { method: 'HEAD', headers: { 'accept-encoding': 'identity' } });
     assert.equal(head.headers.get('etag'), get.headers.get('etag'));

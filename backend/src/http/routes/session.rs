@@ -22,7 +22,7 @@ fn session(db: &Store, user: &User, _: &Input) -> Result<Reply> {
     Reply::of(&SessionResponse {
         user: user.user.clone(),
         csrf: user.csrf.clone(),
-        dsps: db.dsps(user)?,
+        dsps: summaries(db, user)?,
         development: db.config.development,
         environment: db.config.env(),
         release: db.config.release.clone(),
@@ -83,4 +83,15 @@ fn open_dsp(db: &Store, user: &User, input: &Input) -> Result<Reply> {
         dsp: c.dsp,
         roles,
     })
+}
+
+// Authorization still runs on every request; keys cannot share membership-specific listings.
+pub(super) fn summaries(db: &Store, user: &User) -> Result<Vec<crate::contracts::DspSummary>> {
+    user.state.read_cache.read(
+        format!("dsps:{}:{}", user.actor(), user.user.platform_owner),
+        user.state
+            .data_revision
+            .load(std::sync::atomic::Ordering::Relaxed),
+        || db.dsps(user),
+    )
 }

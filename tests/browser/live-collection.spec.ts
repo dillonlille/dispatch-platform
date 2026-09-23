@@ -16,7 +16,14 @@ test('driver results update open timecards and meal breaks without resetting the
     await Promise.all(
       [...waiting].map(async (route) => {
         waiting.delete(route);
-        await route.fulfill({ json: { revision: String(revision) } }).catch(() => {});
+        await route
+          .fulfill({
+            json: {
+              revision: String(revision),
+              changes: [{ provider: 'all', dates: [], employeeCode: null, roster: true }],
+            },
+          })
+          .catch(() => {});
       }),
     );
   };
@@ -36,7 +43,12 @@ test('driver results update open timecards and meal breaks without resetting the
     const after = new URL(route.request().url()).searchParams.get('after');
     if (after === '' && revision === 0) initial = route;
     else if (after !== String(revision))
-      await route.fulfill({ json: { revision: String(revision) } });
+      await route.fulfill({
+        json: {
+          revision: String(revision),
+          changes: [{ provider: 'all', dates: [], employeeCode: null, roster: true }],
+        },
+      });
     else {
       waiting.clear();
       waiting.add(route);
@@ -86,7 +98,12 @@ test('driver results update open timecards and meal breaks without resetting the
   // Deliver the baseline and first update inside the same 150ms coalescing window.
   await expect.poll(() => initial !== undefined).toBe(true);
   await page.clock.pauseAt(new Date(Date.now() + 1000));
-  await initial!.fulfill({ json: { revision: '0' } });
+  await initial!.fulfill({
+    json: {
+      revision: '0',
+      changes: [{ provider: 'all', dates: [], employeeCode: null, roster: true }],
+    },
+  });
   const nextPoll = async () => {
     await expect
       .poll(async () => {

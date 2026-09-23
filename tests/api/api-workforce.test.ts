@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { sortDailyRows } from '../../dashboard/src/lib/daily-sort.js';
 import { employeeName } from '../../dashboard/src/lib/paycom.js';
 import { localDate } from '../../dashboard/src/lib/meal-breaks.js';
 import { fixture, until } from '../support/support.js';
@@ -139,11 +140,32 @@ test('Unicode employee sorting agrees with the dashboard locale and preserves di
     const publication = db.prepare('SELECT id FROM publications WHERE active=1').get() as {
       id: string;
     };
-    names.forEach((name, i) =>
-      db
-        .prepare('INSERT INTO employees VALUES (?,?,?,?,?,?,?)')
-        .run(publication.id, `E${i}`, name, 'Delivery', 'Driver', '', 1),
-    );
+    names.forEach((name, i) => {
+      db.prepare('INSERT INTO employees VALUES (?,?,?,?,?,?,?)').run(
+        publication.id,
+        `E${i}`,
+        name,
+        'Delivery',
+        'Driver',
+        '',
+        1,
+      );
+      db.prepare('INSERT INTO timecards VALUES (?,?,?,?,?,?)').run(
+        publication.id,
+        `E${i}`,
+        localDate('America/Chicago'),
+        i % 3,
+        'Complete',
+        JSON.stringify(
+          i % 2
+            ? [
+                { in: '08:00', out: '12:00', hours: 4 },
+                { in: '12:30', out: '16:30', hours: 4 },
+              ]
+            : [{ in: '09:00', out: '17:00', hours: 8 }],
+        ),
+      );
+    });
   });
   await f.start();
   const owner = await f.client();
@@ -160,6 +182,26 @@ test('Unicode employee sorting agrees with the dashboard locale and preserves di
     result.map(({ name, code }) => ({ name, code })),
     expected,
   );
+  const day = `/api/dsp/timecards?date=${localDate('America/Chicago')}`;
+  const rows = (await owner.get(day)).value.rows;
+  for (const sort of [
+    'name',
+    'totalHours',
+    'condition',
+    'inDay',
+    'outLunch',
+    'inLunch',
+    'outDay',
+  ]) {
+    for (const direction of ['asc', 'desc']) {
+      const server = (await owner.get(`${day}&sort=${sort}&direction=${direction}`)).value.rows;
+      assert.deepEqual(
+        sortDailyRows(rows, sort, direction === 'desc'),
+        server,
+        `${sort}/${direction}`,
+      );
+    }
+  }
 });
 
 test('employee sync queues one driver and period, preserves the roster, and yields to a later full sync', async (t) => {

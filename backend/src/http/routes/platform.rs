@@ -48,7 +48,7 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn dsps(db: &Store, owner: &User, _: &Input) -> Result<Reply> {
-    Reply::of(&db.dsps(owner)?)
+    Reply::of(&super::session::summaries(db, owner)?)
 }
 
 // A DSP is created either by name, or for an invited owner who then names it.

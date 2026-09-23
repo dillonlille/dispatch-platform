@@ -19,6 +19,8 @@ pub fn route(path: &str) -> &'static str {
         "/api/session" => "/api/session",
         "/api/session/dsp" => "/api/session/dsp",
         "/api/dsp/jobs" => "/api/dsp/jobs",
+        "/api/dsp/paycom/meal-breaks" => "/api/dsp/paycom/meal-breaks",
+        "/api/dsp/paycom/settings" => "/api/dsp/paycom/settings",
         "/api/dsp/timecards" => "/api/dsp/timecards",
         "/api/dsp/employees" => "/api/dsp/employees",
         "/api/dsp/collection-updates" => "/api/dsp/collection-updates",

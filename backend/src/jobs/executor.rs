@@ -161,6 +161,20 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
             "metrics":job_metrics::summary(&snapshot)}),
     );
     let changed_dsp = dsp.clone();
+    let request: Value = serde_json::from_str(&job.request).unwrap_or_default();
+    let change = crate::contracts::CollectionChange {
+        provider: provider.id().to_owned(),
+        dates: request
+            .get("date")
+            .and_then(Value::as_str)
+            .map(|date| vec![date.to_owned()])
+            .unwrap_or_default(),
+        employee_code: request
+            .get("employeeCode")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        roster: provider == Provider::Paycom && request.get("employeeCode").is_none(),
+    };
     let _ = state
         .run(move |db| {
             if let Some(ref error) = error {
@@ -196,5 +210,5 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
             )
         })
         .await;
-    state.updates.notify(&changed_dsp);
+    state.updates.changed(&changed_dsp, change);
 }
