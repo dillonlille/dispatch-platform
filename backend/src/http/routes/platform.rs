@@ -1,4 +1,4 @@
-//! What only a platform owner sees: every DSP, the platform's health, diagnostics and releases.
+//! What only a platform owner sees: every DSP, the platform's health and diagnostics.
 use crate::{
     Error, Result, State,
     contracts::{BrowserHealth, DspStatus, JobStatus, PlatformHealth, ProviderMode},
@@ -44,7 +44,6 @@ pub fn routes() -> Vec<Route> {
         ),
         read("/api/platform/diagnostics", PlatformOwner, diagnostics),
         write("/api/platform/diagnostics", PlatformOwner, load_test_dsp),
-        read("/api/platform/releases", PlatformOwner, releases),
     ]
 }
 
@@ -259,22 +258,4 @@ fn diagnostics_report(db: &Store, state: &State) -> Result<Value> {
         },
         "dsps":db.platform.all(TEST_DSPS, [])?
     }))
-}
-
-fn releases(db: &Store, _: &User, _: &Input) -> Result<Reply> {
-    let name = if db.config.env().is_production() {
-        "production-update.json"
-    } else {
-        "dev-update.json"
-    };
-    let update = std::fs::read(db.config.platform().join(name))
-        .ok()
-        .and_then(|s| serde_json::from_slice::<Value>(&s).ok())
-        .map(|v| json!({"status":v["status"],"commit":v["commit"],"updatedAt":v["updatedAt"]}));
-    Ok(Reply::json(json!({
-        "version":db.config.version,
-        "environment":db.config.environment,
-        "release":db.config.release,
-        "update":update
-    })))
 }
