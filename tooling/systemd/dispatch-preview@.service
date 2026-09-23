@@ -1,0 +1,22 @@
+[Unit]
+# One preview per worktree: dispatch-preview@<worktree>.service serves that branch's
+# dashboard with fixture data, so a review link outlives the session that opened it.
+Description=Dispatch preview for the %i worktree
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dispatch-platform/worktrees/%i
+# DISPATCH_DEV_PORT pins this worktree's port so its link survives restarts.
+EnvironmentFile=%h/.config/dispatch-preview/%i.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Previews serve unreviewed code with fixture data: Tailscale only, never 0.0.0.0.
+Environment=DISPATCH_DEV_HOST=100.120.159.116
+ExecStart=%h/.local/bin/npm run dev
+# A preview is disposable: a crashed one stays down rather than looping on a broken branch.
+Restart=no
+TimeoutStopSec=30
+KillMode=mixed
+UMask=0077

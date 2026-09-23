@@ -11,6 +11,19 @@ session cookie. Bind only to Tailscale or loopback. `DISPATCH_DEV_PORT` pins a p
 an occupied port fails without replacing another server. Stop only your preview.
 Browser results stay in the worktree's `test-results/`.
 
+A preview that must outlive its session runs as `dispatch-preview@<worktree>.service`,
+which pins the same port through `~/.config/dispatch-preview/<worktree>.env`:
+
+```sh
+install -Dm600 /dev/stdin ~/.config/dispatch-preview/my-branch.env <<<'DISPATCH_DEV_PORT=4101'
+systemctl --user start dispatch-preview@my-branch
+systemctl --user status dispatch-preview@my-branch   # the link is in its output
+```
+
+Stop it with `systemctl --user stop dispatch-preview@my-branch` when its PR merges, and
+remove the env file. The unit never restarts on its own: a crashed preview stays down
+instead of looping on a broken branch.
+
 - `.build/`: verified compiled runtime serving https://dispatchdev.dillonlille.com.
 - `config/`, `data/`, `dsps/`: private configuration and persistent state.
 - `.runtime/management/`: installed Rust manager and compatibility launchers.
