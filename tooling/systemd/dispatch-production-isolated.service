@@ -1,0 +1,43 @@
+# Install as /etc/systemd/system/dispatch-production.service during the host cutover.
+[Unit]
+Description=Dispatch Production platform (isolated runtime)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dispatch-runtime
+Group=dispatch-runtime
+StateDirectory=dispatch-production
+StateDirectoryMode=0700
+EnvironmentFile=/home/thepickle/dispatch-platform/public/config/platform.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Root executes only this root-owned copier and verifier, never the application.
+ExecStartPre=+/usr/bin/python3 /usr/local/libexec/dispatch-runtime/prepare-isolated-runtime.py --source /home/thepickle/dispatch-platform/public/live
+ExecStart=/usr/bin/env DISPATCH_STATE_ROOT=/var/lib/dispatch-production DISPATCH_ARTIFACT_ROOT=/opt/dispatch-production/current DISPATCH_BWRAP_EXECUTABLE=/usr/local/libexec/dispatch-runtime/bwrap PATH=/usr/bin:/bin /opt/dispatch-production/current/services/rust/dispatch-backend serve
+WorkingDirectory=/opt/dispatch-production
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=mixed
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ReadWritePaths=/var/lib/dispatch-production
+# The trusted setuid bubblewrap launcher needs privilege transition and namespaces.
+# Do not enable NoNewPrivileges, PrivateUsers or RestrictNamespaces here.
+MemoryHigh=3G
+MemoryMax=4G
+TasksMax=1024
+LimitNOFILE=16384
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

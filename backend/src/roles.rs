@@ -347,6 +347,13 @@ impl Store {
                 "UPDATE invitations SET role=? WHERE role_id=? AND used_at IS NULL",
                 [mirror, id],
             )?;
+            if role.permissions != permissions {
+                self.platform.exec(
+                    "DELETE FROM invitations WHERE dsp_id=? AND used_at IS NULL AND \
+                     (role_id=? OR created_by IN (SELECT user_id FROM memberships WHERE role_id=?))",
+                    [dsp, id, id],
+                )?;
+            }
             // Open views sign the DSP revision, so members pick up the change.
             self.platform
                 .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;

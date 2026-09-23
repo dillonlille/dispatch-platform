@@ -158,9 +158,9 @@ async fn accept_invitation(state: Arc<State>, input: Input, _: Public) -> Result
     state.run(move |db| db.throttle(&key, 20, 3600000)).await?;
     let token = input.param("token").to_owned();
     let setup = request.dsp_profile.is_some();
-    let (first, last) = (request.first_name, request.last_name);
+    let session = input.session_token(state.config.development).to_owned();
     let joined = state
-        .accept_invitation(token, first, last, request.password, request.dsp_profile)
+        .accept_invitation(token, request, input.ip, session)
         .await?;
     if setup {
         state

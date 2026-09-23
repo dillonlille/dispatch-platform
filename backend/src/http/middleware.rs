@@ -29,12 +29,30 @@ pub fn failure(error: Error) -> Response {
 
 pub async fn pipeline(
     AxumState(state): AxumState<Arc<State>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let started = std::time::Instant::now();
     let route = observability::route(request.uri().path());
     let method = request.method().clone();
+    let trace = observability::RequestTrace::default();
+    request.extensions_mut().insert(trace.clone());
+    let client = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .and_then(|peer| {
+            state
+                .config
+                .trusted_proxy
+                .client_ip(peer.0.ip(), request.headers())
+                .ok()
+        })
+        .map(|ip| {
+            crypto::sign(
+                &state.key,
+                &format!("client:{}:{ip}", crate::db::now() / 86400000),
+            )
+        });
     let request_id = match crypto::id("req") {
         Ok(id) => id,
         Err(error) => return error.into_response(),
@@ -50,13 +68,19 @@ pub async fn pipeline(
         _ => "info",
     };
     let error = response.extensions().get::<Failure>().map(|f| f.0.clone());
+    let context = trace.lock().unwrap_or_else(|poison| poison.into_inner());
     observability::event(
         level,
         "http.request",
         json!({
             "requestId":request_id,
             "method":method.as_str(),
-            "route":route,
+            "route":context.route.unwrap_or(route),
+            "actorId":context.actor,
+            "dspId":context.tenant,
+            "account":context.account,
+            "client":client,
+            "bulk":context.bulk,
             "status":status,
             "elapsedMs":started.elapsed().as_millis(),
             "error":error
@@ -64,6 +88,12 @@ pub async fn pipeline(
     );
     let headers = response.headers_mut();
     headers.insert("x-request-id", request_id.parse().unwrap());
+    if state.config.origin.starts_with("https://") {
+        headers.insert(
+            "strict-transport-security",
+            "max-age=31536000".parse().unwrap(),
+        );
+    }
     for (name, value) in [
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "same-origin"),
@@ -136,6 +166,29 @@ pub async fn input(state: &State, request: Request, pattern: &'static str) -> Re
     } else {
         Value::Null
     };
+    let trace = parts
+        .extensions
+        .get::<observability::RequestTrace>()
+        .cloned()
+        .unwrap_or_default();
+    {
+        let mut context = trace.lock().unwrap_or_else(|poison| poison.into_inner());
+        context.route = Some(pattern);
+        context.bulk =
+            query.get("limit").is_some_and(|value| value == "all") || pattern.ends_with("/export");
+        if ["/api/auth/login", "/api/auth/forgot-password"].contains(&pattern) {
+            context.account = body
+                .get("email")
+                .and_then(Value::as_str)
+                .filter(|email| email.len() <= 254)
+                .map(|email| {
+                    crypto::sign(
+                        &state.key,
+                        &format!("account:{}", email.trim().to_lowercase()),
+                    )
+                });
+        }
+    }
     Ok(Input {
         path: parts.uri.path().to_owned(),
         method: parts.method,
@@ -143,6 +196,7 @@ pub async fn input(state: &State, request: Request, pattern: &'static str) -> Re
         body,
         query: Value::Object(query),
         ip,
+        trace,
         pattern,
     })
 }

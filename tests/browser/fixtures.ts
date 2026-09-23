@@ -4,7 +4,7 @@ import { built, demo, fixture, type FixtureOptions } from '../support/support.js
 type Dispatch = Awaited<ReturnType<typeof fixture>>;
 export const test = base.extend<{
   /** Set with `test.use`, or override in `test.extend`, to change the server under test. */
-  dispatchOptions: Pick<FixtureOptions, 'seed' | 'env'>;
+  dispatchOptions: Pick<FixtureOptions, 'seed' | 'env' | 'originHost'>;
   /** A private server of the built artifact with its own state, port and mail. */
   dispatch: Dispatch;
   /** Set with `test.use` to load the sign-in van's model, for the tests about it. */

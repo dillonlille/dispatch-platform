@@ -8,6 +8,7 @@ import { useAction } from '../../app/useAction.js';
 import { ThemeSection } from './ThemeSection.js';
 import { hashQuery, navigate, replaceHashQuery, signInHash } from '../../app/navigation.js';
 import { ProfileBadge } from './ProfileBadge.js';
+import { SecuritySettings } from './SecuritySettings.js';
 
 export function SettingsPage({ session, view }: { session: SessionView; view?: DspView }) {
   const [requestedTab, setTab] = useState(hashQuery().get('tab') || 'general');
@@ -44,65 +45,68 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
       />
       {tab === 'general' && <ProfileBadge session={session} view={view} />}
       {tab === 'security' && (
-        <section className="settings-section">
-          <div>
-            <h2>Change password</h2>
-            <p>Changing your password signs out all sessions.</p>
-          </div>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              setPasswordError('');
-              if (form.get('password') !== form.get('confirmPassword')) {
-                setPasswordError('The new passwords must match.');
-                return;
-              }
-              void changePassword.run(form);
-            }}
-          >
-            <label>
-              Current password
-              <input
-                name="currentPassword"
-                type="password"
-                autoComplete="current-password"
-                maxLength={128}
-                required
-                disabled={busy}
-              />
-            </label>
-            <label>
-              New password
-              <input
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                maxLength={128}
-                required
-                disabled={busy}
-              />
-            </label>
-            <p className="muted">Use at least 8 characters.</p>
-            <label>
-              Confirm new password
-              <input
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                maxLength={128}
-                required
-                disabled={busy}
-              />
-            </label>
-            <ErrorBox message={passwordError} />
-            <button className="primary" disabled={busy}>
-              {busy ? 'Changing password…' : 'Change password'}
-            </button>
-          </form>
-        </section>
+        <>
+          <SecuritySettings />
+          <section className="settings-section">
+            <div>
+              <h2>Change password</h2>
+              <p>Changing your password signs out all sessions.</p>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                setPasswordError('');
+                if (form.get('password') !== form.get('confirmPassword')) {
+                  setPasswordError('The new passwords must match.');
+                  return;
+                }
+                void changePassword.run(form);
+              }}
+            >
+              <label>
+                Current password
+                <input
+                  name="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  maxLength={128}
+                  required
+                  disabled={busy}
+                />
+              </label>
+              <label>
+                New password
+                <input
+                  name="password"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  maxLength={128}
+                  required
+                  disabled={busy}
+                />
+              </label>
+              <p className="muted">Use at least 8 characters.</p>
+              <label>
+                Confirm new password
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  maxLength={128}
+                  required
+                  disabled={busy}
+                />
+              </label>
+              <ErrorBox message={passwordError} />
+              <button className="primary" disabled={busy}>
+                {busy ? 'Changing password…' : 'Change password'}
+              </button>
+            </form>
+          </section>
+        </>
       )}
       {tab === 'connections' && connections && view && (
         <div className="settings-connections">

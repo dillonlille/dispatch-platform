@@ -49,6 +49,14 @@ impl System for Fake {
         self.calls
             .borrow_mut()
             .push(args.iter().map(|s| s.to_string()).collect());
+        if args.first() == Some(&"sudo") {
+            assert_eq!(&args[..3], &["sudo", "-n", "/usr/bin/systemctl"]);
+            assert_eq!(args[4], "dispatch-production.service");
+            if args[3] == "start" && self.fail_start.replace(false) {
+                return Err("start failed".into());
+            }
+            return Ok(vec![]);
+        }
         if args[0] == "systemctl" {
             if args[2] == "start" && self.fail_start.replace(false) {
                 return Err("start failed".into());
@@ -1030,4 +1038,24 @@ fn production_failed_release_is_not_retried_and_latest_hint_never_authorizes_an_
     f.system.responses.borrow_mut().remove(&url);
     u.run_locked().unwrap();
     f.assert_old();
+}
+
+#[test]
+fn isolated_production_service_preserves_activation_and_rollback() {
+    let f = Fixture::new(Environment::Production);
+    let file = f.root.join("config/updater.json");
+    let mut config: Value = io::read_json(&file).unwrap();
+    config["systemService"] = json!(true);
+    fs::write(file, config.to_string()).unwrap();
+    let u = f.updater();
+    f.system.fail_start.set(true);
+    assert!(u.activate(&f.candidate, &f.new).is_err());
+    assert_eq!(artifact::verify(&u.active, None).unwrap(), f.old_manifest);
+    let calls = f.system.calls.borrow();
+    let actions: Vec<_> = calls
+        .iter()
+        .filter(|call| call[0] == "sudo")
+        .map(|call| call[3].as_str())
+        .collect();
+    assert_eq!(actions, ["stop", "start", "stop", "start"]);
 }

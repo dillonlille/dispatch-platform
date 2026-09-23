@@ -3,5 +3,6 @@ import type { DspSummary } from "./DspSummary";
 import type { Environment } from "./Environment";
 import type { ProviderMode } from "./ProviderMode";
 import type { PublicUser } from "./PublicUser";
+import type { SecurityStatus } from "./SecurityStatus";
 
-export type SessionResponse = { user: PublicUser, csrf: string, dsps: Array<DspSummary>, development: boolean, environment: Environment, release: string, providerMode: ProviderMode, };
+export type SessionResponse = { user: PublicUser, csrf: string, dsps: Array<DspSummary>, development: boolean, environment: Environment, release: string, providerMode: ProviderMode, security: SecurityStatus, };

@@ -12,6 +12,28 @@ mod delivery;
 pub mod templates;
 pub use delivery::mailer;
 
+/// Never send an expired, revoked or already consumed grant. Bound retained content.
+pub fn discard_stale(db: &Store) -> Result<()> {
+    db.platform.exec(
+        "DELETE FROM outbox WHERE (status<>'pending' AND created_at<?1) OR \
+         (status IN ('pending','failed') AND (created_at<?2 OR \
+          (kind='invitation' AND NOT EXISTS (SELECT 1 FROM invitations i JOIN dsps d ON d.id=i.dsp_id \
+           WHERE i.hash=outbox.invitation_hash AND i.used_at IS NULL AND i.expires_at>?3 AND d.status='active')) OR \
+          (kind='reset' AND NOT EXISTS (SELECT 1 FROM resets r JOIN users u ON u.id=r.user_id \
+           WHERE r.user_id=outbox.user_id AND r.used_at IS NULL AND r.expires_at>?3 \
+           AND u.status='active' AND r.user_version=u.version))))",
+        params![db::now()-30*86400000, db::now()-7*86400000, db::now()],
+    )?;
+    for (id, hash) in db.platform.query_as::<(String, String)>(
+        "SELECT id,invitation_hash FROM outbox WHERE status IN ('pending','failed') AND kind='invitation'", [],
+    )? {
+        if !db.inviter_authorized(&hash)? {
+            db.platform.exec("DELETE FROM outbox WHERE id=?", [&id])?;
+        }
+    }
+    Ok(())
+}
+
 pub fn transport_status(state: &State, error: Option<&str>) {
     if let Ok(mut health) = state.mail_transport.lock() {
         *health = TransportHealth {

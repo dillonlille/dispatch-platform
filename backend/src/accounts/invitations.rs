@@ -5,6 +5,54 @@ impl Store {
         let role = self.role(dsp, role)?;
         self.ensure_assignable(&c, &role)?;
         ensure(self.config.mail_available(), "email_unavailable", 503)?;
+        ensure(
+            !email.eq_ignore_ascii_case(&a.user.email),
+            "already_a_member",
+            409,
+        )?;
+        ensure(
+            self.platform.count(
+                "SELECT count(*) FROM memberships m JOIN users u ON u.id=m.user_id \
+                 WHERE m.dsp_id=? AND u.email=? COLLATE NOCASE",
+                [dsp, email],
+            )? == 0,
+            "already_a_member",
+            409,
+        )?;
+        self.reserve_quota(
+            &format!("mail:actor:{}", a.user.id),
+            self.config.security.mail_actor_hourly,
+            3600000,
+        )?;
+        self.reserve_quota(
+            &format!("mail:dsp:{dsp}"),
+            self.config.security.mail_tenant_hourly,
+            3600000,
+        )?;
+        self.reserve_quota(
+            &format!("mail:recipient:{}", email.to_lowercase()),
+            self.config.security.mail_recipient_daily,
+            86400000,
+        )?;
+        self.reserve_quota(
+            &format!("mail:cooldown:{}", email.to_lowercase()),
+            1,
+            self.config.security.mail_cooldown_seconds * 1000,
+        )?;
+        ensure(
+            self.platform.count(
+                "SELECT count(*) FROM outbox o JOIN invitations i ON i.hash=o.invitation_hash \
+             WHERE o.status='pending' AND i.dsp_id=?",
+                [dsp],
+            )? < self.config.security.mail_tenant_pending,
+            "email_queue_full",
+            429,
+        )?;
+        // A resend replaces the outstanding grant rather than accumulating links.
+        self.platform.exec(
+            "DELETE FROM invitations WHERE dsp_id=? AND email=? COLLATE NOCASE AND used_at IS NULL",
+            [dsp, email],
+        )?;
         let raw = crypto::token()?;
         self.platform.exec(
             "INSERT INTO invitations(hash,dsp_id,email,role,role_id,expires_at,created_by) \
@@ -38,12 +86,49 @@ impl Store {
                 params![crypto::sha(raw), now(), self.config.environment],
             )?
             .ok_or_else(|| Error::new("invitation_expired", 404))?;
+        ensure(
+            self.inviter_authorized(&crypto::sha(raw))?,
+            "invitation_expired",
+            404,
+        )?;
         let owner = flag(&invitation, "owner");
         invitation.as_object_mut().unwrap().remove("owner");
         let profile = self.profile(s(&invitation, "dspId"))?;
         invitation["onboarding"] = json!(owner && profile.setup_required);
         invitation["stationCode"] = json!(profile.station_code);
         Ok(invitation)
+    }
+    /// An outstanding invitation never outlives the authority that issued it.
+    pub fn inviter_authorized(&self, hash: &str) -> Result<bool> {
+        let row: Option<(String, String, String)> = self.platform.one_as(
+            "SELECT created_by,dsp_id,role_id FROM invitations WHERE hash=?",
+            [hash],
+        )?;
+        let Some((actor, dsp, role)) = row else {
+            return Ok(false);
+        };
+        let Some(user) = UserRow::find(&self.platform, "id", &actor)? else {
+            return Ok(false);
+        };
+        if !user.active() {
+            return Ok(false);
+        }
+        if user.user.platform_owner {
+            return Ok(true);
+        }
+        let Some(grant) = self.grant(&actor, &dsp)? else {
+            return Ok(false);
+        };
+        let Some(role) = self.find_role(&dsp, &role)? else {
+            return Ok(false);
+        };
+        Ok(grant.owner
+            || (!role.system
+                && grant.permissions.iter().any(|p| p == "members.invite")
+                && role
+                    .permissions
+                    .iter()
+                    .all(|p| grant.permissions.contains(p))))
     }
     pub fn invitation_mail(
         &self,
@@ -79,15 +164,22 @@ impl crate::State {
     pub async fn accept_invitation(
         self: &std::sync::Arc<Self>,
         raw: String,
-        first: String,
-        last: String,
-        password: String,
-        dsp_profile: Option<DspSetupRequest>,
+        request: crate::contracts::InvitationRequest,
+        ip: String,
+        session: String,
     ) -> Result<Value> {
+        let crate::contracts::InvitationRequest {
+            first_name: first,
+            last_name: last,
+            password,
+            dsp_profile,
+        } = request;
         let token = raw.clone();
         let (invite, existing) = self
-            .read(move |db| {
+            .run(move |db| {
+                db.throttle(&format!("invite-token:{}", crypto::sha(&token)), 10, 900000)?;
                 let invite = db.invitation(&token)?;
+                db.password_attempt(s(&invite, "email"), &ip)?;
                 let existing = UserRow::find(&db.platform, "email", s(&invite, "email"))?;
                 Ok((invite, existing))
             })
@@ -133,6 +225,24 @@ impl crate::State {
                     }
                     _ => return Err(Error::new("sign_in_with_existing_password", 403)),
                 };
+                // A password plus an invitation must not bypass an existing second factor.
+                if existing.is_some() {
+                    let user = fresh.as_ref().unwrap().user.clone();
+                    let candidate = Auth {
+                        user,
+                        hash: String::new(),
+                        csrf: String::new(),
+                        raw: String::new(),
+                        preview: None,
+                    };
+                    if db.security_status(&candidate)?.required {
+                        let signed_in = db
+                            .authenticate(&session)
+                            .map_err(|_| Error::new("invitation_mfa_required", 403))?;
+                        ensure(signed_in.user.id == id, "invitation_mfa_required", 403)?;
+                        db.ensure_mfa(&signed_in)?;
+                    }
+                }
                 let role = db.role(dsp, s(&invite, "roleId"))?;
                 db.platform.exec(
                     "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) \
