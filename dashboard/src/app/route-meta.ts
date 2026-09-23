@@ -48,11 +48,6 @@ export const routeMeta = [
     label: 'DSPs',
   },
   {
-    id: 'releases',
-    scope: 'platform',
-    label: 'Updates',
-  },
-  {
     id: 'jobs',
     scope: 'platform',
     label: 'Diagnostics',

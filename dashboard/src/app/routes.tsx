@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import {
-  ArrowUpFromLine,
   Building2,
   CalendarDays,
   FlaskConical,
@@ -14,7 +13,7 @@ import {
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { AuditPage } from '../features/audit/index.js';
 import { HomePage } from '../features/home/index.js';
-import { DiagnosticsPage, DspList, DspPicker, ReleasesPage } from '../features/platform/index.js';
+import { DiagnosticsPage, DspList, DspPicker } from '../features/platform/index.js';
 import { SettingsPage } from '../features/settings/index.js';
 import { TeamPage } from '../features/team/index.js';
 import { UniformInventoryPage } from '../features/uniforms/index.js';
@@ -83,12 +82,6 @@ const platformPages: Record<PlatformRouteId, Entry<PageContext>> = {
     nav: true,
     render: ({ session }) =>
       session.user.platformOwner ? <DspList /> : <DspPicker session={session} />,
-  },
-  releases: {
-    icon: ArrowUpFromLine,
-    nav: true,
-    permission: platformOwner,
-    render: () => <ReleasesPage />,
   },
   jobs: {
     icon: FlaskConical,

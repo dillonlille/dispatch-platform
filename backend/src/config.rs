@@ -10,7 +10,6 @@ pub struct Config {
     pub origin: String,
     pub port: u16,
     pub release: String,
-    pub version: Option<String>,
     pub fixture: bool,
     pub fixture_url: Option<String>,
     pub browser_capacity: usize,
@@ -93,7 +92,6 @@ impl Config {
                 .parse()
                 .map_err(|_| super::Error::new("invalid_port", 400))?,
             release: variable("DISPATCH_RELEASE", "development"),
-            version: None,
             fixture: provider == "fixture",
             fixture_url: env::var("DISPATCH_FIXTURE_PROVIDER_URL").ok(),
             browser_capacity: 2,
@@ -114,7 +112,6 @@ impl Config {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(bundle.join("release.json"))?)?;
             c.release = manifest["digest"].as_str().unwrap_or("unknown").into();
-            c.version = manifest["version"].as_str().map(str::to_owned);
         }
         ensure(
             c.root.is_absolute() && c.root.parent().is_some(),

@@ -1,11 +1,3 @@
-@media (prefers-reduced-motion: reduce) {
-  #platform-updates-content *,
-  #platform-updates-content :before,
-  #platform-updates-content :after {
-    transition: none !important;
-    animation: none !important;
-  }
-}
 button {
   display: inline-flex;
   align-items: center;
