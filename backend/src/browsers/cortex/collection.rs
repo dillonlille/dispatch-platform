@@ -36,8 +36,14 @@ struct Punch {
     start: i64,
     end: Option<i64>,
 }
+#[cfg(test)]
+impl Candidate {
+    pub(super) fn id(&self) -> &str {
+        &self.id
+    }
+}
 impl Driver {
-    async fn meal_read(
+    pub(super) async fn meal_read(
         &self,
         scope: &Scope,
         candidate: Option<&Candidate>,
