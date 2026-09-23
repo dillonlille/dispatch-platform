@@ -20,7 +20,7 @@ interpretation and meal assessment; the dashboard formats typed assessment resul
 expose theirs through `index.ts`. Styles live with their owner; `dashboard/src/styles.css`
 sets the global import order. Shared contracts and tooling never import dashboard code.
 
-Use an isolated worktree branched from `origin/dev`, then `npm ci` and `npm run dev`.
+Use an isolated worktree branched from `origin/main`, then `npm ci` and `npm run dev`.
 The preview prints a private fixture URL. `npm run check:ci` runs full validation;
 `npm run check:ci build-dashboard` runs the dashboard checks. `npm test` discovers
 TypeScript tests recursively; Python tooling tests use
