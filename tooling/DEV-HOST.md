@@ -20,9 +20,11 @@ systemctl --user start dispatch-preview@my-branch
 systemctl --user status dispatch-preview@my-branch   # the link is in its output
 ```
 
-Stop it with `systemctl --user stop dispatch-preview@my-branch` when its PR merges, and
-remove the env file. The unit never restarts on its own: a crashed preview stays down
-instead of looping on a broken branch.
+It keeps everything it makes, including its fixture data, in the worktree's scratch
+directory `/tmp/dispatch-my-branch`. When its PR merges, stop it with
+`systemctl --user stop dispatch-preview@my-branch`, then remove the env file and that
+directory. The unit never restarts on its own: a crashed preview stays down instead of
+looping on a broken branch.
 
 - `.build/`: verified compiled runtime serving https://dispatchdev.dillonlille.com.
 - `config/`, `data/`, `dsps/`: private configuration and persistent state.
