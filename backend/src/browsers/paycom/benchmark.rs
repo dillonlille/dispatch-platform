@@ -620,3 +620,140 @@ async fn http_extraction_parity() -> Result<()> {
     driver.browser.close().await;
     result
 }
+
+// Every employee's timecard over HTTP at each of several concurrency levels, with one
+// session for all of them. Prints timings and refusal labels only. Stops raising the
+// level as soon as Paycom throttles or fails a request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
+async fn http_concurrency() -> Result<()> {
+    let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
+    let profile = dsp.join("state/browsers/paycom-browseros");
+    let runtime = browseros::Runtime::new(
+        std::path::Path::new("/opt/dispatch-browseros/0.50.5/browseros"),
+        std::path::Path::new("/usr/local/libexec/dispatch-dev/bwrap"),
+        &env_path("DISPATCH_BENCHMARK_WORKER")?,
+        &env_path("DISPATCH_BENCHMARK_RUNS")?,
+        1,
+    )?;
+    let browser = runtime
+        .start(
+            &profile,
+            browseros::Mode::Windowed,
+            browseros::NetworkPolicy::Paycom,
+        )
+        .await?;
+    let mut driver = Driver::new(browser, &profile, None).await?;
+    let roster = async {
+        let secrets = dsp.join("secrets");
+        let credentials = crate::crypto::decrypt(
+            &db::key_file(&secrets.join("vault.key"))?,
+            &format!("{}:paycom:2", dsp.file_name().unwrap().to_str().unwrap()),
+            &std::fs::read_to_string(secrets.join("paycom.enc"))?,
+        )?;
+        let auth = driver.authenticate(credentials, false).await?;
+        ensure(
+            auth["type"] == "ready",
+            "benchmark_verification_required",
+            409,
+        )?;
+        driver.credentials = Value::Null;
+        let timezone = std::env::var("DISPATCH_BENCHMARK_TIMEZONE")
+            .map_err(|_| Error::new("benchmark_configuration_required", 400))?;
+        driver.roster(&timezone, None, true).await
+    }
+    .await;
+    driver.browser.close().await;
+    let roster = roster?;
+    let http = Arc::new(
+        roster
+            .http
+            .ok_or_else(|| Error::new("benchmark_http_unavailable", 502))?,
+    );
+    let employees = Arc::new(roster.employees);
+    let period = Arc::new(roster.period);
+    let origin = driver.origin.clone();
+    let levels = std::env::var("DISPATCH_BENCHMARK_LEVELS").unwrap_or_else(|_| "2,4,6".into());
+    for (step, lanes) in levels
+        .split(',')
+        .filter_map(|v| v.trim().parse::<usize>().ok())
+        .enumerate()
+    {
+        if step > 0 {
+            sleep(Duration::from_secs(15)).await;
+        }
+        let next = Arc::new(AtomicU64::new(0));
+        let started = Instant::now();
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..lanes {
+            let (http, employees, period, next, origin) = (
+                http.clone(),
+                employees.clone(),
+                period.clone(),
+                next.clone(),
+                origin.clone(),
+            );
+            tasks.spawn(async move {
+                let mut reads = Vec::new();
+                loop {
+                    let index = next.fetch_add(1, Ordering::SeqCst) as usize;
+                    let Some(employee) = employees.get(index) else {
+                        break;
+                    };
+                    let source = collection::timecard_url(&origin, employee, &period, false);
+                    let fetched = Instant::now();
+                    let page = http.page(&source, &format!("{origin}{SEARCH}")).await;
+                    let ms = fetched.elapsed().as_millis();
+                    let outcome = match page {
+                        Err(http::Refusal::Unavailable) => Err("unavailable".to_owned()),
+                        Err(http::Refusal::Unreadable(label)) => Err(label.to_owned()),
+                        Ok(html) => {
+                            let (code, period) = (s(employee, "code").to_owned(), period.clone());
+                            tokio::task::spawn_blocking(move || {
+                                extract::timecard(
+                                    &html,
+                                    &extract::Source {
+                                        employee: &code,
+                                        period: &period,
+                                        url: &source,
+                                    },
+                                )
+                                .map(|_| ())
+                                .map_err(|reason| format!("{reason:?}"))
+                            })
+                            .await
+                            .unwrap_or_else(|_| Err("extraction_stopped".into()))
+                        }
+                    };
+                    reads.push((ms, outcome));
+                }
+                reads
+            });
+        }
+        let mut reads = Vec::new();
+        while let Some(lane) = tasks.join_next().await {
+            reads.extend(lane.unwrap());
+        }
+        let elapsed = started.elapsed().as_millis();
+        let mut times = reads.iter().map(|(ms, _)| *ms).collect::<Vec<_>>();
+        times.sort();
+        let mut refusals = std::collections::BTreeMap::<String, usize>::new();
+        for (_, outcome) in &reads {
+            if let Err(label) = outcome {
+                *refusals.entry(label.clone()).or_default() += 1;
+            }
+        }
+        let valid = reads.iter().filter(|(_, o)| o.is_ok()).count();
+        eprintln!(
+            "LEVEL {}",
+            json!({"lanes":lanes,"reads":reads.len(),"valid":valid,"elapsedMs":elapsed,
+                "p50Ms":times.get(times.len()/2),"p90Ms":times.get(times.len()*9/10),
+                "maxMs":times.last(),"refusals":refusals})
+        );
+        if refusals.contains_key("unavailable") {
+            eprintln!("LEVEL {}", json!({"stopped":"provider_unavailable"}));
+            break;
+        }
+    }
+    Ok(())
+}

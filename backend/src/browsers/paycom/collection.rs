@@ -24,6 +24,9 @@ const PAGE_RETRY: &[crate::Code] = &[
     crate::Code::BrowserNavigationPending,
 ];
 const API: &str = "https://time-and-attendance.paycomonline.net/api/cl/timecard-search/employees";
+/// Timecards read over HTTP at once. Paycom answered six together as fast as two
+/// (3.6 s against 3.5 s each for 100 employees) and refused none.
+const HTTP_LANES: usize = 6;
 const FIELDS: &[&str] = &[
     "allocationCategories",
     "approvalMode",
@@ -519,26 +522,31 @@ impl Driver {
             None => None,
         };
         let queue = queue(todo, direct, progress);
-        // Drain both lanes even when one fails. Dropping a sibling's in-flight
+        // Drain every lane even when one fails. Dropping a sibling's in-flight
         // CDP command intentionally closes the shared browser transport.
-        let (first, others) = match &reader {
+        let lanes = match &reader {
             Some(http) => {
                 drop(second);
                 self.browser.close().await;
-                tokio::join!(
-                    queue.lane(Reader::Http(http)),
-                    queue.lane(Reader::Http(http))
+                futures_util::future::join_all(
+                    (0..HTTP_LANES).map(|_| queue.lane(Reader::Http(http))),
                 )
+                .await
             }
-            None => tokio::join!(queue.lane(Reader::Tab(&mut self.page)), async {
-                match &mut second {
-                    Some(page) => queue.lane(Reader::Tab(page)).await,
-                    None => Ok(BTreeMap::new()),
-                }
-            }),
+            None => {
+                let (first, others) =
+                    tokio::join!(queue.lane(Reader::Tab(&mut self.page)), async {
+                        match &mut second {
+                            Some(page) => queue.lane(Reader::Tab(page)).await,
+                            None => Ok(BTreeMap::new()),
+                        }
+                    });
+                vec![first, others]
+            }
         };
-        pages.extend(first?);
-        pages.extend(others?);
+        for lane in lanes {
+            pages.extend(lane?);
+        }
         let timecards = employees
             .iter()
             .flat_map(|employee| pages.remove(s(employee, "code")).unwrap_or_default())

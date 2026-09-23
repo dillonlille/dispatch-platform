@@ -157,15 +157,22 @@ test(
       'Use two browsers when memory permits; queue under pressure',
     );
     assert.equal(maxRunningPerDsp, 1);
-    assert(f.state.timecardsPeak >= 2 && f.state.timecardsPeak <= 4);
+    assert(f.state.browserPeak >= 2 && f.state.browserPeak <= 4);
+    assert(f.state.httpPeak <= 12, 'Six HTTP reads per collecting DSP at most');
     if (peakBrowsers === 2 && !memoryDelayed)
       assert.equal(f.state.timecardAccountsPeak, 2, 'Distinct DSPs must collect concurrently');
-    for (const account of accounts)
+    for (const account of accounts) {
       assert.equal(
-        f.state.peakByAccount.get(account),
+        f.state.browserPeakByAccount.get(account),
         2,
         `${account} must use two concurrent tabs`,
       );
+      assert.equal(
+        f.state.peakByAccount.get(account),
+        6,
+        `${account} must read six timecards at once over HTTP`,
+      );
+    }
     assert.equal(f.state.accountStarts.filter((v) => v === accounts[0]).length, 2);
     // Fairness is the order in which jobs receive a slot. If both slots free
     // together, different browser startup times can reorder the first HTTP request.

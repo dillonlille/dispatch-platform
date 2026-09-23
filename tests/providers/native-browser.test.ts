@@ -140,11 +140,8 @@ test(
     assert.equal(f.state.verifications, 5);
     assert.equal(f.state.httpTimecards, 25, 'Every response read comes from the platform');
     assert.equal(complete.completed, 25);
-    assert.equal(
-      f.state.timecardsPeak,
-      2,
-      'Two real document requests must overlap, with a hard limit of two',
-    );
+    assert.equal(f.state.browserPeak, 2, 'Two tabs overlap, with a hard limit of two');
+    assert.equal(f.state.httpPeak, 6, 'Six HTTP reads overlap, with a hard limit of six');
     assert.equal((await owner.get('/api/dsp/employees')).value.total, 25);
     assert.equal(f.events.filter((event) => event === 'timecard').length, 25);
     assert.equal(
@@ -197,7 +194,8 @@ test(
       id,
       'A failure in either tab must preserve the previous complete publication',
     );
-    assert.equal(f.state.timecardsPeak, 2);
+    assert.equal(f.state.browserPeak, 2);
+    assert(f.state.httpPeak <= 6);
     assert.equal(f.events.filter((e) => e === 'primary').length, 1);
 
     f.state.wrongIdentity = false;
@@ -219,7 +217,7 @@ test(
     f.state.timecardStatus = 200;
     f.state.timecardDelayMs = 3000;
     const cancelled = await owner.post('/api/dsp/jobs', { requestId: 'parallel-cancelled' });
-    await until(async () => f.state.timecardsActive === 2);
+    await until(async () => f.state.timecardsActive >= 2);
     assert.equal(
       (await owner.post(`/api/dsp/jobs/${cancelled.value.id}/cancel`, {})).value.status,
       'cancelled',

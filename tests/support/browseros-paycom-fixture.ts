@@ -155,8 +155,15 @@ export async function paycomFixture(
     // Responses for later employees differ from their rendered pages yet validate.
     responseDrift: false,
     // Timecard requests from the platform's own HTTP client, not a browser: it asks
-    // for no compressed encoding, which a browser always does.
+    // for no compressed encoding, which a browser always does. Each kind's overlap
+    // is kept apart, overall and per account.
     httpTimecards: 0,
+    httpActive: 0,
+    httpPeak: 0,
+    browserActive: 0,
+    browserPeak: 0,
+    browserByAccount: new Map<string, number>(),
+    browserPeakByAccount: new Map<string, number>(),
     expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
@@ -290,7 +297,19 @@ export async function paycomFixture(
       state.activeByAccount.set(account, active);
       state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
       const code = url.searchParams.get('firstrefno')!;
-      if (!req.headers['accept-encoding']) state.httpTimecards++;
+      const fromPlatform = !req.headers['accept-encoding'];
+      if (fromPlatform) {
+        state.httpTimecards++;
+        state.httpPeak = Math.max(state.httpPeak, ++state.httpActive);
+      } else {
+        state.browserPeak = Math.max(state.browserPeak, ++state.browserActive);
+        const tabs = (state.browserByAccount.get(account) ?? 0) + 1;
+        state.browserByAccount.set(account, tabs);
+        state.browserPeakByAccount.set(
+          account,
+          Math.max(tabs, state.browserPeakByAccount.get(account) ?? 0),
+        );
+      }
       if (!verification) {
         state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
         events.push('timecard');
@@ -342,6 +361,11 @@ export async function paycomFixture(
       } finally {
         state.timecardsActive--;
         state.activeByAccount.set(account, (state.activeByAccount.get(account) ?? 1) - 1);
+        if (fromPlatform) state.httpActive--;
+        else {
+          state.browserActive--;
+          state.browserByAccount.set(account, state.browserByAccount.get(account)! - 1);
+        }
       }
     }
     res.writeHead(404);
