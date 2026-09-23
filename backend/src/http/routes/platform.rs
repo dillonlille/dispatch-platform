@@ -1,4 +1,4 @@
-//! What only a platform owner sees: every DSP, the platform's health, diagnostics and releases.
+//! What only a platform owner sees: every DSP, the platform's health and diagnostics.
 use crate::{
     Error, Result, State,
     contracts::{BrowserHealth, DspStatus, JobStatus, PlatformHealth, ProviderMode},
