@@ -208,6 +208,44 @@ pub fn retarget(root: &Path, old: &str, new: &str) -> Result<Manifest> {
     fs::write(root.join("release.json"), format!("{}\n", seal(value)?))?;
     verify(root, Some(new))
 }
+/// Names the version a release publishes. Only the manifest changes: the files, their
+/// inventory and the source commit stay exactly what CI built and tested.
+pub fn stamp(root: &Path, commit: &str, version: &str) -> Result<Manifest> {
+    verify(root, Some(commit))?;
+    let mut value: Value = serde_json::from_slice(&fs::read(root.join("release.json"))?)?;
+    value["version"] = json!(version);
+    fs::write(root.join("release.json"), format!("{}\n", seal(value)?))?;
+    verify(root, Some(commit))
+}
+/// Packs a verified build as regular files only, with fixed ownership, times and modes.
+pub fn pack(root: &Path, archive: &Path) -> Result<()> {
+    let manifest = verify(root, None)?;
+    let output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(archive)?;
+    let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+        output,
+        flate2::Compression::default(),
+    ));
+    for name in manifest
+        .files
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .chain(["release.json"])
+    {
+        let file = File::open(root.join(name))?;
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_size(file.metadata()?.len());
+        header.set_mode(if name == REQUIRED[1] { 0o755 } else { 0o644 });
+        header.set_mtime(0);
+        tar.append_data(&mut header, name, file)?;
+    }
+    tar.into_inner()?.finish()?.sync_all()?;
+    Ok(())
+}
 pub fn unpack(archive: &Path, destination: &Path) -> Result<()> {
     crate::io::private_directory(destination)?;
     real_directory(destination)?;

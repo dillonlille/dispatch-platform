@@ -2,12 +2,15 @@ use super::*;
 use crate::io::{Native, Response};
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     io::{Cursor, Write},
     os::unix::fs::{PermissionsExt, symlink},
 };
 
+const WORKFLOW: &str = ".github/workflows/checks.yml";
+
 // Only remote services, smoke execution and time are faked. Release directories,
-// manifests, tar/ZIP packages, Git worktrees and journal durability use real I/O.
+// manifests, tar/ZIP packages, Git history and journal durability use real I/O.
 struct Fake {
     calls: RefCell<Vec<Vec<String>>>,
     listed: RefCell<Vec<Value>>,
@@ -23,12 +26,15 @@ struct Fake {
     asset_error: Cell<bool>,
     wrong_tag: Cell<bool>,
     hide_release_once: Cell<bool>,
-    pull: RefCell<Option<Value>>,
-    sync: RefCell<Option<Value>>,
     comparison: RefCell<String>,
-    /// A merge queue: listings before a merge command shows its PR merged.
-    queue: Cell<u32>,
-    merging: RefCell<Option<String>>,
+    /// Runs that skipped the core suite, so validated less than the full suite.
+    partial: RefCell<BTreeSet<u64>>,
+    /// Where the temporary checks branch points on GitHub.
+    branch: RefCell<Option<String>>,
+    /// The conclusion a dispatched run reaches.
+    dispatched: Cell<&'static str>,
+    /// Validation receipt archives by the run that published them.
+    receipts: RefCell<BTreeMap<u64, Vec<u8>>>,
 }
 impl Fake {
     fn fail(&self, point: &str) {
@@ -47,6 +53,18 @@ impl Fake {
                 .any(|s| s.iter().map(String::as_str).eq(words.iter().copied()))
         })
     }
+    fn count(&self, words: &[&str]) -> usize {
+        self.calls
+            .borrow()
+            .iter()
+            .filter(|c| {
+                c.iter()
+                    .map(String::as_str)
+                    .take(words.len())
+                    .eq(words.iter().copied())
+            })
+            .count()
+    }
 }
 impl System for Fake {
     fn command(
@@ -59,39 +77,14 @@ impl System for Fake {
         self.calls
             .borrow_mut()
             .push(args.iter().map(|s| s.to_string()).collect());
-        let value = if args.starts_with(&["gh", "api", "graphql"]) {
-            let field = |name: &str| {
-                args.iter()
-                    .find_map(|a| a.strip_prefix(&format!("{name}=")))
-                    .unwrap_or("")
-                    .to_owned()
-            };
-            let query = field("query");
-            if query.contains("mergeQueue(branch:") {
-                let queued = self.queue.get() > 0 && query.contains("branch: \"dev\"");
-                json!({"data":{"repository":{"mergeQueue":if queued { json!({"id":"MQ_dev"}) } else { Value::Null }}}})
-            } else if query.contains("enqueuePullRequest") {
-                let number = if field("id") == "PR_8" { "8" } else { "sync" };
-                let pulls = if number == "8" {
-                    self.pull.borrow()
-                } else {
-                    self.sync.borrow()
-                };
-                let pull = pulls.as_ref().ok_or("No pull")?;
-                require(
-                    pull["id"] == field("id").as_str(),
-                    "Unknown pull request id",
-                )?;
-                require(
-                    pull["headRefOid"] == field("head").as_str(),
-                    "PR head moved",
-                )?;
-                self.merging.replace(Some(number.into()));
-                json!({"data":{"enqueuePullRequest":{"mergeQueueEntry":{"position":1}}}})
-            } else {
-                return Err(format!("Unexpected GraphQL {query}").into());
-            }
-        } else if args[0] == "gh" && args[1] == "api" {
+        let field = |name: &str| {
+            args.iter()
+                .find_map(|a| a.strip_prefix(&format!("{name}=")))
+                .unwrap_or("")
+                .to_owned()
+        };
+        let checks_ref = "refs/heads/release-checks/v1.0.0";
+        let value = if args[0] == "gh" && args[1] == "api" {
             let endpoint = args[2]
                 .strip_prefix(&format!("repos/{REPOSITORY}/"))
                 .ok_or("Wrong repository")?;
@@ -111,6 +104,40 @@ impl System for Fake {
                 fs::write(output.ok_or("Expected download file")?, &self.download)?;
                 self.maybe_fail("download")?;
                 return Ok(vec![]);
+            } else if let Some(run) = endpoint
+                .strip_prefix("actions/runs/")
+                .and_then(|s| s.strip_suffix("/jobs?filter=latest&per_page=100"))
+            {
+                let partial = self.partial.borrow().contains(&run.parse()?);
+                json!({"jobs":[{"name":"build","conclusion":"success"},
+                    {"name":"core","conclusion":if partial { "skipped" } else { "success" }}]})
+            } else if let Some(run) = endpoint
+                .strip_prefix("actions/runs/")
+                .and_then(|s| s.strip_suffix("/artifacts"))
+            {
+                let run: u64 = run.parse()?;
+                let receipts = self.receipts.borrow();
+                let artifacts: Vec<_> = receipts
+                    .get(&run)
+                    .map(|zip| {
+                        json!({"name":format!("dispatch-validation-{run}-1"),"id":100 + run,
+                        "expired":false,"size_in_bytes":zip.len(),
+                        "digest":format!("sha256:{}",artifact::hash(zip))})
+                    })
+                    .into_iter()
+                    .collect();
+                json!({ "artifacts": artifacts })
+            } else if let Some(id) = endpoint
+                .strip_prefix("actions/artifacts/")
+                .and_then(|s| s.strip_suffix("/zip"))
+            {
+                let run = id.parse::<u64>()? - 100;
+                return Ok(self
+                    .receipts
+                    .borrow()
+                    .get(&run)
+                    .ok_or("Unknown artifact")?
+                    .clone());
             } else if endpoint.starts_with("git/matching-refs/tags/") {
                 if self.listed.borrow().iter().any(|r| r["draft"] == false) || self.wrong_tag.get()
                 {
@@ -118,6 +145,27 @@ impl System for Fake {
                 } else {
                     json!([])
                 }
+            } else if endpoint == "git/matching-refs/heads/release-checks/v1.0.0" {
+                let refs: Vec<_> = self
+                    .branch
+                    .borrow()
+                    .iter()
+                    .map(|sha| json!({"ref":checks_ref,"object":{"type":"commit","sha":sha}}))
+                    .collect();
+                json!(refs)
+            } else if endpoint == "git/refs" {
+                require(field("ref") == checks_ref, "Unexpected branch")?;
+                require(self.branch.borrow().is_none(), "Reference already exists")?;
+                self.branch.replace(Some(field("sha")));
+                json!({ "ref": checks_ref })
+            } else if endpoint == "git/refs/heads/release-checks/v1.0.0" {
+                if args.contains(&"DELETE") {
+                    self.branch.take().ok_or("Reference does not exist")?;
+                    return Ok(vec![]);
+                }
+                require(args.contains(&"PATCH"), "Unexpected branch update")?;
+                self.branch.replace(Some(field("sha")));
+                json!({ "ref": checks_ref })
             } else if endpoint == "releases/9" && args.contains(&"PATCH") {
                 self.listed.borrow_mut()[0]["draft"] = json!(false);
                 self.listed.borrow_mut()[0]["published_at"] = json!("2026-09-21T00:00:00Z");
@@ -126,71 +174,22 @@ impl System for Fake {
             } else {
                 return Err(format!("Unexpected API {endpoint}").into());
             }
-        } else if args.starts_with(&["gh", "pr", "list"]) {
-            if !args.contains(&"--head") {
-                if self
-                    .pull
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|p| p["state"] == "OPEN")
-                {
-                    json!([{"headRefName":"release/v1.0.0"}])
-                } else {
-                    json!([])
-                }
-            } else {
-                let number = if args.contains(&"release/v1.0.0") {
-                    "8"
-                } else {
-                    "sync"
-                };
-                if self.merging.borrow().as_deref() == Some(number) {
-                    self.queue.set(self.queue.get() - 1);
-                    if self.queue.get() == 0 {
-                        self.merging.replace(None);
-                        let mut pulls = if number == "8" {
-                            self.pull.borrow_mut()
-                        } else {
-                            self.sync.borrow_mut()
-                        };
-                        let pull = pulls.as_mut().unwrap();
-                        pull["state"] = json!("MERGED");
-                        pull["mergeCommit"] = json!({"oid":self.commit});
-                    }
-                }
-                if number == "8" {
-                    json!(self.pull.borrow().iter().collect::<Vec<_>>())
-                } else {
-                    json!(self.sync.borrow().iter().collect::<Vec<_>>())
-                }
-            }
-        } else if args.starts_with(&["gh", "pr", "create"]) {
-            let branch = args[args.iter().position(|s| *s == "--head").unwrap() + 1];
-            let head = git(cwd.unwrap(), &["rev-parse", branch]);
-            let pull = json!({"id":"PR_8","number":8,"state":"OPEN","url":"https://example.invalid/pr/8","headRefOid":head,"mergeCommit":null,"isCrossRepository":false});
-            self.pull.replace(Some(pull));
-            self.maybe_fail("create-pr")?;
-            return Ok(b"https://example.invalid/pr/8\n".to_vec());
-        } else if args.starts_with(&["gh", "pr", "merge"]) {
-            let mut pulls = if args[3] == "8" {
-                self.pull.borrow_mut()
-            } else {
-                self.sync.borrow_mut()
-            };
-            let pull = pulls.as_mut().ok_or("No pull")?;
-            let head = args[args
-                .iter()
-                .position(|s| *s == "--match-head-commit")
-                .unwrap()
-                + 1];
-            require(pull["headRefOid"] == head, "PR head moved")?;
-            // With a queue and auto-merge off, GitHub refuses a direct gh merge into dev.
+        } else if args.starts_with(&["gh", "workflow", "run", "checks.yml"]) {
+            let reference = args[args.iter().position(|s| *s == "--ref").unwrap() + 1];
             require(
-                self.queue.get() == 0 || args[3] == "8",
-                "Auto merge is not allowed for this repository",
+                format!("refs/heads/{reference}") == checks_ref,
+                "Unexpected dispatch",
             )?;
-            pull["state"] = json!("MERGED");
-            pull["mergeCommit"] = json!({"oid":self.commit});
+            let sha = self.branch.borrow().clone().ok_or("No such ref")?;
+            let mut runs = self.runs.borrow_mut();
+            let runs = runs.as_array_mut().unwrap();
+            let id = runs.iter().filter_map(|r| r["id"].as_u64()).max().unwrap() + 1;
+            runs.push(
+                json!({"id":id,"run_attempt":1,"head_sha":sha,"event":"workflow_dispatch",
+                "head_branch":reference,"status":"completed","conclusion":self.dispatched.get(),
+                "path":WORKFLOW,"head_repository":{"full_name":REPOSITORY},
+                "html_url":format!("https://example.invalid/run/{id}")}),
+            );
             Value::Null
         } else if args.starts_with(&["gh", "release", "create"]) {
             self.listed.replace(vec![json!({"id":9,"tag_name":"v1.0.0","draft":true,"prerelease":false,
@@ -215,10 +214,7 @@ impl System for Fake {
                     .is_file()
             );
             Value::Null
-        } else if args.starts_with(&["git", "fetch"]) || args.starts_with(&["git", "push"]) {
-            self.maybe_fail("push")?;
-            Value::Null
-        } else if args.starts_with(&["cargo", "metadata"]) {
+        } else if args.starts_with(&["git", "fetch"]) {
             Value::Null
         } else {
             return Native.command(args, cwd, timeout, output);
@@ -271,17 +267,41 @@ fn git(root: &Path, args: &[&str]) -> String {
     .trim()
     .into()
 }
+/// Merges a PR's change into main through a merge commit, as the queue does.
+fn merge_to_main(root: &Path, name: &str) -> String {
+    git(root, &["checkout", "-q", "-b", name, "main"]);
+    fs::write(root.join(name), name).unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", name]);
+    git(root, &["checkout", "-q", "main"]);
+    git(
+        root,
+        &[
+            "merge",
+            "--no-ff",
+            "-m",
+            &format!("Merge pull request #8 from dispatch-systems/{name}"),
+            "-m",
+            name,
+            name,
+        ],
+    );
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(root, &["rev-parse", "HEAD"])
+}
 struct Fixture {
     temp: tempfile::TempDir,
     root: PathBuf,
     system: Fake,
+    /// What CI built: the version main's source names, before the release stamps its own.
+    built: artifact::Manifest,
 }
 impl Fixture {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("dev");
         fs::create_dir(&root).unwrap();
-        git(&root, &["init", "-b", "dev"]);
+        git(&root, &["init", "-b", "main"]);
         git(&root, &["config", "user.name", "Test"]);
         git(&root, &["config", "user.email", "test@dispatch.test"]);
         fs::write(root.join(".gitignore"), "/node_modules\n").unwrap();
@@ -290,25 +310,15 @@ impl Fixture {
             .unwrap()
             .parent()
             .unwrap();
-        for name in [
-            "package.json",
-            "package-lock.json",
-            "backend/Cargo.toml",
-            "backend/host/Cargo.toml",
-            "backend/ci/Cargo.toml",
-            "Cargo.lock",
-        ] {
-            fs::create_dir_all(root.join(name).parent().unwrap()).unwrap();
-            fs::copy(source.join(name), root.join(name)).unwrap();
-        }
+        fs::create_dir_all(root.join("tooling/ci")).unwrap();
+        fs::copy(
+            source.join("tooling/ci/test-plan.json"),
+            root.join("tooling/ci/test-plan.json"),
+        )
+        .unwrap();
         git(&root, &["add", "."]);
         git(&root, &["commit", "-m", "initial"]);
-        git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
-        fs::write(root.join("change"), "accepted Dev change").unwrap();
-        git(&root, &["add", "."]);
-        git(&root, &["commit", "-m", "feature"]);
-        git(&root, &["update-ref", "refs/remotes/origin/dev", "HEAD"]);
-        let commit = git(&root, &["rev-parse", "HEAD"]);
+        let commit = merge_to_main(&root, "accepted");
         fs::create_dir_all(root.join("node_modules/.bin")).unwrap();
         fs::write(root.join("node_modules/.bin/tsx"), "fake smoke").unwrap();
         let candidate = temp.path().join("candidate");
@@ -328,7 +338,7 @@ impl Fixture {
             )
             .unwrap();
         }
-        let manifest = artifact::write_manifest(&candidate, "1.0.0").unwrap();
+        let built = artifact::write_manifest(&candidate, "0.9.0").unwrap();
         let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         let mut tar = tar::Builder::new(gzip);
         tar.append_dir_all(".", &candidate).unwrap();
@@ -341,8 +351,13 @@ impl Fixture {
         .unwrap();
         zip.write_all(&archive).unwrap();
         let download = zip.finish().unwrap().into_inner();
+        // Production reports the digest of the build stamped with the release's version.
+        let digest = artifact::stamp(&candidate, &commit, "1.0.0")
+            .unwrap()
+            .digest;
         let run = json!({"id":5,"run_attempt":1,"head_sha":commit,"event":"push","head_branch":"main",
-            "status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/5"});
+            "status":"completed","conclusion":"success","path":WORKFLOW,
+            "head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/5"});
         let system = Fake {
             calls: RefCell::new(vec![]),
             listed: RefCell::new(vec![]),
@@ -353,25 +368,26 @@ impl Fixture {
             ),
             download,
             commit: commit.clone(),
-            digest: manifest.digest,
+            digest,
             failure: RefCell::new(None),
             elapsed: Cell::new(Duration::ZERO),
             unhealthy: Cell::new(false),
             health_error: Cell::new(false),
             asset_error: Cell::new(false),
-            queue: Cell::new(0),
-            merging: RefCell::new(None),
             wrong_tag: Cell::new(false),
             hide_release_once: Cell::new(false),
             comparison: RefCell::new("ahead".into()),
-            pull: RefCell::new(Some(
-                json!({"id":"PR_8","number":8,"state":"MERGED","headRefOid":commit,"mergeCommit":{"oid":commit},"isCrossRepository":false}),
-            )),
-            sync: RefCell::new(Some(
-                json!({"id":"PR_10","number":10,"state":"MERGED","headRefOid":commit,"isCrossRepository":false}),
-            )),
+            partial: RefCell::new(BTreeSet::new()),
+            branch: RefCell::new(None),
+            dispatched: Cell::new("success"),
+            receipts: RefCell::new(BTreeMap::new()),
         };
-        Self { temp, root, system }
+        Self {
+            temp,
+            root,
+            system,
+            built,
+        }
     }
     fn release(&self) -> Release<'_> {
         let options = Options {
@@ -379,7 +395,7 @@ impl Fixture {
             version: Some("1.0.0".into()),
             root: self.root.clone(),
             bump: "patch".into(),
-            dev_commit: None,
+            commit: None,
             notes: None,
             releases: None,
         };
@@ -403,6 +419,32 @@ impl Fixture {
         release.ensure_draft(&prepared).unwrap();
         prepared
     }
+    /// Main's merge queue group for the release commit reused the PR run that validated
+    /// the same merge, whose receipt records `scope`. Neither the group nor main's push
+    /// ran the suites themselves.
+    fn reused_group(&self, scope: &str) {
+        let commit = &self.system.commit;
+        let parents = git(&self.root, &["rev-list", "--parents", "-n", "1", commit]);
+        let parents: Vec<_> = parents.split_whitespace().collect();
+        let tree = git(&self.root, &["rev-parse", &format!("{commit}^{{tree}}")]);
+        let receipt = json!({"format":1,"repository":REPOSITORY,"workflow":WORKFLOW,"baseRef":"main",
+            "runId":6,"attempt":1,"base":parents[1],"head":parents[2],"tree":tree,"commit":commit,
+            "scope":scope});
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("validation.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&serde_json::to_vec(&receipt).unwrap())
+            .unwrap();
+        self.system
+            .receipts
+            .borrow_mut()
+            .insert(6, zip.finish().unwrap().into_inner());
+        self.system.runs.borrow_mut().as_array_mut().unwrap().push(json!({"id":6,"run_attempt":1,
+            "head_sha":commit,"event":"merge_group","head_branch":"gh-readonly-queue/main/pr-8",
+            "status":"completed","conclusion":"success","path":WORKFLOW,
+            "head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/6"}));
+        self.system.partial.borrow_mut().extend([5, 6]);
+    }
 }
 
 #[test]
@@ -421,9 +463,17 @@ fn legacy_cli_defaults_and_explicit_stages_are_validated_before_effects() {
         vec!["--root", "/a", "--root", "/b"],
         vec!["status"],
         vec!["--root", "/a", "--bump", "bad"],
+        vec!["--root", "/a", "--dev-commit", "HEAD"],
     ] {
         assert!(parse(&args).is_err());
     }
+    assert_eq!(
+        parse(&["--root", "/checkout", "--commit", "HEAD"])
+            .unwrap()
+            .commit
+            .as_deref(),
+        Some("HEAD")
+    );
     assert_eq!(next_version("0.0.9", "patch").unwrap(), "0.0.10");
     assert_eq!(next_version("1.4.9", "minor").unwrap(), "1.5.0");
     assert_eq!(next_version("1.4.9", "major").unwrap(), "2.0.0");
@@ -657,63 +707,6 @@ fn prepare_stops_at_draft_and_publish_checks_again_then_completes() {
 }
 
 #[test]
-fn queued_merges_are_awaited_before_the_release_continues() {
-    let sync_pull = |commit: &str, state: &str| json!({"id":"PR_10","number":10,"state":state,"url":"https://example.invalid/pr/10","headRefOid":commit,"isCrossRepository":false});
-    let passed_sync_run = |commit: &str| {
-        json!({"id":6,"run_attempt":1,"head_sha":commit,"event":"pull_request","head_branch":"chore/sync-main-v1.0.0",
-            "status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/6"})
-    };
-    // A merge queue holds the sync PR open for three listings after the merge command.
-    let f = Fixture::new();
-    let release = f.release();
-    f.system
-        .sync
-        .replace(Some(sync_pull(&f.system.commit, "OPEN")));
-    f.system
-        .runs
-        .borrow_mut()
-        .as_array_mut()
-        .unwrap()
-        .push(passed_sync_run(&f.system.commit));
-    f.system.queue.set(3);
-    release.finish_sync().unwrap();
-    // dev's queue is joined through the enqueue API at the checked head, never gh pr merge.
-    assert!(!f.system.has_call(&["gh", "pr", "merge", "10"]));
-    assert!(f.system.calls.borrow().iter().any(|call| {
-        call.iter().any(|word| word.contains("enqueuePullRequest"))
-            && call.contains(&"id=PR_10".to_string())
-            && call.contains(&format!("head={}", f.system.commit))
-    }));
-    assert_eq!(f.system.sync.borrow().as_ref().unwrap()["state"], "MERGED");
-    assert!(f.system.elapsed.get() >= Duration::from_secs(20));
-    // A PR the queue never merges stops the release after the deadline, resumable later.
-    let f = Fixture::new();
-    let release = f.release();
-    f.system
-        .sync
-        .replace(Some(sync_pull(&f.system.commit, "OPEN")));
-    f.system
-        .runs
-        .borrow_mut()
-        .as_array_mut()
-        .unwrap()
-        .push(passed_sync_run(&f.system.commit));
-    f.system.queue.set(u32::MAX);
-    let error = release.finish_sync().unwrap_err().to_string();
-    assert!(error.contains("still queued"), "{error}");
-    assert!(f.system.elapsed.get() >= Duration::from_secs(1800));
-    assert_eq!(f.system.sync.borrow().as_ref().unwrap()["state"], "OPEN");
-    // A PR closed without merging is an error, not a wait.
-    let f = Fixture::new();
-    let release = f.release();
-    f.system
-        .sync
-        .replace(Some(sync_pull(&f.system.commit, "CLOSED")));
-    let error = release.finish_sync().unwrap_err().to_string();
-    assert!(error.contains("closed without merging"), "{error}");
-    assert_eq!(f.system.elapsed.get(), Duration::ZERO);
-}
-#[test]
 fn publication_response_loss_and_production_failure_resume_without_republishing_or_smoking() {
     for failure in ["publication", "health", "assets"] {
         let f = Fixture::new();
@@ -739,49 +732,16 @@ fn publication_response_loss_and_production_failure_resume_without_republishing_
         );
         assert!(!f.system.has_call(&["PATCH"]));
         assert!(!f.system.has_call(&["--smoke-only"]));
-        assert!(!f.system.has_call(&["gh", "pr", "merge"]));
+        assert!(!f.system.has_call(&["gh", "workflow", "run"]));
     }
 }
 
-#[test]
-fn the_sync_pr_opens_only_after_mains_checks_pass() {
-    let sync = ["--head", "chore/sync-main-v1.0.0"];
-    let f = Fixture::new();
-    let release = f.release();
-    io::private_directory(&release.directory).unwrap();
-    fs::write(&release.notes, "Notes").unwrap();
-    f.system.runs.borrow_mut()[0]["conclusion"] = json!("failure");
-    assert!(release.execute(Stage::Prepare, None).is_err());
-    assert!(!f.system.has_call(&sync));
-    f.system.runs.borrow_mut()[0]["conclusion"] = json!("success");
-    f.system.calls.borrow_mut().clear();
-    assert_eq!(
-        release.execute(Stage::Prepare, None).unwrap()["stage"],
-        "draft-verified"
-    );
-    let calls = f.system.calls.borrow();
-    let checked = calls
-        .iter()
-        .position(|call| {
-            call.iter()
-                .any(|word| word.contains("event=push&head_sha="))
-        })
-        .unwrap();
-    let opened = calls
-        .iter()
-        .position(|call| call.windows(2).any(|pair| pair == sync))
-        .unwrap();
-    assert!(
-        checked < opened,
-        "the sync PR was looked up before main's checks"
-    );
-}
 #[test]
 fn smoke_failure_stops_draft_creation_and_publish_needs_preparation() {
     let f = Fixture::new();
     let release = f.release();
     assert!(release.execute(Stage::Publish, None).is_err());
-    assert!(!f.system.has_call(&["gh", "pr", "create"]));
+    assert!(!release.output.exists());
     f.system.fail("smoke");
     assert!(release.execute(Stage::Prepare, None).is_err());
     assert!(release.output.is_dir());
@@ -818,39 +778,37 @@ fn status_is_read_only_even_for_missing_preparation() {
 }
 
 #[test]
-fn unfinished_discovery_covers_merged_pr_before_draft_and_published_before_verification() {
+fn unfinished_discovery_covers_a_pinned_commit_before_draft_and_published_before_verification() {
     let f = Fixture::new();
     let release = f.release();
-    assert!(
-        unfinished(&f.system, &release.directory, &[])
-            .unwrap()
-            .is_none()
-    );
+    assert!(unfinished(&release.directory, &[]).unwrap().is_none());
     io::private_directory(&release.directory).unwrap();
     release.record_commit(&f.system.commit).unwrap();
     assert_eq!(
-        unfinished(&f.system, &release.directory, &[])
-            .unwrap()
-            .as_deref(),
+        unfinished(&release.directory, &[]).unwrap().as_deref(),
         Some("1.0.0")
     );
     let other = json!({"tag_name":"v2.0.0","draft":true});
-    assert!(unfinished(&f.system, &release.directory, &[other]).is_err());
+    assert!(unfinished(&release.directory, &[other]).is_err());
     let listed = json!({"tag_name":"v1.0.0","draft":false});
     assert_eq!(
-        unfinished(&f.system, &release.directory, &[listed])
+        unfinished(&release.directory, &[listed])
             .unwrap()
             .as_deref(),
         Some("1.0.0")
     );
+    // Journals from releases that went through a release PR still read.
+    let mut legacy = serde_json::to_value(release.journal().unwrap()).unwrap();
+    legacy["devCommit"] = json!(f.system.commit);
+    io::write_json(&release.journal_path(), &legacy).unwrap();
     let mut journal = release.journal().unwrap();
+    assert_eq!(
+        journal.dev_commit.as_deref(),
+        Some(f.system.commit.as_str())
+    );
     journal.complete = true;
     release.save(&journal).unwrap();
-    assert!(
-        unfinished(&f.system, &release.directory, &[])
-            .unwrap()
-            .is_none()
-    );
+    assert!(unfinished(&release.directory, &[]).unwrap().is_none());
 }
 
 #[test]
@@ -859,16 +817,10 @@ fn legacy_history_without_receipts_does_not_reopen_superseded_releases() {
     let release = f.release();
     io::private_directory(&release.directory.join("v0.0.3")).unwrap();
     let listed = vec![json!({"tag_name":"v1.0.0","draft":false,"prerelease":false})];
-    assert!(
-        unfinished(&f.system, &release.directory, &listed)
-            .unwrap()
-            .is_none()
-    );
+    assert!(unfinished(&release.directory, &listed).unwrap().is_none());
     io::private_directory(&release.output).unwrap();
     assert_eq!(
-        unfinished(&f.system, &release.directory, &listed)
-            .unwrap()
-            .as_deref(),
+        unfinished(&release.directory, &listed).unwrap().as_deref(),
         Some("1.0.0")
     );
     fs::remove_dir(&release.output).unwrap();
@@ -880,9 +832,7 @@ fn legacy_history_without_receipts_does_not_reopen_superseded_releases() {
     )
     .unwrap();
     assert_eq!(
-        unfinished(&f.system, &release.directory, &listed)
-            .unwrap()
-            .as_deref(),
+        unfinished(&release.directory, &listed).unwrap().as_deref(),
         Some("0.0.3")
     );
 }
@@ -975,82 +925,135 @@ fn busy_executable_retry_respects_the_command_deadline() {
 }
 
 #[test]
-fn failed_dev_sync_remains_resumable_after_production_is_verified() {
+fn the_release_publishes_mains_build_under_its_own_version() {
     let f = Fixture::new();
-    f.draft();
+    let prepared = f.prepare();
     let release = f.release();
-    f.system.sync.borrow_mut().as_mut().unwrap()["state"] = json!("CLOSED");
-    assert!(release.execute(Stage::Publish, None).is_err());
-    assert!(release.output.join("deployment-verification.json").exists());
-    assert!(!release.journal().unwrap().complete);
-    f.system.sync.borrow_mut().as_mut().unwrap()["state"] = json!("MERGED");
-    f.system.calls.borrow_mut().clear();
-    release.execute(Stage::Publish, None).unwrap();
-    assert!(!f.system.has_call(&["PATCH"]));
-    assert!(release.journal().unwrap().complete);
+    let manifest: artifact::Manifest =
+        serde_json::from_value(io::read_json(&release.output.join("release.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest.version, "1.0.0");
+    assert_eq!(manifest.files, f.built.files);
+    assert_eq!(manifest.digest, prepared.runtime_digest);
+    assert_ne!(manifest.digest, f.built.digest);
+    let unpacked = f.temp.path().join("unpacked");
+    artifact::unpack(
+        &release.output.join("dispatch-platform-1.0.0.tar.gz"),
+        &unpacked,
+    )
+    .unwrap();
+    assert_eq!(
+        artifact::verify(&unpacked, Some(&f.system.commit)).unwrap(),
+        manifest
+    );
 }
 
 #[test]
-fn release_branch_pins_dev_and_preserves_work_when_a_push_is_interrupted() {
+fn the_release_pins_mains_head_and_only_an_unprepared_pin_moves() {
     let f = Fixture::new();
     let release = f.release();
-    f.system.pull.replace(None);
-    f.system.runs.borrow_mut()[0]["head_branch"] = json!("dev");
     io::private_directory(&release.directory).unwrap();
-    f.system.fail("push");
-    assert!(release.merge_release(None).is_err());
+    assert_eq!(release.pin(None).unwrap(), f.system.commit);
+    // Main moves on; a resumed release keeps its commit until --commit names another.
+    let later = merge_to_main(&f.root, "later");
+    assert_eq!(release.pin(None).unwrap(), f.system.commit);
+    assert_eq!(release.pin(Some("origin/main")).unwrap(), later);
     assert_eq!(
-        release.journal().unwrap().dev_commit.as_deref(),
-        Some(f.system.commit.as_str())
+        release.journal().unwrap().commit.as_deref(),
+        Some(later.as_str())
+    );
+    git(&f.root, &["checkout", "-q", "-b", "side", "main"]);
+    fs::write(f.root.join("side"), "unmerged").unwrap();
+    git(&f.root, &["add", "."]);
+    git(&f.root, &["commit", "-m", "side"]);
+    let error = release.pin(Some("side")).unwrap_err().to_string();
+    assert!(error.contains("must be on main"), "{error}");
+    assert_eq!(
+        release.journal().unwrap().commit.as_deref(),
+        Some(later.as_str())
     );
     assert_eq!(
-        git(&release.worktree, &["branch", "--show-current"]),
-        "release/v1.0.0"
+        release.pin(Some(&f.system.commit)).unwrap(),
+        f.system.commit
     );
-    assert_eq!(
-        io::read_json(&release.worktree.join("package.json")).unwrap()["version"],
-        "1.0.0"
-    );
-    assert!(git(&release.worktree, &["status", "--porcelain"]).is_empty());
-    fs::write(release.worktree.join("unfinished"), "preserve").unwrap();
-    assert!(release.merge_release(None).is_err());
-    assert!(release.worktree.join("unfinished").exists());
-    assert_eq!(git(&f.root, &["branch", "--show-current"]), "dev");
-    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.system.commit);
+    f.prepare();
+    assert!(release.pin(Some(&later)).is_err());
+    assert_eq!(release.pin(None).unwrap(), f.system.commit);
 }
 
 #[test]
-fn conflicting_main_merge_leaves_the_release_worktree_for_resolution() {
+fn a_release_needs_something_new_on_main_since_the_previous_one() {
     let f = Fixture::new();
-    let release = f.release();
-    f.system.pull.replace(None);
-    f.system.runs.borrow_mut()[0]["head_branch"] = json!("dev");
-    let main = f.temp.path().join("main");
     git(
         &f.root,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            "main",
-            main.to_str().unwrap(),
-            "origin/main",
-        ],
+        &["tag", "v0.9.0", &format!("{}^1", f.system.commit)],
     );
-    fs::write(main.join("change"), "conflicting main change").unwrap();
-    git(&main, &["add", "."]);
-    git(&main, &["commit", "-m", "main change"]);
-    git(&main, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    f.system.listed.replace(vec![
+        json!({"tag_name":"v0.9.0","draft":false,"prerelease":false}),
+    ]);
+    f.system.comparison.replace("identical".into());
+    let release = f.release();
     io::private_directory(&release.directory).unwrap();
-    let error = release.merge_release(None).unwrap_err().to_string();
-    assert!(error.contains("Resolve and commit the merge"));
-    assert!(
-        !git(
-            &release.worktree,
-            &["diff", "--name-only", "--diff-filter=U"]
-        )
-        .is_empty()
+    let error = release.pin(None).unwrap_err().to_string();
+    assert!(error.contains("nothing new since v0.9.0"), "{error}");
+    assert!(release.journal().unwrap().commit.is_none());
+    f.system.comparison.replace("ahead".into());
+    assert_eq!(release.pin(None).unwrap(), f.system.commit);
+    let compared = format!("repos/{REPOSITORY}/compare/v0.9.0...{}", f.system.commit);
+    assert!(f.system.has_call(&["gh", "api", &compared]));
+}
+
+#[test]
+fn a_queue_group_that_reused_a_full_pr_validation_needs_no_other_run() {
+    let f = Fixture::new();
+    f.reused_group("full");
+    let release = f.release();
+    io::private_directory(&release.directory).unwrap();
+    fs::write(&release.notes, "Notes").unwrap();
+    assert_eq!(
+        release.execute(Stage::Prepare, None).unwrap()["stage"],
+        "draft-verified"
     );
-    assert!(!f.system.has_call(&["git", "push"]));
-    assert_eq!(git(&f.root, &["branch", "--show-current"]), "dev");
+    assert!(!f.system.has_call(&["gh", "workflow", "run"]));
+    assert!(f.system.branch.borrow().is_none());
+    // A receipt short of the full suite does not count.
+    let f = Fixture::new();
+    f.reused_group("dashboard");
+    let release = f.release();
+    io::private_directory(&release.directory).unwrap();
+    fs::write(&release.notes, "Notes").unwrap();
+    release.execute(Stage::Prepare, None).unwrap();
+    assert_eq!(f.system.count(&["gh", "workflow", "run"]), 1);
+}
+
+#[test]
+fn a_commit_without_a_full_run_gets_one_on_a_temporary_branch_before_preparation() {
+    let f = Fixture::new();
+    f.system.partial.borrow_mut().insert(5);
+    f.system.dispatched.set("failure");
+    let release = f.release();
+    io::private_directory(&release.directory).unwrap();
+    fs::write(&release.notes, "Notes").unwrap();
+    let error = release
+        .execute(Stage::Prepare, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Checks ended with failure"), "{error}");
+    assert!(!release.output.exists());
+    assert_eq!(
+        f.system.branch.borrow().as_deref(),
+        Some(f.system.commit.as_str())
+    );
+    // A rerun awaits that same run instead of starting another.
+    assert!(release.execute(Stage::Prepare, None).is_err());
+    assert_eq!(f.system.count(&["gh", "workflow", "run"]), 1);
+    // Rerunning its failed jobs passes it; the release continues and drops the branch.
+    f.system.runs.borrow_mut()[1]["conclusion"] = json!("success");
+    assert_eq!(
+        release.execute(Stage::Prepare, None).unwrap()["stage"],
+        "draft-verified"
+    );
+    assert_eq!(f.system.count(&["gh", "workflow", "run"]), 1);
+    assert!(f.system.branch.borrow().is_none());
+    assert_eq!(release.prepared(None).unwrap().commit, f.system.commit);
 }
