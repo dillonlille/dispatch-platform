@@ -175,6 +175,8 @@ export async function fixture(options: boolean | FixtureOptions = true) {
   const database = <T>(area: string, callback: (db: DatabaseSync) => T): T => {
     const db = new DatabaseSync(path.join(root, area));
     try {
+      // The fixture server's mail worker can briefly hold the write lock.
+      db.exec('PRAGMA busy_timeout=5000');
       return callback(db);
     } finally {
       db.close();
