@@ -1,6 +1,16 @@
 //! Structured events contain only selected operational fields, never raw requests.
 use serde_json::{Value, json};
 
+#[derive(Default)]
+pub struct RequestContext {
+    pub actor: Option<String>,
+    pub tenant: Option<String>,
+    pub account: Option<String>,
+    pub route: Option<&'static str>,
+    pub bulk: bool,
+}
+pub type RequestTrace = std::sync::Arc<std::sync::Mutex<RequestContext>>;
+
 pub fn event(level: &str, event: &str, fields: Value) {
     eprintln!(
         "{}",

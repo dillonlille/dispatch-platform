@@ -38,17 +38,18 @@ async fn login(state: Arc<State>, input: Input, _: Public) -> Result<Reply> {
 fn logout(db: &Store, user: &User, _: &Input) -> Result<Reply> {
     db.platform
         .exec("DELETE FROM sessions WHERE hash=?", [&user.hash])?;
-    Ok(Reply::signed_out())
+    Ok(Reply::signed_out(user.state.config.development))
 }
 
 // Hashing a password waits outside the database, so the session is read first.
 async fn change_password(state: Arc<State>, input: Input, access: Session) -> Result<Reply> {
     let request = PasswordRequest::parse(&input.body)?;
+    let ip = input.ip.clone();
     let auth = state.read(move |db| access.authorize(db, &input)).await?;
     state
-        .change_password(auth, request.current_password, request.password)
+        .change_password(auth, request.current_password, request.password, ip)
         .await?;
-    Ok(Reply::signed_out())
+    Ok(Reply::signed_out(state.config.development))
 }
 
 fn forgot_password(db: &Store, _: &Anyone, input: &Input) -> Result<Reply> {

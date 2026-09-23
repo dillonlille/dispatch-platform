@@ -35,6 +35,11 @@ pub const PLATFORM: &[Migration] = &[
         name: "outbox_context",
         apply: Code(outbox_context),
     },
+    Migration {
+        id: 6,
+        name: "account_security",
+        apply: Sql(include_str!("platform/0006_account_security.sql")),
+    },
 ];
 pub const JOBS: &[Migration] = &[Migration {
     id: 1,

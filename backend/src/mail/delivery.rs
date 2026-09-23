@@ -37,10 +37,12 @@ pub async fn mailer(state: Arc<State>, mut stop: tokio::sync::watch::Receiver<bo
             }
         }
         let pending = state
-            .read(|db| {
+            .run(|db| {
+                super::discard_stale(db)?;
                 db.platform.all(
                     "SELECT id,encrypted_message,attempts \
-            FROM outbox WHERE status='pending' AND available_at<=? ORDER BY available_at LIMIT 5",
+            FROM outbox WHERE status='pending' AND available_at<=? \
+            ORDER BY CASE kind WHEN 'reset' THEN 0 ELSE 1 END,available_at LIMIT 5",
                     [db::now()],
                 )
             })

@@ -159,7 +159,7 @@ test('request IDs correlate sanitized failure logs without logging secrets or in
   const event = events.find((e) => e.fields?.requestId === id);
   assert.equal(event.event, 'http.request');
   assert.equal(event.fields.error, 'invitation_expired');
-  assert.equal(event.fields.route, '/api/invitations/:token/*');
+  assert.equal(event.fields.route, '/api/invitations/{token}');
   for (const secret of [token, 'private-query', 'untrusted-request-id', demo.password])
     assert(!f.logs().includes(secret));
 });

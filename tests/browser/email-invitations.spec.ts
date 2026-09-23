@@ -1,5 +1,6 @@
 import { test, expect, demo, login } from './fixtures.js';
 import { capturedMail } from '../support/mail-support.js';
+import { createHash } from 'node:crypto';
 
 // This flow performs additional sign-ins; like every browser test it owns its server,
 // so its accounts and throttles stay isolated.
@@ -23,6 +24,16 @@ test('an existing account opens its newly invited DSP instead of another members
     data: { firstName: 'Existing', lastName: 'Member', password: demo.password },
   });
   expect(accepted.status()).toBe(200);
+  // The prior membership predates this onboarding flow. Expire its recipient cooldown
+  // without relaxing the production limit or waiting a minute in the browser test.
+  dispatch.database('data/platform/accounts.sqlite', (db) =>
+    db
+      .prepare('UPDATE throttle SET reset_at=? WHERE key=?')
+      .run(
+        Date.now() - 1,
+        createHash('sha256').update('mail:cooldown:existing-invite@dispatch.test').digest('hex'),
+      ),
+  );
   await page.getByRole('button', { name: 'Create new DSP', exact: true }).click();
   await page.getByLabel('Owner email').fill('existing-invite@dispatch.test');
   await page.getByRole('dialog').getByRole('button', { name: 'Create DSP', exact: true }).click();

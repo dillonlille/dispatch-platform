@@ -1,27 +1,42 @@
 use super::*;
 impl Store {
+    pub fn password_attempt(&self, email: &str, ip: &str) -> Result<()> {
+        self.throttle(
+            &format!("login:ip:{ip}"),
+            self.config.security.password_ip_attempts,
+            self.config.security.password_window_seconds * 1000,
+        )?;
+        self.throttle(
+            &format!("login:email:{}", email.to_lowercase()),
+            self.config.security.password_account_attempts,
+            self.config.security.password_window_seconds * 1000,
+        )
+    }
     pub fn throttle(&self, key: &str, max: i64, window: i64) -> Result<()> {
+        self.platform
+            .transaction(|| self.reserve_quota(key, max, window))
+    }
+    // Called under the invitation transaction, so failed issuance releases the reservation.
+    pub(super) fn reserve_quota(&self, key: &str, max: i64, window: i64) -> Result<()> {
         let key = crypto::sha(key);
-        self.platform.transaction(|| {
-            self.platform
-                .exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
-            let row: Option<(i64,)> = self
-                .platform
-                .one_as("SELECT count FROM throttle WHERE key=?", [&key])?;
-            ensure(row.as_ref().map_or(0, |r| r.0) < max, "rate_limited", 429)?;
-            let known = row.is_some();
-            ensure(
-                known || self.platform.count("SELECT count(*) FROM throttle", [])? < 10000,
-                "rate_limited",
-                429,
-            )?;
-            self.platform.exec(
-                "INSERT INTO throttle(key,count,reset_at) VALUES (?,1,?) \
-                 ON CONFLICT(key) DO UPDATE SET count=count+1",
-                params![key, now() + window],
-            )?;
-            Ok(())
-        })
+        self.platform
+            .exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
+        let row: Option<(i64,)> = self
+            .platform
+            .one_as("SELECT count FROM throttle WHERE key=?", [&key])?;
+        ensure(row.as_ref().map_or(0, |r| r.0) < max, "rate_limited", 429)?;
+        let known = row.is_some();
+        ensure(
+            known || self.platform.count("SELECT count(*) FROM throttle", [])? < 10000,
+            "rate_limited",
+            429,
+        )?;
+        self.platform.exec(
+            "INSERT INTO throttle(key,count,reset_at) VALUES (?,1,?) \
+             ON CONFLICT(key) DO UPDATE SET count=count+1",
+            params![key, now() + window],
+        )?;
+        Ok(())
     }
     pub fn authenticate(&self, raw: &str) -> Result<Auth> {
         ensure(
@@ -46,6 +61,7 @@ impl Store {
         })
     }
     pub fn context(&self, a: &Auth, id: &str, permission: &str) -> Result<Context> {
+        self.ensure_mfa(a)?;
         let dsp = self.find_dsp(id)?;
         let grant = if !a.user.platform_owner {
             self.grant(&a.user.id, id)?
@@ -155,8 +171,7 @@ impl crate::State {
             .map_err(|_| Error::new("login_busy", 429))?;
         let row = self
             .run(move |db| {
-                db.throttle(&format!("login:ip:{ip}"), 30, 900000)?;
-                db.throttle(&format!("login:email:{email}"), 10, 900000)?;
+                db.password_attempt(&email, &ip)?;
                 UserRow::find(&db.platform, "email", &email)
             })
             .await?;
