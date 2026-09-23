@@ -22,3 +22,4 @@
 @import './features/platform/diagnostics/diagnostics.css';
 @import './features/timecard/timecards.css';
 @import './features/uniforms/uniforms.css';
+@import './features/settings/security.css';

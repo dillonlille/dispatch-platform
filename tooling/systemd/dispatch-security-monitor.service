@@ -1,0 +1,27 @@
+[Unit]
+Description=Dispatch security event monitor
+After=dispatch-production.service
+
+[Service]
+Type=simple
+User=dispatch-monitor
+Group=dispatch-monitor
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/bin/python3 /usr/local/libexec/dispatch-runtime/security-monitor.py --journal
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=128M
+TasksMax=16
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
