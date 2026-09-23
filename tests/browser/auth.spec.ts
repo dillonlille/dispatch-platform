@@ -157,7 +157,7 @@ test.describe('desktop animation lifecycle', () => {
     });
     const draws = () =>
       page.evaluate(() => (window as unknown as { vanProbe: { draws: number } }).vanProbe.draws);
-    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto('/');
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme });
@@ -173,6 +173,13 @@ test.describe('desktop animation lifecycle', () => {
       ).toBeLessThanOrEqual(1_500_000);
       await expect(page.getByRole('button', { name: /pause|resume|play/i })).toHaveCount(0);
     }
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(page.locator('.login-van')).toHaveCount(0);
+    const reduced = await draws();
+    await page.waitForTimeout(200);
+    expect(await draws()).toBe(reduced);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(page.locator('.login-van canvas')).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('.login-van')).toHaveCount(0);
     const stopped = await draws();

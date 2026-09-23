@@ -1,3 +1,4 @@
+import { performancePolicy } from '../../lib/performance-policy.js';
 import { useUpdateState } from '../../app/browser-update.js';
 import { useEffect, useState } from 'react';
 import { ArrowRight, RefreshCw, Settings } from 'lucide-react';
@@ -10,8 +11,9 @@ import { paycomDefaults } from '../../lib/paycom.js';
 import { api, useCachedData, useData } from '../../app/api.js';
 import { syncEmployeeTimecard, usePaycomSettings } from '../../app/endpoints.js';
 import { dataCache } from '../../app/data-cache.js';
+import { collectionData } from '../../lib/data-policy.js';
 import { useCollectionUpdates } from '../../app/live-collection.js';
-import { ErrorBox, Header, Loading, Tabs } from '../../ui/index.js';
+import { ErrorBox, Header, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
 import { randomId } from '../../lib/random-id.js';
 import { timecardPeriod } from '../../lib/timecard-format.js';
@@ -31,16 +33,23 @@ export function PaycomPage({ view }: { view: DspView }) {
   useCollectionUpdates();
   const tab = selectedTab ?? 'timecards';
   const [syncRevision, setSyncRevision] = useState(0);
+  const [collecting, setCollecting] = useState(false);
   const overview = useCachedData<{
     connection: Connection;
     workforce: { collectedAt: string | null };
-  }>('/api/dsp/paycom/status', 5000);
+  }>('/api/dsp/paycom/status', performancePolicy.recoveryPollMs);
   const syncState = useData<{
     date: string;
     scopeAvailable: boolean;
     paycom: SyncSource;
     flex: SyncSource;
-  }>(`/api/dsp/jobs/meal-breaks?date=${date}`, 5000, undefined, String(syncRevision));
+  }>(
+    `/api/dsp/jobs/meal-breaks?date=${date}`,
+    collecting ? performancePolicy.activeCollectionPollMs : performancePolicy.recoveryPollMs,
+    String(syncRevision),
+    `${date}:${syncRevision}`,
+    true,
+  );
   // The last known state stays up while another date loads so the page does not shift.
   const sourceState = syncState.data ?? syncState.stale;
   const sourceCurrent = syncState.data?.date === date;
@@ -50,11 +59,18 @@ export function PaycomPage({ view }: { view: DspView }) {
   const timecards = tab === 'timecards';
   const daily = timecards || meals;
   const activeSync = sourceState?.paycom.active || sourceState?.flex.active;
+  useEffect(() => setCollecting(Boolean(activeSync)), [activeSync]);
   const collectedAt = overview.data?.workforce.collectedAt;
   useEffect(() => {
-    if (collectedAt) dataCache.observeVersion('paycom', collectedAt);
+    if (collectedAt) dataCache.observeVersion('paycom', collectedAt, collectionData);
   }, [collectedAt]);
-  const refreshKey = `${sourceState?.paycom.collectedAt ?? collectedAt}:${sourceState?.flex.collectedAt}`;
+  const refreshKey = String(syncRevision);
+  useEffect(() => {
+    if (sourceState?.flex.collectedAt)
+      dataCache.observeVersion('flex', sourceState.flex.collectedAt, (url) =>
+        url.startsWith('/api/dsp/paycom/meal-breaks'),
+      );
+  }, [sourceState?.flex.collectedAt]);
   const syncUnavailable = daily
     ? !sourceState
       ? 'Checking connections…'
@@ -98,6 +114,7 @@ export function PaycomPage({ view }: { view: DspView }) {
         disabled={
           !!syncUnavailable ||
           !syncState.data ||
+          syncState.validatedKey !== String(syncRevision) ||
           !!syncState.error ||
           sync.busy ||
           !!activeSync ||
@@ -171,8 +188,6 @@ export function PaycomPage({ view }: { view: DspView }) {
           owner={can(view, 'timecard.manage')}
           preferences={preferences.data?.values ?? paycomDefaults}
         />
-      ) : canConnect && !data && !error ? (
-        <Loading />
       ) : canConnect && data && !data.enabled && !overview.data?.workforce.collectedAt ? (
         <button
           className="primary paycom-connect"

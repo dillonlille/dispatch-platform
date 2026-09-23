@@ -129,7 +129,7 @@ export function UniformDetail({
       )}
       <div className="uniform-detail-footer">
         <span>
-          {sizes.length} sizes · {live ? uniformTotal(uniform) : '—'} in stock
+          {sizes.length} sizes · {uniformTotal(uniform)} in stock
         </span>
         {canManage && (
           <button className="text-button" disabled={!live} onClick={onEdit}>

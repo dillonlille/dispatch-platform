@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
-import { api, ApiError, view } from './api.js';
+import { ApiError, view } from './api.js';
 import { backoff } from '../lib/backoff.js';
 import { dataCache } from './data-cache.js';
+import { collectionAffects, collectionData, type CollectionChange } from '../lib/data-policy.js';
+import { getCollectionUpdates } from './endpoints.js';
 
 /** One sleeping request for the Timecard page, shared across days and tabs. */
 export function useCollectionUpdates() {
@@ -14,34 +16,39 @@ export function useCollectionUpdates() {
     let failures = 0;
     let after = '';
     let pendingVersion: string | undefined;
-    const refresh = (version?: string) => {
+    let pendingChanges: CollectionChange[] = [];
+    const refresh = (version: string, changes: CollectionChange[]) => {
       pendingVersion = version;
+      pendingChanges.push(...changes);
       if (pending) return;
       // Coalesce closely spaced driver results from the collection lanes.
       pending = setTimeout(() => {
         pending = undefined;
         if (!disposed) {
-          if (pendingVersion === undefined) dataCache.invalidate();
-          else dataCache.observeVersion('collections', pendingVersion);
+          const changes = pendingChanges;
+          pendingChanges = [];
+          dataCache.observeVersion('collections', pendingVersion!, (url) =>
+            collectionAffects(url, changes),
+          );
         }
-      }, 150);
+      }, 400);
     };
     const listen = async () => {
-      if (disposed || document.hidden || controller) return;
+      if (disposed || document.hidden || !navigator.onLine || controller) return;
       const request = new AbortController();
       controller = request;
       let delay = 0;
       let stopped = false;
       try {
-        const result = await api<{ revision: string }>(
-          `/api/dsp/collection-updates?after=${encodeURIComponent(after)}`,
-          undefined,
+        const result = await getCollectionUpdates(
+          after,
           AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
         );
         if (!request.signal.aborted && !disposed) {
           // Record the baseline before a fast first update can coalesce with it.
-          if (after === '') dataCache.observeVersion('collections', result.revision);
-          else if (result.revision !== after) refresh(result.revision);
+          if (after === '')
+            dataCache.observeVersion('collections', result.revision, collectionData);
+          else if (result.revision !== after) refresh(result.revision, result.changes);
           after = result.revision;
           failures = 0;
         }
@@ -50,7 +57,7 @@ export function useCollectionUpdates() {
           stopped = error instanceof ApiError && [401, 403].includes(error.status);
           delay = backoff(failures++);
           // A transient transport failure still gets a conventional data refresh.
-          if (!stopped) refresh();
+          if (!stopped && failures === 1) dataCache.invalidate(collectionData);
         }
       } finally {
         if (controller === request) controller = undefined;
@@ -59,16 +66,19 @@ export function useCollectionUpdates() {
     };
     const visibility = () => {
       if (retry) clearTimeout(retry);
-      if (document.hidden) {
+      if (document.hidden || !navigator.onLine) {
         controller?.abort();
         if (pending) clearTimeout(pending);
         pending = undefined;
+        pendingChanges = [];
       } else {
         after = '';
         void listen();
       }
     };
     document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('online', visibility);
+    window.addEventListener('offline', visibility);
     void listen();
     return () => {
       disposed = true;
@@ -76,6 +86,8 @@ export function useCollectionUpdates() {
       if (retry) clearTimeout(retry);
       if (pending) clearTimeout(pending);
       document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('online', visibility);
+      window.removeEventListener('offline', visibility);
     };
   }, [token]);
 }

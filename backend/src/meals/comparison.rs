@@ -421,7 +421,7 @@ impl Store {
             .or(publications.first().or(latest_zone.as_ref()))
             .map(|p| s(p, "timezone"))
             .unwrap_or(timezone);
-        let preferences = self.preferences(id)?;
+        let preferences = self.preference_values(id)?;
         let late = LateRule {
             time: s(&preferences["values"], "late_da_time").into(),
             departments: serde_json::from_value(

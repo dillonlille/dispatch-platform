@@ -61,11 +61,12 @@ async fn collection_updates(state: Arc<State>, input: Input, access: Dsp) -> Res
         let _ = tokio::time::timeout(Duration::from_secs(20), updates.changed()).await;
     }
     let revision = state.updates.token(&updates);
+    let changes = state.updates.changes(&dsp, &after, &revision);
     // Permission changes and expired sessions take effect during an open wait.
     state
         .read(move |db| access.authorize(db, &input).map(|_| ()))
         .await?;
-    Ok(Reply::json(json!({"revision":revision})))
+    Reply::of(&crate::contracts::CollectionUpdates { revision, changes })
 }
 
 // Heartbeats only touch memory, so they stay off the platform write lock.

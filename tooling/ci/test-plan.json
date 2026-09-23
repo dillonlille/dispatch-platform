@@ -4,11 +4,12 @@
     "tests/dashboard/collection-history.test.ts",
     "tests/dashboard/dashboard-format.test.ts",
     "tests/dashboard/dashboard-structure.test.ts",
+    "tests/dashboard/data-policy.test.ts",
     "tests/dashboard/diagnostics.test.ts",
     "tests/dashboard/meal-breaks.test.ts",
     "tests/dashboard/response-cache.test.ts",
-    "tests/dashboard/unused-css.test.ts",
-    "tests/dashboard/uniforms.test.ts"
+    "tests/dashboard/uniforms.test.ts",
+    "tests/dashboard/unused-css.test.ts"
   ],
   "native": {
     "paycom": ["tests/providers/paycom-worker.test.ts", "tests/providers/native-browser.test.ts"],

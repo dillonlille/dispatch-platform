@@ -156,6 +156,11 @@ fn preference_changes(before: &Value, after: &Value) -> Vec<AuditChange> {
         .collect()
 }
 impl Store {
+    /// Values and revision without scanning the roster for editor options.
+    pub fn preference_values(&self, id: &str) -> Result<Value> {
+        let db = self.collector(id, Provider::Paycom)?;
+        preferences(&db)
+    }
     pub fn preferences(&self, id: &str) -> Result<Value> {
         let db = self.collector(id, Provider::Paycom)?;
         let mut out = preferences(&db)?;

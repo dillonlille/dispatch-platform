@@ -13,5 +13,6 @@ CREATE TABLE storage_identity (dsp_id TEXT NOT NULL, provider TEXT NOT NULL, sou
 CREATE TABLE timecard_sources (publication_id TEXT NOT NULL, employee_code TEXT NOT NULL, period_key TEXT NOT NULL, url TEXT NOT NULL, PRIMARY KEY(publication_id,employee_code), FOREIGN KEY(publication_id,employee_code) REFERENCES employees(publication_id,code) ON DELETE CASCADE);
 CREATE TABLE timecards (publication_id TEXT NOT NULL REFERENCES publications(id) ON DELETE CASCADE, employee_code TEXT NOT NULL, date TEXT NOT NULL, hours REAL NOT NULL, status TEXT NOT NULL, punches TEXT NOT NULL, PRIMARY KEY(publication_id,employee_code,date), FOREIGN KEY(publication_id,employee_code) REFERENCES employees(publication_id,code) ON DELETE CASCADE);
 CREATE UNIQUE INDEX active_publication ON publications(active) WHERE active=1;
+CREATE INDEX employees_by_code ON employees(code, publication_id);
 CREATE INDEX publications_by_collection ON publications(collected_at DESC);
 CREATE INDEX timecards_by_day ON timecards(publication_id,date,employee_code);

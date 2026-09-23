@@ -120,7 +120,7 @@ impl Store {
             timecards.sort_by(|a, b| s(b, "date").cmp(s(a, "date")));
             collected_at = Some(s(&sync, "collected_at").to_owned());
         }
-        let settings = self.preferences(id)?;
+        let settings = self.preference_values(id)?;
         employee["name"] = json!(display_name(
             s(&employee, "name"),
             s(&settings["values"], "name_order")

@@ -160,6 +160,8 @@ async function run(app: Awaited<ReturnType<typeof prepare>>) {
       '/api/dsp/employees/E00050',
       '/api/dsp/timecards?date=2026-08-15&sort=totalHours&direction=desc',
       '/api/session',
+      '/api/dsp/employees?limit=all',
+      '/api/dsp/paycom/meal-breaks?date=2026-08-15',
     ];
     const stable = (route: string, value: any) => {
       if (route !== '/api/session') return value;

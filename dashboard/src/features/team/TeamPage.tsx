@@ -1,7 +1,9 @@
+import { performancePolicy } from '../../lib/performance-policy.js';
 import { useMemo, useState } from 'react';
 import { RefreshCw, Plus, Ellipsis } from 'lucide-react';
 import type { DspView, Membership, Role } from '../../../../shared/contracts/index.js';
-import { api, useData } from '../../app/api.js';
+import { useUpdateState } from '../../app/browser-update.js';
+import { api, useCachedData } from '../../app/api.js';
 import {
   Badge,
   ConfirmDialog,
@@ -28,16 +30,21 @@ import { useMembers, inviteMember, setMemberRole, useRoles } from '../../app/end
 type Invitation = { email: string; role: string; expiresAt: number; accepted: boolean };
 const actions = <span className="sr-only">Actions</span>;
 export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promise<void> }) {
-  const { data, error, refresh } = useMembers(10000);
+  const [tab, setTab] = useUpdateState('team-tab', 'members');
+  const { data, error, refresh } = useMembers(
+    tab === 'members' ? performancePolicy.teamPollMs : -1,
+  );
   const canInvite = can(view, 'members.invite'),
     canManage = can(view, 'members.manage'),
     canRoles = can(view, 'roles.manage');
-  const invitations = useData<Invitation[]>(canInvite ? '/api/dsp/invitations' : '', 10000);
-  const roles = useRoles(10000);
+  const invitations = useCachedData<Invitation[]>(
+    canInvite && tab === 'invitations' ? '/api/dsp/invitations' : '',
+    performancePolicy.teamPollMs,
+  );
+  const roles = useRoles(tab === 'roles' ? performancePolicy.teamPollMs : -1);
   const [roleEditor, setRoleEditor] = useState<Role | 'new'>();
   const grantable = roles.data?.filter((role) => assignable(view, role)) ?? [];
-  const [tab, setTab] = useState('members');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUpdateState('team-search', '');
   const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<Membership>();
   const [removing, setRemoving] = useState<Membership>();

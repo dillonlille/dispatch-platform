@@ -4,10 +4,26 @@ import { LoginVan } from './LoginVan.js';
 
 // Keep in sync with auth.css. Mobile never imports Three.js or fetches the model/poster.
 const desktopQuery = matchMedia('(min-width: 701px)');
-const isDesktop = () => desktopQuery.matches;
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const connection = (
+  navigator as Navigator & {
+    connection?: EventTarget & { saveData?: boolean; effectiveType?: string };
+  }
+).connection;
+const isDesktop = () =>
+  desktopQuery.matches &&
+  !reducedMotion.matches &&
+  !connection?.saveData &&
+  !['slow-2g', '2g', '3g'].includes(connection?.effectiveType ?? '');
 function subscribe(changed: () => void) {
   desktopQuery.addEventListener('change', changed);
-  return () => desktopQuery.removeEventListener('change', changed);
+  reducedMotion.addEventListener('change', changed);
+  connection?.addEventListener?.('change', changed);
+  return () => {
+    desktopQuery.removeEventListener('change', changed);
+    reducedMotion.removeEventListener('change', changed);
+    connection?.removeEventListener?.('change', changed);
+  };
 }
 const contourPath =
   'M-100 150C40-80 360-90 480 75S740 175 880 290 870 600 685 665 720 925 485 1090 100 1070 5 875 130 640-65 485-240 320-100 150Z';

@@ -20,6 +20,7 @@ pub mod observability;
 pub mod operations;
 pub mod presence;
 pub mod proxy;
+pub mod read_cache;
 pub mod roles;
 pub mod schedules;
 pub mod tenants;
@@ -40,6 +41,8 @@ pub struct State {
     // Serializes short state transitions across the platform, jobs and tenant databases.
     pub transition: RwLock<()>,
     pub pool: Mutex<Vec<db::Store>>,
+    pub read_cache: read_cache::ReadCache,
+    pub data_revision: std::sync::atomic::AtomicU64,
     pub schedule_revision: std::sync::atomic::AtomicU64,
     pub password_slots: Arc<Semaphore>,
     pub mail_transport: Mutex<mail::TransportHealth>,
@@ -68,6 +71,8 @@ impl State {
             db_queue: Arc::new(Semaphore::new(64)),
             transition: RwLock::new(()),
             pool: Mutex::new(vec![store]),
+            read_cache: read_cache::ReadCache::default(),
+            data_revision: std::sync::atomic::AtomicU64::new(0),
             schedule_revision: std::sync::atomic::AtomicU64::new(0),
             password_slots: Arc::new(Semaphore::new(2)),
             mail_transport: Mutex::new(mail::TransportHealth::default()),
@@ -96,6 +101,7 @@ impl State {
     ) -> Result<T> {
         // Bound both queued requests and blocking threads. Short bursts wait without
         // allocating another database pool or failing otherwise healthy requests.
+        let started = std::time::Instant::now();
         let queued = self
             .db_queue
             .clone()
@@ -108,6 +114,7 @@ impl State {
         .await
         .map_err(|_| Error::new("platform_busy", 503))?
         .map_err(|_| Error::new("platform_unavailable", 503))?;
+        let queued_ms = started.elapsed().as_secs_f64() * 1000.0;
         let state = self.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -121,19 +128,41 @@ impl State {
                 Some(db) => db,
                 None => db::Store::open(state.config.clone(), state.key.clone())?,
             };
+            let waiting = std::time::Instant::now();
+            let lock_ms;
+            let work_started;
             let result = if write {
                 let _guard = state
                     .transition
                     .write()
                     .map_err(|_| Error::new("platform_unavailable", 503))?;
+                lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
+                work_started = std::time::Instant::now();
+                // Advance even on errors: a multi-database operation may have partially written.
+                state
+                    .data_revision
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 f(&db)
             } else {
                 let _guard = state
                     .transition
                     .read()
                     .map_err(|_| Error::new("platform_unavailable", 503))?;
+                lock_ms = waiting.elapsed().as_secs_f64() * 1000.0;
+                work_started = std::time::Instant::now();
                 f(&db)
             };
+            let work_ms = work_started.elapsed().as_secs_f64() * 1000.0;
+            if queued_ms + lock_ms + work_ms >= 25.0 {
+                observability::event(
+                    "info",
+                    "database.slow",
+                    serde_json::json!({
+                        "write":write, "queueMs":queued_ms, "lockMs":lock_ms, "workMs":work_ms,
+                        "totalMs":started.elapsed().as_secs_f64()*1000.0
+                    }),
+                );
+            }
             state
                 .pool
                 .lock()
