@@ -34,6 +34,13 @@ test('Rust provisioning, invitation acceptance, profile setup, removal and resto
       .status,
     404,
   );
+  // Opening a used link again says who it let in, not that it expired.
+  assert.deepEqual((await f.request(invite)).value, {
+    accepted: true,
+    email: 'new@dispatch.test',
+    dspName: created.value.dsp.name,
+    role: 'Owner',
+  });
   const user = await f.client('new@dispatch.test');
   const view = await user.select(id);
   assert.equal(view.profile.setupRequired, true);
@@ -53,6 +60,7 @@ test('Rust provisioning, invitation acceptance, profile setup, removal and resto
   const members = (await user.get('/api/dsp/members')).value;
   assert.equal((await user.post(`/api/dsp/members/${members[0].id}`, { role: null })).status, 409);
   assert.equal((await owner.post(`/api/platform/dsps/${id}/remove`)).status, 200);
+  assert.equal((await f.request(invite)).status, 404);
   assert.equal((await user.get('/api/dsp/employees')).status, 409);
   assert.equal(
     (await owner.post(`/api/platform/dsps/${id}/status`, { status: 'active' })).status,

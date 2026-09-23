@@ -23,6 +23,8 @@
   --map-route-width: 4.5;
   --map-traveler-core: #2055ed;
   --map-traveler-outline: #fff;
+  --map-cancelled: #8a95a6;
+  --map-cancelled-station: #b3bcc8;
 }
 [data-theme='dark'] .member-profile-page {
   --map-land: #172030;
@@ -49,6 +51,8 @@
   --map-route-width: 5.5;
   --map-traveler-core: #f4f7ff;
   --map-traveler-outline: #263a6b;
+  --map-cancelled: #6b7a92;
+  --map-cancelled-station: #2a3446;
 }
 .member-profile-map {
   position: absolute;
@@ -186,9 +190,35 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .member-profile-map-motion {
+  [data-route='live'] .member-profile-map-motion {
     display: none;
   }
+}
+/* Settled routes for a spent invitation link; neither moves. */
+.member-profile-map[data-route='cancelled'] {
+  --map-route: transparent;
+  --map-route-core: transparent;
+  --map-halo-opacity: 0;
+  --map-marker: var(--map-cancelled);
+  --map-station: var(--map-cancelled-station);
+}
+.member-profile-route-cancelled {
+  stroke: var(--map-cancelled);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0.55 0.75;
+}
+.member-profile-delivered {
+  stroke: var(--map-marker);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(1.9);
+  opacity: 0.4;
+}
+.member-profile-delivered-echo {
+  transform: scale(3.2);
+  opacity: 0.18;
 }
 @media (max-width: 700px) {
   .member-profile-map {

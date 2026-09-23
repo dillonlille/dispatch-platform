@@ -149,7 +149,7 @@ fn role_input(b: &Value) -> Result<(String, Vec<String>)> {
 
 fn invitation(db: &Store, _: &Anyone, input: &Input) -> Result<Reply> {
     db.throttle(&format!("invite-read:{}", input.ip), 60, 60000)?;
-    Ok(Reply::json(db.invitation(input.param("token"))?))
+    Ok(Reply::json(db.invitation_link(input.param("token"))?))
 }
 
 async fn accept_invitation(state: Arc<State>, input: Input, _: Public) -> Result<Reply> {
