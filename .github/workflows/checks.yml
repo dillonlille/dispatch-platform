@@ -85,7 +85,7 @@ jobs:
           key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
       - name: Preserve workload measurements
         if: always() && needs.plan.outputs.mode == 'full'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/dispatch-rust-benchmark.json
@@ -99,7 +99,7 @@ jobs:
           tar -czf dispatch-dev.tar.gz -C .build .
           echo "name=dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
       - name: Pass candidate to browser shards and the final gate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.candidate.outputs.name }}
           path: dispatch-dev.tar.gz
@@ -147,7 +147,7 @@ jobs:
         run: npm run check:ci -- browser ${{ matrix.shard }}/4
       - name: Preserve failure traces
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-browser-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: test-results/
@@ -216,7 +216,7 @@ jobs:
         run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
       - name: Upload PR validation
         if: needs.plan.outputs.trusted-pr == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/validation.json
@@ -232,7 +232,7 @@ jobs:
         run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
       - name: Preserve the gated PR build
         if: needs.plan.outputs.trusted-pr == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}
           path: dispatch-dev.tar.gz
@@ -240,7 +240,7 @@ jobs:
           retention-days: 7
       - name: Publish verified branch build
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-${{ github.ref_name }}-${{ github.sha }}
           path: dispatch-dev.tar.gz
