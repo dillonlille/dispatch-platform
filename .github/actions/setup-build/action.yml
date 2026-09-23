@@ -5,7 +5,7 @@ inputs:
     description: Cache partition, release or debug.
     required: true
   save:
-    description: Allow this job to maintain the cache on dev/main.
+    description: Allow this job to maintain the cache on main.
     default: 'true'
   skip-rust:
     description: The verified PR artifact already contains the compiled backend.
@@ -54,4 +54,4 @@ runs:
       with:
         shared-key: dispatch-${{ inputs.profile }}
         cache-bin: 'false'
-        save-if: ${{ inputs.save == 'true' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') }}
+        save-if: ${{ inputs.save == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

@@ -23,7 +23,7 @@ impl System for Fake {
     ) -> Result<Vec<u8>> {
         if args[0] == "git" {
             return Ok(match args[1] {
-                "branch" => b"dev".to_vec(),
+                "branch" => b"main".to_vec(),
                 "status" => {
                     if self.dirty.get() {
                         b"modified".to_vec()
@@ -47,7 +47,7 @@ impl System for Fake {
                     }
                 }
                 "rev-parse" => {
-                    if self.stale.get() && args[2] == "origin/dev" {
+                    if self.stale.get() && args[2] == "origin/main" {
                         "b".repeat(40).into_bytes()
                     } else {
                         COMMIT.as_bytes().to_vec()

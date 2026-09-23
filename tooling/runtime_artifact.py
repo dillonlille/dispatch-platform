@@ -167,7 +167,7 @@ def host_binary():
         metadata = json.loads((active / "tooling/build-info.json").read_text())
         require(metadata.get("hostManagement") == 1, "Active runtime has no Rust host management")
         if environment == "dev":
-            require(command("git", "branch", "--show-current", cwd=live) == "dev"
+            require(command("git", "branch", "--show-current", cwd=live) in ("main", "dev")
                     and not command("git", "status", "--porcelain", "--untracked-files=all", cwd=live),
                     "Clean Dev checkout required for handoff")
             require(command("git", "rev-parse", "HEAD", cwd=live) == metadata["commit"], "Handoff source differs")

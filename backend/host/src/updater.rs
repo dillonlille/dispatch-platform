@@ -119,14 +119,14 @@ impl<'a> Updater<'a> {
                 .to_owned(),
         )
     }
-    /// The branch Dev follows: whichever of `main` or `dev` its checkout is on. Moving the
-    /// checkout onto main at the running commit switches Dev over without reinstalling.
+    /// The branch Dev follows: main. A checkout still on `dev`, as a legacy host handing
+    /// over from the Python updater is, keeps following it until it is moved onto main.
     pub fn tracked_branch(&self) -> Result<&'static str> {
         let branch = self.git(&["branch", "--show-current"])?;
         ["main", "dev"]
             .into_iter()
             .find(|trusted| *trusted == branch)
-            .ok_or_else(|| "Dev checkout must be on main or dev".into())
+            .ok_or_else(|| "Dev checkout must be on main".into())
     }
     pub fn clean_checkout(&self) -> Result<()> {
         self.tracked_branch()?;

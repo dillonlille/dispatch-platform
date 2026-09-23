@@ -17,7 +17,7 @@ class SharedToolingTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.commit = "a" * 40
-        self.run = {"id": 5, "run_attempt": 1, "head_sha": self.commit, "event": "push", "head_branch": "dev",
+        self.run = {"id": 5, "run_attempt": 1, "head_sha": self.commit, "event": "push", "head_branch": "main",
                     "status": "completed", "conclusion": "success",
                     "head_repository": {"full_name": runtime.REPOSITORY}}
 

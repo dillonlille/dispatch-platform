@@ -223,11 +223,10 @@ fn prepare(options: &Options, system: &dyn System) -> Result<transaction::Journa
                     .into(),
             )
         };
-        let branch = git(&["branch", "--show-current"])?;
         require(
-            matches!(branch.as_str(), "main" | "dev")
+            git(&["branch", "--show-current"])? == "main"
                 && git(&["status", "--porcelain"])?.is_empty(),
-            "Clean Dev checkout on main or dev required",
+            "Clean Dev checkout on main required",
         )?;
         let origin = git(&["remote", "get-url", "origin"])?;
         require(
@@ -252,11 +251,11 @@ fn prepare(options: &Options, system: &dyn System) -> Result<transaction::Journa
             .is_empty(),
             "Dev source must not contain private environment paths",
         )?;
-        git(&["fetch", "origin", &branch])?;
+        git(&["fetch", "origin", "main"])?;
         let commit = git(&["rev-parse", "HEAD"])?;
         require(
-            commit == git(&["rev-parse", &format!("origin/{branch}")])?,
-            "Setup requires the merged HEAD of the branch Dev follows",
+            commit == git(&["rev-parse", "origin/main"])?,
+            "Setup requires main's merged HEAD",
         )?;
         let manifest = artifact::verify(&options.root.join(".build"), Some(&commit))?;
         (Some(commit), Some(manifest))

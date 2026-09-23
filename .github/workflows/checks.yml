@@ -2,12 +2,12 @@ name: Platform checks
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-  # The dev merge queue tests the exact merge commit it will push; that run's receipt and
-  # build are what the following dev push reuses.
+  # The main merge queue tests the exact merge commit it will push; that run's receipt and
+  # build are what the following main push reuses.
   merge_group:
     types: [checks_requested]
   push:
-    branches: [main, dev]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,11 +26,11 @@ jobs:
     timeout-minutes: 3
     outputs:
       mode: ${{ steps.validation.outputs.mode }}
-      # A PR from this repository into a trusted branch, or a merge queue group of such PRs:
-      # its validation and build may be promoted.
-      trusted-pr: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
+      # A PR from this repository into main, or a merge queue group of such PRs: its
+      # validation and build may be promoted.
+      trusted-pr: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository) }}
       # Runs whose build is packaged for the final gate: trusted pushes, groups and trusted PRs.
-      candidate: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main') && github.event.pull_request.head.repo.full_name == github.repository) }}
+      candidate: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -78,7 +78,7 @@ jobs:
         if: steps.reuse.outputs.reused == 'true'
         run: npm run test:smoke
       - name: Save trusted release binary
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .ci-rust-cache/
@@ -251,7 +251,7 @@ jobs:
   # path. Every other job only restores them and builds with Cargo when they are absent.
   tools:
     needs: plan
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

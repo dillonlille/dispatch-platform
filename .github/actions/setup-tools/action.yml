@@ -2,7 +2,7 @@ name: Prebuilt CI tools
 description: >-
   Restore dispatch-ci, dispatch-host and the browser assessment fixture that a trusted
   branch built from identical inputs. Nothing is compiled here; launchers build with
-  Cargo when a tool is absent, and the tools job on dev and main refills the caches.
+  Cargo when a tool is absent, and the tools job on main refills the caches.
 inputs:
   fixture:
     description: Also restore the assessment fixture the browser suite uses.
