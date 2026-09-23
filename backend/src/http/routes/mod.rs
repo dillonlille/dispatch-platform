@@ -8,6 +8,7 @@ pub mod jobs;
 pub mod live;
 pub mod platform;
 pub mod schedules;
+pub mod security;
 pub mod session;
 pub mod settings;
 pub mod team;
@@ -18,6 +19,7 @@ pub fn all() -> Vec<Route> {
     [
         live::routes(),
         auth::routes(),
+        security::routes(),
         session::routes(),
         platform::routes(),
         team::routes(),

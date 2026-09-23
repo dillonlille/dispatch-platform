@@ -1,7 +1,10 @@
 use super::{Result, ensure};
 use std::{env, path::PathBuf};
+mod security;
+pub use security::SecurityPolicy;
 #[derive(Clone)]
 pub struct Config {
+    pub security: SecurityPolicy,
     pub root: PathBuf,
     pub environment: String,
     pub development: bool,
@@ -76,6 +79,7 @@ impl Config {
                 .filter(|v| !v.trim().is_empty())
         };
         let mut c = Self {
+            security: SecurityPolicy::parse(&variable("DISPATCH_SECURITY_POLICY", "{}"))?,
             root: PathBuf::from(variable(
                 "DISPATCH_STATE_ROOT",
                 "/tmp/dispatch-rust-development",

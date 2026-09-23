@@ -23,6 +23,8 @@ export const built = {
   env: { DISPATCH_ARTIFACT_ROOT: path.resolve('.build') },
 };
 export type FixtureOptions = {
+  /** WebAuthn needs a domain RP ID; localhost is also a secure browser context. */
+  originHost?: 'localhost';
   /** `seed` loads the demo DSPs (default); false bootstraps an empty platform. */
   seed?: boolean;
   /** Added to, or replacing, the fixture environment. */
@@ -55,7 +57,8 @@ export async function prepare(options: boolean | FixtureOptions = true) {
     binary = executable;
   }
   const port = await freePort();
-  const origin = `http://127.0.0.1:${port}`;
+  const host = typeof options === 'boolean' ? '127.0.0.1' : (options.originHost ?? '127.0.0.1');
+  const origin = `http://${host}:${port}`;
   const env = {
     ...process.env,
     NODE_ENV: 'development',

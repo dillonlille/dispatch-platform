@@ -95,10 +95,7 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
     ] {
         assert!(one(&format!("SELECT 1 FROM {table}")).is_none(), "{table}");
     }
-    assert_eq!(
-        one("SELECT created_by FROM invitations").unwrap()["created_by"],
-        owner["id"]
-    );
+    assert!(one("SELECT created_by FROM invitations").is_none());
     let log = audits(&db, Some(dsp)).unwrap();
     let event = log
         .as_array()
@@ -127,10 +124,14 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
     state
         .accept_invitation(
             raw,
-            "Riley".into(),
-            "Shaw".into(),
-            "a-brand-new-password".into(),
-            None,
+            dispatch_backend::contracts::InvitationRequest {
+                first_name: "Riley".into(),
+                last_name: "Shaw".into(),
+                password: "a-brand-new-password".into(),
+                dsp_profile: None,
+            },
+            "127.0.0.1".into(),
+            String::new(),
         )
         .await
         .unwrap();

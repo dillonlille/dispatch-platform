@@ -1,0 +1,61 @@
+.security-settings {
+  display: grid;
+  gap: var(--space-6, 24px);
+}
+.security-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 12px;
+}
+.security-row small {
+  display: block;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+.security-row h2 {
+  margin: 0;
+}
+.security-prompt {
+  max-width: 480px;
+  width: 100%;
+  margin: 8vh auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.security-prompt form {
+  display: grid;
+  gap: 16px;
+}
+.security-prompt > button {
+  margin-top: 16px;
+}
+.recovery-codes pre {
+  font-size: 12px;
+  overflow-x: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+@media (max-width: 700px) {
+  .security-row {
+    flex-wrap: wrap;
+  }
+  .security-prompt {
+    margin-block: 24px;
+  }
+}
+
+.security-section {
+  max-width: 900px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+.security-section form {
+  max-width: 448px;
+  margin-top: 24px;
+}
+.security-section form > button {
+  margin-top: 16px;
+}

@@ -26,3 +26,6 @@ export type DspView = Narrow<
   { permissions: Permission[]; role: ViewRole; roles?: ViewRole[] }
 >;
 export type { DspProfile } from './generated/DspProfile';
+export type { SecurityStatus } from './generated/SecurityStatus';
+export type { PasskeySummary } from './generated/PasskeySummary';
+export type { AccountSession } from './generated/AccountSession';

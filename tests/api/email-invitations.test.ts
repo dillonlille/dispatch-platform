@@ -36,6 +36,7 @@ test('Dev and production invitations use isolated configuration, mailboxes and a
   assert.deepEqual(productionOwner.session.dsps, []);
   assert.deepEqual((await productionOwner.get('/api/platform/dsps')).value, []);
   assert.equal(productionOwner.session.user.platformOwner, true);
+  assert.equal(productionOwner.session.security.required, false);
   for (const [f, prefix] of [
     [dev, '[Dispatch Dev] '],
     [production, ''],

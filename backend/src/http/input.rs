@@ -15,6 +15,7 @@ pub struct Input {
     pub body: Value,
     pub query: Value,
     pub ip: String,
+    pub trace: crate::observability::RequestTrace,
     // The registered pattern, whose `{name}` segments name the path parameters.
     pub(super) pattern: &'static str,
 }
@@ -39,12 +40,22 @@ impl Input {
             })
             .map_or("", |(_, segment)| segment)
     }
-    pub(super) fn session_token(&self) -> &str {
-        self.header("cookie")
-            .split(';')
+    pub(super) fn session_token(&self, development: bool) -> &str {
+        let prefix = if development {
+            "dispatch_session="
+        } else {
+            "__Host-dispatch_session="
+        };
+        let mut values = self
+            .headers
+            .get_all("cookie")
+            .iter()
+            .filter_map(|header| header.to_str().ok())
+            .flat_map(|header| header.split(';'))
             .map(str::trim)
-            .find_map(|part| part.strip_prefix("dispatch_session="))
-            .unwrap_or("")
+            .filter_map(|part| part.strip_prefix(prefix));
+        let first = values.next().unwrap_or("");
+        if values.next().is_some() { "" } else { first }
     }
 }
 
@@ -77,14 +88,26 @@ impl Reply {
     /// `{"ok":true}` that also starts the browser's session.
     pub fn signed_in(raw: &str, development: bool, lifetime: SessionLifetime) -> Self {
         let secure = if development { "" } else { "; Secure" };
+        let name = if development {
+            "dispatch_session"
+        } else {
+            "__Host-dispatch_session"
+        };
         Self::ok().cookie(format!(
-            "dispatch_session={raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
+            "{name}={raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{secure}",
             lifetime.seconds()
         ))
     }
     /// `{"ok":true}` that also ends the browser's session.
-    pub fn signed_out() -> Self {
-        Self::ok().cookie("dispatch_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into())
+    pub fn signed_out(development: bool) -> Self {
+        let (name, secure) = if development {
+            ("dispatch_session", "")
+        } else {
+            ("__Host-dispatch_session", "; Secure")
+        };
+        Self::ok().cookie(format!(
+            "{name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}"
+        ))
     }
     fn cookie(mut self, cookie: String) -> Self {
         self.cookie = Some(cookie);

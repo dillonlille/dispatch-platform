@@ -373,6 +373,13 @@ impl Store {
                 self.platform
                     .exec("DELETE FROM memberships WHERE id=?", [member])?;
             }
+            // Membership changes invalidate grants the member previously issued.
+            // Removal also invalidates links addressed to them, including legacy duplicates.
+            self.platform.exec(
+                "DELETE FROM invitations WHERE dsp_id=?1 AND used_at IS NULL \
+                 AND (created_by=?2 OR (?3 AND email=(SELECT email FROM users WHERE id=?2) COLLATE NOCASE))",
+                params![dsp, user, next.is_none()],
+            )?;
             self.platform
                 .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
             let name: (String,) = self
@@ -400,14 +407,14 @@ impl Store {
                 Some(("member", user)),
             )?;
             if next.is_none() {
-                self.delete_account(user, c.actor())?;
+                self.delete_account(user)?;
             }
             Ok(())
         })
     }
     // A removed member's account goes with their last membership, freeing the
     // email for a fresh invitation. Their name stays on the activity they left.
-    fn delete_account(&self, user: &str, actor: &str) -> Result<()> {
+    fn delete_account(&self, user: &str) -> Result<()> {
         let removable: Option<(String,)> = self.platform.one_as(REMOVABLE_ACCOUNT, [user])?;
         let Some((name,)) = removable else {
             return Ok(());
@@ -416,15 +423,8 @@ impl Store {
             .exec("DELETE FROM sessions WHERE user_id=?", [user])?;
         self.platform
             .exec("DELETE FROM resets WHERE user_id=?", [user])?;
-        if actor == user {
-            self.platform
-                .exec("DELETE FROM invitations WHERE created_by=?", [user])?;
-        } else {
-            self.platform.exec(
-                "UPDATE invitations SET created_by=? WHERE created_by=?",
-                [actor, user],
-            )?;
-        }
+        self.platform
+            .exec("DELETE FROM invitations WHERE created_by=?", [user])?;
         self.platform.exec(
             "UPDATE audit SET actor_name=?,actor_id=NULL WHERE actor_id=?",
             [name.as_str(), user],

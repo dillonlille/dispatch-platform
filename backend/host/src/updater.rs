@@ -44,6 +44,7 @@ pub struct Updater<'a> {
     pub environment: Environment,
     pub system: &'a dyn System,
     health_url: String,
+    system_service: bool,
 }
 impl<'a> Updater<'a> {
     pub fn new(root: &Path, environment: Environment, system: &'a dyn System) -> Result<Self> {
@@ -69,6 +70,13 @@ impl<'a> Updater<'a> {
         });
         require(!active.is_symlink(), "Runtime symlink denied")?;
         let config = io::read_json(&root.join("config/updater.json"))?;
+        let system_service = config.get("systemService").map_or(Ok(false), |value| {
+            value.as_bool().ok_or("Invalid systemService")
+        })?;
+        require(
+            !system_service || environment == Environment::Production,
+            "System service is Production-only",
+        )?;
         require(
             config["service"] == environment.service(),
             "Environment service required",
@@ -108,6 +116,7 @@ impl<'a> Updater<'a> {
             environment,
             system,
             health_url,
+            system_service,
         })
     }
     pub fn git(&self, args: &[&str]) -> Result<String> {
@@ -163,12 +172,18 @@ impl<'a> Updater<'a> {
         )
     }
     fn service(&self, action: &str) -> Result<()> {
-        self.system.command(
-            &["systemctl", "--user", action, self.environment.service()],
-            None,
-            90,
-            None,
-        )?;
+        let args = if self.system_service {
+            vec![
+                "sudo",
+                "-n",
+                "/usr/bin/systemctl",
+                action,
+                self.environment.service(),
+            ]
+        } else {
+            vec!["systemctl", "--user", action, self.environment.service()]
+        };
+        self.system.command(&args, None, 90, None)?;
         Ok(())
     }
     fn healthy(&self, digest: &str, timeout: u64) -> bool {

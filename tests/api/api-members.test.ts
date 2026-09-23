@@ -73,7 +73,10 @@ test('existing-account invitations require the account password and revocation r
   t.after(f.close);
   const owner = await f.client();
   const member = await f.client('member@dispatch.test');
-  const dev = owner.session.dsps.find((d: { permanent: boolean }) => d.permanent);
+  const dev = owner.session.dsps.find(
+    (d: { permanent: boolean; id: string }) =>
+      !d.permanent && !member.session.dsps.some((mine: { id: string }) => mine.id === d.id),
+  );
   await owner.select(dev.id);
   const roles: { id: string; name: string }[] = (await owner.get('/api/dsp/roles')).value;
   const roleId = (name: string) => roles.find((role) => role.name === name)!.id;

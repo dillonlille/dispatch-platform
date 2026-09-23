@@ -64,10 +64,27 @@ impl Grant for Session {
         Access::Session
     }
     fn authorize(self, db: &Store, input: &Input) -> Result<Auth> {
-        let auth = db.authenticate(input.session_token())?;
+        let auth = db.authenticate(input.session_token(db.config.development))?;
+        {
+            let mut trace = input
+                .trace
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            trace.actor = Some(auth.user.id.clone());
+            trace.account = Some(crypto::sign(
+                &db.key,
+                &format!("account:{}", auth.user.email.to_lowercase()),
+            ));
+        }
         if input.method == Method::POST {
             let sent = input.header("x-csrf-token");
             ensure(crypto::equal(&auth.csrf, sent), "csrf_required", 403)?;
+        }
+        if input.path != "/api/session"
+            && input.path != "/api/auth/logout"
+            && !input.path.starts_with("/api/auth/security/")
+        {
+            db.ensure_mfa(&auth)?;
         }
         Ok(auth)
     }
@@ -81,6 +98,9 @@ impl Grant for PlatformOwner {
         let auth = Session.authorize(db, input)?;
         let owner = auth.user.platform_owner;
         ensure(owner, "platform_owner_required", 403)?;
+        if input.method == Method::POST {
+            db.ensure_recent(&auth)?;
+        }
         Ok(auth)
     }
 }
@@ -91,7 +111,24 @@ impl Grant for Dsp {
     }
     fn authorize(self, db: &Store, input: &Input) -> Result<Context> {
         let auth = Session.authorize(db, input)?;
-        db.from_view(&auth, input.header("x-dispatch-view"), self.0)
+        if input.method == Method::POST
+            && [
+                "connections.manage",
+                "members.manage",
+                "members.invite",
+                "roles.manage",
+            ]
+            .contains(&self.0)
+        {
+            db.ensure_recent(&auth)?;
+        }
+        let context = db.from_view(&auth, input.header("x-dispatch-view"), self.0)?;
+        input
+            .trace
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .tenant = Some(context.dsp.id.clone());
+        Ok(context)
     }
 }
 impl Dsp {

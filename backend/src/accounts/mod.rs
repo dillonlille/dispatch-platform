@@ -1,11 +1,12 @@
 //! Accounts, authenticated contexts, sessions and invitations.
 mod invitations;
 mod passwords;
+mod security;
 mod sessions;
 
 use crate::{
     Error, Result,
-    contracts::{Dsp, DspSetupRequest, DspStatus, PublicUser, UserStatus},
+    contracts::{Dsp, DspStatus, PublicUser, UserStatus},
     crypto,
     db::{Db, FromRow, Row, Store, flag, iso, now, s},
     ensure,
@@ -171,6 +172,15 @@ impl Store {
             MailContext::Invitation { hash } => ("invitation", Some(hash), None),
             MailContext::Reset { user } => ("reset", None, Some(user)),
         };
+        // Invitation traffic has its own ceiling; recovery keeps reserved capacity.
+        ensure(
+            self.platform.count(
+                "SELECT count(*) FROM outbox WHERE status='pending' AND kind=?",
+                [kind],
+            )? < self.config.security.mail_kind_pending,
+            "email_queue_full",
+            429,
+        )?;
         self.platform.exec(
             "INSERT INTO outbox(id,encrypted_message,available_at,created_at,kind,\
              invitation_hash,user_id) VALUES (?,?,?3,?3,?,?,?)",

@@ -7,9 +7,9 @@ import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.
 import { dspHash, navigate, parseHash, platformHash } from './app/navigation.js';
 import { Page, findRoute, navigation } from './app/routes.js';
 import { routeLabel } from './app/route-meta.js';
-import { AuthScreen, DspOnboarding } from './features/auth/index.js';
+import { AuthScreen, DspOnboarding, SecurityPrompt } from './features/auth/index.js';
 import { messageOf } from './lib/errors.js';
-import { Loading } from './ui/index.js';
+import { Loading, Modal } from './ui/index.js';
 import { can } from './app/permissions.js';
 import './styles.css';
 import { Shell } from './shell/Shell.js';
@@ -19,11 +19,13 @@ import { leavePresence, usePresence } from './app/presence.js';
 import { openView, saveRole } from './app/session.js';
 import { getSession } from './app/endpoints.js';
 function App() {
+  const [reauthenticate, setReauthenticate] = useState(false);
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [address, setAddress] = useState(() => parseHash(window.location.hash)),
     [switching, setSwitching] = useState(false);
   const { perform, fail } = useFeedback();
+  const securityRequired = Boolean(session?.security.required && !session.security.verified);
   const setupRequired = Boolean(view?.profile?.setupRequired && can(view, 'settings.manage'));
   const showAuth =
     session === null ||
@@ -73,6 +75,18 @@ function App() {
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, [load, fail]);
+  useEffect(() => {
+    const verify = () => setReauthenticate(true);
+    const required = () => void load();
+    window.addEventListener('dispatch-reauthenticate', verify);
+    window.addEventListener('dispatch-mfa-required', required);
+    window.addEventListener('dispatch-security-changed', required);
+    return () => {
+      window.removeEventListener('dispatch-reauthenticate', verify);
+      window.removeEventListener('dispatch-mfa-required', required);
+      window.removeEventListener('dispatch-security-changed', required);
+    };
+  }, [load]);
   const { route, dspId, page } = address;
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);
   // A platform owner looking into a DSP is never shown to its team.
@@ -103,7 +117,7 @@ function App() {
   useEffect(() => {
     setView(undefined);
     if (!dspId) saveRole();
-    if (!session) return;
+    if (!session || securityRequired) return;
     credentials(session.csrf);
     if (!dspId) return;
     let active = true;
@@ -124,7 +138,7 @@ function App() {
     return () => {
       active = false;
     };
-  }, [session, dspId, fail]);
+  }, [session, dspId, fail, securityRequired]);
   if (session === undefined)
     return (
       <>
@@ -133,6 +147,14 @@ function App() {
       </>
     );
   if (showAuth) return <AuthScreen key={route} onLogin={() => load(true)} />;
+  if (securityRequired && session)
+    return (
+      <SecurityPrompt
+        enrolled={session.security.enrolled}
+        complete={() => load(true)}
+        signOut={logout}
+      />
+    );
   if (setupRequired)
     return (
       <DspOnboarding
@@ -169,6 +191,18 @@ function App() {
       }}
     >
       <FeedbackMessages />
+      {reauthenticate && (
+        <Modal title="Confirm it's you" onClose={() => setReauthenticate(false)}>
+          <SecurityPrompt
+            enrolled={session.security.enrolled}
+            complete={async () => {
+              setReauthenticate(false);
+              fail('Verification complete. You can retry your action.');
+            }}
+            signOut={logout}
+          />
+        </Modal>
+      )}
       {dspId ? (
         switching ? (
           <Loading />
