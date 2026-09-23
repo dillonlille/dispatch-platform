@@ -4,7 +4,7 @@ use crate::updater::{Environment, Updater};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs,
     io::Cursor,
     os::unix::fs::{PermissionsExt, symlink},
@@ -870,6 +870,44 @@ fn manifests_preserve_legacy_digest_order_and_metadata_when_promoted() {
         io::read_json(&root.join("tooling/build-info.json")).unwrap()["hostManagement"],
         1
     );
+}
+#[test]
+fn a_stamped_release_changes_only_its_version_and_packs_what_unpack_accepts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("build");
+    let commit = "a".repeat(40);
+    let built = artifact(&root, &commit, "0.0.19", true);
+    assert!(artifact::stamp(&root, &"b".repeat(40), "0.0.20").is_err());
+    let stamped = artifact::stamp(&root, &commit, "0.0.20").unwrap();
+    assert_eq!(stamped.version, "0.0.20");
+    assert_eq!(stamped.files, built.files);
+    assert_ne!(stamped.digest, built.digest);
+    let package = temp.path().join("release.tar.gz");
+    artifact::pack(&root, &package).unwrap();
+    assert!(artifact::pack(&root, &package).is_err());
+    let unpacked = temp.path().join("unpacked");
+    artifact::unpack(&package, &unpacked).unwrap();
+    assert_eq!(artifact::verify(&unpacked, Some(&commit)).unwrap(), stamped);
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+        fs::File::open(&package).unwrap(),
+    ));
+    let modes: BTreeMap<_, _> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            let header = entry.header();
+            assert_eq!(header.entry_type(), tar::EntryType::Regular);
+            assert_eq!(header.mtime().unwrap(), 0);
+            (
+                entry.path().unwrap().to_str().unwrap().to_owned(),
+                header.mode().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(modes["services/rust/dispatch-backend"], 0o755);
+    assert_eq!(modes["release.json"], 0o644);
+    assert_eq!(modes.len(), built.files.len() + 1);
 }
 #[test]
 fn archives_reject_links_traversal_duplicates_sparse_files_and_oversized_entries() {

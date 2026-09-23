@@ -1,5 +1,6 @@
-//! Release coordination. GitHub and immutable assets are the source of truth;
-//! the small local journal only pins intent across process interruptions.
+//! Release coordination. A release publishes a commit already on main, under a version
+//! stamped into the build CI made of it. GitHub and immutable assets are the source of
+//! truth; the small local journal only pins intent across process interruptions.
 mod assets;
 mod workflow;
 
@@ -21,11 +22,11 @@ use std::{
 
 const PRODUCTION: &str = "https://dispatch.dillonlille.com";
 const HELP: &str = "Dispatch release [run|status|prepare|publish] [X.Y.Z] --root CHECKOUT
-  run       Release, publish and verify Production (the legacy default).
+  run       Release main's head, publish and verify Production (the default).
   status    Inspect GitHub, saved assets and public health without changing release state.
-  prepare   Merge the release PR and stop at a smoke-tested, verified draft.
-  publish   Publish an existing verified preparation, verify Production and finish Dev sync.
-Options: --bump patch|minor|major, --dev-commit REV, --notes PATH, --releases PATH
+  prepare   Require the full suite on the commit and stop at a smoke-tested, verified draft.
+  publish   Publish an existing verified preparation and verify Production.
+Options: --bump patch|minor|major, --commit REV, --notes PATH, --releases PATH
 Rerun the same command after fixing a failure. Tags and existing assets are never overwritten.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +42,7 @@ struct Options {
     version: Option<String>,
     root: PathBuf,
     bump: String,
-    dev_commit: Option<String>,
+    commit: Option<String>,
     notes: Option<PathBuf>,
     releases: Option<PathBuf>,
 }
@@ -52,7 +53,7 @@ impl Options {
             version: None,
             root: PathBuf::new(),
             bump: "patch".into(),
-            dev_commit: None,
+            commit: None,
             notes: None,
             releases: None,
         };
@@ -70,14 +71,14 @@ impl Options {
         let mut seen = BTreeSet::new();
         while let Some(arg) = iter.next() {
             match arg.as_str() {
-                "--root" | "--bump" | "--dev-commit" | "--notes" | "--releases" => {
+                "--root" | "--bump" | "--commit" | "--notes" | "--releases" => {
                     require(seen.insert(arg), "Duplicate release option")?;
                     let next = iter.next().ok_or("Release option needs a value")?;
                     require(!next.starts_with('-'), "Release option needs a value")?;
                     match arg.as_str() {
                         "--root" => value.root = std::path::absolute(next)?,
                         "--bump" => value.bump = next.clone(),
-                        "--dev-commit" => value.dev_commit = Some(next.clone()),
+                        "--commit" => value.commit = Some(next.clone()),
                         "--notes" => value.notes = Some(std::path::absolute(next)?),
                         _ => value.releases = Some(std::path::absolute(next)?),
                     }
@@ -103,6 +104,8 @@ impl Options {
 struct Journal {
     format: u32,
     version: String,
+    /// The Dev revision a release PR brought to main, before releases came from main.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     dev_commit: Option<String>,
     commit: Option<String>,
     complete: bool,
@@ -120,16 +123,13 @@ impl Drop for ReleaseLock {
 struct Release<'a> {
     system: &'a dyn System,
     root: PathBuf,
-    platform: PathBuf,
     directory: PathBuf,
     output: PathBuf,
     notes: PathBuf,
     version: String,
     tag: String,
-    branch: String,
-    sync_branch: String,
-    worktree: PathBuf,
-    sync_worktree: PathBuf,
+    /// A temporary branch at the release commit, only for dispatching its full checks.
+    checks_branch: String,
 }
 
 fn say(message: impl std::fmt::Display) {
@@ -162,14 +162,10 @@ impl<'a> Release<'a> {
                 .notes
                 .clone()
                 .unwrap_or_else(|| directory.join(format!("v{version}-notes.md"))),
-            worktree: platform.join(format!("worktrees/release-v{version}")),
-            sync_worktree: platform.join(format!("worktrees/sync-main-v{version}")),
             directory,
-            platform,
             version: version.into(),
             tag: format!("v{version}"),
-            branch: format!("release/v{version}"),
-            sync_branch: format!("chore/sync-main-v{version}"),
+            checks_branch: format!("release-checks/v{version}"),
         }
     }
     fn command(&self, args: &[&str], cwd: Option<&Path>, timeout: u64) -> Result<String> {
@@ -280,7 +276,7 @@ impl<'a> Release<'a> {
         )?;
         self.checks(commit, "push", Some("main"), false)
     }
-    fn execute(&self, stage: Stage, dev_commit: Option<&str>) -> Result<Value> {
+    fn execute(&self, stage: Stage, requested: Option<&str>) -> Result<Value> {
         if stage == Stage::Status {
             return self.status();
         }
@@ -295,7 +291,7 @@ impl<'a> Release<'a> {
         lock.try_lock_exclusive()
             .map_err(|_| "Another release command is running")?;
         let _lock = ReleaseLock(lock);
-        self.git(&["fetch", "origin", "main", "dev"], None, 300)?;
+        self.git(&["fetch", "--tags", "origin", "main"], None, 300)?;
         let published = self.listed_release()?.is_some_and(|r| r["draft"] == false);
         if published {
             require(
@@ -303,13 +299,8 @@ impl<'a> Release<'a> {
                 "Release is already published; use status or publish to verify it",
             )?;
         } else if stage != Stage::Publish {
-            let commit = self.merge_release(dev_commit)?;
-            self.record_commit(&commit)?;
+            let commit = self.pin(requested)?;
             let prepared = self.prepare(&commit)?;
-            // Only now has main passed its checks for this commit, so the sync PR's own run
-            // can reuse main's published build instead of validating the same tree again.
-            // It runs while the release is smoke tested, published and installed.
-            self.open_sync()?;
             self.smoke(&prepared)?;
             self.ensure_draft(&prepared)?;
             if stage == Stage::Prepare {
@@ -318,13 +309,11 @@ impl<'a> Release<'a> {
                 );
             }
         }
-        // Publication can only consume complete, revalidated preparation. It never
-        // creates or merges a release PR implicitly.
+        // Publication can only consume complete, revalidated preparation.
         let prepared = self.prepared(None)?;
         self.record_commit(&prepared.commit)?;
         let release = self.publish(&prepared)?;
         self.verify_production(&prepared, &release)?;
-        self.finish_sync()?;
         self.clean()?;
         let mut journal = self.journal()?;
         journal.complete = true;
@@ -349,8 +338,7 @@ impl<'a> Release<'a> {
             .unwrap_or_else(|error| json!({"problem": error.to_string()}));
         Ok(
             json!({"version":self.version,"journal":self.journal()?,"prepared":prepared,
-            "release":self.listed_release()?,"releasePr":self.pull_request(&self.branch,"main")?,
-            "syncPr":self.pull_request(&self.sync_branch,"dev")?,"production":health}),
+            "release":self.listed_release()?,"production":health}),
         )
     }
 }
@@ -380,37 +368,9 @@ fn latest_version(listed: &[Value]) -> &str {
         .map(|(_, s)| s)
         .unwrap_or("0.0.0")
 }
-fn unfinished(system: &dyn System, directory: &Path, listed: &[Value]) -> Result<Option<String>> {
+fn unfinished(directory: &Path, listed: &[Value]) -> Result<Option<String>> {
     let latest = releases::version(latest_version(listed))?;
-    let pulls: Vec<Value> = serde_json::from_slice(&system.command(
-        &[
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            REPOSITORY,
-            "--base",
-            "main",
-            "--state",
-            "open",
-            "--limit",
-            "100",
-            "--json",
-            "headRefName",
-        ],
-        None,
-        120,
-        None,
-    )?)?;
     let mut found = BTreeSet::new();
-    for pull in pulls {
-        if let Some(v) = pull["headRefName"]
-            .as_str()
-            .and_then(|s| s.strip_prefix("release/v"))
-        {
-            found.insert(v.to_owned());
-        }
-    }
     for release in listed {
         if release["draft"] == true
             && let Some(v) = release["tag_name"]
@@ -487,7 +447,7 @@ pub fn run(args: &[String], system: &dyn System) -> Result<Value> {
         .unwrap_or_else(|| platform.join("releases"));
     let version = match &options.version {
         Some(version) => version.clone(),
-        None => match unfinished(system, &directory, &listed)? {
+        None => match unfinished(&directory, &listed)? {
             Some(version) => version,
             None if options.stage == Stage::Status => latest.into(),
             None if options.stage == Stage::Publish => {
@@ -506,7 +466,7 @@ pub fn run(args: &[String], system: &dyn System) -> Result<Value> {
         )?;
     }
     Release::new(system, &options, &version, platform)
-        .execute(options.stage, options.dev_commit.as_deref())
+        .execute(options.stage, options.commit.as_deref())
 }
 
 #[cfg(test)]

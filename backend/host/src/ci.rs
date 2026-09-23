@@ -4,7 +4,7 @@ use dispatch_ci::policy::{Context, Environment, Policy, Validation, trusted_bran
 use serde_json::Value;
 use std::{fs, io::Write, os::unix::fs::PermissionsExt, path::Path};
 
-struct Runner<'a>(&'a dyn System);
+pub(crate) struct Runner<'a>(pub(crate) &'a dyn System);
 impl dispatch_ci::Runner for Runner<'_> {
     fn command(&self, args: &[&str], cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
         self.0.command(args, cwd, timeout, None)

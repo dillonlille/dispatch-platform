@@ -116,6 +116,8 @@ impl Release<'_> {
                 self.output.display()
             ).into());
         }
+        self.full_suite(commit)?;
+        // Main's push run publishes the build of this commit.
         self.checks(commit, "push", Some("main"), true)?;
         let run = self.checked_source(commit)?;
         let records = io::github(
@@ -137,19 +139,14 @@ impl Release<'_> {
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir_in(&self.directory)?;
         let download = tempfile::tempdir_in(staging.path())?;
-        let manifest = releases::download_run(
-            self.system,
-            artifacts[0],
-            download.path(),
-            commit,
-            Some(&staging.path().join(self.archive())),
-        )?;
-        require(
-            manifest.version == self.version,
-            "Compiled artifact has another version",
-        )?;
+        releases::download_run(self.system, artifacts[0], download.path(), commit, None)?;
+        // CI built the version main's source names; the release publishes those bytes
+        // under its own version.
+        let candidate = download.path().join("candidate");
+        let manifest = artifact::stamp(&candidate, commit, &self.version)?;
+        artifact::pack(&candidate, &staging.path().join(self.archive()))?;
         fs::copy(
-            download.path().join("candidate/release.json"),
+            candidate.join("release.json"),
             staging.path().join("release.json"),
         )?;
         let prepared = Prepared {
