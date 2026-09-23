@@ -1,4 +1,5 @@
-import { test, expect, login, signIn } from './fixtures.js';
+import type { Page } from '@playwright/test';
+import { test, expect, login, signIn, openDsp } from './fixtures.js';
 
 test.use({ dispatchOptions: { originHost: 'localhost' } });
 
@@ -6,18 +7,7 @@ test('passkeys protect new sessions, reject replay, and recovery codes work only
   page,
   dispatch,
 }) => {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-    },
-  });
+  await authenticator(page);
   const older = await dispatch.client();
   await login(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
@@ -92,4 +82,36 @@ test('passkeys protect new sessions, reject replay, and recovery codes work only
   await page.goto('/');
   await signIn(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
+});
+
+async function authenticator(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+}
+
+test('DSP settings keep recovery codes visible until saved', async ({ page, dispatch }) => {
+  await authenticator(page);
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByLabel('Passkey name').fill('DSP account key');
+  await page.getByRole('button', { name: 'Add passkey', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();
+  const other = await dispatch.client('member@dispatch.test');
+  expect(other.session.security.required).toBe(false);
+  expect((await page.locator('.recovery-codes pre').innerText()).split('\n')).toHaveLength(8);
+  await page.getByRole('button', { name: 'I saved my recovery codes' }).click();
+  await expect(page.getByText('DSP account key', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).not.toBeVisible();
 });

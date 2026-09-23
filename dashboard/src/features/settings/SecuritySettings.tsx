@@ -43,7 +43,15 @@ export function SecuritySettings() {
             : 'Other sessions will be signed out. Your remaining passkeys will still work.'}
         </ConfirmDialog>
       )}
-      {codes.length > 0 && <RecoveryCodes codes={codes} done={() => setCodes([])} />}
+      {codes.length > 0 && (
+        <RecoveryCodes
+          codes={codes}
+          done={() => {
+            setCodes([]);
+            window.dispatchEvent(new Event('dispatch-security-changed'));
+          }}
+        />
+      )}
       <section className="security-section">
         <h2>Passkeys</h2>
         <DataState data={keys.data} error={keys.error}>
@@ -69,8 +77,12 @@ export function SecuritySettings() {
                   const name = String(new FormData(event.currentTarget).get('name'));
                   run(async () => {
                     await verifyIfNeeded();
-                    setCodes(await registerPasskey(name));
-                    window.dispatchEvent(new Event('dispatch-security-changed'));
+                    const recoveryCodes = await registerPasskey(name);
+                    setCodes(recoveryCodes);
+                    // Refreshing a DSP view can remount settings. Keep the one-time codes
+                    // visible until the user has acknowledged saving them.
+                    if (!recoveryCodes.length)
+                      window.dispatchEvent(new Event('dispatch-security-changed'));
                   });
                 }}
               >
