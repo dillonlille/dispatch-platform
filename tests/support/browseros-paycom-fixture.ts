@@ -154,6 +154,9 @@ export async function paycomFixture(
     verifications: 0,
     // Responses for later employees differ from their rendered pages yet validate.
     responseDrift: false,
+    // Timecard requests from the platform's own HTTP client, not a browser: it asks
+    // for no compressed encoding, which a browser always does.
+    httpTimecards: 0,
     expiredTimecard: false,
     requests: [] as Record<string, unknown>[],
   };
@@ -287,6 +290,7 @@ export async function paycomFixture(
       state.activeByAccount.set(account, active);
       state.peakByAccount.set(account, Math.max(active, state.peakByAccount.get(account) ?? 0));
       const code = url.searchParams.get('firstrefno')!;
+      if (!req.headers['accept-encoding']) state.httpTimecards++;
       if (!verification) {
         state.readsByCode.set(code, (state.readsByCode.get(code) ?? 0) + 1);
         events.push('timecard');
@@ -323,9 +327,10 @@ export async function paycomFixture(
         }
         if (state.wrongIdentity && url.searchParams.get('firstrefno') === 'BB02')
           url.searchParams.set('firstrefno', 'AA01');
+        // Anything but a navigation reads the response: a tab's fetch or the platform.
         const drift =
           state.responseDrift &&
-          !(req.headers.accept ?? '').includes('text/html') &&
+          req.headers['upgrade-insecure-requests'] !== '1' &&
           accountCodes.indexOf(code) >= 2;
         return html(
           timecard(url, state.mismatch, 8, drift) +

@@ -59,7 +59,7 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
         metrics.phase(Phase::Collection);
         let request: Value = serde_json::from_str(&job.request)?;
         let collected = session
-            .collect(&state, &id, &owner, &metrics, &request)
+            .collect(&state, &id, &owner, &metrics, &request, job.attempt)
             .await?;
         metrics.counts(&collected.data);
         metrics.phase(Phase::Publication);
@@ -87,11 +87,16 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
         tokio::select! {
             result=&mut task=>break result,
             _=sample.tick()=>{
-                if let Some(pid)=state.browsers.get_for(&dsp,
-                    provider).filter(|session|session.revision==job.connection_revision).and_then(|session|session.process_id())
-                    && let Ok(Some(memory))=tokio::task::spawn_blocking(move||job_metrics::memory(pid)).await {
-                    if let Some(session) = state.browsers.get_for(&dsp,provider) { session.observe_memory(&memory); }
-                    metrics.observe(memory);
+                if let Some(session)=state.browsers.get_for(&dsp,
+                    provider).filter(|session|session.revision==job.connection_revision)
+                    && let Some(pid)=session.process_id() {
+                    match tokio::task::spawn_blocking(move||job_metrics::memory(pid).ok_or_else(||
+                        !std::path::Path::new(&format!("/proc/{pid}")).exists())).await {
+                        Ok(Ok(memory)) => { session.observe_memory(&memory); metrics.observe(memory); }
+                        // The driver closed its browser and reads without one.
+                        Ok(Err(true)) => session.browser_exited(),
+                        _ => {}
+                    }
                 }
                 let jid=id.clone(); let worker=owner.clone(); let snapshot=metrics.snapshot();
                 let _=state.run(move|db|db.save_metrics(&jid,&worker,&snapshot)).await;

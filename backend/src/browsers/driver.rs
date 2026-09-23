@@ -15,6 +15,8 @@ pub struct Run<'a> {
     pub timezone: &'a str,
     pub metrics: &'a Recorder,
     pub request: &'a Value,
+    /// 1 for a job's first attempt.
+    pub attempt: i64,
 }
 impl Run<'_> {
     /// Shown on the job. Fails once the job is cancelled or no longer this worker's.

@@ -1,6 +1,8 @@
 //! Deterministic Paycom driver. Credentials, attempt limits and orchestration
 //! belong to Rust; JavaScript is restricted to provider page operations.
 mod collection;
+mod extract;
+mod http;
 use super::{
     attempt,
     driver::{Collected, Driver as Drives, Pending, Run},
@@ -418,6 +420,7 @@ impl Drives for Driver {
                     run.owner,
                 )),
                 |progress, message| run.progress(progress, message),
+                run.attempt == 1,
             )
             .await?;
             Ok(Collected { data, scope: None })

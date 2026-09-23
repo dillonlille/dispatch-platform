@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    http::{Http, Refusal},
+    *,
+};
 use crate::{collection_checkpoint::Checkpoint, job_metrics::Recorder};
 use chrono::{Datelike, NaiveDate};
 use std::{
@@ -304,21 +307,41 @@ impl Driver {
             "sources":[{"employeeCode":employee["code"],"periodKey":period["key"],"url":source_url(&self.origin,employee,&period)}],
             "from":requested.from,"to":requested.to,"collectedAt":db::iso()}))
     }
-    pub async fn collect<F, Fut>(
+    /// The roster, fetched by the signed-in tab itself.
+    async fn roster_in_page(&self, input: Value) -> Result<Value> {
+        // Start a bounded fetch in the isolated world, then poll. No command holds
+        // the browser transport for a network-length timeout.
+        self.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchRoster=null;(async input=>{{try{{
+            const response=await fetch(input.url,{{method:'POST',credentials:'include',redirect:'error',
+                cache:'no-store',headers:input.headers,body:input.body,signal:AbortSignal.timeout(55000)}});
+            if(response.status!==200||!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
+            const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let size=0,text='';
+            for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 0;}}text+=decoder.decode(part.value,{{stream:true}});}}
+            text+=decoder.decode();globalThis.dispatchRoster={{ok:true,value:JSON.parse(text)}};
+        }}catch{{globalThis.dispatchRoster={{ok:false}};}}}})({input});return true;}})()"#)).await?;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let raw = loop {
+            ensure(Instant::now() < deadline, "provider_timeout", 504)?;
+            let value = self.page.evaluate("globalThis.dispatchRoster").await?;
+            if !value.is_null() {
+                ensure(value["ok"] == true, "provider_unavailable", 502)?;
+                break value["value"].clone();
+            }
+            sleep(Duration::from_millis(200)).await;
+        };
+        self.page
+            .evaluate("delete globalThis.dispatchRoster")
+            .await?;
+        Ok(raw)
+    }
+    /// The roster for the selected period, read the way the search page reads it,
+    /// with a session for plain HTTP when `http` allows one and it works.
+    pub(super) async fn roster(
         &mut self,
         timezone: &str,
         selected_date: Option<NaiveDate>,
-        metrics: &Recorder,
-        checkpoint: Option<&Checkpoint>,
-        mut progress: F,
-    ) -> Result<Value>
-    where
-        F: FnMut(i64, String) -> Fut,
-        Fut: Future<Output = Result<()>>,
-    {
-        self.credentials = Value::Null;
-        self.assistance = None;
-        progress(10, "Reading employee roster".into()).await?;
+        http: bool,
+    ) -> Result<Roster> {
         self.new_page().await?;
         let api = if self.fixture {
             format!("{}/api/cl/timecard-search/employees", self.origin)
@@ -376,31 +399,59 @@ impl Driver {
                 }
             }
         }
-        let input = json!({"url":api,"body":body.to_string(),"headers":headers});
-        // Start a bounded fetch in the isolated world, then poll. No command holds
-        // the browser transport for a network-length timeout.
-        self.page.evaluate(&format!(r#"(()=>{{globalThis.dispatchRoster=null;(async input=>{{try{{
-            const response=await fetch(input.url,{{method:'POST',credentials:'include',redirect:'error',
-                cache:'no-store',headers:input.headers,body:input.body,signal:AbortSignal.timeout(55000)}});
-            if(response.status!==200||!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||'')||!response.body)throw 0;
-            const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{{fatal:true}});let size=0,text='';
-            for(;;){{const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>2097152){{await reader.cancel();throw 0;}}text+=decoder.decode(part.value,{{stream:true}});}}
-            text+=decoder.decode();globalThis.dispatchRoster={{ok:true,value:JSON.parse(text)}};
-        }}catch{{globalThis.dispatchRoster={{ok:false}};}}}})({input});return true;}})()"#)).await?;
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let raw = loop {
-            ensure(Instant::now() < deadline, "provider_timeout", 504)?;
-            let value = self.page.evaluate("globalThis.dispatchRoster").await?;
-            if !value.is_null() {
-                ensure(value["ok"] == true, "provider_unavailable", 502)?;
-                break value["value"].clone();
+        // The first attempt reads over plain HTTP from here once the browser has signed
+        // in and the roster shows the session works; a retry reads as it always has.
+        let mut reader = None;
+        let mut raw = None;
+        if http {
+            match Http::signed_in(&self.browser, &self.origin).await {
+                Ok(client) => match client.roster(&api, &headers, body.to_string()).await {
+                    Ok(value) => {
+                        raw = Some(value);
+                        reader = Some(client);
+                    }
+                    Err(error) => fallback("roster", &error.code),
+                },
+                Err(error) => fallback("session", &error.code),
             }
-            sleep(Duration::from_millis(200)).await;
+        }
+        let raw = match raw {
+            Some(raw) => raw,
+            None => {
+                self.roster_in_page(json!({"url":api,"body":body.to_string(),"headers":headers}))
+                    .await?
+            }
         };
-        self.page
-            .evaluate("delete globalThis.dispatchRoster")
-            .await?;
         let employees = employees(&raw, &codes)?;
+        Ok(Roster {
+            raw,
+            period,
+            employees,
+            http: reader,
+        })
+    }
+    pub async fn collect<F, Fut>(
+        &mut self,
+        timezone: &str,
+        selected_date: Option<NaiveDate>,
+        metrics: &Recorder,
+        checkpoint: Option<&Checkpoint>,
+        mut progress: F,
+        http: bool,
+    ) -> Result<Value>
+    where
+        F: FnMut(i64, String) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        self.credentials = Value::Null;
+        self.assistance = None;
+        progress(10, "Reading employee roster".into()).await?;
+        let Roster {
+            raw,
+            period,
+            employees,
+            http: reader,
+        } = self.roster(timezone, selected_date, http).await?;
         let resume = if let Some(checkpoint) = checkpoint {
             Some(checkpoint.prepare(&period, &employees, timezone).await?)
         } else {
@@ -408,7 +459,7 @@ impl Driver {
         };
         let (token, mut pages) = resume.map(|r| (r.token, r.pages)).unwrap_or_default();
         metrics.resumed(pages.len());
-        let todo = employees
+        let mut todo = employees
             .iter()
             .enumerate()
             .filter_map(|(index, employee)| {
@@ -420,31 +471,74 @@ impl Driver {
         } else {
             None
         };
-        let direct = Direct::new(&todo);
-        let queue = Queue {
+        let origin = self.origin.clone();
+        let queue = |todo, direct, progress| Queue {
             employees: &employees,
             todo,
             next: AtomicUsize::new(0),
             stopped: AtomicBool::new(false),
-            progress: tokio::sync::Mutex::new((pages.len(), progress)),
-            origin: &self.origin,
+            progress: tokio::sync::Mutex::new(progress),
+            origin: &origin,
             period: &period,
             metrics,
             checkpoint,
             token: &token,
             direct,
         };
+        let mut direct = Direct::new(&todo);
+        let mut progress = (pages.len(), progress);
+        // Render a few employees while reading the same responses here. Only when
+        // they all agree does the browser close and the rest come over HTTP.
+        let reader = match reader.filter(|_| todo.len() >= Direct::SAMPLED_ROSTER) {
+            Some(http) => {
+                let sample = Proof::sample(&raw, &employees, &todo);
+                let proof = Proof::default();
+                let proving = queue(sample.clone(), Direct::disabled(), progress);
+                let (first, others) = tokio::join!(
+                    proving.lane(Reader::Proving(&mut self.page, &http, &proof)),
+                    async {
+                        match &mut second {
+                            Some(page) => proving.lane(Reader::Proving(page, &http, &proof)).await,
+                            None => Ok(BTreeMap::new()),
+                        }
+                    }
+                );
+                progress = proving.progress.into_inner();
+                pages.extend(first?);
+                pages.extend(others?);
+                todo.retain(|index| !sample.contains(index));
+                if proof.proven() {
+                    Some(http)
+                } else {
+                    // As when the first comparison differs: nothing from a response.
+                    fallback("comparison", "provider_response_mismatch");
+                    direct = Direct::disabled();
+                    None
+                }
+            }
+            None => None,
+        };
+        let queue = queue(todo, direct, progress);
         // Drain both lanes even when one fails. Dropping a sibling's in-flight
         // CDP command intentionally closes the shared browser transport.
-        let (first, second) = tokio::join!(queue.lane(&mut self.page), async {
-            if let Some(page) = &mut second {
-                queue.lane(page).await
-            } else {
-                Ok(BTreeMap::new())
+        let (first, others) = match &reader {
+            Some(http) => {
+                drop(second);
+                self.browser.close().await;
+                tokio::join!(
+                    queue.lane(Reader::Http(http)),
+                    queue.lane(Reader::Http(http))
+                )
             }
-        });
+            None => tokio::join!(queue.lane(Reader::Tab(&mut self.page)), async {
+                match &mut second {
+                    Some(page) => queue.lane(Reader::Tab(page)).await,
+                    None => Ok(BTreeMap::new()),
+                }
+            }),
+        };
         pages.extend(first?);
-        pages.extend(second?);
+        pages.extend(others?);
         let timecards = employees
             .iter()
             .flat_map(|employee| pages.remove(s(employee, "code")).unwrap_or_default())
@@ -468,6 +562,14 @@ impl Driver {
     }
 }
 
+/// A job's roster: the provider's response, its period and its validated employees.
+pub(super) struct Roster {
+    pub raw: Value,
+    pub period: Value,
+    pub employees: Vec<Value>,
+    pub http: Option<Http>,
+}
+
 struct Queue<'a, F> {
     employees: &'a [Value],
     todo: Vec<usize>,
@@ -486,37 +588,60 @@ where
     F: FnMut(i64, String) -> Fut,
     Fut: Future<Output = Result<()>>,
 {
-    async fn lane(&self, page: &mut Page) -> Result<BTreeMap<String, Vec<Value>>> {
-        let result = self.read_queue(page).await;
+    async fn lane(&self, reader: Reader<'_>) -> Result<BTreeMap<String, Vec<Value>>> {
+        let result = self.read_queue(reader).await;
         if result.is_err() {
             self.stopped.store(true, Ordering::SeqCst);
         }
         result
     }
-    async fn read_queue(&self, page: &mut Page) -> Result<BTreeMap<String, Vec<Value>>> {
+    async fn read_queue(&self, mut reader: Reader<'_>) -> Result<BTreeMap<String, Vec<Value>>> {
         let mut pages = BTreeMap::new();
         while !self.stopped.load(Ordering::SeqCst) {
             let Some(&index) = self.todo.get(self.next.fetch_add(1, Ordering::SeqCst)) else {
                 break;
             };
             let employee = &self.employees[index];
-            let records = read_timecard(
-                page,
-                self.origin,
-                employee,
-                self.period,
-                self.metrics,
-                index + 1,
-                &self.direct,
-            )
-            .await?;
+            let (origin, period, metrics) = (self.origin, self.period, self.metrics);
+            let records = match &mut reader {
+                Reader::Tab(page) => {
+                    read_timecard(
+                        page,
+                        origin,
+                        employee,
+                        period,
+                        metrics,
+                        index + 1,
+                        &self.direct,
+                    )
+                    .await?
+                }
+                Reader::Proving(page, http, proof) => {
+                    prove(
+                        page,
+                        http,
+                        proof,
+                        origin,
+                        employee,
+                        period,
+                        metrics,
+                        index + 1,
+                    )
+                    .await?
+                }
+                Reader::Http(http) => {
+                    read_http(http, origin, employee, period, metrics, Some(index + 1)).await?
+                }
+            };
             if let Some(checkpoint) = self.checkpoint {
                 checkpoint
                     .save(self.token, employee, self.period, &records)
                     .await?;
             }
             pages.insert(s(employee, "code").to_owned(), records);
-            page.collect_garbage().await?;
+            if let Reader::Tab(page) | Reader::Proving(page, ..) = &reader {
+                page.collect_garbage().await?;
+            }
             let mut progress = self.progress.lock().await;
             progress.0 += 1;
             let done = progress.0;
@@ -528,6 +653,187 @@ where
         }
         Ok(pages)
     }
+}
+
+/// How a lane reads each timecard.
+enum Reader<'r> {
+    /// In the browser tab: rendered, or from the response once `Direct` allows.
+    Tab(&'r mut Page),
+    /// Rendered in the tab and read over HTTP; the rendered read is kept.
+    Proving(&'r mut Page, &'r Http, &'r Proof),
+    /// Over HTTP only, after the browser has closed.
+    Http(&'r Http),
+}
+
+/// Why a job reads through the browser after all. Fixed labels only.
+fn fallback(stage: &str, code: &str) {
+    crate::observability::event(
+        "warn",
+        "paycom.http_fallback",
+        json!({"stage":stage,"error":code}),
+    );
+}
+
+/// Whether this job's responses, read here, equal its rendered pages: at least one
+/// comparison covered punches and none differed.
+#[derive(Default)]
+struct Proof {
+    differed: AtomicBool,
+    punched: AtomicBool,
+}
+impl Proof {
+    fn proven(&self) -> bool {
+        self.punched.load(Ordering::SeqCst) && !self.differed.load(Ordering::SeqCst)
+    }
+    /// The employees a job renders to prove its responses: the first the roster
+    /// shows with hours, so the comparison covers punches, and a few at random.
+    fn sample(raw: &Value, employees: &[Value], todo: &[usize]) -> Vec<usize> {
+        let worked = raw["employees"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|row| {
+                row["totals"]["totalHours"]
+                    .as_f64()
+                    .is_some_and(|hours| hours > 0.)
+            })
+            .map(|row| s(row, "employeeCode").to_ascii_uppercase())
+            .collect::<HashSet<_>>();
+        let first = todo
+            .iter()
+            .copied()
+            .find(|index| worked.contains(&s(&employees[*index], "code").to_ascii_uppercase()))
+            .unwrap_or(todo[0]);
+        let rest = todo
+            .iter()
+            .copied()
+            .filter(|index| *index != first)
+            .collect::<Vec<_>>();
+        std::iter::once(first)
+            .chain(pick(&rest, Direct::SAMPLE))
+            .collect()
+    }
+}
+/// Up to `count` distinct values of `from`, chosen at random. Without entropy the
+/// first ones are chosen instead.
+fn pick(from: &[usize], count: usize) -> Vec<usize> {
+    let mut chosen = Vec::new();
+    if from.is_empty() {
+        return chosen;
+    }
+    let mut random = [0u8; 8 * Direct::SAMPLE * 4];
+    let drawn = getrandom::fill(&mut random).is_ok();
+    for (index, bytes) in random.chunks_exact(8).enumerate() {
+        if chosen.len() == count.min(from.len()) {
+            break;
+        }
+        let position = if drawn {
+            u64::from_le_bytes(bytes.try_into().expect("eight bytes")) as usize
+        } else {
+            index
+        };
+        let value = from[position % from.len()];
+        if !chosen.contains(&value) {
+            chosen.push(value);
+        }
+    }
+    chosen
+}
+/// Reads one employee both ways and keeps the rendered read. A punch can land
+/// between reads, so only a response that still differs after it counts.
+#[allow(clippy::too_many_arguments)]
+async fn prove(
+    page: &mut Page,
+    http: &Http,
+    proof: &Proof,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    metrics: &Recorder,
+    ordinal: usize,
+) -> Result<Vec<Value>> {
+    let response = read_http(http, origin, employee, period, metrics, None).await;
+    let rendered = read_rendered(page, origin, employee, period, metrics, ordinal, false).await?;
+    let agrees = response.is_ok_and(|records| records == rendered)
+        || read_http(http, origin, employee, period, metrics, None)
+            .await
+            .is_ok_and(|records| records == rendered);
+    if agrees {
+        metrics.spot_checked();
+        if rendered
+            .iter()
+            .any(|card| card["punches"].as_array().is_some_and(|p| !p.is_empty()))
+        {
+            proof.punched.store(true, Ordering::SeqCst);
+        }
+    } else {
+        proof.differed.store(true, Ordering::SeqCst);
+    }
+    Ok(rendered)
+}
+/// One timecard read over HTTP and extracted here. With an `ordinal` it supplies
+/// published data; without one it only checks another read, at the verification
+/// address. A page naming another employee fails as a rendered read would; anything
+/// else unreadable sends the job to its retry, which reads through the browser.
+async fn read_http(
+    http: &Http,
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    metrics: &Recorder,
+    ordinal: Option<usize>,
+) -> Result<Vec<Value>> {
+    let source = timecard_url(origin, employee, period, ordinal.is_none());
+    if let Some(ordinal) = ordinal {
+        metrics.page_start(ordinal, 1);
+    }
+    let unreadable = |label: &str| {
+        metrics.detail(label);
+        Error::new("provider_response_unreadable", 502)
+    };
+    let result = async {
+        let html = http
+            .page(&source, &format!("{origin}{SEARCH}"))
+            .await
+            .map_err(|refusal| match refusal {
+                Refusal::Unavailable => Error::new("provider_unavailable", 502),
+                Refusal::Unreadable(label) => unreadable(label),
+            })?;
+        if let Some(ordinal) = ordinal {
+            metrics.page_stage(ordinal, "extraction");
+        }
+        let code = s(employee, "code").to_owned();
+        let period = period.clone();
+        let read = tokio::task::spawn_blocking(move || {
+            let source = extract::Source {
+                employee: &code,
+                period: &period,
+                url: &source,
+            };
+            let record = extract::timecard(&html, &source)?;
+            project(&record, &code).map_err(|error| {
+                extract::Unreadable::Invalid(if error.is(crate::Code::InvalidTimecardHours) {
+                    "invalid_timecard_hours"
+                } else {
+                    "provider_hours_mismatch"
+                })
+            })
+        })
+        .await
+        .map_err(|_| unreadable("extraction_stopped"))?;
+        read.map_err(|reason| match reason {
+            extract::Unreadable::WrongEmployee => Error::new("timecard_extraction_failed", 502),
+            extract::Unreadable::Invalid(label) => unreadable(label),
+        })
+    }
+    .await;
+    if let Some(ordinal) = ordinal {
+        metrics.page_finish(ordinal, result.as_ref().err().map(|e| e.code.as_str()));
+        if result.is_ok() {
+            metrics.direct();
+        }
+    }
+    result
 }
 
 /// Whether this job may read timecards from responses. A page can fill or change
@@ -547,31 +853,31 @@ impl Direct {
     const DISABLED: u8 = 2;
     const VERIFYING: u8 = 3;
     const SAMPLE: usize = 4;
+    /// A roster this long gains from responses; a shorter one is rendered.
+    const SAMPLED_ROSTER: usize = 20;
     /// `todo` holds employee indexes in reading order. The first two are rendered
     /// before any response is trusted, and a short roster gains little from
     /// responses, so neither is sampled.
     fn new(todo: &[usize]) -> Self {
-        let mut sample = HashSet::new();
         let later = todo.get(2..).unwrap_or_default();
-        if todo.len() >= 20 {
-            let mut random = [0u8; 8 * Self::SAMPLE * 4];
-            // Without entropy the first later employees are checked instead.
-            let drawn = getrandom::fill(&mut random).is_ok();
-            for (index, bytes) in random.chunks_exact(8).enumerate() {
-                if sample.len() == Self::SAMPLE {
-                    break;
-                }
-                let position = if drawn {
-                    u64::from_le_bytes(bytes.try_into().expect("eight bytes")) as usize
-                } else {
-                    index
-                };
-                sample.insert(later[position % later.len()] + 1);
-            }
-        }
+        let sample = if todo.len() >= Self::SAMPLED_ROSTER {
+            pick(later, Self::SAMPLE)
+                .into_iter()
+                .map(|index| index + 1)
+                .collect()
+        } else {
+            HashSet::new()
+        };
         Self {
             state: AtomicU8::new(0),
             sample,
+        }
+    }
+    /// Every read rendered.
+    fn disabled() -> Self {
+        Self {
+            state: AtomicU8::new(Self::DISABLED),
+            sample: HashSet::new(),
         }
     }
     fn enabled(&self) -> bool {
@@ -715,7 +1021,12 @@ pub(super) fn source_url(origin: &str, employee: &Value, period: &Value) -> Stri
         s(period, "key")
     )
 }
-fn timecard_url(origin: &str, employee: &Value, period: &Value, verification: bool) -> String {
+pub(super) fn timecard_url(
+    origin: &str,
+    employee: &Value,
+    period: &Value,
+    verification: bool,
+) -> String {
     format!(
         "{}&dispatch_timecards={}",
         source_url(origin, employee, period),

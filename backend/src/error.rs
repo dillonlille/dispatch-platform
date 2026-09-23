@@ -37,6 +37,7 @@ codes! {
     ProviderContentTimeout => "provider_content_timeout",
     ProviderContentMissing => "provider_content_missing",
     ProviderHoursMismatch => "provider_hours_mismatch",
+    ProviderResponseUnreadable => "provider_response_unreadable",
     CortexSourceChanged => "cortex_source_changed",
     CortexContentIncomplete => "cortex_content_incomplete",
     CortexScopeMismatch => "cortex_scope_mismatch",
@@ -73,6 +74,7 @@ impl Code {
         Code::ProviderUnavailable,
         Code::ProviderNavigationTimeout,
         Code::ProviderContentTimeout,
+        Code::ProviderResponseUnreadable,
         Code::CortexSourceChanged,
         Code::CortexContentIncomplete,
     ];
@@ -224,6 +226,7 @@ mod tests {
                 "provider_unavailable",
                 "provider_navigation_timeout",
                 "provider_content_timeout",
+                "provider_response_unreadable",
                 "cortex_source_changed",
                 "cortex_content_incomplete",
             ]

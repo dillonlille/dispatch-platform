@@ -126,18 +126,19 @@ test(
         if (!['succeeded', 'failed', 'cancelled'].includes(job.status)) return false;
         assert.equal(job.status, expected, JSON.stringify(job));
         return true;
-      }, 30000);
+      }, 60000);
       await until(
         async () => (await owner.get('/api/platform/health')).value.browsers.active === 0,
       );
       return job;
     };
     const complete = (await run('parallel-complete', 'succeeded')).metrics[0].pageReads;
-    // After one comparison most employees are read from responses, and a few
-    // random ones are rendered again to confirm the response that was read.
-    assert(complete.direct >= 20, JSON.stringify(complete));
-    assert(complete.spotChecked >= 1 && complete.spotChecked <= 4, JSON.stringify(complete));
-    assert.equal(f.state.verifications, 1 + complete.spotChecked);
+    // Five employees are rendered while the platform reads the same responses over
+    // HTTP. They agree, so the browser closes and the other twenty come over HTTP.
+    assert.equal(complete.spotChecked, 5, JSON.stringify(complete));
+    assert.equal(complete.direct, 20, JSON.stringify(complete));
+    assert.equal(f.state.verifications, 5);
+    assert.equal(f.state.httpTimecards, 25, 'Every response read comes from the platform');
     assert.equal(complete.completed, 25);
     assert.equal(
       f.state.timecardsPeak,
@@ -168,11 +169,26 @@ test(
       cards.map((row) => ({ ...row })),
       f.state.codes.map((code) => ({ code, count: 14, hours: 16 })),
     );
-    // Responses that validate but differ from the rendered page pass the first
-    // comparison (early employees agree); a spot check must stop the publication.
+    // Responses that validate but differ from the rendered page: the first employee
+    // agrees and the random ones do not, so nothing is read from a response.
     f.state.responseDrift = true;
-    assert.equal((await run('response-drift', 'failed')).error, 'provider_response_mismatch');
-    assert.equal(publication(), id, 'Unconfirmed responses are never published');
+    const drifted = (await run('response-drift', 'succeeded')).metrics[0].pageReads;
+    assert.equal(drifted.direct, 0, JSON.stringify(drifted));
+    assert.equal(drifted.completed, 25);
+    const sunday = (code: string) =>
+      f.collector(dsp.id, (db) =>
+        JSON.parse(
+          db
+            .prepare(
+              'SELECT punches FROM timecards WHERE publication_id=(SELECT id FROM publications WHERE active=1) AND employee_code=? AND hours>0 ORDER BY date LIMIT 1',
+            )
+            .get(code)!.punches as string,
+        ),
+      );
+    for (const code of f.state.codes.slice(2))
+      assert.equal(sunday(code)[0].in, '08:00 AM', 'Unconfirmed responses are never published');
+    // The rendered cards equal the ones already published, so that publication stays.
+    assert.equal(publication(), id);
     f.state.responseDrift = false;
     f.state.wrongIdentity = true;
     await run('parallel-wrong-employee', 'failed');
