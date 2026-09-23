@@ -418,7 +418,7 @@ dependencies = [
  "chrono-tz",
  "dispatch-host",
  "fs2",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hmac",
  "icu_collator",
  "lettre",
