@@ -20,7 +20,7 @@ const CONTENT_NOT_READY: &[crate::Code] = &[
 const EXTRACT: &str = include_str!("meal.js");
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Candidate {
+pub(super) struct Candidate {
     id: String,
     transporter_id: String,
     driver: String,
@@ -81,7 +81,7 @@ impl Driver {
         }
         Ok(result)
     }
-    async fn meal_page(
+    pub(super) async fn meal_page(
         &mut self,
         scope: &Scope,
         candidate: Option<&Candidate>,
@@ -133,7 +133,11 @@ impl Driver {
         }
         Err(Error::new(&last_error, 502))
     }
-    async fn candidates(&mut self, scope: &Scope, metrics: &Recorder) -> Result<Vec<Candidate>> {
+    pub(super) async fn candidates(
+        &mut self,
+        scope: &Scope,
+        metrics: &Recorder,
+    ) -> Result<Vec<Candidate>> {
         let value = self.meal_page(scope, None, metrics).await?;
         let rows: Vec<Candidate> = serde_json::from_value(value["candidates"].clone())
             .map_err(|_| Error::new("cortex_content_incomplete", 502))?;

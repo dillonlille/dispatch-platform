@@ -1,4 +1,6 @@
 //! Cortex authentication and structured meal evidence from Amazon Logistics.
+#[cfg(test)]
+mod benchmark;
 mod collection;
 mod discovery;
 use super::{
