@@ -4,7 +4,7 @@ use dispatch_ci::policy::{Context, Environment, Policy, Validation, trusted_bran
 use serde_json::Value;
 use std::{fs, io::Write, os::unix::fs::PermissionsExt, path::Path};
 
-struct Runner<'a>(&'a dyn System);
+pub(crate) struct Runner<'a>(pub(crate) &'a dyn System);
 impl dispatch_ci::Runner for Runner<'_> {
     fn command(&self, args: &[&str], cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
         self.0.command(args, cwd, timeout, None)
@@ -18,15 +18,20 @@ impl std::fmt::Display for ValidationChanged {
     }
 }
 impl std::error::Error for ValidationChanged {}
-/// Whether this run validates a PR merge or merge queue group into dev.
-fn into_dev(env: &Environment) -> bool {
-    match env.get("GITHUB_EVENT_NAME") {
-        "pull_request" => env.get("GITHUB_BASE_REF") == "dev",
+/// The trusted branch this run validates a PR merge or merge queue group into, if any.
+fn integration_branch(env: &Environment) -> Option<&'static str> {
+    let branch = match env.get("GITHUB_EVENT_NAME") {
+        "pull_request" => env.get("GITHUB_BASE_REF"),
         "merge_group" => env
             .get("GITHUB_REF")
-            .starts_with("refs/heads/gh-readonly-queue/dev/"),
-        _ => false,
-    }
+            .strip_prefix("refs/heads/gh-readonly-queue/")?
+            .split('/')
+            .next()?,
+        _ => return None,
+    };
+    ["dev", "main"]
+        .into_iter()
+        .find(|trusted| *trusted == branch)
 }
 /// The build a reuse run restores, and the run that validated it.
 #[derive(Debug, PartialEq)]
@@ -42,14 +47,16 @@ fn verified(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result
     if context.commit != env.get("GITHUB_SHA") {
         return Err(Box::new(ValidationChanged("Actual merged commit required")));
     }
-    if into_dev(env) {
-        // A merge that changes nothing against main reuses main's published build. A merge
-        // queue group that is exactly its PR's merge reuses that PR run's gated build.
-        if let Ok(Some(run)) = policy.brings_main(context) {
+    if let Some(branch) = integration_branch(env) {
+        // A merge into dev that changes nothing against main reuses main's published build.
+        // A merge queue group that is exactly its PR's merge reuses that PR run's gated build.
+        if branch == "dev"
+            && let Ok(Some(run)) = policy.brings_main(context)
+        {
             return Ok(Verified::Main(run));
         }
         if env.get("GITHUB_EVENT_NAME") == "merge_group"
-            && let Ok(Some(validation)) = policy.validated_pull(context, "dev")
+            && let Ok(Some(validation)) = policy.validated_pull(context, branch)
         {
             return Ok(Verified::Pull(validation));
         }

@@ -4,7 +4,7 @@ use crate::updater::{Environment, Updater};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs,
     io::Cursor,
     os::unix::fs::{PermissionsExt, symlink},
@@ -189,6 +189,8 @@ struct Fixture {
     new_manifest: artifact::Manifest,
     system: Fake,
     environment: Environment,
+    /// The branch Dev's checkout follows in this test.
+    branch: std::cell::Cell<&'static str>,
 }
 impl Fixture {
     fn new(environment: Environment) -> Self {
@@ -246,7 +248,18 @@ impl Fixture {
             new_manifest,
             system,
             environment,
+            branch: std::cell::Cell::new("dev"),
         }
+    }
+    /// Move Dev's checkout onto main at the running commit, as the switch to one branch does,
+    /// with main's newest merged commit being the new build.
+    fn on_main(&self) {
+        git(&self.root, &["checkout", "-q", "-B", "main"]);
+        git(
+            &self.root,
+            &["update-ref", "refs/remotes/origin/main", &self.new],
+        );
+        self.branch.set("main");
     }
     fn updater(&self) -> Updater<'_> {
         Updater::new(&self.root, self.environment, &self.system).unwrap()
@@ -274,11 +287,12 @@ impl Fixture {
         }
     }
     fn run(&self) -> Value {
-        json!({"id":17,"head_sha":self.new,"head_branch":"dev","event":"push","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
+        json!({"id":17,"head_sha":self.new,"head_branch":self.branch.get(),"event":"push","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
     }
     fn run_url(&self) -> String {
         format!(
-            "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?branch=dev&event=push&head_sha={}&per_page=20",
+            "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?branch={}&event=push&head_sha={}&per_page=20",
+            self.branch.get(),
             self.new
         )
     }
@@ -301,7 +315,7 @@ impl Fixture {
         use std::io::Write;
         zip.write_all(&data).unwrap();
         let bytes = zip.finish().unwrap().into_inner();
-        let record = json!({"id":42,"name":format!("dispatch-dev-{}",self.new),"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
+        let record = json!({"id":42,"name":format!("dispatch-{}-{}",self.branch.get(),self.new),"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
         self.system.reply(
             &format!("repos/{REPOSITORY}/actions/runs/17/artifacts"),
             vec![json!({"artifacts":[record]})],
@@ -531,6 +545,36 @@ fn dev_download_installs_only_with_still_current_validation() {
             );
         }
     }
+}
+#[test]
+fn dev_follows_main_once_its_checkout_is_on_main_and_nothing_else() {
+    // Moving the checkout onto main at the running commit switches Dev over: it installs
+    // main's newest merged build and fast-forwards along main.
+    let f = Fixture::new(Environment::Dev);
+    f.on_main();
+    f.dev_download();
+    f.system
+        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+    f.updater().run_locked().unwrap();
+    assert_eq!(
+        artifact::verify(&f.updater().active, None).unwrap(),
+        f.new_manifest
+    );
+    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
+    assert_eq!(git(&f.root, &["branch", "--show-current"]), "main");
+    // A build published for dev is not main's, even at the same commit.
+    let f = Fixture::new(Environment::Dev);
+    f.dev_download();
+    f.on_main();
+    f.system
+        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+    assert!(f.updater().run_locked().is_err());
+    f.assert_old();
+    // Any other branch is refused rather than followed.
+    let f = Fixture::new(Environment::Dev);
+    git(&f.root, &["checkout", "-q", "-B", "feature"]);
+    assert!(f.updater().run_locked().is_err());
+    f.assert_old();
 }
 #[test]
 fn production_download_rechecks_publication_and_records_failed_release() {
@@ -826,6 +870,44 @@ fn manifests_preserve_legacy_digest_order_and_metadata_when_promoted() {
         io::read_json(&root.join("tooling/build-info.json")).unwrap()["hostManagement"],
         1
     );
+}
+#[test]
+fn a_stamped_release_changes_only_its_version_and_packs_what_unpack_accepts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("build");
+    let commit = "a".repeat(40);
+    let built = artifact(&root, &commit, "0.0.19", true);
+    assert!(artifact::stamp(&root, &"b".repeat(40), "0.0.20").is_err());
+    let stamped = artifact::stamp(&root, &commit, "0.0.20").unwrap();
+    assert_eq!(stamped.version, "0.0.20");
+    assert_eq!(stamped.files, built.files);
+    assert_ne!(stamped.digest, built.digest);
+    let package = temp.path().join("release.tar.gz");
+    artifact::pack(&root, &package).unwrap();
+    assert!(artifact::pack(&root, &package).is_err());
+    let unpacked = temp.path().join("unpacked");
+    artifact::unpack(&package, &unpacked).unwrap();
+    assert_eq!(artifact::verify(&unpacked, Some(&commit)).unwrap(), stamped);
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+        fs::File::open(&package).unwrap(),
+    ));
+    let modes: BTreeMap<_, _> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            let header = entry.header();
+            assert_eq!(header.entry_type(), tar::EntryType::Regular);
+            assert_eq!(header.mtime().unwrap(), 0);
+            (
+                entry.path().unwrap().to_str().unwrap().to_owned(),
+                header.mode().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(modes["services/rust/dispatch-backend"], 0o755);
+    assert_eq!(modes["release.json"], 0o644);
+    assert_eq!(modes.len(), built.files.len() + 1);
 }
 #[test]
 fn archives_reject_links_traversal_duplicates_sparse_files_and_oversized_entries() {

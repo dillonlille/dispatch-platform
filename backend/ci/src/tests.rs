@@ -400,8 +400,18 @@ fn planner_reuses_only_current_validated_merges_and_defaults_conservatively() {
     fixture.fake.paths.replace("backend/src/lib.rs\0".into());
     assert_eq!(fixture.policy().plan(&group, &queue_event()).0, "full");
     fixture.fake.paths.replace("dashboard/src/app.ts\0".into());
+    // main is scoped exactly as dev is: groups, pushes and PRs by what they change.
     let mut main_group = queue_event();
     main_group["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert_eq!(fixture.policy().plan(&group, &main_group).0, "dashboard");
+    assert_eq!(
+        fixture
+            .policy()
+            .plan(&environment("push", "refs/heads/main"), &event())
+            .0,
+        "dashboard"
+    );
+    fixture.fake.paths.replace("backend/src/lib.rs\0".into());
     assert_eq!(fixture.policy().plan(&group, &main_group).0, "full");
     assert_eq!(
         fixture
@@ -410,6 +420,7 @@ fn planner_reuses_only_current_validated_merges_and_defaults_conservatively() {
             .0,
         "full"
     );
+    fixture.fake.paths.replace("dashboard/src/app.ts\0".into());
     for name in ["workflow_dispatch", "schedule", "release"] {
         assert_eq!(
             fixture
@@ -433,7 +444,7 @@ fn planner_reuses_only_current_validated_merges_and_defaults_conservatively() {
             .policy()
             .plan(&environment("pull_request", "refs/pull/1/merge"), &pr)
             .0,
-        "full"
+        "dashboard"
     );
     pr["pull_request"]["draft"] = true.into();
     assert_eq!(
@@ -488,8 +499,12 @@ fn receipt_artifact_must_be_unique_unexpired_and_match_its_github_record() {
     value["baseRef"] = "main".into();
     f.set_receipt(value.clone());
     assert!(f.policy().validated(&context(), "main").unwrap().is_some());
+    // main takes the scope the merge needed, as dev does: the dashboard set for a
+    // dashboard-only merge, never for one that changed the backend.
     value["scope"] = "dashboard".into();
     f.set_receipt(value);
+    assert!(f.policy().validated(&context(), "main").unwrap().is_some());
+    f.fake.paths.replace("backend/src/lib.rs\0".into());
     assert!(f.policy().validated(&context(), "main").unwrap().is_none());
 }
 #[test]
@@ -529,10 +544,10 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
     let mut wrong = good.clone();
     wrong["pull_request"]["draft"] = true.into();
     assert!(f.policy().receipt(&env, &wrong, "full").is_err());
-    wrong = good.clone();
-    wrong["pull_request"]["base"]["ref"] = "main".into();
-    assert!(f.policy().receipt(&env, &wrong, "dashboard").is_err());
-    assert!(f.policy().receipt(&env, &wrong, "full").is_ok());
+    let mut into_main = good.clone();
+    into_main["pull_request"]["base"]["ref"] = "main".into();
+    assert!(f.policy().receipt(&env, &into_main, "dashboard").is_ok());
+    assert!(f.policy().receipt(&env, &into_main, "full").is_ok());
     f.fake.paths.replace("backend/src/lib.rs\0".into());
     assert!(f.policy().receipt(&env, &good, "dashboard").is_err());
     for (key, value) in [
@@ -567,10 +582,14 @@ fn issuing_receipts_requires_actual_merge_trusted_pr_and_sufficient_checks() {
             "{pointer}"
         );
     }
-    let mut wrong = group.clone();
-    wrong["merge_group"]["base_ref"] = "refs/heads/main".into();
-    assert!(f.policy().receipt(&env, &wrong, "dashboard").is_err());
-    assert!(f.policy().receipt(&env, &wrong, "full").is_ok());
+    // A group queued for main records a dashboard scope only when the merge needed no more.
+    let mut into_main = group.clone();
+    into_main["merge_group"]["base_ref"] = "refs/heads/main".into();
+    assert!(f.policy().receipt(&env, &into_main, "dashboard").is_ok());
+    assert!(f.policy().receipt(&env, &into_main, "full").is_ok());
+    f.fake.paths.replace("backend/src/lib.rs\0".into());
+    assert!(f.policy().receipt(&env, &into_main, "dashboard").is_err());
+    f.fake.paths.replace("dashboard/src/app.ts\0".into());
     assert!(
         f.policy().receipt(&env, &good, "full").is_err(),
         "a PR payload is not a group"
@@ -601,10 +620,11 @@ fn prs_bringing_mains_verified_commit_reuse_its_published_build() {
     let mut draft = event();
     draft["pull_request"]["draft"] = true.into();
     assert_eq!(f.policy().plan(&env, &draft).0, "draft");
-    let mut release = event();
-    release["pull_request"]["base"]["ref"] = "main".into();
-    assert_eq!(f.policy().plan(&env, &release).0, "full");
-    assert!(f.policy().receipt(&env, &release, "reuse").is_err());
+    // Only dev receives main's own build back; into main there is nothing to bring.
+    let mut into_main = event();
+    into_main["pull_request"]["base"]["ref"] = "main".into();
+    assert_eq!(f.policy().plan(&env, &into_main).0, "dashboard");
+    assert!(f.policy().receipt(&env, &into_main, "reuse").is_err());
     for change in [
         json!({"conclusion":"failure"}),
         json!({"status":"in_progress"}),
