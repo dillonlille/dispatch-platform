@@ -21,7 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 fs2 = "0.4"
 getrandom = "0.3"
-hmac = "0.12"
+hmac = "0.13"
 libc = "0.2"
 icu_collator = "2"
 sha2 = "0.10"
