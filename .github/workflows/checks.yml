@@ -79,7 +79,7 @@ jobs:
         run: npm run test:smoke
       - name: Save trusted release binary
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ci-rust-cache/
           key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
@@ -283,7 +283,7 @@ jobs:
           install -m 700 "$target/release/dispatch-ci" "$target/release/dispatch-host" .ci-tools/tools/
       - name: Save the planner, gate and host tools
         if: steps.restore.outputs.tools-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ci-tools/tools/
           key: ${{ steps.restore.outputs.tools-key }}
@@ -302,7 +302,7 @@ jobs:
           install -m 700 "$target/debug/examples/assessment-fixture" .ci-tools/fixture/
       - name: Save the assessment fixture
         if: steps.restore.outputs.fixture-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .ci-tools/fixture/
           key: ${{ steps.restore.outputs.fixture-key }}
@@ -318,7 +318,7 @@ jobs:
           npx playwright install chromium
       - name: Save the pinned Playwright browser
         if: steps.browser.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cache/ms-playwright/
           key: dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
