@@ -1,8 +1,17 @@
 import type { DspRouteId, PlatformRouteId } from './route-meta.js';
 
+const destinations = new Map<string, DspRouteId>();
+export function rememberDestination(dspId: string, page: DspRouteId) {
+  if (page === 'overview' || page === 'paycom-settings') return;
+  destinations.delete(dspId);
+  destinations.set(dspId, page);
+  while (destinations.size > 100) destinations.delete(destinations.keys().next().value!);
+}
+export const clearDestinations = () => destinations.clear();
+
 export const dspHash = (
   dspId: string,
-  page: DspRouteId = 'overview',
+  page: DspRouteId = destinations.get(dspId) ?? 'overview',
   query?: Record<string, string>,
 ) => `#dsp/${dspId}/${page}${query ? `?${new URLSearchParams(query)}` : ''}`;
 export const platformHash = (page: PlatformRouteId = 'dsps') => `#${page}`;

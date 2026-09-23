@@ -27,7 +27,12 @@ export function Shell({
   /** The navigation item the open page belongs to. */
   current: string;
   label: string;
-  navigation: readonly { id: string; label: string; icon?: LucideIcon }[];
+  navigation: readonly {
+    id: string;
+    label: string;
+    icon?: LucideIcon;
+    preload: () => Promise<unknown>;
+  }[];
   logout: () => void;
   exitView: () => void;
   viewAs: (roleId?: string) => void;
@@ -81,12 +86,14 @@ export function Shell({
           <X size={18} />
         </button>
         <nav className="nav-list" aria-label="Primary navigation">
-          {navigation.map(({ id, label: itemLabel, icon: Icon }) => (
+          {navigation.map(({ id, label: itemLabel, icon: Icon, preload }) => (
             <a
               key={id}
               href={dspId ? dspHash(dspId, id as DspRouteId) : platformHash(id as PlatformRouteId)}
               className="nav-item"
               aria-current={current === id ? 'page' : undefined}
+              onPointerEnter={() => void preload().catch(() => undefined)}
+              onFocus={() => void preload().catch(() => undefined)}
               onClick={() => setMobile(false)}
             >
               {Icon && <Icon aria-hidden="true" />}

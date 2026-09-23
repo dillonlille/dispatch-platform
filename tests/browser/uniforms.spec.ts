@@ -119,7 +119,7 @@ test('custom fits, sizes, categories and names update other users without overwr
   }
 });
 
-test('disconnected and returning tabs hide stale counts until they synchronize', async ({
+test('disconnected and returning tabs retain known counts and block edits until synchronized', async ({
   page,
   context,
   dispatch,
@@ -137,7 +137,7 @@ test('disconnected and returning tabs hide stale counts until they synchronize',
   await expect(counter).toHaveText('0');
   await context.setOffline(true);
   await expect(page.locator('.uniform-live')).toHaveText('Reconnecting…');
-  await expect(counter).toHaveText('—');
+  await expect(counter).toHaveText('0');
   await expect(
     page.getByRole('button', { name: 'Add one Short Sleeve Polo, Men’s, XS', exact: true }),
   ).toBeDisabled();

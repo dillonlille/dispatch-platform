@@ -1,3 +1,4 @@
+import { performancePolicy } from '../../lib/performance-policy.js';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownAZ, ArrowUpAZ, ChevronRight } from 'lucide-react';
 import type {
@@ -7,7 +8,7 @@ import type {
 import { useUpdateState } from '../../app/browser-update.js';
 import { employeeTimecardUrl, useEmployeeTimecard, useEmployees } from '../../app/endpoints.js';
 import { prefetchData } from '../../app/prefetch.js';
-import { DataState, Empty, SearchInput } from '../../ui/index.js';
+import { DataState, Empty, Pagination, SearchInput } from '../../ui/index.js';
 import { EmployeeAvatar } from './EmployeeAvatar.js';
 import { EmployeeDetail } from './EmployeeDetail.js';
 
@@ -22,11 +23,30 @@ export function EmployeesPage({
   const [desc, setDesc] = useUpdateState('employee-sort-desc', false);
   const [query, setQuery] = useUpdateState('employee-query', '');
   const [status, setStatus] = useUpdateState<(typeof statuses)[number]>('employee-status', 'all');
-  const [selection, setSelection] = useState<{
-    code: string;
-    period: EmployeeTimecardPeriod | null;
-  }>();
-  const { data, error } = useEmployees(query, status, desc, refreshKey);
+  const [page, setPage] = useUpdateState('employee-page', 0);
+  const [search, setSearch] = useState(query);
+  useEffect(() => {
+    if (search === query) return;
+    const timer = setTimeout(() => {
+      setSearch(query);
+      setPage(0);
+    }, performancePolicy.employeeSearchDelayMs);
+    return () => clearTimeout(timer);
+  }, [query, search, setPage]);
+  const [selection, setSelection] = useUpdateState<
+    | {
+        code: string;
+        period: EmployeeTimecardPeriod | null;
+      }
+    | undefined
+  >('employee-selection', undefined);
+  const { data: current, stale, error } = useEmployees(search, status, desc, refreshKey, page);
+  const data = current ?? stale;
+  const busy = !current || search !== query;
+  useEffect(() => {
+    if (current && page && page * performancePolicy.employeePageSize >= current.total)
+      setPage(Math.max(0, Math.ceil(current.total / performancePolicy.employeePageSize) - 1));
+  }, [current, page, setPage]);
   const employee =
     data?.employees.find((person) => person.code === selection?.code) ?? data?.employees[0];
   const period = employee?.code === selection?.code ? (selection?.period ?? null) : null;
@@ -74,7 +94,10 @@ export function EmployeesPage({
               key={value}
               type="button"
               aria-pressed={status === value}
-              onClick={() => setStatus(value)}
+              onClick={() => {
+                setStatus(value);
+                setPage(0);
+              }}
             >
               {value === 'all' ? 'All' : value === 'active' ? 'Active' : 'Inactive'}
             </button>
@@ -83,7 +106,10 @@ export function EmployeesPage({
         <button
           type="button"
           aria-label={desc ? 'Sort employees A to Z' : 'Sort employees Z to A'}
-          onClick={() => setDesc(!desc)}
+          onClick={() => {
+            setDesc(!desc);
+            setPage(0);
+          }}
         >
           {desc ? <ArrowUpAZ size={16} /> : <ArrowDownAZ size={16} />}
           {desc ? 'Z–A' : 'A–Z'}
@@ -93,13 +119,13 @@ export function EmployeesPage({
         {(data) => (
           <>
             {employee ? (
-              <div className="employees-workspace">
+              <div className="employees-workspace" aria-busy={busy}>
                 <nav className="employees-directory" aria-label="Employee directory">
                   <div className="employees-directory-heading">
                     <span>Employee</span>
                     <span>{desc ? 'Z–A' : 'A–Z'}</span>
                   </div>
-                  <ul ref={directory}>
+                  <ul ref={directory} inert={busy}>
                     {data.employees.map((person) => (
                       <li key={person.code}>
                         <button
@@ -118,6 +144,12 @@ export function EmployeesPage({
                       </li>
                     ))}
                   </ul>
+                  <Pagination
+                    page={page}
+                    pageSize={performancePolicy.employeePageSize}
+                    total={data.total}
+                    onChange={setPage}
+                  />
                 </nav>
                 <EmployeeDetail
                   key={employee.code}

@@ -16,7 +16,7 @@ export function LoginVan() {
         .catch(() => {
           if (!abort.signal.aborted) setReady(false);
         });
-    }, 0);
+    }, 500);
     return () => {
       clearTimeout(timer);
       abort.abort();

@@ -10,7 +10,6 @@ export function UniformList({
   onQuery,
   onSelect,
   onAdd,
-  live,
 }: {
   uniforms: Uniform[];
   selected?: string;
@@ -44,7 +43,7 @@ export function UniformList({
                   onClick={() => onSelect(uniform.id)}
                 >
                   <span>{uniform.name}</span>
-                  <span className="uniform-list-count">{live ? uniformTotal(uniform) : '—'}</span>
+                  <span className="uniform-list-count">{uniformTotal(uniform)}</span>
                 </button>
               ))}
             </div>

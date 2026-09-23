@@ -1,12 +1,19 @@
-import { beginBrowserWrite } from './browser-update.js';
+import { performancePolicy } from '../lib/performance-policy.js';
+import { beginBrowserWrite, clearNavigationState } from './browser-update.js';
 import { scheduleIssues } from './schedule-issues.js';
 import { useEffect, useState, useCallback, useRef, useSyncExternalStore } from 'react';
 import { parseApiResponse } from '../../../shared/contracts/runtime.js';
 import { backoff } from '../lib/backoff.js';
 import { dataCache } from './data-cache.js';
+import { clearDestinations } from './navigation.js';
+import { mutationAffects } from '../lib/data-policy.js';
 export let csrf = '',
   view = '';
 export function credentials(nextCsrf: string, nextView = '') {
+  if (csrf && csrf !== nextCsrf) {
+    clearNavigationState();
+    clearDestinations();
+  }
   if (csrf !== nextCsrf || view !== nextView) dataCache.clear();
   csrf = nextCsrf;
   view = nextView;
@@ -110,7 +117,15 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
         ...(view ? { 'X-Dispatch-View': view } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      signal,
+      signal:
+        body === undefined &&
+        !url.startsWith('/api/dsp/collection-updates') &&
+        !url.startsWith('/api/dsp/uniforms/updates')
+          ? AbortSignal.any([
+              ...(signal ? [signal] : []),
+              AbortSignal.timeout(performancePolicy.readTimeoutMs),
+            ])
+          : signal,
     });
     const value = await response.json();
     if (!response.ok) {
@@ -130,7 +145,8 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
     }
     try {
       const parsed = parseApiResponse(url, body === undefined ? 'GET' : 'POST', value) as T;
-      if (body !== undefined && requestView === view) dataCache.invalidate();
+      if (body !== undefined && requestView === view)
+        dataCache.invalidate((key) => mutationAffects(url, key));
       return parsed;
     } catch {
       throw new ApiError(
@@ -140,6 +156,14 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
         response.headers.get('x-request-id') ?? undefined,
       );
     }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError')
+      throw new ApiError(
+        'request_timeout',
+        'The connection is taking too long. Please try again.',
+        504,
+      );
+    throw error;
   } finally {
     finish?.();
   }
@@ -167,7 +191,12 @@ export function useData<T>(
   const session = cache ? dataCache.session : 0;
   const scope = cache ? url : dataScope;
   const previous = useRef<{ url: string; refreshKey?: string | null; revision: number }>(undefined);
-  const [result, setResult] = useState<{ data: T; scope: string | undefined; session: number }>(),
+  const [result, setResult] = useState<{
+      data: T;
+      scope: string | undefined;
+      session: number;
+      refreshKey?: string | null;
+    }>(),
     [error, setError] = useState(''),
     [errorCode, setErrorCode] = useState(''),
     [revision, setRevision] = useState(0);
@@ -185,14 +214,25 @@ export function useData<T>(
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const read = async (force = false) => {
-      if (!url || reading || document.hidden) return;
+      if (!url || reading || document.hidden || !navigator.onLine) return;
       reading = true;
       try {
         const value = cache
           ? await dataCache.read(url, (signal) => api<T>(url, undefined, signal), force)
           : await api<T>(url, undefined, controller.signal);
-        if (active && (!cache || generation === dataCache.generation)) {
-          setResult({ data: value, scope, session });
+        if (
+          active &&
+          (!cache ||
+            (generation === dataCache.peek(url).generation && session === dataCache.session))
+        ) {
+          setResult((previous) =>
+            previous?.data === value &&
+            previous.scope === scope &&
+            previous.session === session &&
+            previous.refreshKey === refreshKey
+              ? previous
+              : { data: value, scope, session, refreshKey },
+          );
           setError('');
           setErrorCode('');
           failures = 0;
@@ -201,7 +241,8 @@ export function useData<T>(
       } catch (error) {
         if (
           active &&
-          (!cache || generation === dataCache.generation) &&
+          (!cache ||
+            (generation === dataCache.peek(url).generation && session === dataCache.session)) &&
           error instanceof Error &&
           error.name !== 'AbortError'
         ) {
@@ -221,14 +262,16 @@ export function useData<T>(
       if (!document.hidden) void read(true);
     };
     document.addEventListener('visibilitychange', visible);
+    window.addEventListener('online', visible);
     void read(force);
     // Active cached views periodically revalidate, including changes made in another browser.
-    const interval = poll || (cache ? dataCache.limits.freshMs : 0);
+    const interval = poll < 0 ? 0 : poll || (cache ? performancePolicy.recoveryPollMs : 0);
     const timer = interval ? setInterval(() => void read(true), interval) : undefined;
     return () => {
       active = false;
       controller.abort();
       document.removeEventListener('visibilitychange', visible);
+      window.removeEventListener('online', visible);
       if (timer) clearInterval(timer);
       if (retry) clearTimeout(retry);
     };
@@ -239,5 +282,5 @@ export function useData<T>(
     (cached?.data as T | undefined) ?? (shown?.scope === scope ? shown?.data : undefined);
   // The previous scope's value lets a view hold its layout, marked busy, until the new one lands.
   const stale = data || error ? undefined : shown?.data;
-  return { data, stale, error, errorCode, refresh };
+  return { data, stale, error, errorCode, refresh, validatedKey: shown?.refreshKey };
 }

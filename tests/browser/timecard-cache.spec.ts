@@ -165,6 +165,8 @@ test('preloaded employees and pay periods render on the next paint with requests
     expect(back.busy).toBe('false');
     expect(back.text).toContain('Alex Parker');
     await expect(detail.getByRole('heading', { name: 'Alex Parker', exact: true })).toBeVisible();
+    for (const timing of [first.ms, previous.ms, next.ms, back.ms])
+      expect(timing).toBeLessThan(100);
     test.info().annotations.push({
       type: 'cached paint ms',
       description: JSON.stringify({
@@ -239,6 +241,7 @@ test('adjacent days render from memory and returning from another Dispatch page 
     const returned = await clickAndPaint(page.getByRole('link', { name: 'Timecard', exact: true }));
     expect(returned.busy).toBe('false');
     expect(returned.text).toContain(current);
+    for (const timing of [older.ms, newer.ms, returned.ms]) expect(timing).toBeLessThan(100);
     test.info().annotations.push({
       type: 'cached paint ms',
       description: JSON.stringify({

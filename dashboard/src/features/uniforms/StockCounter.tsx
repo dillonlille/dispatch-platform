@@ -69,7 +69,7 @@ export function StockCounter({
           <Minus size={14} />
         </button>
       )}
-      <output aria-label={`${label} in stock`}>{live ? variant.quantity : '—'}</output>
+      <output aria-label={`${label} in stock`}>{variant.quantity}</output>
       {canAdjust && (
         <button
           type="button"
