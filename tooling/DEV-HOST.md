@@ -1,6 +1,7 @@
 # Dev host layout
 
-The live checkout is `/home/thepickle/dispatch-platform/dev`, on branch `dev`.
+The live checkout is `/home/thepickle/dispatch-platform/dev`, on branch `main`. Its
+updater installs each commit merged into `main` once that push's checks pass.
 Development changes belong in isolated worktrees under
 `/home/thepickle/dispatch-platform/worktrees`; keep the live checkout clean.
 

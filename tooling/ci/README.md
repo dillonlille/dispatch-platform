@@ -10,35 +10,26 @@ The planner chooses full validation for backend, shared, infrastructure or
 unknown changes. Dashboard code, listed dashboard tests, browser TypeScript and
 Markdown outside the backend can use dashboard validation. `test-plan.json`
 remains the shared list of executed dashboard tests. Renames count both paths.
-`main` and `dev` are treated alike: PRs, merge queue groups and pushes on either are
-scoped by what they change and reuse a matching receipt. A release separately
-requires the full suite on the exact commit it publishes. API failures fall back to
-ordinary check selection.
+PRs into `main`, its merge queue groups and its pushes are scoped by what they change
+and reuse a matching receipt. Any other branch is validated in full. A release
+separately requires the full suite on the exact commit it publishes. API failures
+fall back to ordinary check selection.
 
 A receipt binds the same-repository PR merge's base, head and tree, workflow,
 run and attempt, target branch and validation scope. The newest matching run
 wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
-A PR into `dev` whose head is a commit `main` pushed and passed, such as the sync PR
-after a release, brings a tree `main` validated in full and published. When the merge
-changes nothing against that commit, so the merge's tree is exactly `main`'s tree, the
-planner selects `reuse`: the build job restores `main`'s published branch build
-retargeted to the merge and smoke tests it, and the receipt records full validation,
-so the following `dev` push reuses it again. The same applies to a merge queue group
-that consists of that PR alone. A merge that also carries other `dev` commits, a
-failed, pending or foreign `main` run, a draft, a fork or another base branch keep
-ordinary checks.
-
-A merge queue on `dev` runs the workflow on the exact merge commit it will push,
+A merge queue on `main` runs the workflow on the exact merge commit it will push,
 scoped against the group's base so every PR in the group counts. A group holding one
-PR that is still current with `dev` merges the same base, head and tree that PR's own
+PR that is still current with `main` merges the same base, head and tree that PR's own
 run validated, so it reuses that run's gated build and only smoke tests it, and its
 receipt records that run's scope. A batched group, a group built on another base and
 a stale PR are validated afresh. That run issues the receipt and gated build, and the
-following `dev` push looks for it first: the newest merge queue run of the pushed
-commit decides, and only a commit with no queue run falls back to its PR head's run. The preflight stops treating a moved
-`dev` or other ready PRs as blockers while the queue exists.
+following `main` push looks for it first: the newest merge queue run of the pushed
+commit decides, and only a commit with no queue run falls back to its PR head's run.
+The preflight stops treating a moved `main` or other ready PRs as blockers while the
+queue exists.
 
 `backend/host/src/ci` promotes builds through that same receipt policy and the
 host artifact verifier. It checks the artifact's GitHub record, file inventory
@@ -89,5 +80,5 @@ after that gate succeeds. Draft PRs produce no validation receipt.
 assessment fixture that a trusted branch built from identical inputs, keyed by the Rust
 inputs, the pinned toolchain and the runner's distribution. Launchers use a restored tool only on
 CI and only from the workspace's own `.ci-tools` directory; otherwise they build with
-Cargo exactly as before. Only the `tools` job on `dev` and `main` pushes saves those
+Cargo exactly as before. Only the `tools` job on `main` pushes saves those
 caches, and the pinned Playwright browser, off the critical path.

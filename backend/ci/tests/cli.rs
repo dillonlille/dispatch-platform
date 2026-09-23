@@ -13,7 +13,7 @@ fn native_entry_point_appends_plan_outputs_and_fails_closed_at_the_gate() {
         .args(["plan", "--root", temp.path().to_str().unwrap()])
         .env("GITHUB_EVENT_PATH", &event)
         .env("GITHUB_EVENT_NAME", "workflow_dispatch")
-        .env("GITHUB_REF", "refs/heads/dev")
+        .env("GITHUB_REF", "refs/heads/main")
         .env("GITHUB_OUTPUT", &output)
         .env("GITHUB_STEP_SUMMARY", &summary)
         .output()

@@ -1,7 +1,6 @@
 //! Artifact promotion uses the planner's policy and the host's existing verifier.
 use crate::{Result, artifact, io::System, releases, require};
 use dispatch_ci::policy::{Context, Environment, Policy, Validation, trusted_branch};
-use serde_json::Value;
 use std::{fs, io::Write, os::unix::fs::PermissionsExt, path::Path};
 
 pub(crate) struct Runner<'a>(pub(crate) &'a dyn System);
@@ -18,50 +17,35 @@ impl std::fmt::Display for ValidationChanged {
     }
 }
 impl std::error::Error for ValidationChanged {}
-/// The trusted branch this run validates a PR merge or merge queue group into, if any.
-fn integration_branch(env: &Environment) -> Option<&'static str> {
-    let branch = match env.get("GITHUB_EVENT_NAME") {
-        "pull_request" => env.get("GITHUB_BASE_REF"),
-        "merge_group" => env
-            .get("GITHUB_REF")
-            .strip_prefix("refs/heads/gh-readonly-queue/")?
-            .split('/')
-            .next()?,
-        _ => return None,
-    };
-    ["dev", "main"]
-        .into_iter()
-        .find(|trusted| *trusted == branch)
+/// Whether this run validates a PR merge or merge queue group into main.
+fn into_main(env: &Environment) -> bool {
+    match env.get("GITHUB_EVENT_NAME") {
+        "pull_request" => env.get("GITHUB_BASE_REF") == "main",
+        "merge_group" => {
+            env.get("GITHUB_REF")
+                .strip_prefix("refs/heads/gh-readonly-queue/")
+                .and_then(|rest| rest.split('/').next())
+                == Some("main")
+        }
+        _ => false,
+    }
 }
-/// The build a reuse run restores, and the run that validated it.
-#[derive(Debug, PartialEq)]
-enum Verified {
-    /// Main's published branch build, for a merge that brings exactly main's tree.
-    Main(Value),
-    /// The gated build of the PR run whose validation covers this merge.
-    Pull(Validation),
-}
-/// What validated the bytes this run may reuse, refusing anything else. Checked again
-/// after the download, so validation revoked meanwhile stops the promotion.
-fn verified(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Verified> {
+/// The PR run whose validation covers the bytes this run may reuse, refusing anything
+/// else. Checked again after the download, so validation revoked meanwhile stops the
+/// promotion.
+fn verified(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result<Validation> {
     if context.commit != env.get("GITHUB_SHA") {
         return Err(Box::new(ValidationChanged("Actual merged commit required")));
     }
-    if let Some(branch) = integration_branch(env) {
-        // A merge into dev that changes nothing against main reuses main's published build.
+    if into_main(env) {
         // A merge queue group that is exactly its PR's merge reuses that PR run's gated build.
-        if branch == "dev"
-            && let Ok(Some(run)) = policy.brings_main(context)
-        {
-            return Ok(Verified::Main(run));
-        }
         if env.get("GITHUB_EVENT_NAME") == "merge_group"
-            && let Ok(Some(validation)) = policy.validated_pull(context, branch)
+            && let Ok(Some(validation)) = policy.validated_pull(context, "main")
         {
-            return Ok(Verified::Pull(validation));
+            return Ok(validation);
         }
         return Err(Box::new(ValidationChanged(
-            "Cannot confirm main's validation or this merge's own PR run; rerun the workflow",
+            "Cannot confirm this merge's own PR run; rerun the workflow",
         )));
     }
     if env.get("GITHUB_EVENT_NAME") != "push" {
@@ -72,7 +56,7 @@ fn verified(policy: &Policy<'_>, context: &Context, env: &Environment) -> Result
     let branch = trusted_branch(env.get("GITHUB_REF"))
         .ok_or(ValidationChanged("Trusted branch required"))?;
     match policy.validated(context, branch) {
-        Ok(Some(validation)) => Ok(Verified::Pull(validation)),
+        Ok(Some(validation)) => Ok(validation),
         _ => Err(Box::new(ValidationChanged(
             "Cannot confirm current PR validation; rerun the workflow",
         ))),
@@ -125,27 +109,15 @@ fn restore(
         .ok_or(ValidationChanged("Actual merged commit required"))?;
     let verification = verified(policy, &context, env)?;
     // Each build is named for the run that produced it and carries that run's source commit.
-    let (id, name, source) = match &verification {
-        Verified::Main(run) => (
-            run["id"].as_u64().ok_or("Invalid run id")?,
-            format!("dispatch-main-{}", context.head),
-            context.head.clone(),
-        ),
-        Verified::Pull(validated) => {
-            let id = validated.run["id"].as_u64().ok_or("Invalid run id")?;
-            (
-                id,
-                format!(
-                    "dispatch-pr-build-{id}-{}",
-                    validated.run["run_attempt"].as_u64().unwrap_or(1)
-                ),
-                validated.receipt["commit"]
-                    .as_str()
-                    .ok_or("Receipt commit required")?
-                    .to_owned(),
-            )
-        }
-    };
+    let id = verification.run["id"].as_u64().ok_or("Invalid run id")?;
+    let name = format!(
+        "dispatch-pr-build-{id}-{}",
+        verification.run["run_attempt"].as_u64().unwrap_or(1)
+    );
+    let source = verification.receipt["commit"]
+        .as_str()
+        .ok_or("Receipt commit required")?
+        .to_owned();
     let artifacts = policy.github(&format!("actions/runs/{id}/artifacts"))?;
     let matches: Vec<_> = artifacts["artifacts"]
         .as_array()
@@ -173,9 +145,7 @@ fn restore(
             "Validation changed during download; rerun the workflow",
         )));
     }
-    if let Verified::Pull(validated) = &verification {
-        warm_cache(system, policy.root, &candidate, &validated.receipt)?;
-    }
+    warm_cache(system, policy.root, &candidate, &verification.receipt)?;
     place(&candidate, destination)?;
     println!(
         "Reused the verified build from run {id} for {}",

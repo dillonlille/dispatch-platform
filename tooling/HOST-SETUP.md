@@ -7,8 +7,7 @@ host's data. Existing `config`, `data`, `dsps`, management or Production `live`
 directories are preserved and cause setup to stop, even if empty.
 
 Dev requires a private, real `dev` directory containing a clean persistent clone
-on the current merged head of the branch Dev follows, `origin/main` (or `dev` until
-the switch), with its verified artifact at `.build`:
+on the current merged head of `origin/main`, with its verified artifact at `.build`:
 
 ```sh
 python3 tooling/setup-dev.py \

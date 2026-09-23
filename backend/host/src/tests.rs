@@ -189,8 +189,6 @@ struct Fixture {
     new_manifest: artifact::Manifest,
     system: Fake,
     environment: Environment,
-    /// The branch Dev's checkout follows in this test.
-    branch: std::cell::Cell<&'static str>,
 }
 impl Fixture {
     fn new(environment: Environment) -> Self {
@@ -203,7 +201,7 @@ impl Fixture {
         io::private_directory(&root.join("config")).unwrap();
         fs::write(root.join("config/updater.json"),json!({"service":if environment==Environment::Dev {"dispatch-dev.service"}else{"dispatch-production.service"},"healthUrl":"http://127.0.0.1:5180/api/health"}).to_string()).unwrap();
         let (old, new) = if environment == Environment::Dev {
-            git(&root, &["init", "-b", "dev"]);
+            git(&root, &["init", "-b", "main"]);
             git(
                 &root,
                 &[
@@ -225,7 +223,7 @@ impl Fixture {
             fs::write(root.join("app"), "new").unwrap();
             git(&root, &["commit", "-am", "new"]);
             let new = git(&root, &["rev-parse", "HEAD"]);
-            git(&root, &["update-ref", "refs/remotes/origin/dev", &new]);
+            git(&root, &["update-ref", "refs/remotes/origin/main", &new]);
             git(&root, &["reset", "--hard", &old]);
             (old, new)
         } else {
@@ -248,18 +246,7 @@ impl Fixture {
             new_manifest,
             system,
             environment,
-            branch: std::cell::Cell::new("dev"),
         }
-    }
-    /// Move Dev's checkout onto main at the running commit, as the switch to one branch does,
-    /// with main's newest merged commit being the new build.
-    fn on_main(&self) {
-        git(&self.root, &["checkout", "-q", "-B", "main"]);
-        git(
-            &self.root,
-            &["update-ref", "refs/remotes/origin/main", &self.new],
-        );
-        self.branch.set("main");
     }
     fn updater(&self) -> Updater<'_> {
         Updater::new(&self.root, self.environment, &self.system).unwrap()
@@ -287,12 +274,11 @@ impl Fixture {
         }
     }
     fn run(&self) -> Value {
-        json!({"id":17,"head_sha":self.new,"head_branch":self.branch.get(),"event":"push","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
+        json!({"id":17,"head_sha":self.new,"head_branch":"main","event":"push","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
     }
     fn run_url(&self) -> String {
         format!(
-            "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?branch={}&event=push&head_sha={}&per_page=20",
-            self.branch.get(),
+            "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={}&per_page=20",
             self.new
         )
     }
@@ -315,7 +301,7 @@ impl Fixture {
         use std::io::Write;
         zip.write_all(&data).unwrap();
         let bytes = zip.finish().unwrap().into_inner();
-        let record = json!({"id":42,"name":format!("dispatch-{}-{}",self.branch.get(),self.new),"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
+        let record = json!({"id":42,"name":format!("dispatch-main-{}",self.new),"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
         self.system.reply(
             &format!("repos/{REPOSITORY}/actions/runs/17/artifacts"),
             vec![json!({"artifacts":[record]})],
@@ -509,7 +495,7 @@ fn latest_workflow_rerun_supersedes_green_validation() {
     bad["run_attempt"] = json!(2);
     bad["conclusion"] = json!("failure");
     let runs = json!([f.run(), bad]);
-    let selected = releases::latest_run(&runs, &f.new, "push", Some("dev"), false).unwrap();
+    let selected = releases::latest_run(&runs, &f.new, "push", Some("main"), false).unwrap();
     assert!(!releases::passed(selected));
     f.system
         .reply(&f.run_url(), vec![json!({"workflow_runs":runs})]);
@@ -547,32 +533,12 @@ fn dev_download_installs_only_with_still_current_validation() {
     }
 }
 #[test]
-fn dev_follows_main_once_its_checkout_is_on_main_and_nothing_else() {
-    // Moving the checkout onto main at the running commit switches Dev over: it installs
-    // main's newest merged build and fast-forwards along main.
-    let f = Fixture::new(Environment::Dev);
-    f.on_main();
-    f.dev_download();
-    f.system
-        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
-    f.updater().run_locked().unwrap();
-    assert_eq!(
-        artifact::verify(&f.updater().active, None).unwrap(),
-        f.new_manifest
-    );
-    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
-    assert_eq!(git(&f.root, &["branch", "--show-current"]), "main");
-    // A build published for dev is not main's, even at the same commit.
-    let f = Fixture::new(Environment::Dev);
-    f.dev_download();
-    f.on_main();
-    f.system
-        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
-    assert!(f.updater().run_locked().is_err());
-    f.assert_old();
-    // Any other branch is refused rather than followed.
+fn dev_follows_main_and_refuses_other_branches() {
     let f = Fixture::new(Environment::Dev);
     git(&f.root, &["checkout", "-q", "-B", "feature"]);
+    f.dev_download();
+    f.system
+        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
     assert!(f.updater().run_locked().is_err());
     f.assert_old();
 }

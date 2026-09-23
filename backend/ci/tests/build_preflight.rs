@@ -96,7 +96,7 @@ fn native_preflight_fetches_actual_base_and_refuses_dirty_or_stale_work() {
     let bin = temp.path().join("bin");
     fs::create_dir(&remote).unwrap();
     fs::create_dir(&bin).unwrap();
-    git(&remote, &["init", "-q", "-b", "dev"]);
+    git(&remote, &["init", "-q", "-b", "main"]);
     git(
         &remote,
         &[
@@ -149,8 +149,8 @@ fn native_preflight_fetches_actual_base_and_refuses_dirty_or_stale_work() {
     );
     let stale = run();
     assert!(!stale.status.success());
-    assert!(String::from_utf8_lossy(&stale.stderr).contains("origin/dev has advanced"));
-    git(&checkout, &["merge", "--ff-only", "origin/dev"]);
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("origin/main has advanced"));
+    git(&checkout, &["merge", "--ff-only", "origin/main"]);
     assert!(run().status.success());
     executable(&bin.join("gh"), "#!/bin/sh\nexit 1\n");
     assert!(!run().status.success(), "API failure cannot allow a push");
