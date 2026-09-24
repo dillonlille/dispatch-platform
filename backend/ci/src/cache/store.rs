@@ -28,7 +28,7 @@ pub(super) fn hash(path: &Path) -> Result<String> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::to_hex(&digest.finalize()))
 }
 pub(super) fn copy_binary(source: &Path, destination: &Path) -> Result<()> {
     let parent = destination

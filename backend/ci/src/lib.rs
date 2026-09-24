@@ -27,6 +27,10 @@ pub fn web_path(url: &str) -> Option<&str> {
         .iter()
         .find_map(|name| url.strip_prefix(&format!("https://github.com/{name}/")))
 }
+/// Lowercase hex of a digest, as `sha256sum` prints it.
+pub fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 pub fn require(value: bool, message: &str) -> Result<()> {
     if value { Ok(()) } else { Err(message.into()) }
 }

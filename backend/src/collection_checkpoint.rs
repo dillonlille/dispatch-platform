@@ -71,12 +71,9 @@ impl Checkpoint {
     ) -> Result<Resume> {
         let mut roster = employees.to_vec();
         roster.sort_by(|a, b| s(a, "code").cmp(s(b, "code")));
-        let fingerprint = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(
-                &json!({"version":1,"timezone":timezone,"period":period,"employees":roster})
-            )?)
-        );
+        let fingerprint = crypto::hex(&Sha256::digest(serde_json::to_vec(
+            &json!({"version":1,"timezone":timezone,"period":period,"employees":roster}),
+        )?));
         let period = period.clone();
         let mut live_metadata = json!({"from":period["start"],"to":period["end"],"roster":roster});
         let job = self.job.clone();

@@ -108,7 +108,7 @@ impl Fixture {
     }
     fn set_receipt(&self, value: Value) {
         let archive = zip(&[("validation.json", serde_json::to_vec(&value).unwrap())]);
-        self.json("actions/runs/5/artifacts",json!({"artifacts":[{"name":"dispatch-validation-5-1","id":7,"expired":false,"size_in_bytes":archive.len(),"digest":format!("sha256:{:x}",Sha256::digest(&archive))}]}));
+        self.json("actions/runs/5/artifacts",json!({"artifacts":[{"name":"dispatch-validation-5-1","id":7,"expired":false,"size_in_bytes":archive.len(),"digest":format!("sha256:{}", crate::to_hex(&Sha256::digest(&archive)))}]}));
         self.fake.replies.borrow_mut().insert(
             format!("repos/{REPOSITORY}/actions/artifacts/7/zip"),
             archive,
@@ -229,7 +229,7 @@ fn receipts_bind_repository_workflow_run_attempt_parents_tree_scope_and_source()
 #[test]
 fn archive_integrity_entry_count_names_and_expansion_are_bounded() {
     let good = zip(&[("validation.json", serde_json::to_vec(&receipt()).unwrap())]);
-    let digest = format!("sha256:{:x}", Sha256::digest(&good));
+    let digest = format!("sha256:{}", crate::to_hex(&Sha256::digest(&good)));
     assert_eq!(read_receipt(&good, &digest).unwrap(), receipt());
     assert!(read_receipt(&good, "sha256:wrong").is_err());
     for entries in [
@@ -239,14 +239,26 @@ fn archive_integrity_entry_count_names_and_expansion_are_bounded() {
         vec![("validation.json", b"{}".to_vec()), ("extra", vec![])],
     ] {
         let bytes = zip(&entries);
-        assert!(read_receipt(&bytes, &format!("sha256:{:x}", Sha256::digest(&bytes))).is_err());
+        assert!(
+            read_receipt(
+                &bytes,
+                &format!("sha256:{}", crate::to_hex(&Sha256::digest(&bytes)))
+            )
+            .is_err()
+        );
     }
     let bytes = vec![0; 100_001];
-    assert!(read_receipt(&bytes, &format!("sha256:{:x}", Sha256::digest(&bytes))).is_err());
+    assert!(
+        read_receipt(
+            &bytes,
+            &format!("sha256:{}", crate::to_hex(&Sha256::digest(&bytes)))
+        )
+        .is_err()
+    );
     assert!(
         read_receipt(
             b"not zip",
-            &format!("sha256:{:x}", Sha256::digest(b"not zip"))
+            &format!("sha256:{}", crate::to_hex(&Sha256::digest(b"not zip")))
         )
         .is_err()
     );

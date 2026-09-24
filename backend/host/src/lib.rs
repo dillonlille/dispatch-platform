@@ -15,5 +15,9 @@ pub use cli::run;
 pub use dispatch_ci::{REPOSITORIES, REPOSITORY, Result, require, web_path};
 pub const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
+/// Lowercase hex of a digest, as `sha256sum` prints it.
+pub fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 #[cfg(test)]
 mod tests;
