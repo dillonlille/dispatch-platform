@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cortexClock, fullName, displayMeal, type ClockTime } from '../../../lib/meal-breaks.js';
 import { type MealEmployee } from '../../../../../shared/contracts/meals.js';
 import type { TableColumn } from '../../../ui/index.js';
-import { Clock, GapBadge, LunchCell, Source } from './cells.js';
+import { Clock, GapBadge, LunchCell } from './cells.js';
 
 type Summary = ReturnType<typeof displayMeal>;
 type Pair = Summary['pairs'][number];
@@ -105,13 +105,7 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'inDay',
-    header: (
-      <>
-        IN DAY
-        <Source name="Paycom" />
-      </>
-    ),
-    name: 'IN DAY',
+    header: 'IN DAY',
     scope: 'col',
     sortable: true,
     sortHeader,
@@ -121,13 +115,7 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'lastDelivery',
-    header: (
-      <>
-        Last delivery
-        <Source name="Flex" />
-      </>
-    ),
-    name: 'Last delivery',
+    header: 'Last delivery',
     scope: 'col',
     sortable: true,
     sortHeader,
@@ -180,13 +168,7 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'firstDelivery',
-    header: (
-      <>
-        First delivery
-        <Source name="Flex" />
-      </>
-    ),
-    name: 'First delivery',
+    header: 'First delivery',
     scope: 'col',
     sortable: true,
     sortHeader,
@@ -204,13 +186,7 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'outDay',
-    header: (
-      <>
-        OUT DAY
-        <Source name="Paycom" />
-      </>
-    ),
-    name: 'OUT DAY',
+    header: 'OUT DAY',
     scope: 'col',
     sortable: true,
     sortHeader,
