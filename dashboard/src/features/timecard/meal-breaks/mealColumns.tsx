@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cortexClock, fullName, displayMeal, type ClockTime } from '../../../lib/meal-breaks.js';
 import { type MealEmployee } from '../../../../../shared/contracts/meals.js';
 import type { TableColumn } from '../../../ui/index.js';
-import { Clock, GapBadge, LunchCell, Source } from './cells.js';
+import { Clock, GapBadge, LunchCell } from './cells.js';
 
 type Summary = ReturnType<typeof displayMeal>;
 type Pair = Summary['pairs'][number];
@@ -35,6 +35,14 @@ export function mealLines(
   return { ...first!, more: rest };
 }
 
+const sortHeader = {
+  className: 'meal-sort',
+  indicator: (direction?: 'asc' | 'desc') => (
+    <span aria-hidden="true" className={direction ? undefined : 'meal-sort-hint'}>
+      {direction === 'desc' ? '↓' : direction ? '↑' : '↕'}
+    </span>
+  ),
+};
 const delivery = (line: MealLine, side: 'lastDelivery' | 'firstDelivery') =>
   line.pair.cortex
     ? cortexClock(line.pair.cortex[side], line.date, line.pair.cortex.timezone)
@@ -44,6 +52,19 @@ const text = (clock?: ClockTime | null) =>
 // An export row is an employee, so a column with several meals lists them in order.
 const meals = (line: MealLine, value: (meal: MealLine) => string) =>
   [line, ...(line.more ?? [])].map(value).join('; ');
+const difference = (minutes: number | null | undefined) =>
+  minutes === null || minutes === undefined ? null : Math.abs(minutes);
+/** Statuses in the order a review reads them: attention first, agreement last. */
+const statusOrder = [
+  'Different times',
+  'Missing Paycom lunch',
+  'Missing data',
+  'Review Paycom punches',
+  'Review meal pairing',
+  'No Flex meal',
+  'Flex only',
+  'Same times',
+];
 
 export const mealColumns: TableColumn<MealLine>[] = [
   {
@@ -54,10 +75,7 @@ export const mealColumns: TableColumn<MealLine>[] = [
     rowHeader: true,
     sortable: true,
     sticky: true,
-    sortHeader: {
-      className: 'meal-sort',
-      indicator: (direction) => <span aria-hidden="true">{direction === 'desc' ? '↓' : '↑'}</span>,
-    },
+    sortHeader,
     value: (line) => line.name,
     cell: ({ name, summary, index }, { expanded, toggle }) =>
       index === 0 ? (
@@ -87,27 +105,21 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'inDay',
-    header: (
-      <>
-        IN DAY
-        <Source name="Paycom" />
-      </>
-    ),
-    name: 'IN DAY',
+    header: 'IN DAY',
     scope: 'col',
+    sortable: true,
+    sortHeader,
     value: (line) => text(line.summary.paycom.inDay),
+    sortValue: (line) => line.summary.paycom.inDay?.minute ?? null,
     cell: (line) => <Clock value={line.index === 0 ? line.summary.paycom.inDay : null} />,
   },
   {
     id: 'lastDelivery',
-    header: (
-      <>
-        Last delivery
-        <Source name="Flex" />
-      </>
-    ),
-    name: 'Last delivery',
+    header: 'Last delivery',
     scope: 'col',
+    sortable: true,
+    sortHeader,
+    sortValue: (line) => delivery(line, 'lastDelivery')?.minute ?? null,
     className: (line) => `meal-delivery${line.pair.gaps.before?.overLimit ? ' has-gap' : ''}`,
     exports: [
       ['Last delivery', (line) => meals(line, (meal) => text(delivery(meal, 'lastDelivery')))],
@@ -123,6 +135,10 @@ export const mealColumns: TableColumn<MealLine>[] = [
     id: 'outLunch',
     header: 'OUT LUNCH',
     scope: 'col',
+    sortable: true,
+    sortHeader,
+    // Orders by how far Flex strays from Paycom, so the largest differences meet at one end.
+    sortValue: (line) => difference(line.pair.outDifference),
     headerClassName: 'meal-lunch',
     className: 'meal-lunch',
     exports: [
@@ -137,6 +153,9 @@ export const mealColumns: TableColumn<MealLine>[] = [
     id: 'inLunch',
     header: 'IN LUNCH',
     scope: 'col',
+    sortable: true,
+    sortHeader,
+    sortValue: (line) => difference(line.pair.inDifference),
     headerClassName: 'meal-lunch',
     className: 'meal-lunch',
     exports: [
@@ -149,14 +168,11 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'firstDelivery',
-    header: (
-      <>
-        First delivery
-        <Source name="Flex" />
-      </>
-    ),
-    name: 'First delivery',
+    header: 'First delivery',
     scope: 'col',
+    sortable: true,
+    sortHeader,
+    sortValue: (line) => delivery(line, 'firstDelivery')?.minute ?? null,
     className: (line) => `meal-delivery${line.pair.gaps.after?.overLimit ? ' has-gap' : ''}`,
     exports: [
       ['First delivery', (line) => meals(line, (meal) => text(delivery(meal, 'firstDelivery')))],
@@ -170,22 +186,22 @@ export const mealColumns: TableColumn<MealLine>[] = [
   },
   {
     id: 'outDay',
-    header: (
-      <>
-        OUT DAY
-        <Source name="Paycom" />
-      </>
-    ),
-    name: 'OUT DAY',
+    header: 'OUT DAY',
     scope: 'col',
+    sortable: true,
+    sortHeader,
     value: (line) => text(line.summary.paycom.outDay),
+    sortValue: (line) => line.summary.paycom.outDay?.minute ?? null,
     cell: (line) => <Clock value={line.index === 0 ? line.summary.paycom.outDay : null} />,
   },
   {
     id: 'comparison',
     header: 'Comparison',
     scope: 'col',
+    sortable: true,
+    sortHeader,
     value: (line) => line.summary.status,
+    sortValue: (line) => statusOrder.indexOf(line.summary.status),
     cell: ({ index, summary }) =>
       index === 0 && (
         <span className={`meal-status ${summary.missing || summary.different ? 'attention' : ''}`}>

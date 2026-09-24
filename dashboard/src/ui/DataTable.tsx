@@ -108,7 +108,7 @@ export function DataTable<T>({
         onSort={() => table.toggleSort(column.id)}
         className={column.sortHeader?.className}
         headerClassName={classes(column.headerClassName, column.sticky && 'sticky-column')}
-        indicator={column.sortHeader?.indicator?.(direction ?? 'asc')}
+        indicator={column.sortHeader?.indicator?.(direction)}
       >
         {column.header}
       </SortHeader>
