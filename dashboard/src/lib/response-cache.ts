@@ -1,13 +1,15 @@
 type Snapshot = { data?: unknown; generation: number };
-type Entry = { snapshot: Snapshot; expires: number; bytes: number };
+type Entry = { snapshot: Snapshot; expires: number; bytes: number; json: string };
 type Request = { controller: AbortController; promise: Promise<unknown> };
+export type CacheFilter = (key: string) => boolean;
 
-/** An in-memory LRU. The byte budget measures serialized payloads, not JavaScript heap size. */
+/** Bounded session memory. Its byte budget estimates payloads plus comparison strings, not heap size. */
 export class ResponseCache {
   private entries = new Map<string, Entry>();
   private requests = new Map<string, Request>();
   private listeners = new Map<string, Set<() => void>>();
   private versions = new Map<string, string>();
+  private emptyEntries = new Map<string, Snapshot>();
   private bytes = 0;
   private empty: Snapshot = { generation: 0 };
   session = 0;
@@ -16,7 +18,7 @@ export class ResponseCache {
   constructor(readonly limits: { entries: number; bytes: number; freshMs: number }) {}
 
   peek(key: string): Snapshot {
-    return this.entries.get(key)?.snapshot ?? this.empty;
+    return this.entries.get(key)?.snapshot ?? this.emptyEntries.get(key) ?? this.empty;
   }
 
   subscribe(key: string, listener: () => void) {
@@ -25,7 +27,10 @@ export class ResponseCache {
     this.listeners.set(key, listeners);
     return () => {
       listeners.delete(listener);
-      if (!listeners.size) this.listeners.delete(key);
+      if (!listeners.size) {
+        this.listeners.delete(key);
+        this.emptyEntries.delete(key);
+      }
     };
   }
 
@@ -43,11 +48,11 @@ export class ResponseCache {
     const pending = this.requests.get(key);
     if (pending) return pending.promise as Promise<T>;
     const controller = new AbortController();
-    const generation = this.generation;
     const promise = Promise.resolve()
       .then(() => load(controller.signal))
       .then((data) => {
-        if (!controller.signal.aborted && generation === this.generation) this.save(key, data);
+        // Scoped invalidation aborts only affected requests. Other responses remain valid.
+        if (!controller.signal.aborted) return this.save(key, data);
         return data;
       })
       .finally(() => {
@@ -57,22 +62,28 @@ export class ResponseCache {
     return promise;
   }
 
-  /** Latest and explicitly dated URLs can refer to the same collected timecard. */
+  /** Also used for authoritative mutation acknowledgements and live snapshots. */
+  put<T>(key: string, data: T): T {
+    return this.save(key, data);
+  }
+
   alias(source: string, target: string) {
     const entry = this.entries.get(source);
     if (entry && source !== target) this.save(target, entry.snapshot.data, entry.expires);
   }
 
-  private save(key: string, data: unknown, expires = Date.now() + this.limits.freshMs) {
-    const bytes = JSON.stringify(data).length * 2;
+  private save<T>(key: string, data: T, expires = Date.now() + this.limits.freshMs): T {
+    const json = JSON.stringify(data);
+    const previous = this.entries.get(key);
+    if (previous?.json === json) {
+      previous.expires = expires;
+      return previous.snapshot.data as T;
+    }
+    const generation = this.peek(key).generation;
+    const bytes = json.length * 4;
     this.remove(key);
-    // A large response can still be displayed by its caller; do not retain it for navigation.
     if (bytes <= this.limits.bytes) {
-      this.entries.set(key, {
-        snapshot: { data, generation: this.generation },
-        expires,
-        bytes,
-      });
+      this.entries.set(key, { snapshot: { data, generation }, expires, bytes, json });
       this.bytes += bytes;
       while (this.entries.size > this.limits.entries || this.bytes > this.limits.bytes) {
         const oldest = this.entries.keys().next().value!;
@@ -81,6 +92,7 @@ export class ResponseCache {
       }
     }
     this.notify(key);
+    return data;
   }
 
   private remove(key: string) {
@@ -88,29 +100,43 @@ export class ResponseCache {
     this.entries.delete(key);
   }
 
-  /** Keep same-record data visible while active views fetch the new revision. */
-  invalidate() {
+  /** Retain known data; only affected subscribers revalidate or cancel pending reads. */
+  invalidate(matches?: CacheFilter) {
     this.generation++;
-    this.empty = { generation: this.generation };
-    for (const request of this.requests.values()) request.controller.abort();
-    this.requests.clear();
-    for (const entry of this.entries.values()) {
-      entry.expires = 0;
-      entry.snapshot = { ...entry.snapshot, generation: this.generation };
+    if (!matches) {
+      this.empty = { generation: this.generation };
+      this.emptyEntries.clear();
     }
-    for (const key of this.listeners.keys()) this.notify(key);
+    const keys = new Set([
+      ...this.entries.keys(),
+      ...this.requests.keys(),
+      ...this.listeners.keys(),
+    ]);
+    for (const key of keys) {
+      if (matches && !matches(key)) continue;
+      this.requests.get(key)?.controller.abort();
+      this.requests.delete(key);
+      const entry = this.entries.get(key);
+      if (entry) {
+        entry.expires = 0;
+        entry.snapshot = { ...entry.snapshot, generation: this.generation };
+      } else if (matches && this.listeners.has(key)) {
+        this.emptyEntries.set(key, { generation: this.generation });
+      }
+      this.notify(key);
+    }
   }
 
-  observeVersion(key: string, version: string) {
+  observeVersion(key: string, version: string, matches?: CacheFilter) {
     const previous = this.versions.get(key);
     this.versions.set(key, version);
-    if (previous !== undefined && previous !== version) this.invalidate();
+    if (previous !== undefined && previous !== version) this.invalidate(matches);
   }
 
-  /** Authorization changes discard values as well as pending requests. */
   clear() {
     this.session++;
     this.entries.clear();
+    this.emptyEntries.clear();
     this.versions.clear();
     this.bytes = 0;
     this.invalidate();

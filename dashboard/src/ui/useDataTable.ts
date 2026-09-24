@@ -135,15 +135,13 @@ export function useDataTable<T extends RowData>({
   const shape = columns.map((column) => `${column.id}:${Boolean(column.sortable)}`).join('|');
   const defs = useMemo(
     () =>
-      latest.current.map(
-        (column, index): ColumnDef<Features, T> => ({
-          id: column.id,
-          accessorFn: (row) => latest.current[index]?.value?.(row) ?? null,
-          enableSorting: Boolean(column.sortable),
-          sortFn: (a: Row<Features, T>, b: Row<Features, T>, id: string) =>
-            compare(a.getValue(id), b.getValue(id)),
-        }),
-      ),
+      latest.current.map((column, index): ColumnDef<Features, T> => ({
+        id: column.id,
+        accessorFn: (row) => latest.current[index]?.value?.(row) ?? null,
+        enableSorting: Boolean(column.sortable),
+        sortFn: (a: Row<Features, T>, b: Row<Features, T>, id: string) =>
+          compare(a.getValue(id), b.getValue(id)),
+      })),
     [shape],
   );
   const count = total ?? rows.length;

@@ -23,3 +23,5 @@ export {
   type TableStateStore,
 } from './useDataTable.js';
 export { useFocusTrap } from './useFocusTrap.js';
+
+export { PageBoundary } from './PageBoundary.js';

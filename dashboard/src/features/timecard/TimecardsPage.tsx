@@ -18,6 +18,7 @@ import {
 } from '../../ui/index.js';
 import { time } from '../../lib/format.js';
 import { punchColumns } from './punchColumns.js';
+import { sortDailyRows } from '../../lib/daily-sort.js';
 import { pageSize } from './pageSize.js';
 import { useAdjacentDays } from './useAdjacentDays.js';
 
@@ -47,8 +48,8 @@ export function TimecardsPage({
   const sort = state.sort!;
   const calendarToday = localDate(timezone);
   const [selectedCode, setSelectedCode] = useState<string>();
-  const url = dailyTimecardsUrl(date, sort.id, sort.desc);
-  const { data: current, stale, error } = useDailyTimecards(date, sort.id, sort.desc, refreshKey);
+  const url = dailyTimecardsUrl(date);
+  const { data: current, stale, error } = useDailyTimecards(date, refreshKey);
   useAdjacentDays(url, date, calendarToday, current);
   // The previous day's rows hold the layout, dimmed and inert, until the new day arrives.
   const data = current ?? stale;
@@ -75,9 +76,13 @@ export function TimecardsPage({
     ],
     [],
   );
+  const rows = useMemo(
+    () => sortDailyRows(data?.rows ?? none, sort.id, sort.desc),
+    [data?.rows, sort.id, sort.desc],
+  );
   const table = useDataTable({
     columns,
-    rows: data?.rows ?? none,
+    rows,
     rowId: (card) => card.employeeCode,
     state,
     sorting: 'server',

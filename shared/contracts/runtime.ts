@@ -18,6 +18,7 @@ import type { Dsp } from './generated/Dsp';
 import {
   permissions,
   type DspView,
+  type CollectionUpdates,
   type DspProfile,
   type DspSummary,
   type Job,
@@ -178,6 +179,17 @@ export const jobSchema = z.object({
   metrics: z.array(metricsSchema),
 }) satisfies z.ZodType<Job>;
 
+const collectionUpdatesSchema = z.object({
+  revision: text,
+  changes: z.array(
+    z.object({
+      provider: text,
+      dates: z.array(text),
+      employeeCode: text.nullable(),
+      roster: z.boolean(),
+    }),
+  ),
+}) satisfies z.ZodType<CollectionUpdates>;
 const okSchema = z.object({ ok: z.literal(true) });
 const jobsSchema = z.array(jobSchema);
 export function parseApiResponse(path: string, method: 'GET' | 'POST', value: unknown): unknown {
@@ -185,6 +197,7 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
   let schema: z.ZodType | undefined;
   if (method === 'GET') {
     if (route === '/api/session') schema = sessionSchema;
+    else if (route === '/api/dsp/collection-updates') schema = collectionUpdatesSchema;
     else if (route === '/api/dsp/uniforms') schema = uniformInventorySchema;
     else if (route === '/api/dsp/uniforms/updates') schema = uniformUpdatesSchema;
     else if (route === '/api/dsp/uniforms/history') schema = uniformHistorySchema;

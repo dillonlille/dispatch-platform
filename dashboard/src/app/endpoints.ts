@@ -1,3 +1,4 @@
+import { performancePolicy } from '../lib/performance-policy.js';
 import type {
   UniformUpdates,
   UniformInventory,
@@ -20,6 +21,7 @@ import type {
   CollectionSchedule,
   CollectionSchedules,
   Connection,
+  CollectionUpdates,
   DspSummary,
   DspView,
   EmployeeTimecardPeriod,
@@ -37,6 +39,13 @@ import type {
   AccountSession,
 } from '../../../shared/contracts/index.js';
 import type { ScheduleInput } from '../../../shared/contracts/schedules.js';
+
+export const getCollectionUpdates = (after: string, signal: AbortSignal) =>
+  api<CollectionUpdates>(
+    `/api/dsp/collection-updates?after=${encodeURIComponent(after)}`,
+    undefined,
+    signal,
+  );
 
 export const getSession = () => api<SessionView>('/api/session');
 export const getSecurityStatus = () => api<SecurityStatus>('/api/auth/security/status');
@@ -73,23 +82,29 @@ export const useEmployeeTimecard = (
   return result;
 };
 export const openDsp = (dspId: string, roleId?: string) =>
-  api<DspView>('/api/session/dsp', roleId ? { dspId, roleId } : { dspId });
+  api<DspView>(
+    '/api/session/dsp',
+    roleId ? { dspId, roleId } : { dspId },
+    AbortSignal.timeout(performancePolicy.readTimeoutMs),
+  );
 
-export const usePlatformDsps = (poll = 0) => useData<DspSummary[]>('/api/platform/dsps', poll);
-export const usePlatformMail = (poll = 0) => useData<MailMessage[]>('/api/platform/mail', poll);
+export const usePlatformDsps = (poll = 0) =>
+  useCachedData<DspSummary[]>('/api/platform/dsps', poll);
+export const usePlatformMail = (poll = 0) =>
+  useCachedData<MailMessage[]>('/api/platform/mail', poll);
 /** Gives a failed message a fresh set of attempts, or drops it. */
 export const retryMail = (id: string) => api(`/api/platform/mail/${id}/retry`, {});
 export const discardMail = (id: string) => api(`/api/platform/mail/${id}/discard`, {});
-export const usePlatformJobs = (poll = 0) => useData<Job[]>('/api/platform/jobs', poll);
+export const usePlatformJobs = (poll = 0) => useCachedData<Job[]>('/api/platform/jobs', poll);
 
-export const useMembers = (poll = 0) => useData<Membership[]>('/api/dsp/members', poll);
+export const useMembers = (poll = 0) => useCachedData<Membership[]>('/api/dsp/members', poll);
 export const inviteMember = (email: unknown, role: unknown) =>
   api('/api/dsp/members/invite', { email, role });
 /** A null role removes the member from the DSP. */
 export const setMemberRole = (member: string, role: string | null) =>
   api(`/api/dsp/members/${member}`, { role });
 
-export const useRoles = (poll = 0) => useData<Role[]>('/api/dsp/roles', poll);
+export const useRoles = (poll = 0) => useCachedData<Role[]>('/api/dsp/roles', poll);
 export const saveTeamRole = (
   id: string | undefined,
   role: { name: string; permissions: Permission[] },
@@ -98,7 +113,7 @@ export const removeRole = (id: string) => api(`/api/dsp/roles/${id}/remove`, {})
 
 const schedules = '/api/dsp/schedules';
 export const useSchedules = (dspId: string) =>
-  useData<CollectionSchedules>(schedules, 10000, dspId, dspId);
+  useCachedData<CollectionSchedules>(schedules, performancePolicy.recoveryPollMs, dspId);
 export const getSchedules = () => api<CollectionSchedules>(schedules);
 /** Saving an existing schedule names the revision it was read at. */
 export const saveSchedule = (
@@ -113,7 +128,7 @@ export const removeSchedule = (id: string, revision: number) =>
 export const connectionUrl = (provider: Connection['provider']) =>
   `/api/dsp/connections/${provider}`;
 export const useConnection = (provider: Connection['provider'], poll = 0) =>
-  useData<Connection>(
+  useCachedData<Connection>(
     provider === 'paycom' ? '/api/dsp/connections' : connectionUrl(provider),
     poll,
   );
@@ -123,29 +138,40 @@ export const useEmployees = (
   status: string,
   descending: boolean,
   refreshKey: string,
+  page = 0,
 ) =>
   useCachedData<EmployeesResponse>(
-    `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=all&direction=${descending ? 'desc' : 'asc'}`,
+    `/api/dsp/employees?q=${encodeURIComponent(query)}&status=${status}&limit=${performancePolicy.employeePageSize}&offset=${page * performancePolicy.employeePageSize}&direction=${descending ? 'desc' : 'asc'}`,
     0,
     refreshKey,
   );
-export const dailyTimecardsUrl = (date: string, sort: string, descending: boolean) =>
-  `/api/dsp/timecards?date=${date}&sort=${sort}&direction=${descending ? 'desc' : 'asc'}`;
-export const useDailyTimecards = (
-  date: string,
-  sort: string,
-  descending: boolean,
-  refreshKey?: string | null,
-) => useCachedData<DailyTimecards>(dailyTimecardsUrl(date, sort, descending), 0, refreshKey);
+export const dailyTimecardsUrl = (date: string) =>
+  `/api/dsp/timecards?date=${date}&sort=name&direction=asc`;
+export const useDailyTimecards = (date: string, refreshKey?: string | null) =>
+  useCachedData<DailyTimecards>(
+    dailyTimecardsUrl(date),
+    performancePolicy.recoveryPollMs,
+    refreshKey,
+  );
 export const mealComparisonUrl = (date: string) =>
   `/api/dsp/paycom/meal-breaks?date=${encodeURIComponent(date)}`;
 export const useMealComparison = (date: string, refreshKey?: string | null) =>
-  useCachedData<MealComparison>(mealComparisonUrl(date), 0, refreshKey);
+  useCachedData<MealComparison>(
+    mealComparisonUrl(date),
+    performancePolicy.recoveryPollMs,
+    refreshKey,
+  );
 
 const paycomSettings = '/api/dsp/paycom/settings';
 /** Editors use a fresh DSP-scoped read; the timecard view shares its session cache. */
 export const usePaycomSettings = (dspId?: string) =>
-  useData<PaycomSettings>(paycomSettings, 0, dspId, dspId ?? paycomSettings, dspId === undefined);
+  useData<PaycomSettings>(
+    paycomSettings,
+    120000,
+    dspId,
+    dspId ?? paycomSettings,
+    dspId === undefined,
+  );
 export const savePaycomSettings = (revision: number, values: PaycomPreferences) =>
   api<PaycomSettings>(paycomSettings, { revision, values });
 export const usePlatformHealth = (poll = 0) =>

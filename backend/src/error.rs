@@ -30,6 +30,7 @@ codes! {
     BrowserNavigationPending => "browser_navigation_pending",
     BrowserScriptFailed => "browser_script_failed",
     BrowserMemoryBusy => "browser_memory_busy",
+    BrowserStartFailed => "browser_start_failed",
     BrowserCapacityBusy => "browser_capacity_busy",
     ProviderTimeout => "provider_timeout",
     ProviderUnavailable => "provider_unavailable",

@@ -85,6 +85,8 @@ fn bindings() -> BTreeMap<PathBuf, String> {
         MealDriver,
         CortexPublication,
         MealComparison,
+        CollectionChange,
+        CollectionUpdates,
         CollectionSchedule,
         CollectionSchedules,
         Connection,

@@ -171,7 +171,7 @@ pub fn download_asset(
         output.write_all(&bytes[..n])?;
     }
     require(
-        total == size && format!("sha256:{:x}", digest.finalize()) == expected,
+        total == size && format!("sha256:{}", crate::to_hex(&digest.finalize())) == expected,
         "GitHub asset digest mismatch",
     )
 }

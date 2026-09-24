@@ -60,3 +60,36 @@ pub struct CollectionSchedules {
 pub struct SchedulePreview {
     pub next_run: String,
 }
+
+/// A bounded collection change hint. Missing history falls back to `all`.
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionChange {
+    pub provider: String,
+    pub dates: Vec<String>,
+    pub employee_code: Option<String>,
+    pub roster: bool,
+}
+impl CollectionChange {
+    pub fn all() -> Self {
+        Self {
+            provider: "all".into(),
+            dates: vec![],
+            employee_code: None,
+            roster: true,
+        }
+    }
+    pub fn provider(provider: &str) -> Self {
+        Self {
+            provider: provider.into(),
+            ..Self::all()
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct CollectionUpdates {
+    pub revision: String,
+    pub changes: Vec<CollectionChange>,
+}

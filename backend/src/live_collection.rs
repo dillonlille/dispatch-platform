@@ -166,7 +166,9 @@ impl Writer {
                 Ok(s(&dsp, "id").to_owned())
             })
             .await?;
-        self.state.updates.notify(&dsp);
+        self.state
+            .updates
+            .changed(&dsp, crate::contracts::CollectionChange::provider("cortex"));
         Ok(())
     }
     pub async fn cortex(&self, capture: &Capture) -> Result<()> {
@@ -175,6 +177,12 @@ impl Writer {
         ensure(capture.itineraries.len() == 1, "invalid_live_capture", 502)?;
         let data = serde_json::to_string(capture)?;
         ensure(data.len() <= 64 * 1024, "invalid_live_capture", 502)?;
+        let change = crate::contracts::CollectionChange {
+            provider: "cortex".into(),
+            dates: vec![capture.scope.date.clone()],
+            employee_code: None,
+            roster: false,
+        };
         let capture = capture.clone();
         let job = self.job.clone();
         let owner = self.owner.clone();
@@ -214,7 +222,7 @@ impl Writer {
                 Ok(s(&dsp, "id").to_owned())
             })
             .await?;
-        self.state.updates.notify(&dsp);
+        self.state.updates.changed(&dsp, change);
         Ok(())
     }
 }

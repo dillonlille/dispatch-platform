@@ -3,6 +3,7 @@ import { api, ApiError } from '../../app/api.js';
 import { verifyPasskey } from '../../app/passkeys.js';
 import { useAction } from '../../app/useAction.js';
 import { ErrorBox } from '../../ui/index.js';
+import '../settings/security.css';
 
 /** Verification only. Enrollment and removal live exclusively in account settings. */
 export function SecurityPrompt({

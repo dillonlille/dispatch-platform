@@ -102,7 +102,7 @@ pub fn fingerprint(
             digest.update([0]);
         }
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::to_hex(&digest.finalize()))
 }
 fn normalized(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();

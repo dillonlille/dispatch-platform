@@ -34,7 +34,7 @@ pub struct Manifest {
 }
 pub use dispatch_ci::policy::hex;
 pub fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::to_hex(&Sha256::digest(bytes))
 }
 pub fn file_hash(file: &Path) -> Result<String> {
     let mut input = File::open(file)?;
@@ -47,7 +47,7 @@ pub fn file_hash(file: &Path) -> Result<String> {
         }
         hash.update(&bytes[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(crate::to_hex(&hash.finalize()))
 }
 pub fn safe_path(name: &str) -> Result<()> {
     require(

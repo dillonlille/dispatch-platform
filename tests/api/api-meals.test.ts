@@ -78,6 +78,8 @@ test('name variants combine existing source records without recollection or losi
   });
   const endpoint = `/api/dsp/paycom/meal-breaks?date=${date}`;
   const before = (await owner.get(endpoint)).value;
+  // Fixture writes bypass the collector's revision notification; restart after seeding.
+  await f.stop();
   f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
     db.prepare(
       `INSERT INTO meal_publications VALUES
@@ -103,6 +105,7 @@ test('name variants combine existing source records without recollection or losi
       }
     });
   });
+  await f.start();
   const response = await owner.get(endpoint);
   assert.equal(response.status, 200);
   const combined = response.value;

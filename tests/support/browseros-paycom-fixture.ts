@@ -137,8 +137,7 @@ export async function paycomFixture(
     peakByAccount: new Map<string, number>(),
     timecardDelayMs: 0,
     beforeTimecard: undefined as
-      | ((account: string, code: string, fromPlatform: boolean) => Promise<void>)
-      | undefined,
+      ((account: string, code: string, fromPlatform: boolean) => Promise<void>) | undefined,
     slowImages: false,
     hydrate: false,
     hydrated: 0,

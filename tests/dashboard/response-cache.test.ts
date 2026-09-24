@@ -103,10 +103,10 @@ test('least-recently used responses are evicted within entry and payload budgets
   assert.equal(cache.peek('B').data, undefined);
   assert.equal(cache.peek('C').data, 'third');
   const small = new ResponseCache({ ...limits, bytes: 20 });
-  await small.read('A', async () => '12345');
-  await small.read('B', async () => '67890');
+  await small.read('A', async () => '123');
+  await small.read('B', async () => '678');
   assert.equal(small.peek('A').data, undefined);
-  assert.equal(small.peek('B').data, '67890');
+  assert.equal(small.peek('B').data, '678');
   assert.equal(await small.read('big', async () => 'x'.repeat(100)), 'x'.repeat(100));
   assert.equal(small.peek('big').data, undefined);
 });
@@ -132,4 +132,22 @@ test('timecard URL aliases reuse data without extending its freshness', async (t
   cache.alias('latest', 'dated');
   assert.equal(cache.peek('dated').data, card);
   assert.deepEqual(await cache.read('dated', async () => ({ hours: 9 })), { hours: 9 });
+});
+
+test('scoped invalidation preserves unrelated pending requests and data identities', async () => {
+  const cache = new ResponseCache(limits);
+  const pending = deferred<number>();
+  const unrelated = cache.read('team', () => pending.promise);
+  await cache.read('day', async () => ({ hours: 8 }));
+  const old = cache.peek('day').data;
+  cache.invalidate((key) => key === 'day');
+  assert.equal(cache.peek('day').data, old);
+  pending.resolve(7);
+  await unrelated;
+  assert.equal(cache.peek('team').data, 7);
+  let notifications = 0;
+  cache.subscribe('day', () => notifications++);
+  await cache.read('day', async () => ({ hours: 8 }), true);
+  assert.equal(cache.peek('day').data, old);
+  assert.equal(notifications, 0);
 });

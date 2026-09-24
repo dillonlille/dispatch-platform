@@ -1,8 +1,15 @@
+import { performancePolicy } from '../lib/performance-policy.js';
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { onActivity } from './activity.js';
 
 const storageKey = 'dispatch:browser-update:v1';
 const values = new Map<string, unknown>();
+const navigationValues = new Map<string, unknown>();
+export function clearNavigationState() {
+  navigationValues.clear();
+  values.clear();
+  restored = {};
+}
 let restored: Record<string, unknown> = {};
 let position: { x: number; y: number; hash: string } | undefined;
 try {
@@ -21,10 +28,9 @@ export function useUpdateState<T>(
   name: string,
   initial: T | (() => T),
 ): [T, Dispatch<SetStateAction<T>>] {
-  const key = `${location.hash}:${name}`;
+  const key = `${location.hash.split('?')[0]}:${name}`;
   const [value, setValue] = useState<T>(() => {
-    const saved = restored[key];
-    delete restored[key];
+    const saved = restored[key] ?? navigationValues.get(key);
     return saved !== undefined
       ? (saved as T)
       : typeof initial === 'function'
@@ -32,7 +38,13 @@ export function useUpdateState<T>(
         : initial;
   });
   useEffect(() => {
+    // A suspended render may retry its initializer; consume restoration only after commit.
+    delete restored[key];
     values.set(key, value);
+    navigationValues.delete(key);
+    navigationValues.set(key, value);
+    while (navigationValues.size > 200)
+      navigationValues.delete(navigationValues.keys().next().value!);
     return () => {
       values.delete(key);
     };
@@ -130,8 +142,8 @@ export function useBrowserUpdate(enabled: boolean) {
       if (!document.hidden) void check();
     };
     document.addEventListener('visibilitychange', visible);
-    const polling = window.setInterval(() => void check(), 5000);
-    const idle = window.setInterval(tick, 100);
+    const polling = window.setInterval(() => void check(), performancePolicy.browserUpdatePollMs);
+    const idle = window.setInterval(tick, 500);
     void check();
     return () => {
       stopped = true;

@@ -71,12 +71,9 @@ impl Checkpoint {
     ) -> Result<Resume> {
         let mut roster = employees.to_vec();
         roster.sort_by(|a, b| s(a, "code").cmp(s(b, "code")));
-        let fingerprint = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(
-                &json!({"version":1,"timezone":timezone,"period":period,"employees":roster})
-            )?)
-        );
+        let fingerprint = crypto::hex(&Sha256::digest(serde_json::to_vec(
+            &json!({"version":1,"timezone":timezone,"period":period,"employees":roster}),
+        )?));
         let period = period.clone();
         let mut live_metadata = json!({"from":period["start"],"to":period["end"],"roster":roster});
         let job = self.job.clone();
@@ -123,7 +120,9 @@ impl Checkpoint {
             }
             Ok((tenant.to_owned(), resume))
         }).await?;
-        self.state.updates.notify(&dsp);
+        self.state
+            .updates
+            .changed(&dsp, crate::contracts::CollectionChange::provider("paycom"));
         Ok(resume)
     }
     pub async fn save(
@@ -134,6 +133,12 @@ impl Checkpoint {
         records: &[Value],
     ) -> Result<()> {
         validate_page(employee, period, records)?;
+        let change = crate::contracts::CollectionChange {
+            provider: "paycom".into(),
+            dates: records.iter().map(|r| s(r, "date").to_owned()).collect(),
+            employee_code: Some(s(employee, "code").to_owned()),
+            roster: false,
+        };
         let token = token.to_owned();
         let code = s(employee, "code").to_owned();
         let data = serde_json::to_string(records)?;
@@ -187,7 +192,7 @@ impl Checkpoint {
                 Ok(s(&dsp, "id").to_owned())
             })
             .await?;
-        self.state.updates.notify(&dsp);
+        self.state.updates.changed(&dsp, change);
         Ok(())
     }
 }

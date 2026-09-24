@@ -69,6 +69,11 @@ pub const PAYCOM: &[Migration] = &[
         name: "employee_timecard_syncs",
         apply: Sql(include_str!("paycom/0002_employee_timecard_syncs.sql")),
     },
+    Migration {
+        id: 3,
+        name: "employee_history_index",
+        apply: Sql(include_str!("paycom/0003_employee_history_index.sql")),
+    },
 ];
 pub const CORTEX: &[Migration] = &[Migration {
     id: 1,

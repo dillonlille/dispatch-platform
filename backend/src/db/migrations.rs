@@ -298,6 +298,35 @@ mod tests {
     }
 
     #[test]
+    fn employee_history_uses_the_code_index() {
+        let root = private();
+        let file = root.path().join("paycom.sqlite");
+        let db = Db::create(&file, Kind::Paycom, "").unwrap();
+        let plan = db
+            .all(
+                "EXPLAIN QUERY PLAN SELECT p.id FROM publications p \
+            JOIN employees e ON e.publication_id=p.id WHERE e.code='E001' \
+            ORDER BY p.period_to DESC LIMIT 1",
+                [],
+            )
+            .unwrap();
+        assert!(
+            plan.iter().any(|row| row["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("employees_by_code")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|row| row["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("SCAN e")),
+            "{plan:?}"
+        );
+    }
+
+    #[test]
     fn a_database_an_older_binary_made_ends_like_a_new_one() {
         let root = private();
         for kind in Kind::ALL {
