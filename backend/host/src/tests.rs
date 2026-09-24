@@ -156,6 +156,11 @@ impl System for Fake {
         self.elapsed.set(self.elapsed.get() + d);
     }
 }
+fn queue_url(commit: &str) -> String {
+    format!(
+        "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?event=merge_group&head_sha={commit}&per_page=20"
+    )
+}
 fn git(root: &Path, args: &[&str]) -> String {
     let mut all = vec![
         "git",
@@ -239,6 +244,10 @@ impl Fixture {
         };
         let system = Fake::default();
         system.root.replace(Some((root.clone(), environment)));
+        if environment == Environment::Dev {
+            // Unless a test queues it, a commit reached main without the merge queue.
+            system.reply(&queue_url(&new), vec![json!({"workflow_runs":[]})]);
+        }
         let updater = Updater::new(&root, environment, &system).unwrap();
         let old_manifest = artifact(&updater.active, &old, "0.1.0", false);
         let candidate = updater.runtime.join("candidate");
@@ -298,7 +307,14 @@ impl Fixture {
         tar.append_dir_all(".", &self.candidate).unwrap();
         tar.into_inner().unwrap().finish().unwrap()
     }
+    fn queue_run(&self) -> Value {
+        json!({"id":23,"head_sha":self.new,"head_branch":format!("gh-readonly-queue/main/pr-7-{}",self.old),"event":"merge_group","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
+    }
     fn dev_download(&self) {
+        self.publish(17, &format!("dispatch-main-{}", self.new), 42);
+    }
+    /// The candidate as the build `name` of workflow run `run`, artifact `id`.
+    fn publish(&self, run: u64, name: &str, id: u64) {
         let data = self.package();
         let mut zip = zip::ZipWriter::new(Cursor::new(vec![]));
         zip.start_file(
@@ -309,13 +325,13 @@ impl Fixture {
         use std::io::Write;
         zip.write_all(&data).unwrap();
         let bytes = zip.finish().unwrap().into_inner();
-        let record = json!({"id":42,"name":format!("dispatch-main-{}",self.new),"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
+        let record = json!({"id":id,"name":name,"expired":false,"size_in_bytes":bytes.len(),"digest":format!("sha256:{}",artifact::hash(&bytes))});
         self.system.reply(
-            &format!("repos/{REPOSITORY}/actions/runs/17/artifacts"),
+            &format!("repos/{REPOSITORY}/actions/runs/{run}/artifacts"),
             vec![json!({"artifacts":[record]})],
         );
         self.system.bodies.borrow_mut().insert(
-            format!("repos/{REPOSITORY}/actions/artifacts/42/zip"),
+            format!("repos/{REPOSITORY}/actions/artifacts/{id}/zip"),
             bytes,
         );
     }
@@ -539,6 +555,153 @@ fn dev_download_installs_only_with_still_current_validation() {
             );
         }
     }
+}
+#[test]
+fn dev_installs_the_merge_queue_build_without_waiting_for_the_push_run() {
+    let f = Fixture::new(Environment::Dev);
+    f.publish(23, "dispatch-pr-build-23-1", 43);
+    // No push run is registered: asking for one fails the update.
+    f.system.reply(
+        &queue_url(&f.new),
+        vec![json!({"workflow_runs":[f.queue_run()]})],
+    );
+    f.updater().run_locked().unwrap();
+    assert_eq!(
+        artifact::verify(&f.updater().active, None).unwrap(),
+        f.new_manifest
+    );
+    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
+}
+#[test]
+fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
+    // A pending or failed queue run keeps the old runtime, even beside a green push run.
+    for failed in [false, true] {
+        let f = Fixture::new(Environment::Dev);
+        f.dev_download();
+        f.system
+            .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+        let mut queued = f.queue_run();
+        if failed {
+            queued["conclusion"] = json!("failure");
+        } else {
+            queued["status"] = json!("in_progress");
+            queued["conclusion"] = Value::Null;
+        }
+        f.system
+            .reply(&queue_url(&f.new), vec![json!({"workflow_runs":[queued]})]);
+        f.updater().run_locked().unwrap();
+        f.assert_old();
+        assert!(f.system.actions().is_empty());
+        assert_eq!(
+            io::read_json(&f.updater().status_file).unwrap()["status"],
+            if failed {
+                "checks_failed"
+            } else {
+                "waiting_for_checks"
+            }
+        );
+    }
+    // An expired queue build, or a group merged into another branch, defers to the push run.
+    for foreign in [false, true] {
+        let f = Fixture::new(Environment::Dev);
+        f.dev_download();
+        f.system
+            .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+        let mut queued = f.queue_run();
+        if foreign {
+            queued["head_branch"] = json!(format!("gh-readonly-queue/other/pr-7-{}", f.old));
+        } else {
+            f.system.reply(
+                &format!("repos/{REPOSITORY}/actions/runs/23/artifacts"),
+                vec![
+                    json!({"artifacts":[{"id":43,"name":"dispatch-pr-build-23-1","expired":true}]}),
+                ],
+            );
+        }
+        f.system
+            .reply(&queue_url(&f.new), vec![json!({"workflow_runs":[queued]})]);
+        f.updater().run_locked().unwrap();
+        assert_eq!(
+            artifact::verify(&f.updater().active, None).unwrap(),
+            f.new_manifest
+        );
+    }
+}
+#[test]
+fn a_queue_build_installs_only_with_still_current_validation() {
+    let f = Fixture::new(Environment::Dev);
+    f.publish(23, "dispatch-pr-build-23-1", 43);
+    let mut rerun = f.queue_run();
+    rerun["run_attempt"] = json!(2);
+    rerun["conclusion"] = json!("failure");
+    f.system.reply(
+        &queue_url(&f.new),
+        vec![
+            json!({"workflow_runs":[f.queue_run()]}),
+            json!({"workflow_runs":[f.queue_run(),rerun]}),
+        ],
+    );
+    f.updater().run_locked().unwrap();
+    f.assert_old();
+    assert!(f.system.actions().is_empty());
+}
+#[test]
+fn dev_adopts_the_updater_of_each_build_it_installs_and_only_then() {
+    let f = Fixture::new(Environment::Dev);
+    let u = f.updater();
+    artifact(&u.active, &f.old, "0.1.0", true);
+    management::install(&u).unwrap();
+    let installed = management::directory(&u).join("dispatch-host");
+    // An ordinary check with nothing new neither hashes nor replaces a hand-restored updater.
+    fs::write(
+        &installed,
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # restored\n",
+    )
+    .unwrap();
+    git(&f.root, &["update-ref", "refs/remotes/origin/main", &f.old]);
+    u.run_locked().unwrap();
+    assert!(fs::read_to_string(&installed).unwrap().contains("restored"));
+    // The next build brings its own updater, which replaces the installed one.
+    git(&f.root, &["update-ref", "refs/remotes/origin/main", &f.new]);
+    fs::write(
+        f.candidate.join("services/rust/dispatch-backend"),
+        "#!/bin/sh\necho '{\"hostManagement\":1}' # new\n",
+    )
+    .unwrap();
+    fs::write(
+        f.candidate.join("tooling/build-info.json"),
+        json!({"commit":f.new,"hostManagement":1}).to_string(),
+    )
+    .unwrap();
+    artifact::write_manifest(&f.candidate, "0.1.1").unwrap();
+    f.dev_download();
+    f.system
+        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+    u.run_locked().unwrap();
+    assert!(!management::drift(&u).unwrap());
+    assert!(fs::read_to_string(&installed).unwrap().contains("# new"));
+}
+#[test]
+fn waiting_for_dev_confirms_the_commit_or_a_later_one_is_live() {
+    let f = Fixture::new(Environment::Dev);
+    let u = f.updater();
+    // Not installed yet: the wait ends with what the updater last reported.
+    let error = u.wait(&f.new, 20).unwrap_err().to_string();
+    assert!(
+        error.contains(&format!("Dev did not install {}", f.new)),
+        "{error}"
+    );
+    f.dev_download();
+    f.system
+        .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+    u.run_locked().unwrap();
+    // The installed commit, and an earlier one it contains, are both live.
+    for commit in [&f.new, &f.old] {
+        let live = u.wait(commit, 20).unwrap();
+        assert_eq!(live["commit"], json!(f.new));
+        assert_eq!(live["digest"], json!(f.new_manifest.digest));
+    }
+    assert!(u.wait("not-a-commit", 20).is_err());
 }
 #[test]
 fn dev_follows_main_and_refuses_other_branches() {

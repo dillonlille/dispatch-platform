@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from pathlib import Path
@@ -5,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "tooling"))
@@ -20,6 +22,15 @@ class SharedToolingTests(unittest.TestCase):
         self.run = {"id": 5, "run_attempt": 1, "head_sha": self.commit, "event": "push", "head_branch": "main",
                     "status": "completed", "conclusion": "success",
                     "head_repository": {"full_name": runtime.REPOSITORY}}
+
+    def test_host_passes_on_what_it_reports_beside_a_success(self):
+        process = unittest.mock.Mock(returncode=0)
+        process.communicate.return_value = ("null", "Installed the new build\n")
+        with patch.object(runtime, "host_binary", return_value=Path("/tmp/host")), \
+                patch.object(runtime.subprocess, "Popen", return_value=process), \
+                patch.object(runtime.sys, "stderr", new_callable=io.StringIO) as stderr:
+            self.assertIsNone(runtime.host("dev", "--root", self.root))
+        self.assertEqual(stderr.getvalue(), "Installed the new build\n")
 
     def test_source_verifier_uses_cargos_configured_output_and_never_a_stale_default(self):
         (self.root / "backend/host").mkdir(parents=True)
