@@ -37,14 +37,14 @@ runs:
         echo "DISPATCH_CI_TOOLS=$GITHUB_WORKSPACE/.ci-tools" >> "$GITHUB_ENV"
     - name: Restore the planner, gate and host tools
       id: tools
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
       with:
         path: .ci-tools/tools/
         key: ${{ steps.keys.outputs.tools }}
     - name: Restore the assessment fixture
       id: fixture
       if: inputs.fixture == 'true'
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
       with:
         path: .ci-tools/fixture/
         key: ${{ steps.keys.outputs.fixture }}

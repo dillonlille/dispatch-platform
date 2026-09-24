@@ -5,13 +5,30 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # Minor and patch releases arrive as one PR a week; majors stay apart.
+      npm-minor-and-patch:
+        update-types: [minor, patch]
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # The RustCrypto crates share digest and crypto-common and only build together.
+      rustcrypto:
+        patterns: [aes-gcm, argon2, hmac, sha2]
+      # Cargo treats a 0.x minor release as breaking, so only patches are grouped.
+      cargo-patch:
+        update-types: [patch]
   - package-ecosystem: github-actions
-    directory: /
+    # The composite actions pin the same actions as the workflows.
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ['*']

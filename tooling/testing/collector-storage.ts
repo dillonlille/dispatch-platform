@@ -11,8 +11,7 @@ export function collectorDatabase(root: string, dspId: string, provider: 'paycom
   const db = new DatabaseSync(core, { readOnly: true });
   try {
     const row = db.prepare("SELECT value FROM settings WHERE key='storage.collectors'").get() as
-      | { value: string }
-      | undefined;
+      { value: string } | undefined;
     assert(!row || row.value === '1', 'Unsupported storage layout');
     return row ? path.join(root, 'dsps', dspId, 'data', provider, `${provider}.sqlite`) : core;
   } finally {

@@ -82,7 +82,8 @@ pub fn trusted_run(run: &Value, sha: &str) -> bool {
 }
 pub fn read_receipt(archive: &[u8], digest: &str) -> Result<Value> {
     require(
-        archive.len() <= 100_000 && digest == format!("sha256:{:x}", Sha256::digest(archive)),
+        archive.len() <= 100_000
+            && digest == format!("sha256:{}", crate::to_hex(&Sha256::digest(archive))),
         "Validation archive digest mismatch",
     )?;
     let mut zip = zip::ZipArchive::new(Cursor::new(archive))?;
