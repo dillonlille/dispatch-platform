@@ -27,7 +27,9 @@ It keeps everything it makes, including its fixture data, in the worktree's scra
 directory `/tmp/dispatch-my-branch`. When its PR merges, stop it with
 `systemctl --user stop dispatch-preview@my-branch`, then remove the env file and that
 directory. The unit never restarts on its own: a crashed preview stays down instead of
-looping on a broken branch.
+looping on a broken branch. Under memory pressure a preview is the first thing the kernel
+kills. If it kills Dev's collection browser instead, `dispatch-dev.service` keeps serving and
+only that collection fails and retries.
 
 - `.build/`: verified compiled runtime serving https://dispatchdev.dillonlille.com.
 - `config/`, `data/`, `dsps/`: private configuration and persistent state.
