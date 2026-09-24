@@ -23,17 +23,15 @@ export function mealLines(
   name: string,
   date: string,
 ): MealLine {
-  const [first, ...rest] = summary.pairs.map(
-    (pair, index): MealLine => ({
-      id: index ? `${row.id}:${index}` : row.id,
-      row,
-      summary,
-      name,
-      date,
-      pair,
-      index,
-    }),
-  );
+  const [first, ...rest] = summary.pairs.map((pair, index): MealLine => ({
+    id: index ? `${row.id}:${index}` : row.id,
+    row,
+    summary,
+    name,
+    date,
+    pair,
+    index,
+  }));
   return { ...first!, more: rest };
 }
 
