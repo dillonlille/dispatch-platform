@@ -18,6 +18,22 @@ fn append(variable: &str, text: &str) -> Result<()> {
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let command = args.first().ok_or("Choose plan, receipt or gate")?;
+    if command == "ship" {
+        // The launcher appends `--root`, which shipping does not need.
+        let number = match &args[1..] {
+            [number] | [number, _, _] => number.parse::<u64>().ok(),
+            _ => None,
+        }
+        .ok_or("Usage: npm run pr:ship -- <PR number>")?;
+        let merge = dispatch_ci::ship::run(
+            number,
+            &Native,
+            &|seconds| std::thread::sleep(std::time::Duration::from_secs(seconds)),
+            &mut |text| println!("{text}"),
+        )?;
+        println!("#{number} merged as {merge}");
+        return Ok(());
+    }
     let mut root = std::env::current_dir()?;
     let mut release = false;
     let mut cache_key = false;

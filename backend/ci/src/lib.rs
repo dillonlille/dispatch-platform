@@ -4,6 +4,7 @@ pub mod policy;
 pub mod preflight;
 pub mod process;
 pub mod runs;
+pub mod ship;
 use std::path::Path;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 /// Where API calls, receipts and provenance name this repository.

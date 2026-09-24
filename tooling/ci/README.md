@@ -61,6 +61,14 @@ outside `backend` disable reuse. CI reuse additionally requires the explicit
 ancestry and other ready PRs through Rust. `--allow-concurrent` retains the
 explicit override for intentional overlapping work.
 
+`npm run pr:ship -- <number>` ships an open PR. It reads the PR from GitHub's API every
+20 seconds: once the checks on its current head pass, including the required `platform`
+gate, it adds the PR to the merge queue bound to that head, then waits until GitHub
+merges it and prints the merge commit. A newer push is followed to its own checks. It
+stops with the reason when a check fails, with each failed check's name and link, and
+when the PR is a draft, closes, leaves the queue unmerged or has not merged after 90
+minutes. Brief API failures are retried; a PR it cannot read at all stops it at once.
+
 Run policy and promotion tests with:
 
 ```sh
