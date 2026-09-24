@@ -19,8 +19,8 @@ export const permissionLabels: Record<Permission, string> = {
 /** The role sheet's sections. Every permission in the catalog belongs to exactly one. */
 export const permissionGroups: [string, Permission[]][] = [
   ['Timecard', ['timecard.view', 'timecard.manage']],
-  ['Collections', ['collections.run']],
   ['Uniform Inventory', ['uniforms.view', 'uniforms.adjust', 'uniforms.manage']],
+  ['Collections', ['collections.run']],
   ['Connections', ['connections.manage']],
   ['Team', ['members.invite', 'members.manage', 'roles.manage']],
   ['DSP', ['settings.manage']],
