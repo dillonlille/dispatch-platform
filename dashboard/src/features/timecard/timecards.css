@@ -1,4 +1,5 @@
-.paycom-page {
+/* The page container caps at 1600px; the timecard tables use the whole width instead. */
+.page-container:has(.paycom-page) {
   max-width: none;
 }
 .paycom-page .page-heading {
