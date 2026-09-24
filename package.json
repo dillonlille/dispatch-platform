@@ -11,6 +11,7 @@
     "build": "tsx tooling/build/build.ts",
     "check": "tsc --noEmit",
     "check:ci": "tsx tooling/ci/checks.ts",
+    "check:rules": "tsx tooling/ci/rules.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "tsx tooling/testing/test.ts",

@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { allTests, coreTests, dashboardTests, nativeShards } from '../../tooling/ci/test-plan.js';
+import {
+  allTests,
+  coreTests,
+  dashboardTests,
+  nativeShards,
+  ruleTests,
+} from '../../tooling/ci/test-plan.js';
 
 const names = (directory: string, pattern: RegExp) =>
   fs
@@ -61,4 +67,14 @@ test('every test file is run by exactly one check of full validation and none is
   assert.match(checks, /'tests\/tooling'/);
   for (const directory of ['tooling', 'dashboard/src', 'shared', 'services'])
     assert.deepEqual(names(directory, /\.(test|spec)\.tsx?$|_test\.py$/), []);
+});
+
+test('check:rules runs the dashboard logic and the listed source rules, which CI runs too', () => {
+  assert.equal(new Set(ruleTests).size, ruleTests.length);
+  for (const file of dashboardTests) assert(ruleTests.includes(file), `${file} is not a rule`);
+  for (const file of ruleTests.filter((file) => !dashboardTests.includes(file)))
+    assert(coreTests().includes(file), `${file} is not run by the core check`);
+  assert.match(fs.readFileSync('tooling/ci/rules.ts', 'utf8'), /\.\.\.ruleTests/);
+  const scripts = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts;
+  assert.equal(scripts['check:rules'], 'tsx tooling/ci/rules.ts');
 });

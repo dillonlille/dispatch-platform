@@ -11,6 +11,11 @@
     "tests/dashboard/uniforms.test.ts",
     "tests/dashboard/unused-css.test.ts"
   ],
+  "rules": [
+    "tests/api/audit-actions.test.ts",
+    "tests/tooling/source-lines.test.ts",
+    "tests/tooling/test-plan.test.ts"
+  ],
   "native": {
     "paycom": ["tests/providers/paycom-worker.test.ts", "tests/providers/native-browser.test.ts"],
     "paycom-recovery": ["tests/providers/native-browser-recovery.test.ts"],
