@@ -1472,7 +1472,11 @@ mod tests {
     }
     fn punch(time: &str) -> String {
         format!(
-            r#"<span class="current-timecard-cell">{time}</span><div class="readOnly-combined-cell" style="display:none">{time} edited</div>"#
+            concat!(
+                r#"<span class="current-timecard-cell">{time}</span>"#,
+                r#"<div class="readOnly-combined-cell" style="display:none">{time} edited</div>"#
+            ),
+            time = time
         )
     }
     /// A page shaped like Paycom's: Sundays worked 8 hours, a weekly total per week.
@@ -1576,7 +1580,12 @@ mod tests {
         // Paycom keeps the shown time a direct child of the cell; history and requests
         // sit beside it.
         let pending = format!(
-            r#"{}<i class="pcrPending" title="Operation: Edit&lt;br&gt;Current Kind: out break&lt;br&gt;Current Time: 04:00 pm&lt;br&gt;Requested Kind: OUT LUNCH&lt;br&gt;Requested Time: 04:30 PM"></i><b title="OUT DAY&lt;br&gt;Actual: 04:01 PM&lt;br&gt;Rounded: 04:00 PM"></b>"#,
+            concat!(
+                r#"{}<i class="pcrPending" title="Operation: Edit&lt;br&gt;"#,
+                r#"Current Kind: out break&lt;br&gt;Current Time: 04:00 pm&lt;br&gt;"#,
+                r#"Requested Kind: OUT LUNCH&lt;br&gt;Requested Time: 04:30 PM"></i>"#,
+                r#"<b title="OUT DAY&lt;br&gt;Actual: 04:01 PM&lt;br&gt;Rounded: 04:00 PM"></b>"#
+            ),
             punch("04:00 PM")
         );
         let sunday = row(&[
@@ -1633,8 +1642,15 @@ mod tests {
             punch("04:00 PM")
         );
         let sunday = format!(
-            r#"<tr><td>HEADING</td><td></td><td>{}</td><td></td><td class="pcrPending" data-pcr-operation="Edit" data-pcr-current-kind="OUT BREAK" data-pcr-current-time="04:00 pm" data-pcr-requested-kind="out lunch" data-pcr-requested-time="04:30 PM">{cell}</td><td></td><td></td><td></td><td>8</td><td>8</td><td></td><td></td><td></td><td></td><td></td></tr>"#,
-            punch("08:00 AM")
+            concat!(
+                r#"<tr><td>HEADING</td><td></td><td>{}</td><td></td><td class="pcrPending" "#,
+                r#"data-pcr-operation="Edit" data-pcr-current-kind="OUT BREAK" "#,
+                r#"data-pcr-current-time="04:00 pm" data-pcr-requested-kind="out lunch" "#,
+                r#"data-pcr-requested-time="04:30 PM">{cell}</td><td></td><td></td><td></td>"#,
+                r#"<td>8</td><td>8</td><td></td><td></td><td></td><td></td><td></td></tr>"#
+            ),
+            punch("08:00 AM"),
+            cell = cell
         );
         let record = read(&page("AA01", "<!doctype html>", Some(sunday.clone()))).unwrap();
         let out = &record["days"][0]["punches"][1];

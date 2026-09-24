@@ -136,7 +136,9 @@ export async function paycomFixture(
     activeByAccount: new Map<string, number>(),
     peakByAccount: new Map<string, number>(),
     timecardDelayMs: 0,
-    beforeTimecard: undefined as ((account: string, code: string) => Promise<void>) | undefined,
+    beforeTimecard: undefined as
+      | ((account: string, code: string, fromPlatform: boolean) => Promise<void>)
+      | undefined,
     slowImages: false,
     hydrate: false,
     hydrated: 0,
@@ -321,7 +323,7 @@ export async function paycomFixture(
         [...state.activeByAccount.values()].filter((count) => count > 0).length,
       );
       try {
-        await state.beforeTimecard?.(account, code);
+        await state.beforeTimecard?.(account, code, fromPlatform);
         await new Promise<void>((resolve) => {
           const stalled = (state.navigationStalls.get(code) ?? 0) > 0;
           if (stalled) state.navigationStalls.set(code, state.navigationStalls.get(code)! - 1);

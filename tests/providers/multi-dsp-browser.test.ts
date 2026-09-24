@@ -58,8 +58,9 @@ test(
     const firstRequests = new Promise<void>((resolve) => (releaseFirst = resolve));
     const gateAccounts = new Set<string>();
     const gateTimer = setTimeout(releaseFirst, 20000);
-    // Also rendezvous each DSP's first two tabs. A fixed response delay cannot
-    // prove concurrency when the browser starts those navigations unevenly.
+    // Also rendezvous each DSP's first two tab reads. A fixed response delay cannot
+    // prove concurrency when the browser starts those navigations unevenly, and the
+    // platform's own HTTP reads between them do not count as tabs.
     const pairs = new Map<
       string,
       { arrivals: number; ready: Promise<void>; release: () => void; timer: NodeJS.Timeout }
@@ -72,7 +73,7 @@ test(
         pair.release();
       }
     });
-    f.state.beforeTimecard = async (account) => {
+    f.state.beforeTimecard = async (account, _code, fromPlatform) => {
       let pair = pairs.get(account);
       if (!pair) {
         let release!: () => void;
@@ -80,7 +81,7 @@ test(
         pair = { arrivals: 0, ready, release, timer: setTimeout(release, 10000) };
         pairs.set(account, pair);
       }
-      if (++pair.arrivals === 2) {
+      if (!fromPlatform && ++pair.arrivals === 2) {
         clearTimeout(pair.timer);
         pair.release();
       }
@@ -89,7 +90,7 @@ test(
         clearTimeout(gateTimer);
         releaseFirst();
       }
-      await Promise.all([firstRequests, pair.ready]);
+      await Promise.all([firstRequests, fromPlatform ? undefined : pair.ready]);
     };
     // A retained queued job from A must not jump ahead of C's first collection.
     for (const index of [0, 0, 1, 2]) {
