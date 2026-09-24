@@ -43,6 +43,14 @@
   background: var(--muted);
   padding-inline: 18px;
 }
+.paycom-data-table th:first-child,
+.paycom-data-table td:first-child {
+  padding-left: 0;
+}
+.paycom-data-table th:last-child,
+.paycom-data-table td:last-child {
+  padding-right: 0;
+}
 @media (max-width: 600px) {
   .paycom-date-controls {
     width: 100%;
@@ -146,7 +154,7 @@
   padding-block: 6px;
 }
 .paycom-timecard-table > .error {
-  margin: 0 18px 18px;
+  margin: 0 0 18px;
 }
 .paycom-timecard-footer {
   display: flex;
@@ -155,7 +163,7 @@
   flex-wrap: wrap;
   gap: 12px;
   border-top: 1px solid var(--border);
-  padding: 14px 18px;
+  padding: 14px 0;
   color: var(--muted-foreground);
   font-size: 12px;
 }
@@ -217,7 +225,7 @@
   }
   .paycom-timecard-heading,
   .paycom-timecard-footer {
-    padding: 12px;
+    padding: 12px 0;
   }
   .paycom-date-controls-compact .date-field {
     width: auto;

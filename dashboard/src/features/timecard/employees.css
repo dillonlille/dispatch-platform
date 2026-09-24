@@ -77,8 +77,7 @@
 .employees-workspace {
   display: grid;
   grid-template-columns: minmax(240px, 0.86fr) minmax(0, 1.4fr);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-top: 1px solid var(--border);
   overflow: hidden;
   background: var(--card);
 }
