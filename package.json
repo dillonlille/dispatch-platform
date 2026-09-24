@@ -24,6 +24,7 @@
     "benchmark:rust": "python3 tooling/cargo-build.py --release && tsx tooling/benchmarks/benchmark-rust.ts",
     "check:rust": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked",
     "pr:prepare": "python3 tooling/ci/pr-prepare.py",
+    "pr:ship": "python3 tooling/ci/pr-ship.py",
     "mail:types": "node services/cloudflare-mail/generate-types.mjs",
     "contracts:generate": "DISPATCH_UPDATE_CONTRACTS=1 cargo test --locked --lib contracts::generated"
   },

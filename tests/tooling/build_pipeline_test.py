@@ -18,6 +18,7 @@ def module(name, path):
 
 cache = module("cargo_build", "tooling/cargo-build.py")
 prepare = module("pr_prepare", "tooling/ci/pr-prepare.py")
+ship = module("pr_ship", "tooling/ci/pr-ship.py")
 collectors = module("browseros_check", "tooling/browseros-check.py")
 
 
@@ -27,6 +28,7 @@ class PipelineTests(unittest.TestCase):
             (cache, "build", []),
             (cache, "build", ["--release", "--cache-key"]),
             (prepare, "preflight", ["--allow-concurrent"]),
+            (ship, "ship", ["235"]),
         ]:
             with self.subTest(command=command, args=args), patch.object(launcher, "launch") as launch:
                 launcher.main(args)
