@@ -1,10 +1,19 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
+import { assessmentFixture } from '../testing/ci-tools.js';
 import { coreTests, dashboardTests } from './test-plan.js';
 
 const mode = process.argv[2] ?? 'full';
-if (!['full', 'build-full', 'build-dashboard', 'build-reuse', 'core', 'browser'].includes(mode))
-  throw new Error('Unknown validation mode');
+const modes = [
+  'full',
+  'build-full',
+  'build-dashboard',
+  'build-reuse',
+  'core',
+  'browser',
+  'benchmark',
+];
+if (!modes.includes(mode)) throw new Error('Unknown validation mode');
 // CI runs the browser suite as separate shard jobs against the packaged build; the build
 // check then skips it. Locally the build check still runs the whole suite.
 const shardedBrowser = process.env.DISPATCH_CI_BROWSER_SHARDS !== undefined && mode !== 'browser';
@@ -25,7 +34,8 @@ async function run(name: string, command: string, args: string[], env = process.
   return ok;
 }
 const npm = (name: string) => run(name, 'npm', ['run', name]);
-async function build(scope: string) {
+/** CI measures in a job of its own; a local full check measures after its build. */
+async function build(scope: string, measure = false) {
   const built = npm('build');
   if (scope === 'reuse') {
     if (await built) await npm('test:smoke');
@@ -55,16 +65,19 @@ async function build(scope: string) {
   ]);
   // Measure after the other build checks finish so this process does not compete
   // with browser tests or compilers on the same runner.
-  if (scope === 'full' && !failures.length)
-    await run('Rust workload regression', process.execPath, [
-      'node_modules/tsx/dist/cli.mjs',
-      'tooling/benchmarks/benchmark-rust.ts',
-      '--binary',
-      '.build/services/rust/dispatch-backend',
-      '--check',
-      '--output',
-      '/tmp/dispatch-rust-benchmark.json',
-    ]);
+  if (measure && !failures.length) await benchmark();
+}
+/** The workload regression, against the build already in `.build`. */
+function benchmark() {
+  return run('Rust workload regression', process.execPath, [
+    'node_modules/tsx/dist/cli.mjs',
+    'tooling/benchmarks/benchmark-rust.ts',
+    '--binary',
+    '.build/services/rust/dispatch-backend',
+    '--check',
+    '--output',
+    '/tmp/dispatch-rust-benchmark.json',
+  ]);
 }
 function installBrowsers() {
   return run('browser setup', 'npx', [
@@ -78,9 +91,15 @@ function installBrowsers() {
 async function browser() {
   const shard = process.argv[3];
   if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard ?? '')) throw new Error('Browser shard required, as 1/3');
+  // The browser downloads and installs its system packages while Cargo compiles the
+  // fixture; test:ui then finds the fixture already built.
+  const fixture = assessmentFixture(process.env, process.cwd())
+    ? Promise.resolve(true)
+    : run('assessment fixture', 'cargo', ['build', '--locked', '--example', 'assessment-fixture']);
+  const ready = await Promise.all([installBrowsers(), fixture]);
   // Three workers on a four-core runner: the fourth core keeps the private servers and the
   // sign-in animation responsive, so long multi-login tests stay well inside their budget.
-  if (await installBrowsers())
+  if (ready.every(Boolean))
     await run('test:ui', 'npm', ['run', 'test:ui', '--', `--shard=${shard}`, '--workers=3']);
 }
 async function core() {
@@ -113,10 +132,11 @@ async function core() {
 }
 if (mode === 'core') await core();
 else if (mode === 'browser') await browser();
+else if (mode === 'benchmark') await benchmark();
 else if (mode === 'full') {
   // CI shards compile on separate runners; local runs share Cargo's build lock.
   await core();
-  if (!failures.length) await build('full');
+  if (!failures.length) await build('full', true);
   // Local full checks still isolate capacity measurements from compilers.
   if (!failures.length) await npm('test:browseros');
 } else await build(mode.replace('build-', ''));

@@ -7,7 +7,7 @@ import sys
 
 
 def prebuilt(root, name):
-    """A tool a trusted branch built from identical inputs and CI restored into this checkout.
+    """A tool the tools job of this ref or of main built from identical inputs, restored here.
 
     Only the workspace's own `.ci-tools` directory is trusted, and only on CI; anywhere else
     the tools are built from the checkout.

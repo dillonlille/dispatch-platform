@@ -13,8 +13,10 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: platform-checks-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a PR replaces its run. Every main commit keeps its own run: that run
+  # publishes the build a release of that commit downloads.
+  group: platform-checks-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
@@ -83,16 +85,8 @@ jobs:
         with:
           path: .ci-rust-cache/
           key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
-      - name: Preserve workload measurements
-        if: always() && needs.plan.outputs.mode == 'full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: dispatch-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /tmp/dispatch-rust-benchmark.json
-          if-no-files-found: ignore
-          retention-days: 30
-      # Every run packages its build: browser shards test these exact bytes, and trusted
-      # runs pass them to the final gate.
+      # Every run packages its build: browser shards and the workload benchmark test these
+      # exact bytes, and trusted runs pass them to the final gate.
       - name: Package runtime candidate
         id: candidate
         run: |
@@ -126,7 +120,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cache/ms-playwright/
-          key: dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: ${{ steps.tools.outputs.playwright-key }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.2
@@ -153,6 +147,37 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+  # The workload regression measures the packaged build on a runner of its own, alongside
+  # the browser shards instead of ahead of them.
+  benchmark:
+    needs: [plan, build]
+    if: needs.plan.outputs.mode == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.2
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Retrieve this run's build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.candidate-artifact }}
+      - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
+      - name: Rust workload regression
+        run: npm run check:ci -- benchmark
+      - name: Preserve workload measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dispatch-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/dispatch-rust-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 30
   core:
     needs: plan
     if: needs.plan.outputs.mode == 'full'
@@ -193,7 +218,7 @@ jobs:
   # Keep one stable required check. No receipt or deployable artifact is published
   # until every required job has succeeded, including every collector shard.
   platform:
-    needs: [plan, build, browser, core, collectors, rust-advisories]
+    needs: [plan, build, browser, benchmark, core, collectors, rust-advisories]
     if: always() && needs.plan.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -245,13 +270,17 @@ jobs:
           name: dispatch-${{ github.ref_name }}-${{ github.sha }}
           path: dispatch-dev.tar.gz
           if-no-files-found: error
-          retention-days: 14
+          # A release downloads this build; keep it as long as GitHub allows.
+          retention-days: 90
 
-  # Trusted branches refill the prebuilt tool, fixture and browser caches off the critical
-  # path. Every other job only restores them and builds with Cargo when they are absent.
+  # Every run builds the tools and fixture its inputs lack, off the critical path, and saves
+  # them to its own ref's cache: the gate and the browser shards start later and restore
+  # them instead of compiling. A PR's saves reach only that PR; main's reach every branch.
+  # Every other job only restores them and builds with Cargo when they are absent, so a
+  # failure here only costs time: it never fails the run, which Dev and releases require.
   tools:
     needs: plan
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -262,12 +291,6 @@ jobs:
         id: restore
         with:
           fixture: 'true'
-      - name: Restore the pinned Playwright browser
-        id: browser
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ~/.cache/ms-playwright/
-          key: dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         if: steps.restore.outputs.tools-hit != 'true'
         with:
@@ -306,22 +329,6 @@ jobs:
         with:
           path: .ci-tools/fixture/
           key: ${{ steps.restore.outputs.fixture-key }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        if: steps.browser.outputs.cache-hit != 'true'
-        with:
-          node-version: 22.23.2
-          cache: npm
-      - name: Download the pinned Playwright browser
-        if: steps.browser.outputs.cache-hit != 'true'
-        run: |
-          npm ci --ignore-scripts
-          npx playwright install chromium
-      - name: Save the pinned Playwright browser
-        if: steps.browser.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ~/.cache/ms-playwright/
-          key: dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
   rust-advisories:
     needs: plan

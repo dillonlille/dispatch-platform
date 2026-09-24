@@ -1,8 +1,8 @@
 name: Prebuilt CI tools
 description: >-
-  Restore dispatch-ci, dispatch-host and the browser assessment fixture that a trusted
-  branch built from identical inputs. Nothing is compiled here; launchers build with
-  Cargo when a tool is absent, and the tools job on main refills the caches.
+  Restore dispatch-ci, dispatch-host and the browser assessment fixture built from identical
+  inputs by the tools job of this ref or of main. Nothing is compiled here; launchers build
+  with Cargo when a tool is absent.
 inputs:
   fixture:
     description: Also restore the assessment fixture the browser suite uses.
@@ -20,6 +20,9 @@ outputs:
   fixture-hit:
     description: Whether the fixture was restored.
     value: ${{ steps.fixture.outputs.cache-hit }}
+  playwright-key:
+    description: Cache key of the Playwright browser, which follows the Playwright version.
+    value: ${{ steps.keys.outputs.playwright }}
 runs:
   using: composite
   steps:
@@ -34,6 +37,8 @@ runs:
         image="${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}"
         echo "tools=dispatch-tools-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/ci/**', 'backend/host/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
         echo "fixture=dispatch-fixture-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
+        playwright=$(jq -er '.packages["node_modules/playwright-core"].version' package-lock.json)
+        echo "playwright=dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-$playwright" >> "$GITHUB_OUTPUT"
         echo "DISPATCH_CI_TOOLS=$GITHUB_WORKSPACE/.ci-tools" >> "$GITHUB_ENV"
     - name: Restore the planner, gate and host tools
       id: tools

@@ -30,7 +30,7 @@ class SharedToolingTests(unittest.TestCase):
                 patch.object(runtime.subprocess, "check_call") as build, \
                 patch.object(runtime, "command", return_value=json.dumps({"target_directory": str(custom)})):
             self.assertEqual(runtime.host_binary.__wrapped__(), custom / "release/dispatch-host")
-            build.assert_called_once_with(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"],
+            build.assert_called_once_with(["cargo", "build", "--locked", "--release", "--workspace", "--bin", "dispatch-host"],
                                           cwd=self.root, stdout=sys.stderr)
 
     def test_source_verifier_prefers_a_restored_host_only_from_its_own_ci_cache(self):

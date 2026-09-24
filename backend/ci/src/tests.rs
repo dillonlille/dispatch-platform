@@ -697,12 +697,13 @@ fn both_repository_names_are_this_repository_and_nothing_else_is() {
 #[test]
 fn gate_requires_every_expected_job_in_every_mode() {
     for mode in ["full", "dashboard", "reuse"] {
-        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"browser":{"result":if mode=="reuse"{"skipped"}else{"success"}},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
+        let mut needs = json!({"plan":{"result":"success","outputs":{"mode":mode}},"build":{"result":"success"},"browser":{"result":if mode=="reuse"{"skipped"}else{"success"}},"benchmark":{"result":if mode=="full"{"success"}else{"skipped"}},"rust-advisories":{"result":"success"},"core":{"result":if mode=="full"{"success"}else{"skipped"}},"collectors":{"result":if mode=="full"{"success"}else{"skipped"}}});
         assert_eq!(gate(&needs).unwrap(), mode);
         for job in [
             "plan",
             "build",
             "browser",
+            "benchmark",
             "rust-advisories",
             "core",
             "collectors",
