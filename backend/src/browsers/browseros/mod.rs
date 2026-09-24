@@ -93,12 +93,24 @@ impl Runtime {
 
     /// Profile paths are derived by the host from its DSP registry. Only this
     /// profile and the egress socket are mounted; the lock stays outside.
+    ///
+    /// A browser that fails to start is started once more. Nothing has reached a
+    /// provider yet, the first attempt is fully reaped and its reason logged, and a
+    /// lasting fault still fails the second time.
     pub async fn start(
         &self,
         profile: &Path,
         mode: Mode,
         policy: NetworkPolicy,
     ) -> Result<Session> {
+        match self.launch(profile, mode, policy).await {
+            Err(error) if error.is(crate::Code::BrowserStartFailed) => {
+                self.launch(profile, mode, policy).await
+            }
+            result => result,
+        }
+    }
+    async fn launch(&self, profile: &Path, mode: Mode, policy: NetworkPolicy) -> Result<Session> {
         if matches!(mode, Mode::Windowed) {
             sandbox::trusted(Path::new("/usr/bin/Xvfb"), true)?;
         }
