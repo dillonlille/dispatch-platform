@@ -141,6 +141,10 @@ pub fn gate(needs: &Value) -> Result<&str> {
                 "success"
             },
         ),
+        (
+            "benchmark",
+            if mode == "full" { "success" } else { "skipped" },
+        ),
         ("rust-advisories", "success"),
         ("core", if mode == "full" { "success" } else { "skipped" }),
         (

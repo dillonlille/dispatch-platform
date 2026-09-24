@@ -126,7 +126,7 @@ def _bootstrap_verify(directory, commit=None):
 
 
 def prebuilt_host(root):
-    """The host a trusted branch built from identical inputs and CI restored into this checkout.
+    """The host the tools job of this ref or of main built from identical inputs, restored here.
 
     Only the workspace's own `.ci-tools` directory is trusted, and only on CI. This file is also
     installed alone under `management`, so the rule is kept here rather than imported.
@@ -149,8 +149,10 @@ def host_binary():
         restored = prebuilt_host(root)
         if restored is not None:
             return restored
-        subprocess.check_call(["cargo", "build", "--locked", "--release", "-p", "dispatch-host"], cwd=root,
-                              stdout=sys.stderr)
+        # Selecting the whole workspace resolves dependency features as the workspace build
+        # does, so right after one this reuses its output instead of compiling them again.
+        subprocess.check_call(["cargo", "build", "--locked", "--release", "--workspace", "--bin", "dispatch-host"],
+                              cwd=root, stdout=sys.stderr)
         metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version=1", cwd=root))
         return Path(metadata["target_directory"]) / "release/dispatch-host"
     require(tooling.name == "management", "Run host tooling from a checkout or installed management directory")

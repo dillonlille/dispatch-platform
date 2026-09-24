@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * The assessment fixture a trusted branch built from identical Rust inputs and CI restored
- * into this checkout, or undefined when the debug example must be built here. Only the
- * workspace's own `.ci-tools` directory is trusted, and only on CI; the same rule as
- * `tooling/ci_tool.py` applies to the planner and host tools.
+ * The assessment fixture the tools job of this ref or of main built from identical Rust
+ * inputs and CI restored into this checkout, or undefined when the debug example must be
+ * built here. Only the workspace's own `.ci-tools` directory is trusted, and only on CI;
+ * the same rule as `tooling/ci_tool.py` applies to the planner and host tools.
  */
 export function assessmentFixture(
   env: Record<string, string | undefined>,

@@ -1,11 +1,16 @@
 name: Isolated BrowserOS
 description: Install the pinned browser with the host isolation used by native verification.
+outputs:
+  package-hit:
+    description: Whether the pinned package came from the cache instead of a download.
+    value: ${{ steps.package.outputs.cache-hit }}
 runs:
   using: composite
   steps:
+    # Only main's cache workflow saves the package, so a PR never stores its own copy.
     - name: Restore the pinned browser package
       id: package
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
       with:
         path: ~/.cache/dispatch-browseros/browseros.deb
         key: dispatch-browseros-${{ hashFiles('tooling/browseros-release.json') }}

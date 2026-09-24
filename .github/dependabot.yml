@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # The types follow the Node version CI and the hosts run, not the newest Node.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
     groups:
       # Minor and patch releases arrive as one PR a week; majors stay apart.
       npm-minor-and-patch:
