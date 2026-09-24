@@ -44,10 +44,11 @@ const INVITATION: &str = "SELECT i.email,i.dsp_id dspId,d.name dspName,d.timezon
     JOIN roles r ON r.id=i.role_id AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NULL \
     AND i.expires_at>? AND d.status='active' AND d.environment=?";
 /// A used invitation still names its DSP and role, so opening its link again can point to Sign In.
+/// It does so only until the invitation would have expired, the same window an open one has.
 const ACCEPTED_INVITATION: &str = "SELECT i.email,d.name dspName,COALESCE(r.name,i.role) role \
     FROM invitations i JOIN dsps d ON d.id=i.dsp_id LEFT JOIN roles r ON r.id=i.role_id \
-    AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NOT NULL AND d.status='active' \
-    AND d.environment=?";
+    AND r.dsp_id=i.dsp_id WHERE i.hash=? AND i.used_at IS NOT NULL AND i.expires_at>? \
+    AND d.status='active' AND d.environment=?";
 
 /// What a queued message is for. Diagnostics joins it back to the invitation or account.
 enum MailContext<'a> {
