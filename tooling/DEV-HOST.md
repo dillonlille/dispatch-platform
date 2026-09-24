@@ -27,7 +27,15 @@ It keeps everything it makes, including its fixture data, in the worktree's scra
 directory `/tmp/dispatch-my-branch`. When its PR merges, stop it with
 `systemctl --user stop dispatch-preview@my-branch`, then remove the env file and that
 directory. The unit never restarts on its own: a crashed preview stays down instead of
-looping on a broken branch.
+looping on a broken branch. Under memory pressure a preview is the first thing the kernel
+kills. If it kills Dev's collection browser instead, `dispatch-dev.service` keeps serving and
+only that collection fails and retries.
+
+The host has 7.7 GB of RAM, and `/tmp` lives in it. `tooling/host/setup-swap.sh`, run once
+with sudo, adds swap: zram first (compressed RAM, half its size, priority 100), then a 2 GB
+`/swapfile` (priority 10) that is used only once zram is full. Swappiness stays at the
+default 60, so idle memory, including old `/tmp` files, is compressed before the file cache
+is dropped.
 
 - `.build/`: verified compiled runtime serving https://dispatchdev.dillonlille.com.
 - `config/`, `data/`, `dsps/`: private configuration and persistent state.

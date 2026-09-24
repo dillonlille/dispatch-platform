@@ -21,6 +21,8 @@ ExecStartPre=/usr/bin/mkdir -p -m 700 /tmp/dispatch-%i
 ExecStart=%h/.local/bin/npm run dev
 # A preview is disposable: a crashed one stays down rather than looping on a broken branch.
 Restart=no
+# And the first thing the kernel kills under memory pressure, before Dev or a collection.
+OOMScoreAdjust=500
 TimeoutStopSec=30
 KillMode=mixed
 UMask=0077

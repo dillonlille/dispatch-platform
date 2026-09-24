@@ -15,6 +15,11 @@ ExecStartPre=/usr/bin/python3 %h/dispatch-platform/dev/.runtime/management/updat
 ExecStart=%h/dispatch-platform/dev/.build/services/rust/dispatch-backend serve
 Restart=on-failure
 RestartSec=5
+# Under memory pressure the kernel kills the biggest process, which during a collection is
+# Dev's own browser. Only that collection then fails and retries; Dev keeps serving. Dev
+# also ranks below other user services (200), the lowest a user service can go.
+OOMPolicy=continue
+OOMScoreAdjust=100
 TimeoutStopSec=45
 KillMode=mixed
 UMask=0077
