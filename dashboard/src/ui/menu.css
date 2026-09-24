@@ -29,6 +29,10 @@
 .account-popover button:hover {
   background: var(--accent);
 }
+/* The item rule above sets the color, so a destructive item restates it. */
+.account-popover button.danger {
+  color: var(--destructive);
+}
 .view-role-menu .account-popover {
   inset: calc(100% + 6px) auto auto 0;
   width: max-content;
