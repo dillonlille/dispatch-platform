@@ -736,6 +736,58 @@ fn downloaded_size_digest_and_tag_ancestry_are_enforced() {
     }
 }
 #[test]
+fn a_failing_production_install_waits_longer_between_attempts() {
+    let f = Fixture::new(Environment::Production);
+    let latest = format!("https://api.github.com/repos/{REPOSITORY}/releases/latest");
+    let mut broken = f.production_release();
+    broken["assets"][0]["size"] = json!(1);
+    f.system.reply(&latest, vec![broken]);
+    let u = f.updater();
+    let retry = u.platform.join("production-update-retry.json");
+    for (failures, delay) in [(1, 60), (2, 120), (3, 240), (4, 480), (5, 600), (6, 600)] {
+        assert!(u.run_locked().is_err());
+        let record = io::read_json(&retry).unwrap();
+        assert_eq!(record["failures"], json!(failures));
+        assert_eq!(record["retryAt"], json!(f.system.now() + delay as f64));
+        // Until then a check asks GitHub nothing, so it cannot fail.
+        f.system.sleep(Duration::from_secs(delay - 1));
+        u.run_locked().unwrap();
+        f.system.sleep(Duration::from_secs(1));
+    }
+    f.assert_old();
+    // The next good attempt installs and forgets the failures.
+    f.system.reply(&latest, vec![f.production_release()]);
+    u.run_locked().unwrap();
+    assert!(!retry.exists());
+    assert_eq!(artifact::verify(&u.active, None).unwrap().version, "0.1.1");
+}
+#[test]
+fn production_hashes_its_runtime_only_when_there_may_be_something_to_do() {
+    let f = Fixture::new(Environment::Production);
+    let u = f.updater();
+    f.system.reply(
+        &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
+        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
+    );
+    f.system.reply(
+        &format!("https://github.com/{REPOSITORY}/releases/latest"),
+        vec![json!(format!(
+            "https://github.com/{REPOSITORY}/releases/tag/v0.1.0"
+        ))],
+    );
+    u.run_locked().unwrap();
+    // A changed file goes unhashed while the last full check is under ten minutes old, then
+    // the next full check finds it.
+    fs::write(u.active.join("dashboard/index.html"), "changed").unwrap();
+    u.run_locked().unwrap();
+    f.system.sleep(Duration::from_secs(600));
+    let error = u.run_locked().unwrap_err().to_string();
+    assert!(
+        error.contains("Artifact file verification failed"),
+        "{error}"
+    );
+}
+#[test]
 fn installed_management_survives_old_runtime_and_source_rollback() {
     let f = Fixture::new(Environment::Dev);
     let u = f.updater();
