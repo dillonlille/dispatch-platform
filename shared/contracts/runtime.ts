@@ -81,12 +81,6 @@ export const sessionSchema = z.object({
   environment,
   release: text,
   providerMode: z.enum(['fixture', 'native']),
-  security: z.object({
-    enrolled: z.boolean(),
-    required: z.boolean(),
-    verified: z.boolean(),
-    recent: z.boolean(),
-  }),
 }) satisfies z.ZodType<SessionView>;
 const viewRole = z.object({ id: text, name: text, owner: z.boolean() });
 const viewSchema = z.object({

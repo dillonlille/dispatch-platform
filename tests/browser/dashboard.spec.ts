@@ -303,10 +303,11 @@ test('archived account tabs preserve names and appearance preferences', async ({
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
+  await page.getByRole('button', { name: 'Change password', exact: true }).click();
   await page.getByLabel('Current password', { exact: true }).fill(demo.password);
   await page.getByLabel('New password', { exact: true }).fill('Different-password-1!');
-  await page.getByLabel('Confirm new password', { exact: true }).fill('Different-password-2!');
-  await page.getByRole('button', { name: 'Change password', exact: true }).click();
+  await page.getByLabel('Confirm password', { exact: true }).fill('Different-password-2!');
+  await page.getByRole('button', { name: 'Save password', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('The new passwords must match.');
 });
 

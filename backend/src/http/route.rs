@@ -80,12 +80,6 @@ impl Grant for Session {
             let sent = input.header("x-csrf-token");
             ensure(crypto::equal(&auth.csrf, sent), "csrf_required", 403)?;
         }
-        if input.path != "/api/session"
-            && input.path != "/api/auth/logout"
-            && !input.path.starts_with("/api/auth/security/")
-        {
-            db.ensure_mfa(&auth)?;
-        }
         Ok(auth)
     }
 }
@@ -98,9 +92,6 @@ impl Grant for PlatformOwner {
         let auth = Session.authorize(db, input)?;
         let owner = auth.user.platform_owner;
         ensure(owner, "platform_owner_required", 403)?;
-        if input.method == Method::POST {
-            db.ensure_recent(&auth)?;
-        }
         Ok(auth)
     }
 }
@@ -111,17 +102,6 @@ impl Grant for Dsp {
     }
     fn authorize(self, db: &Store, input: &Input) -> Result<Context> {
         let auth = Session.authorize(db, input)?;
-        if input.method == Method::POST
-            && [
-                "connections.manage",
-                "members.manage",
-                "members.invite",
-                "roles.manage",
-            ]
-            .contains(&self.0)
-        {
-            db.ensure_recent(&auth)?;
-        }
         let context = db.from_view(&auth, input.header("x-dispatch-view"), self.0)?;
         input
             .trace
