@@ -3,22 +3,20 @@
   --meal-gap-border: #d35c40;
   --meal-gap-background: #ffede7;
   margin-top: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
 }
 .meal-heading {
   border-bottom: 1px solid var(--border);
 }
 .meal-page > .error,
 .meal-load-notice {
-  margin: 12px 18px;
+  margin: 12px 0;
 }
 .meal-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 16px;
-  padding: 12px 18px;
+  padding: 12px 0;
 }
 .meal-toolbar .search {
   width: 290px;
@@ -59,7 +57,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   margin: 0;
-  padding: 0 18px 12px;
+  padding: 0 0 12px;
   font-size: 13px;
   color: var(--muted-foreground);
 }
@@ -70,7 +68,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 4px 6px;
+  margin: 0 0 6px;
   padding: 10px 14px;
   border: 1px solid var(--warning-border);
   border-radius: var(--radius);
@@ -101,9 +99,15 @@
   text-align: left;
   white-space: nowrap;
 }
+/* 6px absorbs the expand chevron's overhang so it sits on the page edge. */
+.meal-table th:first-child,
+.meal-table td:first-child {
+  padding-left: 6px;
+}
 .meal-table th:last-child,
 .meal-table td:last-child {
   border-right: 0;
+  padding-right: 0;
 }
 .meal-table tbody tr:last-child > * {
   border-bottom: 0;
@@ -379,7 +383,7 @@
     margin-top: 18px;
   }
   .meal-toolbar {
-    padding: 12px;
+    padding: 12px 0;
     gap: 10px;
   }
   .meal-toolbar .search {

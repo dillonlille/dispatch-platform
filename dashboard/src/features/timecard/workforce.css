@@ -9,18 +9,16 @@
 .paycom-data-view > button {
   align-self: flex-start;
 }
+/* Tables fill the page: no card border, and their edges align with the tabs above. */
 .paycom-data-table {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
 }
 .paycom-table-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 18px;
+  padding: 18px 0;
 }
 .paycom-table-heading > span {
   color: var(--muted-foreground);
