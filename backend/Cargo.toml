@@ -27,7 +27,11 @@ icu_collator = "2"
 sha2 = "0.11"
 subtle = "2"
 url = "2"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "rustls-tls"] }
+scraper = { version = "0.27", default-features = false }
+ego-tree = "0.11"
+html5ever = "0.39"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "rustls-tls"] }
 webauthn-rs = { version = "0.5.5", default-features = false, features = ["danger-allow-state-serialisation"] }
 

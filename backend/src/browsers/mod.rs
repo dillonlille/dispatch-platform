@@ -44,6 +44,8 @@ pub struct Session {
     run: PathBuf,
     process_id: std::sync::atomic::AtomicU32,
     observed_pss: std::sync::atomic::AtomicU64,
+    /// Its driver closed the browser before the session ended.
+    browser_exited: std::sync::atomic::AtomicBool,
     status: AtomicU8, // 0 starting, 1 ready, 2 challenge, 3 closed
     worker: AsyncMutex<Option<Box<dyn Driver>>>,
     commands: tokio::sync::Semaphore,
@@ -125,9 +127,7 @@ impl Manager {
         let sessions = self.sessions.lock().expect("browser registry");
         admission::Admission::new(
             admission::available(),
-            sessions
-                .values()
-                .map(|session| session.observed_pss.load(Ordering::Acquire)),
+            sessions.values().filter_map(|session| session.resident()),
         )
     }
     pub fn active(&self) -> usize {
@@ -164,6 +164,16 @@ impl Session {
         if memory.complete {
             self.observed_pss.store(memory.pss, Ordering::Release);
         }
+    }
+    /// The browser left while the session continues, as a collection reading over
+    /// HTTP does; it no longer needs memory held for it.
+    pub fn browser_exited(&self) {
+        self.browser_exited.store(true, Ordering::Release);
+    }
+    /// What its browser last used, while it has one.
+    fn resident(&self) -> Option<u64> {
+        (!self.browser_exited.load(Ordering::Acquire))
+            .then(|| self.observed_pss.load(Ordering::Acquire))
     }
     pub fn process_id(&self) -> Option<u32> {
         let id = self.process_id.load(Ordering::Acquire);
@@ -259,6 +269,7 @@ impl Session {
         owner: &str,
         metrics: &super::job_metrics::Recorder,
         request: &Value,
+        attempt: i64,
     ) -> Result<Collected> {
         ensure(self.ready(), "verification_required", 409)?;
         ensure(
@@ -278,6 +289,7 @@ impl Session {
             timezone: &self.timezone,
             metrics,
             request,
+            attempt,
         };
         let response = worker.collect(&run);
         tokio::select! {
@@ -486,6 +498,7 @@ impl State {
             run: run.clone(),
             process_id: std::sync::atomic::AtomicU32::new(0),
             observed_pss: std::sync::atomic::AtomicU64::new(0),
+            browser_exited: std::sync::atomic::AtomicBool::new(false),
             status: AtomicU8::new(0),
             worker: AsyncMutex::new(None),
             commands: tokio::sync::Semaphore::new(32),
@@ -514,9 +527,7 @@ impl State {
             if !session.fixture {
                 let admission = admission::Admission::new(
                     admission::available(),
-                    sessions
-                        .values()
-                        .map(|s| s.observed_pss.load(Ordering::Acquire)),
+                    sessions.values().filter_map(|s| s.resident()),
                 );
                 ensure(admission.can_start, "browser_memory_busy", 503)?;
             }
