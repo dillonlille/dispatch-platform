@@ -6,18 +6,15 @@ import {
   type Role,
 } from '../../../../shared/contracts/index.js';
 import { Modal } from '../../ui/index.js';
-import { can, permissionLabels } from '../../app/permissions.js';
+import {
+  can,
+  impliedPermissions as implied,
+  permissionGroups as groups,
+  permissionLabels,
+} from '../../app/permissions.js';
 import { useAction } from '../../app/useAction.js';
-import { saveTeamRole, removeRole } from '../../app/endpoints.js';
+import { saveTeamRole } from '../../app/endpoints.js';
 
-const groups: [string, Permission[]][] = [
-  ['Timecard', ['timecard.view', 'timecard.manage']],
-  ['Collections', ['collections.run']],
-  ['Connections', ['connections.manage']],
-  ['Team', ['members.invite', 'members.manage', 'roles.manage']],
-  ['DSP', ['settings.manage']],
-];
-const implied: Partial<Record<Permission, Permission>> = { 'timecard.manage': 'timecard.view' };
 export function RoleSheet({
   view,
   role,
@@ -31,9 +28,16 @@ export function RoleSheet({
 }) {
   const [name, setName] = useState(role?.name ?? '');
   const [chosen, setChosen] = useState<Permission[]>(role?.permissions ?? []);
+  const [confirming, setConfirming] = useState(false);
+  const ordered = (permissions: Permission[]) =>
+    allPermissions.filter((p) => permissions.includes(p));
+  const dirty =
+    name !== (role?.name ?? '') ||
+    ordered(chosen).join() !== ordered(role?.permissions ?? []).join();
+  // Edits leave only through Save or Discard; closing the tab drops them silently.
+  const leave = () => (dirty ? setConfirming(true) : close());
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
-  const inUse = role ? (role.members ?? 0) + (role.invitations ?? 0) > 0 : false;
   const save = useAction(
     async () => {
       await saveTeamRole(role?.id, {
@@ -45,14 +49,6 @@ export function RoleSheet({
     },
     { success: role ? 'Role updated' : 'Role created' },
   );
-  const remove = useAction(
-    async () => {
-      await removeRole(role!.id);
-      close();
-      await saved(false);
-    },
-    { success: 'Role deleted' },
-  );
   function toggle(permission: Permission, on: boolean) {
     setChosen((current) => {
       const next = current.filter((p) => p !== permission);
@@ -62,7 +58,7 @@ export function RoleSheet({
     });
   }
   return (
-    <Modal variant="sheet" title={role ? `Edit ${role.name}` : 'Create role'} onClose={close}>
+    <Modal variant="sheet" title={role ? `Edit ${role.name}` : 'Create role'} onClose={leave}>
       <form
         className="role-form"
         onSubmit={(event) => {
@@ -114,24 +110,32 @@ export function RoleSheet({
           </fieldset>
         ))}
         <div className="form-actions">
-          {role ? (
-            <button
-              type="button"
-              className="danger"
-              disabled={inUse}
-              title={inUse ? 'Move this role’s members and pending invitations first.' : undefined}
-              onClick={() => void remove.run()}
-            >
-              Delete role
-            </button>
-          ) : (
-            <button type="button" onClick={close}>
-              Cancel
-            </button>
-          )}
+          <button type="button" onClick={leave}>
+            Cancel
+          </button>
           <button className="primary">{role ? 'Save role' : 'Create role'}</button>
         </div>
       </form>
+      {confirming && (
+        <Modal title="Save changes?" dismissible={false} onClose={() => {}}>
+          <p>This role has unsaved changes.</p>
+          <div className="form-actions">
+            <button type="button" onClick={close}>
+              Discard changes
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={save.busy || !name.trim()}
+              onClick={async () => {
+                if (!(await save.run())) setConfirming(false);
+              }}
+            >
+              Save changes
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

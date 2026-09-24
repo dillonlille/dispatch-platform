@@ -274,4 +274,6 @@ test('inventory history paginates and waiting reads reauthorize after a role cha
   const withdrawn = await pending;
   assert.equal(withdrawn.status, 409);
   assert.equal(withdrawn.value.error, 'dsp_view_expired');
+  await member.select(north.id);
+  assert.equal((await member.get(route)).status, 403);
 });

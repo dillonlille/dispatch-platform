@@ -65,6 +65,7 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
     preload: loadUniforms,
     icon: Shirt,
     nav: true,
+    permission: ({ view }) => can(view, 'uniforms.view'),
     render: ({ view }) => <UniformInventoryPage key={view.token} view={view} />,
   },
   overview: {

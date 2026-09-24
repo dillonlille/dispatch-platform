@@ -25,7 +25,13 @@ import { useAction } from '../../app/useAction.js';
 import { RoleSheet } from './RoleSheet.js';
 import { RolesTab } from './RolesTab.js';
 import { assignable } from './assignable.js';
-import { useMembers, inviteMember, setMemberRole, useRoles } from '../../app/endpoints.js';
+import {
+  useMembers,
+  inviteMember,
+  setMemberRole,
+  useRoles,
+  removeRole,
+} from '../../app/endpoints.js';
 
 type Invitation = { email: string; role: string; expiresAt: number; accepted: boolean };
 const actions = <span className="sr-only">Actions</span>;
@@ -43,6 +49,16 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
   );
   const roles = useRoles(tab === 'roles' ? performancePolicy.teamPollMs : -1);
   const [roleEditor, setRoleEditor] = useState<Role | 'new'>();
+  const [removingRole, setRemovingRole] = useState<Role>();
+  const deleteRole = useAction(
+    async (role: Role) => {
+      await removeRole(role.id);
+      setRemovingRole(undefined);
+      roles.refresh();
+      refresh();
+    },
+    { success: 'Role deleted' },
+  );
   const grantable = roles.data?.filter((role) => assignable(view, role)) ?? [];
   const [search, setSearch] = useUpdateState('team-search', '');
   const [inviting, setInviting] = useState(false);
@@ -239,7 +255,9 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
           </DataState>
         </>
       )}
-      {tab === 'roles' && <RolesTab view={view} roles={roles.data} edit={setRoleEditor} />}
+      {tab === 'roles' && (
+        <RolesTab view={view} roles={roles.data} edit={setRoleEditor} remove={setRemovingRole} />
+      )}
       {roleEditor && (
         <RoleSheet
           view={view}
@@ -350,6 +368,18 @@ export function TeamPage({ view, reopen }: { view: DspView; reopen: () => Promis
             </div>
           </form>
         </Modal>
+      )}
+      {removingRole && (
+        <ConfirmDialog
+          title="Delete role"
+          confirm="Delete role"
+          tone="danger"
+          busy={deleteRole.busy}
+          onConfirm={() => void deleteRole.run(removingRole)}
+          onCancel={() => setRemovingRole(undefined)}
+        >
+          Delete {removingRole.name}?
+        </ConfirmDialog>
       )}
       {removing && (
         <ConfirmDialog

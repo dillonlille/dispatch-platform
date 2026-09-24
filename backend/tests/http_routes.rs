@@ -56,9 +56,9 @@ const INVENTORY: &[Row] = &[
     ("GET", "/api/platform/diagnostics", PlatformOwner, Read, false),
     ("POST", "/api/platform/diagnostics", PlatformOwner, Write, false),
 
-    ("GET", "/api/dsp/uniforms", Dsp("access"), Read, false),
-    ("GET", "/api/dsp/uniforms/updates", Dsp("access"), Async, false),
-    ("GET", "/api/dsp/uniforms/history", Dsp("access"), Read, false),
+    ("GET", "/api/dsp/uniforms", Dsp("uniforms.view"), Read, false),
+    ("GET", "/api/dsp/uniforms/updates", Dsp("uniforms.view"), Async, false),
+    ("GET", "/api/dsp/uniforms/history", Dsp("uniforms.view"), Read, false),
     ("POST", "/api/dsp/uniforms/initialize", Dsp("uniforms.manage"), Write, false),
     ("POST", "/api/dsp/uniforms", Dsp("uniforms.manage"), Write, false),
     ("POST", "/api/dsp/uniforms/{id}", Dsp("uniforms.manage"), Write, false),

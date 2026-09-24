@@ -4,8 +4,9 @@ export const can = (view: DspView | undefined, permission: Permission) =>
   Boolean(view && (view.role.owner || view.permissions.includes(permission)));
 
 export const permissionLabels: Record<Permission, string> = {
+  'uniforms.view': 'View Uniform Inventory',
   'uniforms.adjust': 'Adjust Uniform Inventory',
-  'uniforms.manage': 'Manage Uniforms & Sizes',
+  'uniforms.manage': 'Manage Uniform Inventory',
   'timecard.view': 'View Timecard',
   'timecard.manage': 'Manage Timecard',
   'collections.run': 'Run Collections',
@@ -14,4 +15,19 @@ export const permissionLabels: Record<Permission, string> = {
   'members.manage': 'Manage Members',
   'roles.manage': 'Manage Roles',
   'settings.manage': 'Manage DSP Settings',
+};
+/** The role sheet's sections. Every permission in the catalog belongs to exactly one. */
+export const permissionGroups: [string, Permission[]][] = [
+  ['Timecard', ['timecard.view', 'timecard.manage']],
+  ['Uniform Inventory', ['uniforms.view', 'uniforms.adjust', 'uniforms.manage']],
+  ['Collections', ['collections.run']],
+  ['Connections', ['connections.manage']],
+  ['Team', ['members.invite', 'members.manage', 'roles.manage']],
+  ['DSP', ['settings.manage']],
+];
+/** Granting the key includes its value, mirroring `IMPLIED` in `backend/src/roles.rs`. */
+export const impliedPermissions: Partial<Record<Permission, Permission>> = {
+  'timecard.manage': 'timecard.view',
+  'uniforms.adjust': 'uniforms.view',
+  'uniforms.manage': 'uniforms.view',
 };

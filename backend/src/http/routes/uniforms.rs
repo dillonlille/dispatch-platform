@@ -6,16 +6,17 @@ use crate::{
         input::{Input, Reply},
         route::{Dsp, Grant, Member, Route, async_get, read, write},
     },
-    roles, validate as v,
+    validate as v,
 };
 use std::{sync::Arc, time::Duration};
 
+const VIEW: Dsp = Dsp("uniforms.view");
 const MANAGE: Dsp = Dsp("uniforms.manage");
 pub fn routes() -> Vec<Route> {
     vec![
-        read("/api/dsp/uniforms", Dsp(roles::ACCESS), inventory),
-        async_get("/api/dsp/uniforms/updates", Dsp(roles::ACCESS), updates),
-        read("/api/dsp/uniforms/history", Dsp(roles::ACCESS), history),
+        read("/api/dsp/uniforms", VIEW, inventory),
+        async_get("/api/dsp/uniforms/updates", VIEW, updates),
+        read("/api/dsp/uniforms/history", VIEW, history),
         write("/api/dsp/uniforms/initialize", MANAGE, initialize),
         write("/api/dsp/uniforms", MANAGE, create),
         write("/api/dsp/uniforms/{id}", MANAGE, update),

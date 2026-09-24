@@ -75,7 +75,8 @@
   gap: 16px;
 }
 
-.side-sheet .modal-heading {
+/* Direct children only: a dialog stacked inside the sheet keeps its own layout. */
+.side-sheet > .modal-heading {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -83,22 +84,22 @@
   padding: 30px 24px 20px;
   margin: 0;
 }
-.side-sheet .modal-heading h2 {
+.side-sheet > .modal-heading h2 {
   font-size: 16px;
 }
-.side-sheet .panel-body {
+.side-sheet > .panel-body {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
-.side-sheet .panel-body > form {
+.side-sheet > .panel-body > form {
   display: flex;
   flex-direction: column;
   flex: 1;
   margin-top: 0;
 }
-.side-sheet .panel-body > form > .form-actions {
+.side-sheet > .panel-body > form > .form-actions {
   margin-top: auto;
   padding-top: 24px;
 }
