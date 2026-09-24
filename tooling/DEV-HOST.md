@@ -1,7 +1,10 @@
 # Dev host layout
 
 The live checkout is `/home/thepickle/dispatch-platform/dev`, on branch `main`. Its
-updater installs each commit merged into `main` once that push's checks pass.
+updater installs each commit merged into `main` once its checks pass. It installs the
+build of the merge queue's run, which tested exactly that commit before GitHub pushed it,
+without waiting for the push run that only reuses it. A commit that reached `main` another
+way, or whose queue build has expired, waits for its push run's build instead.
 Development changes belong in isolated worktrees under
 `/home/thepickle/dispatch-platform/worktrees`; keep the live checkout clean.
 
@@ -42,7 +45,9 @@ Existing systemd units keep calling `update-dev.py`. That launcher delegates to
 updater verifies and activates the new artifact, then installs the launchers.
 Their bootstrap verifier copies the Rust manager only from the completed, healthy
 activation named by the receipt. Subsequent Dev updates refresh the manager after
-successful activation; a failed self-check retains the working manager.
+successful activation, and only then; a failed self-check retains the working manager.
+The launcher passes on what the manager reports, such as each install, to the journal.
+Installed launchers change only with an explicit `--install-management`.
 
 Artifact format 3, schema 3, activation receipts and private-state exclusions stay
 compatible. A rollback to a runtime predating Rust management keeps the installed
@@ -71,6 +76,15 @@ python3 .runtime/management/update-dev.py --root "$PWD" --verify
 python3 .runtime/management/update-dev.py --root "$PWD" --verify-management
 systemctl --user status dispatch-dev.service dispatch-dev-update.timer
 curl --fail https://dispatchdev.dillonlille.com/api/health
+```
+
+To wait until a merged commit is live, run the installed manager directly. It returns once
+the updater recorded that commit, or a later one containing it, ready; the checkout is clean
+on it; the recorded runtime is installed; and the service is active and healthy. It gives up
+after `--timeout` seconds, 900 by default, with the updater's last status:
+
+```bash
+.runtime/management/dispatch-host host dev --root "$PWD" --wait <commit>
 ```
 
 Production uses `host production` through `management/update-production.py` and

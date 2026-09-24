@@ -23,7 +23,7 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "Dispatch host management: capabilities | release --help | artifact <inventory|write|verify|unpack|retarget|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management]"
+            "Dispatch host management: capabilities | release --help | artifact <inventory|write|verify|unpack|retarget|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management] | dev --root PATH --wait COMMIT [--timeout SECONDS]"
         );
         return Ok(());
     }
@@ -77,6 +77,7 @@ pub fn run(args: &[String]) -> Result<()> {
             };
             let mut root = None;
             let mut mode = "update";
+            let (mut commit, mut timeout) = (None, None);
             let mut iter = rest.iter();
             while let Some(arg) = iter.next() {
                 match *arg {
@@ -88,14 +89,32 @@ pub fn run(args: &[String]) -> Result<()> {
                         require(mode == "update", "Choose one operation")?;
                         mode = arg;
                     }
+                    "--wait" => {
+                        require(mode == "update", "Choose one operation")?;
+                        mode = arg;
+                        commit = Some(*iter.next().ok_or("Commit required")?);
+                    }
+                    "--timeout" => {
+                        require(timeout.is_none(), "Duplicate timeout")?;
+                        timeout = Some(iter.next().ok_or("Timeout required")?.parse::<u64>()?);
+                    }
                     _ => return Err("Unknown updater argument".into()),
                 }
             }
+            require(
+                timeout.is_none() || mode == "--wait",
+                "A timeout applies only to --wait",
+            )?;
             let updater = Updater::new(
                 Path::new(root.ok_or("Root required")?),
                 environment,
                 &Native,
             )?;
+            if mode == "--wait" {
+                let live = updater.wait(commit.unwrap_or(""), timeout.unwrap_or(900))?;
+                println!("{live}");
+                return Ok(());
+            }
             match mode {
                 "--verify" => {
                     updater.verify()?;

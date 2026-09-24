@@ -33,6 +33,13 @@ impl Environment {
         }
     }
 }
+/// What the checks say about a commit Dev could install.
+enum Checked {
+    /// A passed run and the build it published.
+    Passed(Value, Value),
+    /// The run still deciding, or the one that failed, if there is one.
+    Pending(Value),
+}
 pub struct Updater<'a> {
     pub root: PathBuf,
     pub active: PathBuf,
@@ -393,11 +400,64 @@ impl<'a> Updater<'a> {
             Environment::Production => self.update_production(),
         }
     }
+    /// Wait until Dev runs `commit`, or a later commit of its branch that contains it, and
+    /// confirm it is live: recorded ready, the checkout clean on it, the recorded runtime
+    /// installed, the service active and healthy.
+    pub fn wait(&self, commit: &str, timeout: u64) -> Result<Value> {
+        require(
+            self.environment == Environment::Dev,
+            "Only Dev follows commits",
+        )?;
+        require(artifact::hex(commit, 40), "Full commit required")?;
+        let deadline = self.system.monotonic() + Duration::from_secs(timeout);
+        loop {
+            let last = match self.live(commit) {
+                Ok(Some(live)) => return Ok(live),
+                Ok(None) => io::read_json(&self.status_file)
+                    .map_or_else(|error| error.to_string(), |status| status.to_string()),
+                Err(error) => error.to_string(),
+            };
+            if self.system.monotonic() >= deadline {
+                return Err(
+                    format!("Dev did not install {commit} within {timeout}s: {last}").into(),
+                );
+            }
+            self.system.sleep(Duration::from_secs(5));
+        }
+    }
+    fn live(&self, commit: &str) -> Result<Option<Value>> {
+        let status = io::read_json(&self.status_file)?;
+        let installed = io::text(&status, "commit");
+        if status["status"] != "ready"
+            || !artifact::hex(&installed, 40)
+            || self
+                .git(&["merge-base", "--is-ancestor", commit, &installed])
+                .is_err()
+        {
+            return Ok(None);
+        }
+        let manifest = self.verify()?;
+        require(
+            self.git(&["rev-parse", "HEAD"])? == installed,
+            "Checkout differs from the installed commit",
+        )?;
+        require(
+            status["digest"] == manifest.digest,
+            "Runtime differs from the one the updater installed",
+        )?;
+        self.service("is-active")?;
+        require(
+            self.healthy(&manifest.digest, 10),
+            "Dev is not healthy on its runtime",
+        )?;
+        Ok(Some(
+            json!({"commit":installed,"digest":manifest.digest,"status":"live"}),
+        ))
+    }
     fn update_dev(&self) -> Result<()> {
         self.clean_checkout()?;
         let branch = self.tracked_branch()?;
         let tracked = format!("origin/{branch}");
-        management::refresh(self)?;
         self.git(&["fetch", "origin", branch])?;
         let commit = self.git(&["rev-parse", &tracked])?;
         let current = self.git(&["rev-parse", "HEAD"])?;
@@ -405,18 +465,8 @@ impl<'a> Updater<'a> {
             return Ok(());
         }
         let current_manifest = artifact::verify(&self.active, Some(&current))?;
-        let runs = io::github(
-            self.system,
-            &format!(
-                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
-            ),
-        )?;
-        let run =
-            releases::latest_run(&runs["workflow_runs"], &commit, "push", Some(branch), false)
-                .cloned()
-                .unwrap_or(Value::Null);
-        if !releases::passed(&run) {
-            return self.status(
+        let waiting = |run: &Value| {
+            self.status(
                 if run["status"] == "completed" {
                     "checks_failed"
                 } else {
@@ -424,52 +474,110 @@ impl<'a> Updater<'a> {
                 },
                 &current_manifest,
                 json!({"commit":current}),
-            );
+            )
+        };
+        let (run, record) = match self.validated_build(branch, &commit)? {
+            Checked::Passed(run, record) => (run, record),
+            Checked::Pending(run) => return waiting(&run),
+        };
+        let temp = tempfile::Builder::new()
+            .prefix("update-")
+            .tempdir_in(&self.runtime)?;
+        releases::download_run(self.system, &record, temp.path(), &commit, None)?;
+        self.git(&["fetch", "origin", branch])?;
+        if self.git(&["rev-parse", &tracked])? != commit {
+            return waiting(&Value::Null);
         }
+        // A rerun can revoke validation during a download, even when the head stays put.
+        match self.validated_build(branch, &commit)? {
+            Checked::Passed(again, _) if again == run => {}
+            _ => return waiting(&Value::Null),
+        }
+        self.activate(&temp.path().join("candidate"), &commit)?;
+        // Only after an install: hashing the manager and the runtime on every tick cost
+        // more than the rest of the check together.
+        management::refresh(self)?;
+        eprintln!(
+            "Installed {commit} from the {} run {}",
+            io::text(&run, "event"),
+            run["id"]
+        );
+        Ok(())
+    }
+    /// A passed run of the checks for `commit` and the build it published, or the run still
+    /// deciding, if any. The merge queue tests exactly the commit GitHub then pushes to main,
+    /// whose push run only reuses those bytes, so a queue run decides when there is one. A
+    /// commit that reached the branch another way, or whose queue build expired, waits for
+    /// its push run.
+    fn validated_build(&self, branch: &str, commit: &str) -> Result<Checked> {
+        let queued = io::github(
+            self.system,
+            &format!(
+                "actions/workflows/checks.yml/runs?event=merge_group&head_sha={commit}&per_page=20"
+            ),
+        )?;
+        let prefix = format!("gh-readonly-queue/{branch}/");
+        let groups: Vec<Value> = queued["workflow_runs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|run| {
+                run["head_branch"]
+                    .as_str()
+                    .is_some_and(|name| name.starts_with(&prefix))
+            })
+            .cloned()
+            .collect();
+        if let Some(run) =
+            releases::latest_run(&Value::Array(groups), commit, "merge_group", None, false)
+        {
+            if !releases::passed(run) {
+                return Ok(Checked::Pending(run.clone()));
+            }
+            let name = format!(
+                "dispatch-pr-build-{}-{}",
+                run["id"].as_u64().ok_or("Invalid workflow id")?,
+                run["run_attempt"].as_u64().unwrap_or(1)
+            );
+            if let Some(record) = self.build(run, &name)? {
+                return Ok(Checked::Passed(run.clone(), record));
+            }
+        }
+        let pushed = io::github(
+            self.system,
+            &format!(
+                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
+            ),
+        )?;
+        let run = releases::latest_run(
+            &pushed["workflow_runs"],
+            commit,
+            "push",
+            Some(branch),
+            false,
+        )
+        .cloned()
+        .unwrap_or(Value::Null);
+        if !releases::passed(&run) {
+            return Ok(Checked::Pending(run));
+        }
+        let record = self
+            .build(&run, &format!("dispatch-{branch}-{commit}"))?
+            .ok_or("Verified Dev artifact unavailable")?;
+        Ok(Checked::Passed(run, record))
+    }
+    /// The unexpired build `name` that `run` published.
+    fn build(&self, run: &Value, name: &str) -> Result<Option<Value>> {
         let id = run["id"].as_u64().ok_or("Invalid workflow id")?;
         let artifacts = io::github(self.system, &format!("actions/runs/{id}/artifacts"))?;
         let matches: Vec<_> = artifacts["artifacts"]
             .as_array()
             .ok_or("Missing artifacts")?
             .iter()
-            .filter(|a| a["name"] == format!("dispatch-{branch}-{commit}") && a["expired"] == false)
+            .filter(|a| a["name"] == name && a["expired"] == false)
             .collect();
-        require(matches.len() == 1, "Verified Dev artifact unavailable")?;
-        let temp = tempfile::Builder::new()
-            .prefix("update-")
-            .tempdir_in(&self.runtime)?;
-        releases::download_run(self.system, matches[0], temp.path(), &commit, None)?;
-        self.git(&["fetch", "origin", branch])?;
-        if self.git(&["rev-parse", &tracked])? != commit {
-            return self.status(
-                "waiting_for_checks",
-                &current_manifest,
-                json!({"commit":current}),
-            );
-        }
-        // A rerun can revoke validation during a download, even when the head stays put.
-        let recheck = io::github(
-            self.system,
-            &format!(
-                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
-            ),
-        )?;
-        if releases::latest_run(
-            &recheck["workflow_runs"],
-            &commit,
-            "push",
-            Some(branch),
-            false,
-        ) != Some(&run)
-        {
-            return self.status(
-                "waiting_for_checks",
-                &current_manifest,
-                json!({"commit":current}),
-            );
-        }
-        self.activate(&temp.path().join("candidate"), &commit)?;
-        management::refresh(self)
+        require(matches.len() <= 1, "Verified Dev artifact is ambiguous")?;
+        Ok(matches.first().map(|record| (*record).clone()))
     }
     fn settled(&self, current: &Manifest) -> bool {
         let Ok(check) = io::read_json(&self.platform.join("production-release-check.json")) else {

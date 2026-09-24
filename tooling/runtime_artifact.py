@@ -210,6 +210,8 @@ def host(*args, value=None):
         process.wait()
         raise
     require(process.returncode == 0, stderr.strip() or "Host management failed")
+    # What the host reports alongside a success, such as an install, reaches the journal.
+    sys.stderr.write(stderr)
     return json.loads(stdout)
 
 
