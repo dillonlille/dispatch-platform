@@ -17,14 +17,14 @@ test('custom roles gate tenant APIs and never grant more than the actor holds', 
   assert.deepEqual(
     (await roles()).map((role) => [role.name, role.owner, role.permissions.length]),
     [
-      ['Owner', true, 10],
-      ['Manager', false, 2],
-      ['Member', false, 1],
+      ['Owner', true, 11],
+      ['Manager', false, 4],
+      ['Member', false, 2],
     ],
   );
 
   let view = await member.select(north.id);
-  assert.deepEqual(view.permissions, ['timecard.view']);
+  assert.deepEqual(view.permissions, ['uniforms.view', 'timecard.view']);
   assert.deepEqual(view.role, { id: (await named('Member')).id, name: 'Member', owner: false });
   assert.equal((await member.get('/api/dsp/employees')).status, 200);
   for (const url of ['/api/dsp/jobs', '/api/dsp/roles', '/api/dsp/members'])
@@ -129,7 +129,7 @@ test('memberships written without a role id resolve through the legacy role afte
   });
   await f.start();
   const member = await f.client('member@dispatch.test');
-  assert.deepEqual((await member.select(north.id)).permissions, ['timecard.view']);
+  assert.deepEqual((await member.select(north.id)).permissions, ['uniforms.view', 'timecard.view']);
   const rows = f.database('data/platform/accounts.sqlite', (db) =>
     db
       .prepare(

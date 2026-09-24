@@ -6,18 +6,15 @@ import {
   type Role,
 } from '../../../../shared/contracts/index.js';
 import { Modal } from '../../ui/index.js';
-import { can, permissionLabels } from '../../app/permissions.js';
+import {
+  can,
+  impliedPermissions as implied,
+  permissionGroups as groups,
+  permissionLabels,
+} from '../../app/permissions.js';
 import { useAction } from '../../app/useAction.js';
 import { saveTeamRole, removeRole } from '../../app/endpoints.js';
 
-const groups: [string, Permission[]][] = [
-  ['Timecard', ['timecard.view', 'timecard.manage']],
-  ['Collections', ['collections.run']],
-  ['Connections', ['connections.manage']],
-  ['Team', ['members.invite', 'members.manage', 'roles.manage']],
-  ['DSP', ['settings.manage']],
-];
-const implied: Partial<Record<Permission, Permission>> = { 'timecard.manage': 'timecard.view' };
 export function RoleSheet({
   view,
   role,

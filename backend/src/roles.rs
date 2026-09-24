@@ -20,6 +20,7 @@ const ROLE_USES: &str = "SELECT (SELECT count(*) FROM memberships WHERE role_id=
 // Every permission a DSP owner can grant. Owners implicitly hold all of them,
 // so additions here reach owners without touching stored roles.
 pub const PERMISSIONS: &[&str] = &[
+    "uniforms.view",
     "uniforms.adjust",
     "uniforms.manage",
     "timecard.view",
@@ -33,10 +34,23 @@ pub const PERMISSIONS: &[&str] = &[
 ];
 // Any membership satisfies this; it guards pages every member may open.
 pub const ACCESS: &str = "access";
-const IMPLIED: &[(&str, &str)] = &[("timecard.manage", "timecard.view")];
+const IMPLIED: &[(&str, &str)] = &[
+    ("timecard.manage", "timecard.view"),
+    ("uniforms.adjust", "uniforms.view"),
+    ("uniforms.manage", "uniforms.view"),
+];
 const DEFAULTS: &[(&str, &str, &[&str])] = &[
-    ("manager", "Manager", &["timecard.view", "collections.run"]),
-    ("member", "Member", &["timecard.view"]),
+    (
+        "manager",
+        "Manager",
+        &[
+            "uniforms.view",
+            "uniforms.adjust",
+            "timecard.view",
+            "collections.run",
+        ],
+    ),
+    ("member", "Member", &["uniforms.view", "timecard.view"]),
 ];
 
 pub fn all() -> Vec<String> {
