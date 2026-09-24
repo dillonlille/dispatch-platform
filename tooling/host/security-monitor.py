@@ -25,15 +25,14 @@ class Monitor:
                 if isinstance(value := f.get(key), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", value)}
         alerts = []
         rules = []
-        if route in ("/api/auth/login", "/api/auth/security/recover", "/api/auth/security/verify/finish") and status in (401, 403, 429):
+        if route == "/api/auth/login" and status in (401, 403, 429):
             rules.append(("authentication_failures", safe.get("account", safe.get("client")), 10, 300))
         if route == "/api/dsp/members/invite" and status < 300:
             rules.append(("invitation_burst", safe.get("actorId"), 20, 3600))
         if f.get("bulk") is True and status < 300:
             rules.append(("bulk_reads", safe.get("actorId"), 5, 60))
         if f.get("method") == "POST" and status < 300 and route in (
-            "/api/dsp/members/{id}", "/api/dsp/roles/{id}", "/api/auth/security/recover",
-            "/api/auth/security/passkeys/{id}/remove", "/api/auth/security/register/finish",
+            "/api/dsp/members/{id}", "/api/dsp/roles/{id}",
         ):
             alerts.append({"rule": "access_changed", **safe})
         # Fixed cardinality and event count keep abuse of the monitor itself bounded.

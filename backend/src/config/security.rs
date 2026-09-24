@@ -14,7 +14,8 @@ pub struct SecurityPolicy {
     pub mail_cooldown_seconds: i64,
     pub mail_tenant_pending: i64,
     pub mail_kind_pending: i64,
-    pub fresh_auth_seconds: i64,
+    /// Accepted for configuration compatibility; unused since passkey retirement.
+    fresh_auth_seconds: i64,
 }
 impl Default for SecurityPolicy {
     fn default() -> Self {

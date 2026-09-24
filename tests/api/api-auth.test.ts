@@ -121,6 +121,11 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
   const f = await fixture();
   t.after(f.close);
   const owner = await f.client();
+  f.database('data/platform/accounts.sqlite', (db) =>
+    db
+      .prepare('INSERT INTO passkeys VALUES (?,?,?,?,?)')
+      .run('legacy-owner', owner.session.user.id, '{}', 'Old key', 0),
+  );
   assert.equal(
     (await f.request('/api/auth/forgot-password', { email: 'owner@dispatch.test' })).status,
     202,
@@ -142,6 +147,7 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
   assert.equal((await owner.get('/api/session')).status, 401);
   assert.equal((await f.request('/api/auth/reset-password', { token: raw, password })).status, 400);
   const renewed = await f.client('owner@dispatch.test', 'Replacement-password!');
+  assert.equal((await renewed.get('/api/platform/dsps')).status, 200);
   assert.equal(
     (await renewed.post('/api/auth/password', { currentPassword: 'wrong', password })).status,
     403,

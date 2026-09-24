@@ -171,36 +171,8 @@ pub struct SessionResponse {
     pub environment: Environment,
     pub release: String,
     pub provider_mode: ProviderMode,
-    pub security: SecurityStatus,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct SecurityStatus {
-    pub enrolled: bool,
-    pub required: bool,
-    pub verified: bool,
-    pub recent: bool,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct PasskeySummary {
-    pub id: String,
-    pub name: String,
-    #[cfg_attr(test, ts(type = "number"))]
-    pub created_at: i64,
-}
-impl FromRow for PasskeySummary {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        Ok(Self {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            created_at: row.get("created_at")?,
-        })
-    }
-}
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

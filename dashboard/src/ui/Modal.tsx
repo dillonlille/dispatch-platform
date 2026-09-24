@@ -8,21 +8,26 @@ export function Modal({
   onClose,
   variant = 'dialog',
   description,
+  dismissible = true,
 }: {
   title: ReactNode;
   description?: string;
+  dismissible?: boolean;
   children: ReactNode;
   onClose: () => void;
   variant?: 'dialog' | 'sheet' | 'browser';
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const headingId = useId();
-  useFocusTrap(ref, { initialFocus: 'input,button,select', onEscape: onClose });
+  const dismiss = () => {
+    if (dismissible) onClose();
+  };
+  useFocusTrap(ref, { initialFocus: 'input,button,select', onEscape: dismiss });
   return (
     <div
       className={`modal-backdrop ${variant === 'sheet' ? 'sheet-backdrop' : ''}`}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) dismiss();
       }}
     >
       <div
@@ -35,14 +40,14 @@ export function Modal({
         <div className="modal-heading" data-slot={variant === 'sheet' ? 'sheet-header' : undefined}>
           <h2 id={headingId}>{title}</h2>
           {description && <p className="muted">{description}</p>}
-          {variant !== 'sheet' && (
+          {variant !== 'sheet' && dismissible && (
             <button className="icon-button" aria-label="Close dialog" onClick={onClose}>
               <X size={20} />
             </button>
           )}
         </div>
         {variant === 'sheet' ? <div className="panel-body">{children}</div> : children}
-        {variant === 'sheet' && (
+        {variant === 'sheet' && dismissible && (
           <button className="sheet-close" aria-label="Close dialog" onClick={onClose}>
             <X size={16} />
           </button>

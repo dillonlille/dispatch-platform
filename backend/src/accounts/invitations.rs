@@ -166,7 +166,6 @@ impl crate::State {
         raw: String,
         request: crate::contracts::InvitationRequest,
         ip: String,
-        session: String,
     ) -> Result<Value> {
         let crate::contracts::InvitationRequest {
             first_name: first,
@@ -225,24 +224,6 @@ impl crate::State {
                     }
                     _ => return Err(Error::new("sign_in_with_existing_password", 403)),
                 };
-                // A password plus an invitation must not bypass an existing second factor.
-                if existing.is_some() {
-                    let user = fresh.as_ref().unwrap().user.clone();
-                    let candidate = Auth {
-                        user,
-                        hash: String::new(),
-                        csrf: String::new(),
-                        raw: String::new(),
-                        preview: None,
-                    };
-                    if db.security_status(&candidate)?.required {
-                        let signed_in = db
-                            .authenticate(&session)
-                            .map_err(|_| Error::new("invitation_mfa_required", 403))?;
-                        ensure(signed_in.user.id == id, "invitation_mfa_required", 403)?;
-                        db.ensure_mfa(&signed_in)?;
-                    }
-                }
                 let role = db.role(dsp, s(&invite, "roleId"))?;
                 db.platform.exec(
                     "INSERT INTO memberships(id,user_id,dsp_id,role,role_id) VALUES (?,?,?,?,?) \

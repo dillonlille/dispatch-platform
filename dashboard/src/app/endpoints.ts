@@ -34,8 +34,6 @@ import type {
   Permission,
   Role,
   SessionView,
-  SecurityStatus,
-  PasskeySummary,
   AccountSession,
 } from '../../../shared/contracts/index.js';
 import type { ScheduleInput } from '../../../shared/contracts/schedules.js';
@@ -48,8 +46,6 @@ export const getCollectionUpdates = (after: string, signal: AbortSignal) =>
   );
 
 export const getSession = () => api<SessionView>('/api/session');
-export const getSecurityStatus = () => api<SecurityStatus>('/api/auth/security/status');
-export const usePasskeys = () => useData<PasskeySummary[]>('/api/auth/security/passkeys');
 export const useAccountSessions = () => useData<AccountSession[]>('/api/auth/security/sessions');
 export const employeeTimecardUrl = (code: string, period?: EmployeeTimecardPeriod | null) =>
   `/api/dsp/employees/${encodeURIComponent(code)}${period ? `?from=${period.from}&to=${period.to}` : ''}`;

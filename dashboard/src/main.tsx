@@ -20,11 +20,8 @@ const AuthScreen = lazy(() =>
 const DspOnboarding = lazy(() =>
   import('./features/auth/index.js').then((module) => ({ default: module.DspOnboarding })),
 );
-const SecurityPrompt = lazy(() =>
-  import('./features/auth/index.js').then((module) => ({ default: module.SecurityPrompt })),
-);
 import { messageOf } from './lib/errors.js';
-import { Loading, Modal, PageBoundary } from './ui/index.js';
+import { Loading, PageBoundary } from './ui/index.js';
 import { can } from './app/permissions.js';
 import './styles.css';
 import { Shell } from './shell/Shell.js';
@@ -34,7 +31,6 @@ import { leavePresence, usePresence } from './app/presence.js';
 import { openView, saveRole } from './app/session.js';
 import { getSession } from './app/endpoints.js';
 function App() {
-  const [reauthenticate, setReauthenticate] = useState(false);
   const [session, setSession] = useState<Session | null>(),
     [view, setView] = useState<DspView>(),
     [address, setAddress] = useState(() => parseHash(window.location.hash)),
@@ -51,7 +47,6 @@ function App() {
       window.removeEventListener('offline', update);
     };
   }, []);
-  const securityRequired = Boolean(session?.security.required && !session.security.verified);
   const setupRequired = Boolean(view?.profile?.setupRequired && can(view, 'settings.manage'));
   const showAuth =
     session === null ||
@@ -105,18 +100,6 @@ function App() {
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, [load, fail]);
-  useEffect(() => {
-    const verify = () => setReauthenticate(true);
-    const required = () => void load();
-    window.addEventListener('dispatch-reauthenticate', verify);
-    window.addEventListener('dispatch-mfa-required', required);
-    window.addEventListener('dispatch-security-changed', required);
-    return () => {
-      window.removeEventListener('dispatch-reauthenticate', verify);
-      window.removeEventListener('dispatch-mfa-required', required);
-      window.removeEventListener('dispatch-security-changed', required);
-    };
-  }, [load]);
   const { route, dspId, page } = address;
   useEffect(() => {
     if (session && !showAuth)
@@ -161,7 +144,7 @@ function App() {
   useEffect(() => {
     setView(undefined);
     if (!dspId) saveRole();
-    if (!session || securityRequired) return;
+    if (!session) return;
     credentials(session.csrf);
     if (!dspId) return;
     let active = true;
@@ -182,7 +165,7 @@ function App() {
     return () => {
       active = false;
     };
-  }, [session, dspId, fail, securityRequired]);
+  }, [session, dspId, fail]);
   if (session === undefined)
     return (
       <>
@@ -191,14 +174,6 @@ function App() {
       </>
     );
   if (showAuth) return <AuthScreen key={route} onLogin={() => load(true)} />;
-  if (securityRequired && session)
-    return (
-      <SecurityPrompt
-        enrolled={session.security.enrolled}
-        complete={() => load(true)}
-        signOut={logout}
-      />
-    );
   if (setupRequired)
     return (
       <DspOnboarding
@@ -240,20 +215,6 @@ function App() {
         <p role="status">
           You’re offline. Showing the last loaded data; updates resume when you reconnect.
         </p>
-      )}
-      {reauthenticate && (
-        <Modal title="Confirm it's you" onClose={() => setReauthenticate(false)}>
-          <Suspense fallback={<Loading />}>
-            <SecurityPrompt
-              enrolled={session.security.enrolled}
-              complete={async () => {
-                setReauthenticate(false);
-                fail('Verification complete. You can retry your action.');
-              }}
-              signOut={logout}
-            />
-          </Suspense>
-        </Modal>
       )}
       {dspId ? (
         switching ? (

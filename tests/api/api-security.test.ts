@@ -122,3 +122,65 @@ test('session revocation is account-scoped and cannot revoke another account', a
   assert.equal((await second.get('/api/session')).status, 401);
   assert.equal((await first.get('/api/session')).status, 200);
 });
+
+test('retired passkeys do not block existing accounts or invitations and their endpoints are gone', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  // Keep an older release's tables for rollback, without using their credentials or verification state.
+  f.database('data/platform/accounts.sqlite', (db) =>
+    db.exec(`
+    INSERT INTO passkeys(id,user_id,credential,name,created_at)
+    SELECT 'legacy-' || id,id,'{}','Old security key',0 FROM users;
+    INSERT INTO recovery_codes(hash,user_id) SELECT 'legacy-' || id,id FROM users;
+  `),
+  );
+  const owner = await f.client();
+  const member = await f.client(demo.member);
+  assert.equal('security' in owner.session, false);
+  assert.equal('security' in member.session, false);
+  assert.equal((await owner.get('/api/platform/dsps')).status, 200);
+  assert.equal((await member.get('/api/platform/dsps')).status, 403);
+  await member.select(member.session.dsps[0].id);
+  assert.equal((await member.get('/api/dsp/employees')).status, 200);
+  assert.equal((await member.get('/api/dsp/connections')).status, 403);
+  assert.equal((await f.request('/api/auth/security/sessions')).status, 401);
+  for (const route of ['status', 'passkeys']) {
+    assert.equal((await owner.get(`/api/auth/security/${route}`)).status, 404);
+  }
+  for (const route of [
+    'register/start',
+    'register/finish',
+    'verify/start',
+    'verify/finish',
+    'recover',
+    'recovery-codes',
+    'passkeys/legacy/remove',
+    'reauthenticate',
+  ]) {
+    assert.equal((await owner.post(`/api/auth/security/${route}`, {})).status, 404, route);
+  }
+  const dsp = owner.session.dsps.find(
+    (d: { id: string }) => !member.session.dsps.some((m: { id: string }) => m.id === d.id),
+  );
+  await owner.select(dsp.id);
+  const roles = (await owner.get('/api/dsp/roles')).value;
+  const role = roles.find((r: { name: string }) => r.name === 'Member').id;
+  assert.equal(
+    (await owner.post('/api/dsp/members/invite', { email: demo.member, role })).status,
+    200,
+  );
+  const token = /token=([A-Za-z0-9_-]{43})/.exec(
+    (await capturedMail(f.root, demo.member)).text,
+  )![1];
+  const accept = (password: string) =>
+    f.request(`/api/invitations/${token}/accept`, {
+      firstName: 'Existing',
+      lastName: 'Member',
+      password,
+    });
+  assert.equal((await accept('wrong-password')).status, 403);
+  assert.equal((await accept(demo.password)).status, 200);
+  const joined = await f.client(demo.member);
+  await joined.select(dsp.id);
+  assert.equal((await joined.get('/api/dsp/employees')).status, 200);
+});

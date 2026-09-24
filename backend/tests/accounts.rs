@@ -131,7 +131,6 @@ async fn removing_a_member_deletes_their_account_and_keeps_their_name_in_the_log
                 dsp_profile: None,
             },
             "127.0.0.1".into(),
-            String::new(),
         )
         .await
         .unwrap();

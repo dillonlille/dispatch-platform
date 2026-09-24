@@ -111,8 +111,6 @@ fn bindings() -> BTreeMap<PathBuf, String> {
         ScheduleCollection,
         SchedulePreview,
         SessionResponse,
-        SecurityStatus,
-        PasskeySummary,
         AccountSession,
     )
 }

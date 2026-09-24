@@ -61,7 +61,6 @@ impl Store {
         })
     }
     pub fn context(&self, a: &Auth, id: &str, permission: &str) -> Result<Context> {
-        self.ensure_mfa(a)?;
         let dsp = self.find_dsp(id)?;
         let grant = if !a.user.platform_owner {
             self.grant(&a.user.id, id)?
