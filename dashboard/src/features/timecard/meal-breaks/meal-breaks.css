@@ -255,6 +255,12 @@
   text-align: left;
   justify-content: flex-start;
 }
+.meal-sort-hint {
+  opacity: 0.35;
+}
+.meal-sort:hover .meal-sort-hint {
+  opacity: 0.7;
+}
 .meal-employee {
   display: flex;
   align-items: center;

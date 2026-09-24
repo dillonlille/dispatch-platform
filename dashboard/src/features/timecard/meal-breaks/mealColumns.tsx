@@ -37,8 +37,10 @@ export function mealLines(
 
 const sortHeader = {
   className: 'meal-sort',
-  indicator: (direction: 'asc' | 'desc') => (
-    <span aria-hidden="true">{direction === 'desc' ? '↓' : '↑'}</span>
+  indicator: (direction?: 'asc' | 'desc') => (
+    <span aria-hidden="true" className={direction ? undefined : 'meal-sort-hint'}>
+      {direction === 'desc' ? '↓' : direction ? '↑' : '↕'}
+    </span>
   ),
 };
 const delivery = (line: MealLine, side: 'lastDelivery' | 'firstDelivery') =>

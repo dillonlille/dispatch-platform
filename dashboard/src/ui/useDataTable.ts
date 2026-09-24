@@ -55,8 +55,8 @@ export interface TableColumn<T> {
   /** Replaces `value` for client sorting when the exported text does not order correctly. */
   sortValue?: (row: T) => string | number | null | undefined;
   sortable?: boolean;
-  /** Replaces the sort button's class and arrow. */
-  sortHeader?: { className?: string; indicator?: (direction: 'asc' | 'desc') => ReactNode };
+  /** Replaces the sort button's class and arrow; `direction` is absent while another column sorts. */
+  sortHeader?: { className?: string; indicator?: (direction?: 'asc' | 'desc') => ReactNode };
   /** Renders the cell as `<th scope="row">`. */
   rowHeader?: boolean;
   scope?: 'col';
