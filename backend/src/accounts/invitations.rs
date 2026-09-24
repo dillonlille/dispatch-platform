@@ -98,6 +98,23 @@ impl Store {
         invitation["stationCode"] = json!(profile.station_code);
         Ok(invitation)
     }
+    /// What an invitation's link shows: the open invitation, or that it was already accepted.
+    pub fn invitation_link(&self, raw: &str) -> Result<Value> {
+        let accepted = match raw.len() {
+            43 => self.platform.one(
+                ACCEPTED_INVITATION,
+                params![crypto::sha(raw), self.config.environment],
+            )?,
+            _ => None,
+        };
+        match accepted {
+            Some(mut accepted) => {
+                accepted["accepted"] = json!(true);
+                Ok(accepted)
+            }
+            None => self.invitation(raw),
+        }
+    }
     /// An outstanding invitation never outlives the authority that issued it.
     pub fn inviter_authorized(&self, hash: &str) -> Result<bool> {
         let row: Option<(String, String, String)> = self.platform.one_as(

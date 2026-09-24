@@ -1,7 +1,8 @@
 # Authentication screens
 
 - `dsp-onboarding/` owns DSP setup, owner invitations, its forms, map and styles.
-- `member-profile/` owns member invitations, profile creation and the completion lanyard.
+- `member-profile/` owns member invitations, profile creation, the completion lanyard and the
+  pages for an expired or already-accepted invitation link.
 - `sign-in/` owns sign-in, password recovery and its van artwork.
 
 `AuthScreen` and `InvitationScreen` choose the screen. Screen directories never import
@@ -11,6 +12,13 @@ UI primitives are allowed. Similar artwork is maintained separately by each scre
 Member profile acceptance creates the account without logging in. The only navigation
 data sent to Sign In is an in-memory email and entrance flag in `app/sign-in-handoff.ts`.
 Passwords are never passed to Sign In or persisted by this flow.
+
+An invitation lookup answers `accepted: true` with the email, DSP name and role once the link
+has been used, and `invitation_expired` when it expired, was revoked or never existed.
+`InvitationScreen` shows `InvitationAccepted`, which hands its email to Sign In the same way,
+or `InvitationExpired` for those; any other failure keeps the form with its error. Their map
+settles instead of animating: `route` on `MemberProfileLayout` selects `live`, `cancelled` or
+`delivered`.
 
 For the desktop completion sequence, adjust `member-profile/member-completion-motion.ts`
 for timing, `MemberProfileCompletion.tsx` for choreography and badge content,

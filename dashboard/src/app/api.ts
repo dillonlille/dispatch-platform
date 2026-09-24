@@ -198,6 +198,7 @@ export function useData<T>(
       refreshKey?: string | null;
     }>(),
     [error, setError] = useState(''),
+    [errorCode, setErrorCode] = useState(''),
     [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((v) => v + 1), []);
   useEffect(() => {
@@ -208,6 +209,7 @@ export function useData<T>(
     const controller = new AbortController();
     let active = true;
     setError('');
+    setErrorCode('');
     let reading = false;
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -232,6 +234,7 @@ export function useData<T>(
               : { data: value, scope, session, refreshKey },
           );
           setError('');
+          setErrorCode('');
           failures = 0;
           if (retry) clearTimeout(retry);
         }
@@ -244,6 +247,7 @@ export function useData<T>(
           error.name !== 'AbortError'
         ) {
           setError(error.message);
+          setErrorCode(error instanceof ApiError ? error.code : '');
           // A missed table response must recover even when no further driver arrives.
           if (!(error instanceof ApiError) || error.status >= 500 || error.status === 429) {
             if (retry) clearTimeout(retry);
@@ -278,5 +282,5 @@ export function useData<T>(
     (cached?.data as T | undefined) ?? (shown?.scope === scope ? shown?.data : undefined);
   // The previous scope's value lets a view hold its layout, marked busy, until the new one lands.
   const stale = data || error ? undefined : shown?.data;
-  return { data, stale, error, refresh, validatedKey: shown?.refreshKey };
+  return { data, stale, error, errorCode, refresh, validatedKey: shown?.refreshKey };
 }

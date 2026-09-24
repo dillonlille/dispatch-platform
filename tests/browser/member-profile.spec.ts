@@ -22,7 +22,7 @@ async function fits(page: Page) {
     .poll(() =>
       page.evaluate(() => {
         const heading = document.querySelector('h1')!.getBoundingClientRect();
-        const back = document.querySelector('.member-profile-back')!.getBoundingClientRect();
+        const back = document.querySelector('.member-profile-actions')!.getBoundingClientRect();
         return (
           document.documentElement.scrollWidth <= innerWidth &&
           document.documentElement.scrollHeight <= innerHeight &&
@@ -88,19 +88,24 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   expect(errors).toEqual([]);
 });
 
-test('member profile handles an invalid invitation and returns to the separate sign-in page', async ({
+test('an expired invitation has its own page that returns to the separate sign-in page', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const assets: string[] = [];
   page.on('request', (request) => assets.push(request.url()));
   await page.goto('/#invite?token=expired-invitation');
-  await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
-  await expect(page.getByRole('alert')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Create profile', exact: true })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: 'Invitation expired' })).toBeVisible();
+  await expect(
+    page.getByText('This invitation has expired or was revoked. Ask your DSP for a new one.'),
+  ).toBeVisible();
+  await expect(page.getByLabel('First name', { exact: true })).toHaveCount(0);
   await fits(page);
   expect(assets.filter((url) => /(?:onboarding|member-profile)-map.*\.svg/.test(url))).toEqual([]);
-  await page.getByRole('button', { name: 'Back to sign in' }).click();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.locator('.member-profile-map')).toHaveAttribute('data-route', 'cancelled');
+  await fits(page);
+  await page.getByRole('button', { name: 'Go to sign in', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(page.locator('.member-profile-page, .onboarding-page')).toHaveCount(0);
   await expect(page.locator('.auth-layout')).toBeVisible();
@@ -143,6 +148,48 @@ test('member profile stays light and fits desktop and phone sizes in either devi
       await fits(page);
     }
   }
+});
+
+test('an accepted invitation says so and hands its email to sign-in', async ({
+  page,
+  dispatch,
+  context,
+}) => {
+  const url = await apiInvitation(dispatch);
+  await context.clearCookies();
+  const token = url.split('token=')[1]!;
+  const accepted = await dispatch.request(`/api/invitations/${token}/accept`, {
+    firstName: 'Jamie',
+    lastName: 'Morgan',
+    password: demo.password,
+  });
+  expect(accepted.status).toBe(200);
+  await page.goto(url);
+  await expect(page.getByRole('heading', { name: 'Already accepted' })).toBeVisible();
+  await expect(page.locator('.member-profile-invitation')).toHaveText(
+    'NLNorthline LogisticsMember',
+  );
+  await expect(
+    page.getByText(
+      'You joined Northline Logistics with this invitation. Sign in with your Dispatch password.',
+    ),
+  ).toBeVisible();
+  await expect(page.locator('.member-profile-map')).toHaveAttribute('data-route', 'delivered');
+  await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+  for (const [width, height] of [
+    [1440, 1000],
+    [1024, 600],
+    [390, 844],
+    [568, 320],
+  ]) {
+    await page.setViewportSize({ width: width!, height: height! });
+    await fits(page);
+  }
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/#signin$/);
+  await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
+  await expect(page.getByLabel('Password', { exact: true })).toBeFocused();
+  expect((await page.request.get('/api/session')).status()).toBe(401);
 });
 
 async function fillMemberProfile(page: Page) {
