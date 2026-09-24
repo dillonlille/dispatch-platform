@@ -141,12 +141,15 @@ export async function fixture(options: boolean | FixtureOptions = true) {
       env,
       stdio: inherit ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe'],
     });
-    server.stdout?.on('data', (data) => {
+    // A browser that fails to start says why only in the server's log. Show that line in
+    // the test output as it happens, so a failure on a CI runner explains itself.
+    const keep = (data: Buffer) => {
       logs += data;
-    });
-    server.stderr?.on('data', (data) => {
-      logs += data;
-    });
+      for (const line of String(data).split('\n'))
+        if (line.includes('"browser.start_failed"')) process.stderr.write(`${line}\n`);
+    };
+    server.stdout?.on('data', keep);
+    server.stderr?.on('data', keep);
     await until(async () => {
       try {
         return (await request('/api/health')).status === 200;
