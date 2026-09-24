@@ -18,6 +18,10 @@ ExecStart=/usr/bin/env DISPATCH_STATE_ROOT=/var/lib/dispatch-production DISPATCH
 WorkingDirectory=/opt/dispatch-production
 Restart=on-failure
 RestartSec=5
+# Under memory pressure the kernel kills the biggest process, which during a collection is
+# Production's own browser. Only that collection then fails and retries; Production keeps
+# serving instead of stopping and restarting.
+OOMPolicy=continue
 TimeoutStopSec=45
 KillMode=mixed
 UMask=0077

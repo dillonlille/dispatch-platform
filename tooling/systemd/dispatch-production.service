@@ -13,6 +13,10 @@ ExecStartPre=/usr/bin/python3 %h/dispatch-platform/public/management/update-prod
 ExecStart=%h/dispatch-platform/public/live/services/rust/dispatch-backend serve
 Restart=on-failure
 RestartSec=5
+# Under memory pressure the kernel kills the biggest process, which during a collection is
+# Production's own browser. Only that collection then fails and retries; Production keeps
+# serving instead of stopping and restarting.
+OOMPolicy=continue
 TimeoutStopSec=45
 KillMode=mixed
 UMask=0077
