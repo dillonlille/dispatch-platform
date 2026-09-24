@@ -31,13 +31,27 @@ impl Page {
         self.trusted_origins = origins.iter().map(|s| (*s).to_owned()).collect();
     }
     pub async fn open(browser: browseros::Session, origin: String) -> Result<Self> {
-        let target = browser
-            .command(
-                "Target.createTarget",
-                json!({"url":"about:blank","background":true}),
-                None,
-            )
-            .await?;
+        Self::create(
+            browser,
+            origin,
+            json!({"url":"about:blank","background":true}),
+        )
+        .await
+    }
+    /// A page in a window of its own. Beside the first window it stays visible, so an
+    /// application that waits while hidden loads and renders as it would on screen.
+    pub async fn open_window(browser: browseros::Session, origin: String) -> Result<Self> {
+        let page = Self::create(
+            browser,
+            origin,
+            json!({"url":"about:blank","newWindow":true}),
+        )
+        .await?;
+        page.size_window().await?;
+        Ok(page)
+    }
+    async fn create(browser: browseros::Session, origin: String, target: Value) -> Result<Self> {
+        let target = browser.command("Target.createTarget", target, None).await?;
         let target = s(&target, "targetId").to_owned();
         let attached = browser
             .command(
@@ -204,6 +218,13 @@ impl Page {
     }
     pub async fn loading(&self, loader: &str) -> Result<Value> {
         self.browser.loading(&self.id, loader).await
+    }
+    /// Closes this tab, and its window when it has one of its own.
+    pub async fn close(&self) -> Result<()> {
+        self.browser
+            .command("Target.closeTarget", json!({"targetId":self.target}), None)
+            .await?;
+        Ok(())
     }
     pub async fn reset(&mut self) -> Result<()> {
         self.browser
