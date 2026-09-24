@@ -81,7 +81,7 @@ async fn record_data_requests() -> Result<()> {
             .first()
             .ok_or_else(|| Error::new("benchmark_no_routes", 409))?;
         let started = Instant::now();
-        driver.meal_page(&scope, Some(candidate), &metrics).await?;
+        driver.meal_page(&driver.page, &scope, Some(candidate), &metrics).await?;
         let detail = driver.browser.evaluate(&driver.page.id, REQUESTS).await?;
         eprintln!(
             "REQUESTS {}",
@@ -93,48 +93,6 @@ async fn record_data_requests() -> Result<()> {
     driver.browser.close().await;
     result
 }
-
-/// Compares a data request the page made with the props a collection reads from it:
-/// re-fetches the same address in the page and reports field names, shapes, and which
-/// response fields equal which props. Never values.
-const SHAPES: &str = r#"(async input=>{try{
-  let root;const seen=new Set();
-  for(const element of document.querySelectorAll('*')){
-    const key=Object.keys(element).find(k=>k.startsWith('__reactFiber'));
-    for(let fiber=element[key],depth=0;fiber&&depth<80;fiber=fiber.return,depth++){
-      if(seen.has(fiber))break;seen.add(fiber);const p=fiber.memoizedProps;
-      if(p&&Array.isArray(p.allItinerarySummaries)&&p.transporterSummary&&(!input.detail||p.itineraryDetails))root=p;}}
-  const entry={name:input.request.url};
-  if(!root)return {found:{root:false}};
-  const name=k=>/^[a-z][A-Za-z]{0,40}$/.test(k);
-  const shape=v=>Array.isArray(v)?'array':v===null?'null':typeof v;
-  const keys=v=>v&&typeof v==='object'&&!Array.isArray(v)?Object.keys(v).filter(name).sort():[];
-  let stage='fetch',response,body;
-  try{response=await fetch(entry.name,{method:input.request.method,headers:input.request.headers,
-      credentials:'include',cache:'no-store'});
-    const type=(response.headers.get('content-type')||'').split(';')[0];
-    if(response.status!==200||!/json/.test(type))return {stage,status:response.status,type};
-    stage='parse';body=await response.json();}
-  catch(e){return {stage,error:String(e&&e.name)};}
-  const url=new URL(entry.name);
-  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-  const where={};
-  for(const prop of input.props){
-    const value=root[prop];where[prop]={propShape:shape(value)};
-    const hits=[];
-    for(const [k,v] of Object.entries(body)){if(name(k)&&same(v,value))hits.push(k);}
-    if(same(body,value))hits.push('(whole response)');
-    where[prop].equalTo=hits;
-    // For arrays and objects that are not equal, compare element fields.
-    const sample=Array.isArray(value)?value[0]:value&&typeof value==='object'&&!input.keyed?.includes(prop)?value:null;
-    if(!hits.length&&sample)where[prop].propFields=keys(sample);
-  }
-  const fields={};for(const k of Object.keys(body).filter(name))fields[k]=shape(body[k])
-    +(Array.isArray(body[k])?':'+body[k].length:'')+(Array.isArray(body[k])&&body[k][0]&&typeof body[k][0]==='object'?' of '+keys(body[k][0]).join(','):'');
-  return {status:response.status,type:(response.headers.get('content-type')||'').split(';')[0],
-    params:Object.fromEntries([...url.searchParams.keys()].map(k=>[k,k==='historicalDay'||k==='documentType'?url.searchParams.get(k):'(value)'])),
-    responseFields:fields,props:where};
-}catch(e){return {stage:'compare',error:String(e&&e.name)};}})"#;
 
 /// The first request the tab makes under `path` while loading `url`, sent on as usual:
 /// its method, address and the headers a page may set. Prints only header names.
@@ -190,17 +148,73 @@ async fn capture(driver: &Driver, url: &str, path: &str) -> Result<Value> {
         })
         .unwrap_or_default();
     eprintln!(
-        "SHAPES {}",
+        "REQUESTS {}",
         json!({"captured":path,"method":request["method"],"hasBody":request["hasPostData"],
             "headers":headers.keys().collect::<Vec<_>>()})
     );
     Ok(json!({"url":request["url"],"method":request["method"],"headers":headers}))
 }
 
-// How Cortex's data requests relate to what a collection reads from its pages.
+/// A capture's routes by id, without the moment each was observed.
+fn routes(capture: &Value) -> std::collections::BTreeMap<String, Value> {
+    capture["itineraries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|route| {
+            let mut route = route.clone();
+            route.as_object_mut().map(|r| r.remove("observedAt"));
+            (s(&route, "id").to_owned(), route)
+        })
+        .collect()
+}
+/// Counts that describe a capture without its values.
+fn totals(capture: &Value) -> Value {
+    let routes = routes(capture);
+    let meals = routes
+        .values()
+        .flat_map(|r| r["meals"].as_array().cloned().unwrap_or_default())
+        .collect::<Vec<_>>();
+    json!({"routes":routes.len(),
+        "drivers":routes.values().map(|r|s(r,"transporterId").to_owned()).collect::<std::collections::BTreeSet<_>>().len(),
+        "completeRoutes":routes.values().filter(|r|r["routeComplete"]==true).count(),
+        "completeCoverage":routes.values().filter(|r|r["deliveryCoverage"]=="complete").count(),
+        "meals":meals.len(),"openMeals":meals.iter().filter(|m|m["end"].is_null()).count(),
+        "lastDeliveryBefore":meals.iter().filter(|m|!m["lastDelivery"].is_null()).count(),
+        "firstDeliveryAfter":meals.iter().filter(|m|!m["firstDelivery"].is_null()).count()})
+}
+/// Where two values differ, as field paths without values or indexes.
+fn differences(a: &Value, b: &Value, path: &str, out: &mut std::collections::BTreeSet<String>) {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            for key in x.keys().chain(y.keys()) {
+                differences(
+                    x.get(key).unwrap_or(&Value::Null),
+                    y.get(key).unwrap_or(&Value::Null),
+                    &format!("{path}.{key}"),
+                    out,
+                );
+            }
+        }
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => {
+            for (p, q) in x.iter().zip(y) {
+                differences(p, q, &format!("{path}[]"), out);
+            }
+        }
+        _ if a != b => {
+            out.insert(path.to_owned());
+        }
+        _ => {}
+    }
+}
+
+// A whole day collected with one tab, as jobs have, then with two, compared route by
+// route and field by field. Amazon's own list response is counted as well, so a
+// route missing from both collections would still show. Prints counts and field
+// names only.
 #[tokio::test]
 #[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
-async fn compare_requests_with_props() -> Result<()> {
+async fn compare_tabs() -> Result<()> {
     let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
     let profile = dsp.join("state/browsers/cortex-browseros");
     let runtime = browseros::Runtime::new(
@@ -237,175 +251,84 @@ async fn compare_requests_with_props() -> Result<()> {
             &std::env::var("DISPATCH_BENCHMARK_SCOPE")
                 .map_err(|_| Error::new("benchmark_configuration_required", 400))?,
         )?;
-        let metrics = Recorder::new(&json!({}));
+        // Amazon's own list for the day: the app's signed request, sent again as is.
         let origin = driver.origin.clone();
-        let summaries = capture(
+        let request = capture(
             &driver,
             &format!("{origin}{}", scope.list_path()),
             "/operations/execution/api/summaries",
         )
         .await?;
-        let candidates = driver.candidates(&scope, &metrics).await?;
-        let list = driver
-            .browser
-            .evaluate(
-                &driver.page.id,
-                &call(
-                    SHAPES,
-                    &json!({"request":summaries,
-                    "props":["allItinerarySummaries","transporterSummary"],"keyed":["transporterSummary"]}),
-                ),
-            )
-            .await?;
-        eprintln!("SHAPES {}", json!({"page":"list","observed":list}));
-        let candidate = candidates
-            .first()
-            .ok_or_else(|| Error::new("benchmark_no_routes", 409))?;
-        let itinerary = capture(
-            &driver,
-            &format!("{origin}{}", scope.detail_path(candidate.id())),
-            "/operations/execution/api/itineraries/",
-        )
-        .await?;
-        driver.meal_page(&scope, Some(candidate), &metrics).await?;
-        let detail = driver
-            .browser
-            .evaluate(
-                &driver.page.id,
-                &call(
-                    SHAPES,
-                    &json!({"request":itinerary,"detail":true,
-                    "props":["itineraryDetails"]}),
-                ),
-            )
-            .await?;
-        eprintln!("SHAPES {}", json!({"page":"detail","observed":detail}));
-        Ok(())
-    }
-    .await;
-    driver.browser.close().await;
-    result
-}
-
-/// Moves the app to another route the way its own links do, without reloading.
-const ROUTE: &str = r#"(input=>{window.dispatchMarker=input.marker;
-  history.pushState(history.state,'',input.path);
-  dispatchEvent(new PopStateEvent('popstate',{state:history.state}));return true;})"#;
-/// Whether the document survived, and what it requested since `since` ms.
-const SINCE: &str = r#"(input=>({kept:window.dispatchMarker===input.marker,
-  links:[...document.querySelectorAll('a[href]')].filter(a=>a.href.includes('/documentType/Itinerary')).length,
-  requested:performance.getEntriesByType('resource').filter(e=>e.startTime>=input.since
-    &&['fetch','xmlhttprequest'].includes(e.initiatorType)).map(e=>new URL(e.name).pathname.split('/').map(s=>/\d/.test(s)||s.length>32?'{id}':s).join('/')),
-  now:performance.now()}))"#;
-
-// Whether a captured signature works for another route, and whether moving between
-// routes inside the app loads each one's details without reloading the page.
-#[tokio::test]
-#[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
-async fn probe_route_navigation() -> Result<()> {
-    let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
-    let profile = dsp.join("state/browsers/cortex-browseros");
-    let runtime = browseros::Runtime::new(
-        Path::new("/opt/dispatch-browseros/0.50.5/browseros"),
-        Path::new("/usr/local/libexec/dispatch-dev/bwrap"),
-        &env_path("DISPATCH_BENCHMARK_WORKER")?,
-        &env_path("DISPATCH_BENCHMARK_RUNS")?,
-        1,
-    )?;
-    let browser = runtime
-        .start(
-            &profile,
-            browseros::Mode::Windowed,
-            browseros::NetworkPolicy::Cortex,
-        )
-        .await?;
-    let mut driver = Driver::new(browser, &profile, None).await?;
-    let result = async {
-        let secrets = dsp.join("secrets");
-        let credentials = crate::crypto::decrypt(
-            &db::key_file(&secrets.join("vault.key"))?,
-            &format!("{}:cortex:2", dsp.file_name().unwrap().to_str().unwrap()),
-            &std::fs::read_to_string(secrets.join("cortex.enc"))?,
-        )?;
-        let signed = driver
-            .request(json!({"action":"start","credentials":credentials}))
-            .await;
-        ensure(
-            signed.is_ok_and(|v| v["type"] == "ready"),
-            "benchmark_verification_required",
-            409,
-        )?;
-        let scope: Scope = serde_json::from_str(
-            &std::env::var("DISPATCH_BENCHMARK_SCOPE")
-                .map_err(|_| Error::new("benchmark_configuration_required", 400))?,
-        )?;
-        let metrics = Recorder::new(&json!({}));
-        let origin = driver.origin.clone();
-        let candidates = driver.candidates(&scope, &metrics).await?;
-        ensure(candidates.len() >= 6, "benchmark_no_routes", 409)?;
-        let first = &candidates[0];
-        let signature = capture(
-            &driver,
-            &format!("{origin}{}", scope.detail_path(first.id())),
-            "/operations/execution/api/itineraries/",
-        )
-        .await?;
-        driver.meal_page(&scope, Some(first), &metrics).await?;
-        // The same signed headers on another route's address.
-        let other = s(&signature, "url").replace(first.id(), candidates[1].id());
-        let status = driver
+        driver.candidates(&scope, &Recorder::new(&json!({}))).await?;
+        let listed = driver
             .browser
             .evaluate(
                 &driver.page.id,
                 &format!(
-                    "fetch({},{{headers:{},credentials:'include',cache:'no-store'}}).then(r=>r.status)",
-                    json!(other),
-                    signature["headers"]
+                    "fetch({},{{headers:{},credentials:'include',cache:'no-store'}}).then(r=>r.json())\
+                     .then(b=>b.itinerarySummaries.filter(s=>s.companyId==={}).length)",
+                    json!(request["url"]),
+                    request["headers"],
+                    json!(scope.provider)
                 ),
             )
             .await?;
-        eprintln!("ROUTES {}", json!({"signatureOnAnotherRoute":status}));
-        // Move through five more routes inside the app.
-        for (index, candidate) in candidates.iter().enumerate().skip(1).take(5) {
-            let since = driver
-                .browser
-                .evaluate(&driver.page.id, &call(SINCE, &json!({"marker":"m","since":0})))
-                .await?["now"]
-                .clone();
+        eprintln!("PARITY {}", json!({"amazonListsRoutes":listed}));
+        let mut captures = Vec::new();
+        let runs = std::env::var("DISPATCH_BENCHMARK_TABS").unwrap_or_else(|_| "1,2".into());
+        for tabs in runs.split(',').filter_map(|v| v.trim().parse::<usize>().ok()) {
+            let metrics = Recorder::new(&json!({}));
             let started = Instant::now();
-            driver
-                .browser
-                .evaluate(
-                    &driver.page.id,
-                    &call(ROUTE, &json!({"marker":index,"path":scope.detail_path(candidate.id())})),
-                )
-                .await?;
-            let mut first_read = None;
-            let mut last = None;
-            let mut stable = 0;
-            let deadline = Instant::now() + Duration::from_secs(30);
-            while Instant::now() < deadline && stable < 2 {
-                if let Ok(value) = driver.meal_read(&scope, Some(candidate), &metrics).await {
-                    first_read.get_or_insert(started.elapsed().as_millis());
-                    let mut evidence = value.clone();
-                    if let Some(itinerary) = evidence["itinerary"].as_object_mut() {
-                        itinerary.remove("observedAt");
-                    }
-                    stable = if last.as_ref() == Some(&evidence) { stable + 1 } else { 0 };
-                    last = Some(evidence);
+            let capture = driver
+                .collect(&scope, &metrics, None, |_, _| async { Ok(()) }, tabs)
+                .await;
+            let capture = match capture {
+                Ok(capture) => capture,
+                Err(error) => {
+                    // Which read stalled and why: fixed labels and timings only.
+                    let snapshot = serde_json::to_value(metrics.snapshot())?;
+                    let hidden = driver
+                        .browser
+                        .command("Target.getTargets", json!({}), None)
+                        .await
+                        .map(|t| t["targetInfos"].as_array().map(Vec::len))
+                        .ok();
+                    eprintln!(
+                        "PARITY {}",
+                        json!({"tabs":tabs,"error":error.code,"detail":snapshot["detail"],
+                            "failures":snapshot["pageReads"]["failures"],"active":snapshot["pageReads"]["active"],
+                            "completed":snapshot["pageReads"]["completed"],"targets":hidden})
+                    );
+                    return Err(error);
                 }
-                sleep(Duration::from_millis(300)).await;
-            }
-            let after = driver
-                .browser
-                .evaluate(&driver.page.id, &call(SINCE, &json!({"marker":index,"since":since})))
-                .await?;
+            };
+            let reads = serde_json::to_value(metrics.snapshot())?["pageReads"].clone();
             eprintln!(
-                "ROUTES {}",
-                json!({"route":index,"firstReadMs":first_read,"stableMs":(stable>=2).then(||started.elapsed().as_millis()),
-                    "reloaded":after["kept"]!=true,"links":after["links"],"requested":after["requested"]})
+                "PARITY {}",
+                json!({"tabs":tabs,"ms":started.elapsed().as_millis(),"routeReads":reads["completed"],
+                    "failedReads":reads["failures"].as_array().map(Vec::len),"totals":totals(&capture)})
             );
+            captures.push(routes(&capture));
         }
+        let (one, two) = (&captures[0], &captures[1]);
+        let mut fields = std::collections::BTreeSet::new();
+        let mut differing = 0;
+        for (id, route) in one {
+            if let Some(other) = two.get(id) {
+                differences(route, other, "", &mut fields);
+                if route != other {
+                    differing += 1;
+                }
+            }
+        }
+        let only_one = one.keys().filter(|id| !two.contains_key(*id)).count();
+        let only_two = two.keys().filter(|id| !one.contains_key(*id)).count();
+        eprintln!(
+            "PARITY {}",
+            json!({"compared":one.len().min(two.len()),"onlyOneTab":only_one,"onlyTwoTabs":only_two,
+                "differingRoutes":differing,"differingFields":fields,
+                "matchesAmazonList":listed.as_u64()==Some(one.len() as u64)&&listed.as_u64()==Some(two.len() as u64)})
+        );
         Ok(())
     }
     .await;
@@ -413,12 +336,25 @@ async fn probe_route_navigation() -> Result<()> {
     result
 }
 
-// Ten route pages read in one tab, then ten more across two tabs, with the peak memory
-// of each. Both read the page data exactly as a collection does.
+/// A tab's state while a route loads: visibility, the app's loading flags and its
+/// recent data requests' statuses. Labels, flags and masked paths only.
+const DIAGNOSE: &str = r#"(()=>{let root;const seen=new Set();
+  for(const element of document.querySelectorAll('*')){const key=Object.keys(element).find(k=>k.startsWith('__reactFiber'));
+    for(let fiber=element[key],depth=0;fiber&&depth<80;fiber=fiber.return,depth++){if(seen.has(fiber))break;seen.add(fiber);
+      const p=fiber.memoizedProps;if(p&&Array.isArray(p.allItinerarySummaries)&&p.transporterSummary)root=p;}}
+  const now=performance.now();
+  return {page:/\/documentType\//.test(location.pathname)?'detail':'list',visible:document.visibilityState,focus:document.hasFocus(),
+    root:!!root,loadingSummaries:root?root.isLoadingSummaries:null,details:!!(root&&root.itineraryDetails),
+    loadingDetails:root?root.isLoadingItineraryDetails:null,
+    requests:performance.getEntriesByType('resource').filter(e=>['fetch','xmlhttprequest'].includes(e.initiatorType)&&now-e.startTime<40000)
+      .map(e=>({path:new URL(e.name).pathname.split('/').map(s=>/\d/.test(s)||s.length>32?'{id}':s).join('/'),
+        status:e.responseStatus,ms:Math.round(e.duration),agoMs:Math.round(now-e.startTime)}))};})()"#;
+
+// Two tabs collecting a day while every tab's state is sampled; prints the samples
+// of any tab still loading a route after ten seconds.
 #[tokio::test]
 #[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
-async fn probe_parallel_tabs() -> Result<()> {
-    use std::sync::atomic::{AtomicU64, Ordering};
+async fn diagnose_tabs() -> Result<()> {
     let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
     let profile = dsp.join("state/browsers/cortex-browseros");
     let runtime = browseros::Runtime::new(
@@ -435,19 +371,6 @@ async fn probe_parallel_tabs() -> Result<()> {
             browseros::NetworkPolicy::Cortex,
         )
         .await?;
-    let pid = browser.process_id();
-    let peak = std::sync::Arc::new(AtomicU64::new(0));
-    let watched = peak.clone();
-    let sampler = tokio::spawn(async move {
-        loop {
-            if let Ok(Some(memory)) =
-                tokio::task::spawn_blocking(move || crate::job_metrics::memory(pid)).await
-            {
-                watched.fetch_max(memory.pss, Ordering::Relaxed);
-            }
-            sleep(Duration::from_millis(500)).await;
-        }
-    });
     let mut driver = Driver::new(browser.clone(), &profile, None).await?;
     let result = async {
         let secrets = dsp.join("secrets");
@@ -469,54 +392,63 @@ async fn probe_parallel_tabs() -> Result<()> {
                 .map_err(|_| Error::new("benchmark_configuration_required", 400))?,
         )?;
         let metrics = Recorder::new(&json!({}));
-        let candidates = driver.candidates(&scope, &metrics).await?;
-        ensure(candidates.len() >= 20, "benchmark_no_routes", 409)?;
-        peak.store(0, Ordering::Relaxed);
-        let started = Instant::now();
-        for candidate in &candidates[..10] {
-            driver.meal_page(&scope, Some(candidate), &metrics).await?;
-        }
-        eprintln!(
-            "TABS {}",
-            json!({"tabs":1,"routes":10,"ms":started.elapsed().as_millis(),
-                "peakPssMiB":peak.load(Ordering::Relaxed)/1024/1024})
-        );
-        let mut second = Driver::new(browser.clone(), &profile, None).await?;
-        second.page = Page::open(browser.clone(), driver.origin.clone()).await?;
-        second.page.allow_origins(
-            &driver
-                .origins
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-        );
-        peak.store(0, Ordering::Relaxed);
-        let started = Instant::now();
-        let (a, b) = tokio::join!(
-            async {
-                for candidate in &candidates[10..15] {
-                    driver.meal_page(&scope, Some(candidate), &metrics).await?;
+        let done = std::sync::atomic::AtomicBool::new(false);
+        let origin = driver.origin.clone();
+        let watch = async {
+            let mut sessions = std::collections::BTreeMap::<String, (usize, String)>::new();
+            let mut loading = std::collections::BTreeMap::<String, u32>::new();
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                sleep(Duration::from_secs(5)).await;
+                let Ok(targets) = browser.command("Target.getTargets", json!({}), None).await else {
+                    continue;
+                };
+                for target in targets["targetInfos"].as_array().into_iter().flatten() {
+                    if s(target, "type") != "page" || !s(target, "url").starts_with(&origin) {
+                        continue;
+                    }
+                    let id = s(target, "targetId").to_owned();
+                    if !sessions.contains_key(&id) {
+                        let Ok(attached) = browser
+                            .command("Target.attachToTarget", json!({"targetId":id,"flatten":true}), None)
+                            .await
+                        else {
+                            continue;
+                        };
+                        let index = sessions.len() + 1;
+                        sessions.insert(id.clone(), (index, s(&attached, "sessionId").to_owned()));
+                    }
+                    let (index, session) = sessions[&id].clone();
+                    let Ok(state) = browser.evaluate(&session, DIAGNOSE).await else {
+                        continue;
+                    };
+                    let stuck = state["page"] == "detail"
+                        && (state["root"] != true || state["loadingSummaries"] != false
+                            || state["details"] != true || state["loadingDetails"] != false);
+                    let count = loading.entry(id.clone()).or_default();
+                    *count = if stuck { *count + 1 } else { 0 };
+                    if *count >= 2 {
+                        eprintln!("DIAGNOSE {}", json!({"tab":index,"state":state}));
+                    }
                 }
-                Ok::<_, Error>(())
-            },
-            async {
-                for candidate in &candidates[15..20] {
-                    second.meal_page(&scope, Some(candidate), &metrics).await?;
-                }
-                Ok::<_, Error>(())
             }
-        );
-        a?;
-        b?;
+        };
+        let collect = async {
+            let result = driver
+                .collect(&scope, &metrics, None, |_, _| async { Ok(()) }, 2)
+                .await;
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            result
+        };
+        let (_, collected) = tokio::join!(watch, collect);
+        let snapshot = serde_json::to_value(metrics.snapshot())?;
         eprintln!(
-            "TABS {}",
-            json!({"tabs":2,"routes":10,"ms":started.elapsed().as_millis(),
-                "peakPssMiB":peak.load(Ordering::Relaxed)/1024/1024})
+            "DIAGNOSE {}",
+            json!({"outcome":collected.as_ref().map(|_|"ok".to_owned()).unwrap_or_else(|e|e.code.clone()),
+                "completed":snapshot["pageReads"]["completed"],"detail":snapshot["detail"]})
         );
-        Ok(())
+        collected.map(|_| ())
     }
     .await;
-    sampler.abort();
     browser.close().await;
     result
 }

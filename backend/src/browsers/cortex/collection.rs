@@ -2,13 +2,18 @@ use super::*;
 use crate::{
     db::now,
     job_metrics::Recorder,
+    live_collection::Writer,
     meals::{Capture, Itinerary, Scope},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
     future::Future,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+/// Route pages read at once, each in its own tab. Two read ten real routes in 30 s
+/// instead of 42 s for 6% more memory; more share the same renderer and connection.
+pub(super) const TABS: usize = 2;
 // The route's content has not settled yet; read it again.
 const CONTENT_NOT_READY: &[crate::Code] = &[
     crate::Code::CortexContentIncomplete,
@@ -36,22 +41,17 @@ struct Punch {
     start: i64,
     end: Option<i64>,
 }
-#[cfg(test)]
-impl Candidate {
-    pub(super) fn id(&self) -> &str {
-        &self.id
-    }
-}
 impl Driver {
-    pub(super) async fn meal_read(
+    async fn meal_read(
         &self,
+        page: &Page,
         scope: &Scope,
         candidate: Option<&Candidate>,
         metrics: &Recorder,
     ) -> Result<Value> {
         // Main-world access is needed for the observed React props. Bound both
         // the CDP target and the in-page URL before inspecting application data.
-        let frame = self.page.frame().await?;
+        let frame = page.frame().await?;
         let url = url::Url::parse(s(&frame, "url"))
             .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
         ensure(
@@ -62,7 +62,7 @@ impl Driver {
         let input = json!({"kind":if candidate.is_some(){"detail"}else{"list"},"scope":scope,"candidate":candidate,"origin":self.origin});
         let result = self
             .browser
-            .evaluate(&self.page.id, &call(EXTRACT, &input))
+            .evaluate(&page.id, &call(EXTRACT, &input))
             .await?;
         if let Some(error) = result["error"].as_str() {
             metrics.detail(s(&result, "reason"));
@@ -88,7 +88,8 @@ impl Driver {
         Ok(result)
     }
     pub(super) async fn meal_page(
-        &mut self,
+        &self,
+        page: &Page,
         scope: &Scope,
         candidate: Option<&Candidate>,
         metrics: &Recorder,
@@ -97,7 +98,7 @@ impl Driver {
             .map(|c| scope.detail_path(&c.id))
             .unwrap_or_else(|| scope.list_path());
         let url = format!("{}{path}", self.origin);
-        self.page.start_navigation(&url).await?;
+        page.start_navigation(&url).await?;
         let deadline = Instant::now() + Duration::from_secs(30);
         // Cortex occasionally settles on another route's details and never
         // corrects itself. One reload recovers it without hiding a real mismatch.
@@ -106,7 +107,7 @@ impl Driver {
         let mut stable = 0;
         let mut last_error = "cortex_content_incomplete".to_owned();
         while Instant::now() < deadline {
-            match self.meal_read(scope, candidate, metrics).await {
+            match self.meal_read(page, scope, candidate, metrics).await {
                 Ok(value) => {
                     let mut evidence = value.clone();
                     if let Some(itinerary) = evidence["itinerary"].as_object_mut() {
@@ -129,7 +130,7 @@ impl Driver {
                         && reload.is_some_and(|at| Instant::now() >= at)
                     {
                         reload = None;
-                        self.page.start_navigation(&url).await?;
+                        page.start_navigation(&url).await?;
                     }
                     last_error = error.code;
                 }
@@ -140,22 +141,25 @@ impl Driver {
         Err(Error::new(&last_error, 502))
     }
     pub(super) async fn candidates(
-        &mut self,
+        &self,
         scope: &Scope,
         metrics: &Recorder,
     ) -> Result<Vec<Candidate>> {
-        let value = self.meal_page(scope, None, metrics).await?;
+        let value = self.meal_page(&self.page, scope, None, metrics).await?;
         let rows: Vec<Candidate> = serde_json::from_value(value["candidates"].clone())
             .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
         ensure(rows.len() <= 1000, "cortex_source_too_large", 502)?;
         Ok(rows)
     }
+    /// Every route of the scope's day, read until one pass finds each route's record
+    /// at its latest revision. `tabs` route pages are read at once, each in its own tab.
     pub async fn collect<F, Fut>(
         &mut self,
         scope: &Scope,
         metrics: &Recorder,
-        live: &crate::live_collection::Writer,
+        live: Option<&Writer>,
         progress: F,
+        tabs: usize,
     ) -> Result<Value>
     where
         F: Fn(i64, String) -> Fut,
@@ -163,79 +167,91 @@ impl Driver {
     {
         scope.validate()?;
         let started_at = now();
-        let mut candidates = self.candidates(scope, metrics).await?;
-        live.start_cortex(
-            scope,
-            json!(
-                candidates
-                    .iter()
-                    .map(|c| json!({"id":c.transporter_id,"name":c.driver}))
-                    .collect::<Vec<_>>()
-            ),
-        )
-        .await?;
+        let candidates = self.candidates(scope, metrics).await?;
+        if let Some(live) = live {
+            live.start_cortex(scope, drivers(&candidates)).await?;
+        }
+        // Tabs beside the first, opened once and kept for every pass. Each has its
+        // own window: Cortex can stop loading a route in a hidden background tab.
+        let mut others = Vec::new();
+        for _ in 1..tabs.min(candidates.len()) {
+            let mut page = Page::open_window(self.browser.clone(), self.origin.clone()).await?;
+            page.allow_origins(&self.origins.iter().map(String::as_str).collect::<Vec<_>>());
+            others.push(page);
+        }
+        let result = self
+            .passes(
+                scope, metrics, live, &progress, candidates, &others, started_at,
+            )
+            .await;
+        // Close the extra windows, so they hold no memory while the capture is published.
+        for page in &others {
+            let _ = page.close().await;
+        }
+        result
+    }
+    /// Reads until one pass finds every listed route's record at its latest revision.
+    #[allow(clippy::too_many_arguments)]
+    async fn passes<F, Fut>(
+        &self,
+        scope: &Scope,
+        metrics: &Recorder,
+        live: Option<&Writer>,
+        progress: &F,
+        mut candidates: Vec<Candidate>,
+        others: &[Page],
+        started_at: i64,
+    ) -> Result<Value>
+    where
+        F: Fn(i64, String) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
         let mut records: BTreeMap<String, (String, Itinerary)> = BTreeMap::new();
         let mut known = HashSet::new();
-        let mut reads = 0;
+        let reads = AtomicUsize::new(0);
         // Later passes only re-read routes whose meals changed, so they are short.
         // Swipes arrive every few minutes at midday; allow for several of them.
         for pass in 0..6 {
-            for candidate in &candidates {
-                known.insert(candidate.id.clone());
-                if records
-                    .get(&candidate.id)
-                    .is_some_and(|(revision, _)| revision == &candidate.revision)
-                {
-                    continue;
-                }
-                reads += 1;
-                metrics.page_start(reads, 1);
-                metrics.page_stage(reads, "content");
-                progress(
-                    10 + (70 * records.len() / candidates.len().max(1)) as i64,
-                    format!(
-                        "Reading meal evidence ({}/{})",
-                        records.len() + 1,
-                        candidates.len()
-                    ),
-                )
-                .await?;
-                let result = self.meal_page(scope, Some(candidate), metrics).await;
-                metrics.page_finish(reads, result.as_ref().err().map(|e| e.code.as_str()));
-                match result {
-                    Ok(value) => {
-                        let mut route: Itinerary =
-                            serde_json::from_value(value["itinerary"].clone())
-                                .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
-                        route.source_url = Some(format!(
-                            "{}{}",
-                            self.origin,
-                            scope.detail_path(&candidate.id)
-                        ));
-                        ensure(
-                            route.id == candidate.id
-                                && route.transporter_id == candidate.transporter_id,
-                            "cortex_invalid_identity",
-                            502,
-                        )?;
-                        live.cortex(&Capture {
-                            scope: scope.clone(),
-                            started_at,
-                            finished_at: now(),
-                            itineraries: vec![route.clone()],
+            known.extend(candidates.iter().map(|c| c.id.clone()));
+            let lanes = {
+                let routes = Routes {
+                    driver: self,
+                    scope,
+                    pending: candidates
+                        .iter()
+                        .filter(|c| {
+                            records
+                                .get(&c.id)
+                                .is_none_or(|(revision, _)| revision != &c.revision)
                         })
-                        .await?;
-                        records.insert(candidate.id.clone(), (candidate.revision.clone(), route));
-                    }
-                    // A meal swipe landed after the list was read. Finish the other
-                    // routes; the next pass re-reads this one at its new revision.
-                    Err(error) if error.is(crate::Code::CortexSourceChanged) => {
-                        records.remove(&candidate.id);
-                    }
-                    Err(error) => return Err(error),
-                }
-                if reads.is_multiple_of(10) {
-                    self.page.collect_garbage().await?;
+                        .collect(),
+                    next: AtomicUsize::new(0),
+                    stopped: AtomicBool::new(false),
+                    reads: &reads,
+                    done: AtomicUsize::new(records.len()),
+                    total: candidates.len(),
+                    metrics,
+                    live,
+                    started_at,
+                    progress,
+                };
+                // Drain every tab even when one fails. Dropping a sibling's in-flight
+                // command closes the shared browser transport.
+                futures_util::future::join_all(
+                    std::iter::once(&self.page)
+                        .chain(others)
+                        .map(|page| routes.lane(page)),
+                )
+                .await
+            };
+            for lane in lanes {
+                for (id, read) in lane? {
+                    match read {
+                        Some(record) => records.insert(id, record),
+                        // A meal swipe landed after the list was read. The next pass
+                        // re-reads this route at its new revision.
+                        None => records.remove(&id),
+                    };
                 }
             }
             progress(85, format!("Checking source changes (pass {})", pass + 1)).await?;
@@ -259,14 +275,115 @@ impl Driver {
                 progress(95, "Validating meal publication".into()).await?;
                 return Ok(serde_json::to_value(capture)?);
             }
-            live.cortex_drivers(json!(
-                next.iter()
-                    .map(|c| json!({"id":c.transporter_id,"name":c.driver}))
-                    .collect::<Vec<_>>()
-            ))
-            .await?;
+            if let Some(live) = live {
+                live.cortex_drivers(drivers(&next)).await?;
+            }
             candidates = next;
         }
         Err(Error::new("cortex_source_changed", 502))
+    }
+}
+
+/// The drivers a list names, as the live view shows them.
+fn drivers(candidates: &[Candidate]) -> Value {
+    json!(
+        candidates
+            .iter()
+            .map(|c| json!({"id":c.transporter_id,"name":c.driver}))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// One pass over the routes whose record is missing or out of date, shared by the tabs.
+struct Routes<'a, F> {
+    driver: &'a Driver,
+    scope: &'a Scope,
+    pending: Vec<&'a Candidate>,
+    next: AtomicUsize,
+    stopped: AtomicBool,
+    reads: &'a AtomicUsize,
+    done: AtomicUsize,
+    total: usize,
+    metrics: &'a Recorder,
+    live: Option<&'a Writer>,
+    started_at: i64,
+    progress: &'a F,
+}
+/// A route's record at the revision it was read, or `None` when it changed meanwhile.
+type Read = (String, Option<(String, Itinerary)>);
+impl<F, Fut> Routes<'_, F>
+where
+    F: Fn(i64, String) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    async fn lane(&self, page: &Page) -> Result<Vec<Read>> {
+        let result = self.read(page).await;
+        if result.is_err() {
+            self.stopped.store(true, Ordering::SeqCst);
+        }
+        result
+    }
+    async fn read(&self, page: &Page) -> Result<Vec<Read>> {
+        let mut reads = Vec::new();
+        while !self.stopped.load(Ordering::SeqCst) {
+            let Some(candidate) = self.pending.get(self.next.fetch_add(1, Ordering::SeqCst)) else {
+                break;
+            };
+            let ordinal = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+            self.metrics.page_start(ordinal, 1);
+            self.metrics.page_stage(ordinal, "content");
+            let done = self.done.load(Ordering::SeqCst);
+            (self.progress)(
+                10 + (70 * done / self.total.max(1)) as i64,
+                format!("Reading meal evidence ({}/{})", done + 1, self.total),
+            )
+            .await?;
+            let result = self
+                .driver
+                .meal_page(page, self.scope, Some(candidate), self.metrics)
+                .await;
+            self.metrics
+                .page_finish(ordinal, result.as_ref().err().map(|e| e.code.as_str()));
+            match result {
+                Ok(value) => {
+                    let mut route: Itinerary =
+                        serde_json::from_value(value["itinerary"].clone())
+                            .map_err(|_| Error::new("cortex_content_incomplete", 502))?;
+                    route.source_url = Some(format!(
+                        "{}{}",
+                        self.driver.origin,
+                        self.scope.detail_path(&candidate.id)
+                    ));
+                    ensure(
+                        route.id == candidate.id
+                            && route.transporter_id == candidate.transporter_id,
+                        "cortex_invalid_identity",
+                        502,
+                    )?;
+                    if let Some(live) = self.live {
+                        live.cortex(&Capture {
+                            scope: self.scope.clone(),
+                            started_at: self.started_at,
+                            finished_at: now(),
+                            itineraries: vec![route.clone()],
+                        })
+                        .await?;
+                    }
+                    self.done.fetch_add(1, Ordering::SeqCst);
+                    reads.push((
+                        candidate.id.clone(),
+                        Some((candidate.revision.clone(), route)),
+                    ));
+                }
+                Err(error) if error.is(crate::Code::CortexSourceChanged) => {
+                    reads.push((candidate.id.clone(), None));
+                }
+                Err(error) => return Err(error),
+            }
+            if reads.len().is_multiple_of(10) {
+                page.collect_garbage().await?;
+            }
+        }
+        Ok(reads)
     }
 }

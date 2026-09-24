@@ -198,8 +198,13 @@ impl Drives for Driver {
                 self,
                 &scope,
                 run.metrics,
-                &crate::live_collection::Writer::new(run.state.clone(), run.job, run.owner),
+                Some(&crate::live_collection::Writer::new(
+                    run.state.clone(),
+                    run.job,
+                    run.owner,
+                )),
                 |progress, message| run.progress(progress, message),
+                collection::TABS,
             )
             .await?;
             Ok(Collected {

@@ -463,3 +463,157 @@ test(
     });
   },
 );
+test(
+  'Cortex reads every route of a day in two tabs, including one added while it reads',
+  { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 180000 },
+  async (t) => {
+    const date = '2026-01-12';
+    const start = Date.parse(`${date}T20:00:00Z`);
+    let lists = 0;
+    let active = 0;
+    let peak = 0;
+    const read = new Set<string>();
+    const route = (n: number) => ({
+      itineraryId: `itinerary-${n}`,
+      transporterId: `driver-${n}`,
+      routeCode: `CX${n}`,
+      companyId: 'provider-1',
+      executionStatus: 'COMPLETE',
+      stopProgress: { total: 1, completed: 1 },
+      breaks: [
+        {
+          punchId: `punch-${n}`,
+          breakId: `meal-${n}`,
+          type: 'MEAL',
+          state: 'OFF',
+          timeStampOn: start + n * 60000,
+          timeStampOff: start + n * 60000 + 1800000,
+          sequenceNumber: 1,
+        },
+      ],
+    });
+    const task = (id: string, time: number) => ({
+      taskId: id,
+      taskType: 'DROP_OFF',
+      taskState: 'DELIVERED',
+      executionStatus: 'COMPLETE',
+      actualExecutionTime: time / 1000,
+      transporterId: null,
+    });
+    const server = http.createServer(async (req, res) => {
+      const url = new URL(req.url!, 'http://fixture.test');
+      res.setHeader('content-type', 'text/html');
+      if (url.pathname === '/dspconsolev2') {
+        res.end(
+          '<title>DSP Console</title><nav><a href="/scheduling/calendar-view/week">Weekly schedule</a></nav><a href="/ap/signin">Sign out</a>',
+        );
+        return;
+      }
+      if (!url.pathname.startsWith('/operations/execution/itineraries')) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const detail = url.pathname.includes('/documentType/');
+      if (!detail) lists++;
+      // A rescue route joins the day after the first list was read.
+      const routes = Array.from({ length: lists > 1 ? 8 : 7 }, (_, i) => route(i + 1));
+      const p: any = {
+        selectedDay: date,
+        serviceAreaId: 'area-1',
+        selectedStation: {
+          serviceAreaID: 'area-1',
+          defaultStationCode: 'DOT4',
+          timeZone: 'US/Pacific',
+        },
+        providerFilterValue: 'provider-1',
+        providerFilterOptions: [{ value: 'provider-1' }],
+        isLoadingSummaries: false,
+        allItinerarySummaries: routes,
+        transporterSummary: Object.fromEntries(
+          routes.map((r) => [r.transporterId, { transporterName: `Driver ${r.routeCode}` }]),
+        ),
+      };
+      if (detail) {
+        const id = decodeURIComponent(url.pathname.split('/')[4]!);
+        peak = Math.max(peak, ++active);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        active--;
+        read.add(id);
+        const c = routes.find((r) => r.itineraryId === id)!;
+        const meal = c.breaks[0]!;
+        p.isLoadingItineraryDetails = false;
+        p.itineraryDetails = {
+          ...c,
+          localDate: [2026, 1, 12],
+          serviceAreaId: 'area-1',
+          unknownStops: [],
+          inactiveTasks: [],
+          stops: [
+            {
+              stopId: `stop-${id}`,
+              tasks: [
+                task(`before-${id}`, meal.timeStampOn - 60000),
+                task(`after-${id}`, meal.timeStampOff + 60000),
+              ],
+            },
+          ],
+        };
+      }
+      res.end(
+        `<title>Delivery Execution</title><main></main><script>document.querySelector('main').__reactFiber$fixture={memoizedProps:${JSON.stringify(p)}};</script>`,
+      );
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    t.after(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+    const f = await fixture({
+      env: {
+        DISPATCH_FIXTURE_PROVIDER_URL: `http://fixture.dispatch.invalid:${(server.address() as AddressInfo).port}`,
+        DISPATCH_BWRAP_EXECUTABLE:
+          process.env.DISPATCH_BWRAP_EXECUTABLE ?? '/usr/local/libexec/dispatch-dev/bwrap',
+      },
+    });
+    t.after(f.close);
+    const owner = await f.client();
+    const dsp = owner.session.dsps.find((d: any) => d.permanent);
+    await owner.select(dsp.id);
+    const saved = await owner.post('/api/dsp/connections/cortex', {
+      username: 'fixture@example.test',
+      password: 'fixture-password',
+    });
+    assert.equal(saved.value.status, 'ready', saved.body);
+    const response = await owner.post('/api/dsp/cortex/meal-breaks/collect', {
+      date,
+      station: 'DOT4',
+      serviceAreaId: 'area-1',
+      provider: 'provider-1',
+      timezone: 'America/Los_Angeles',
+      requestId: 'every-route',
+    });
+    assert.equal(response.status, 202, response.body);
+    let job: any;
+    await until(async () => {
+      job = (await owner.get('/api/dsp/jobs')).value.find((j: any) => j.id === response.value.id);
+      return ['succeeded', 'failed'].includes(job.status);
+    }, 90000);
+    assert.equal(job.status, 'succeeded', JSON.stringify(job));
+    const published = (await owner.get(`/api/dsp/cortex/meal-breaks?date=${date}`)).value;
+    assert.equal(published[0].itineraryCount, 8, 'Every route, including the one added mid-read');
+    assert.equal(published[0].mealCount, 8);
+    assert.equal(published[0].verifiedGapPairs, 8, 'Each meal keeps both delivery gaps');
+    assert.equal(read.size, 8);
+    assert.equal(peak, 2, 'Two route pages load at once, never more');
+    f.database(`dsps/${dsp.id}/data/cortex/cortex.sqlite`, (db) => {
+      const drivers = db
+        .prepare('SELECT DISTINCT transporter_id id FROM meal_itineraries WHERE publication_id=?')
+        .all(published[0].id) as { id: string }[];
+      assert.deepEqual(
+        drivers.map((d) => d.id).sort(),
+        Array.from({ length: 8 }, (_, i) => `driver-${i + 1}`).sort(),
+      );
+    });
+  },
+);

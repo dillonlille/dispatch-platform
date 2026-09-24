@@ -418,6 +418,7 @@ dependencies = [
  "chrono-tz",
  "dispatch-host",
  "fs2",
+ "futures-util",
  "getrandom 0.3.4",
  "hmac",
  "icu_collator",

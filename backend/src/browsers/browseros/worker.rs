@@ -259,6 +259,9 @@ async fn browser(mode: &str, notes: &Notes) -> Result<(tokio::process::Child, Cd
         "--disable-quic",
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
         "--renderer-process-limit=4",
+        // A window covered by another stays visible: Cortex does not show a route it
+        // has loaded while its document is hidden, so a covered tab would never finish.
+        "--disable-backgrounding-occluded-windows",
     ]);
     if mode == "headless" {
         command.arg("--headless=new");
