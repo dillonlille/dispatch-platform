@@ -103,7 +103,7 @@ impl Store {
         let accepted = match raw.len() {
             43 => self.platform.one(
                 ACCEPTED_INVITATION,
-                params![crypto::sha(raw), self.config.environment],
+                params![crypto::sha(raw), now(), self.config.environment],
             )?,
             _ => None,
         };

@@ -68,6 +68,12 @@ test('Rust provisioning, invitation acceptance, profile setup, removal and resto
   );
   assert.equal((await owner.post(`/api/platform/dsps/${id}/restore`)).status, 200);
   await user.select(id);
+  assert.equal((await f.request(invite)).value.accepted, true);
+  // After the invitation's own seven days, a used link reads as expired like any other.
+  f.database('data/platform/accounts.sqlite', (db) =>
+    db.prepare("UPDATE invitations SET expires_at=0 WHERE email='new@dispatch.test'").run(),
+  );
+  assert.equal((await f.request(invite)).value.error, 'invitation_expired');
   const dev = owner.session.dsps.find((d: { permanent: boolean }) => d.permanent);
   assert.equal((await owner.post(`/api/platform/dsps/${dev.id}/remove`)).status, 409);
   assert.equal(

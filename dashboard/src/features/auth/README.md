@@ -14,7 +14,9 @@ data sent to Sign In is an in-memory email and entrance flag in `app/sign-in-han
 Passwords are never passed to Sign In or persisted by this flow.
 
 An invitation lookup answers `accepted: true` with the email, DSP name and role once the link
-has been used, and `invitation_expired` when it expired, was revoked or never existed.
+has been used, until the invitation's original seven days run out. It answers
+`invitation_expired` when it expired, was revoked or never existed, and for a used link after
+those seven days.
 `InvitationScreen` shows `InvitationAccepted`, which hands its email to Sign In the same way,
 or `InvitationExpired` for those; any other failure keeps the form with its error. Their map
 settles instead of animating: `route` on `MemberProfileLayout` selects `live`, `cancelled` or
