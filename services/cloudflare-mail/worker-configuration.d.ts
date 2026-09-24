@@ -19,10 +19,9 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
   [Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-  interface ProcessEnv
-    extends StringifyValues<
-      Pick<Cloudflare.Env, 'DISPATCH_ENVIRONMENT' | 'DISPATCH_ORIGIN' | 'MAIL_FROM' | 'MAIL_TOKEN'>
-    > {}
+  interface ProcessEnv extends StringifyValues<
+    Pick<Cloudflare.Env, 'DISPATCH_ENVIRONMENT' | 'DISPATCH_ORIGIN' | 'MAIL_FROM' | 'MAIL_TOKEN'>
+  > {}
 }
 
 export type { Env };
