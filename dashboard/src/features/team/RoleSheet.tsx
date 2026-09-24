@@ -28,6 +28,14 @@ export function RoleSheet({
 }) {
   const [name, setName] = useState(role?.name ?? '');
   const [chosen, setChosen] = useState<Permission[]>(role?.permissions ?? []);
+  const [confirming, setConfirming] = useState(false);
+  const ordered = (permissions: Permission[]) =>
+    allPermissions.filter((p) => permissions.includes(p));
+  const dirty =
+    name !== (role?.name ?? '') ||
+    ordered(chosen).join() !== ordered(role?.permissions ?? []).join();
+  // Edits leave only through Save or Discard; closing the tab drops them silently.
+  const leave = () => (dirty ? setConfirming(true) : close());
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
   const inUse = role ? (role.members ?? 0) + (role.invitations ?? 0) > 0 : false;
@@ -59,7 +67,7 @@ export function RoleSheet({
     });
   }
   return (
-    <Modal variant="sheet" title={role ? `Edit ${role.name}` : 'Create role'} onClose={close}>
+    <Modal variant="sheet" title={role ? `Edit ${role.name}` : 'Create role'} onClose={leave}>
       <form
         className="role-form"
         onSubmit={(event) => {
@@ -122,13 +130,33 @@ export function RoleSheet({
               Delete role
             </button>
           ) : (
-            <button type="button" onClick={close}>
+            <button type="button" onClick={leave}>
               Cancel
             </button>
           )}
           <button className="primary">{role ? 'Save role' : 'Create role'}</button>
         </div>
       </form>
+      {confirming && (
+        <Modal title="Save changes?" dismissible={false} onClose={() => {}}>
+          <p>This role has unsaved changes.</p>
+          <div className="form-actions">
+            <button type="button" onClick={close}>
+              Discard changes
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={save.busy || !name.trim()}
+              onClick={async () => {
+                if (!(await save.run())) setConfirming(false);
+              }}
+            >
+              Save changes
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }
