@@ -579,13 +579,13 @@ impl<'a> Updater<'a> {
         require(matches.len() <= 1, "Verified Dev artifact is ambiguous")?;
         Ok(matches.first().map(|record| (*record).clone()))
     }
-    fn settled(&self, current: &Manifest) -> bool {
+    fn settled(&self, digest: &str) -> bool {
         let Ok(check) = io::read_json(&self.platform.join("production-release-check.json")) else {
             return false;
         };
         let age = self.system.now() - check["checkedAt"].as_f64().unwrap_or(f64::NEG_INFINITY);
         (0.0..600.0).contains(&age)
-            && check["digest"] == current.digest
+            && check["digest"] == digest
             && check["tag"]
                 .as_str()
                 .is_some_and(|tag| releases::latest_tag(self.system).as_deref() == Some(tag))
@@ -597,10 +597,36 @@ impl<'a> Updater<'a> {
         )
     }
     fn update_production(&self) -> Result<()> {
-        let current = artifact::verify(&self.active, None)?;
-        if self.settled(&current) {
+        // Nothing new since the last full check: the recorded digest tells, so the runtime is
+        // hashed again only once there may be something to do, at least every ten minutes.
+        if self.settled(&artifact::manifest(&self.active)?.digest) {
             return Ok(());
         }
+        let retry = self.platform.join("production-update-retry.json");
+        let pending = io::read_json(&retry).unwrap_or(Value::Null);
+        if self.system.now() < pending["retryAt"].as_f64().unwrap_or(f64::NEG_INFINITY) {
+            return Ok(());
+        }
+        let result = self.install_latest();
+        if result.is_ok() {
+            if retry.try_exists()? {
+                fs::remove_file(&retry)?;
+            }
+        } else {
+            // This host has 60 unauthenticated GitHub API calls an hour, and an attempt makes
+            // up to five, so a failure repeated every 30 seconds would soon exhaust them. Wait
+            // 1, 2, 4, 8, then 10 minutes between attempts.
+            let failures = pending["failures"].as_u64().unwrap_or(0) + 1;
+            let delay = (60u64 << (failures - 1).min(4)).min(600);
+            let record = json!({"failures":failures,"retryAt":self.system.now() + delay as f64});
+            if let Err(error) = io::write_json(&retry, &record) {
+                eprintln!("Retry delay was not recorded: {error}");
+            }
+        }
+        result
+    }
+    fn install_latest(&self) -> Result<()> {
+        let current = artifact::verify(&self.active, None)?;
         let release = releases::public_github(self.system, "releases/latest")?;
         let selected = releases::release_version(&release)?;
         let order = releases::version(&selected)?.cmp(&releases::version(&current.version)?);

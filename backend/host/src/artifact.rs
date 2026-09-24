@@ -124,7 +124,9 @@ pub fn write_manifest(root: &Path, version: &str) -> Result<Manifest> {
     )?;
     verify(root, None)
 }
-pub fn verify(root: &Path, commit: Option<&str>) -> Result<Manifest> {
+/// The manifest `root` records, checked against its own digest but without hashing the files
+/// it lists; `verify` does both.
+pub fn manifest(root: &Path) -> Result<Manifest> {
     real_directory(root)?;
     let path = root.join("release.json");
     let info = fs::symlink_metadata(&path)?;
@@ -151,6 +153,10 @@ pub fn verify(root: &Path, commit: Option<&str>) -> Result<Manifest> {
         hex(&manifest.digest, 64) && hash(&serde_json::to_vec(&value)?) == manifest.digest,
         "Artifact manifest changed",
     )?;
+    Ok(manifest)
+}
+pub fn verify(root: &Path, commit: Option<&str>) -> Result<Manifest> {
+    let manifest = manifest(root)?;
     let mut files = BTreeMap::new();
     require(
         manifest.files.len() <= 50_000,
