@@ -52,6 +52,8 @@ export interface TableColumn<T> {
   cell: (row: T, context: RowContext) => ReactNode;
   /** A comparable value read from the row alone. Required for client sorting; used by exports. */
   value?: (row: T) => string | number | null | undefined;
+  /** Replaces `value` for client sorting when the exported text does not order correctly. */
+  sortValue?: (row: T) => string | number | null | undefined;
   sortable?: boolean;
   /** Replaces the sort button's class and arrow. */
   sortHeader?: { className?: string; indicator?: (direction: 'asc' | 'desc') => ReactNode };
@@ -137,7 +139,10 @@ export function useDataTable<T extends RowData>({
     () =>
       latest.current.map((column, index): ColumnDef<Features, T> => ({
         id: column.id,
-        accessorFn: (row) => latest.current[index]?.value?.(row) ?? null,
+        accessorFn: (row) => {
+          const column = latest.current[index];
+          return (column?.sortValue ?? column?.value)?.(row) ?? null;
+        },
         enableSorting: Boolean(column.sortable),
         sortFn: (a: Row<Features, T>, b: Row<Features, T>, id: string) =>
           compare(a.getValue(id), b.getValue(id)),
