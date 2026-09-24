@@ -63,7 +63,8 @@ test('owner creates a role and the member’s interface follows its permissions'
 
   // Removing a permission reaches the open session without a manual reload.
   await page.getByRole('tab', { name: 'Roles', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit Payroll Admin' }).click();
+  await page.getByLabel('Actions for Payroll Admin').click();
+  await page.getByRole('button', { name: 'Edit role', exact: true }).click();
   const edit = page.getByRole('dialog', { name: 'Edit Payroll Admin' });
   await edit.getByRole('switch', { name: 'Manage Timecard', exact: true }).uncheck();
   await edit.getByRole('switch', { name: 'Invite Members', exact: true }).uncheck();
@@ -87,11 +88,13 @@ test('unsaved role edits leave only through Save changes or Discard changes', as
   const ask = page.getByRole('dialog', { name: 'Save changes?' });
 
   // Untouched, the sheet closes at once.
-  await page.getByRole('button', { name: 'Edit Manager' }).click();
+  await page.getByLabel('Actions for Manager').click();
+  await page.getByRole('button', { name: 'Edit role', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(sheet).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Edit Manager' }).click();
+  await page.getByLabel('Actions for Manager').click();
+  await page.getByRole('button', { name: 'Edit role', exact: true }).click();
   await sheet.getByRole('switch', { name: 'Manage Timecard', exact: true }).check();
   await page.keyboard.press('Escape');
   await expect(ask).toBeVisible();
@@ -105,12 +108,36 @@ test('unsaved role edits leave only through Save changes or Discard changes', as
   await expect(sheet).toHaveCount(0);
   await expect(row).not.toContainText('Manage Timecard');
 
-  await page.getByRole('button', { name: 'Edit Manager' }).click();
+  await page.getByLabel('Actions for Manager').click();
+  await page.getByRole('button', { name: 'Edit role', exact: true }).click();
   await sheet.getByRole('switch', { name: 'Manage Timecard', exact: true }).check();
   await sheet.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await ask.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(sheet).toHaveCount(0);
   await expect(row).toContainText('Manage Timecard');
+});
+
+test('owner deletes an unused role from the row menu after confirming', async ({ page }) => {
+  await login(page);
+  await openDsp(page, 'Northline Logistics');
+  await page.getByRole('link', { name: 'Team & Roles', exact: true }).click();
+  await page.getByRole('tab', { name: 'Roles', exact: true }).click();
+  // Member has a member, so it cannot go; Manager has none.
+  await page.getByLabel('Actions for Member').click();
+  await expect(page.getByRole('button', { name: 'Delete role', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  const row = page.getByRole('row', { name: /^Manager/ });
+  await page.getByLabel('Actions for Manager').click();
+  await page.getByRole('button', { name: 'Delete role', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete role' });
+  await expect(confirm).toContainText('Delete Manager?');
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(row).toBeVisible();
+  await page.getByLabel('Actions for Manager').click();
+  await page.getByRole('button', { name: 'Delete role', exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('delete-role.png') });
+  await confirm.getByRole('button', { name: 'Delete role', exact: true }).click();
+  await expect(row).toHaveCount(0);
 });
 
 test('owner removes a member from the row menu after confirming', async ({ page }) => {

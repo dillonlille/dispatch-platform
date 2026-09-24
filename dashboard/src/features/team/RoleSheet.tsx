@@ -13,7 +13,7 @@ import {
   permissionLabels,
 } from '../../app/permissions.js';
 import { useAction } from '../../app/useAction.js';
-import { saveTeamRole, removeRole } from '../../app/endpoints.js';
+import { saveTeamRole } from '../../app/endpoints.js';
 
 export function RoleSheet({
   view,
@@ -38,7 +38,6 @@ export function RoleSheet({
   const leave = () => (dirty ? setConfirming(true) : close());
   const locked = (permission: Permission) =>
     allPermissions.some((p) => implied[p] === permission && chosen.includes(p));
-  const inUse = role ? (role.members ?? 0) + (role.invitations ?? 0) > 0 : false;
   const save = useAction(
     async () => {
       await saveTeamRole(role?.id, {
@@ -49,14 +48,6 @@ export function RoleSheet({
       await saved(Boolean(role));
     },
     { success: role ? 'Role updated' : 'Role created' },
-  );
-  const remove = useAction(
-    async () => {
-      await removeRole(role!.id);
-      close();
-      await saved(false);
-    },
-    { success: 'Role deleted' },
   );
   function toggle(permission: Permission, on: boolean) {
     setChosen((current) => {
@@ -119,21 +110,9 @@ export function RoleSheet({
           </fieldset>
         ))}
         <div className="form-actions">
-          {role ? (
-            <button
-              type="button"
-              className="danger"
-              disabled={inUse}
-              title={inUse ? 'Move this role’s members and pending invitations first.' : undefined}
-              onClick={() => void remove.run()}
-            >
-              Delete role
-            </button>
-          ) : (
-            <button type="button" onClick={leave}>
-              Cancel
-            </button>
-          )}
+          <button type="button" onClick={leave}>
+            Cancel
+          </button>
           <button className="primary">{role ? 'Save role' : 'Create role'}</button>
         </div>
       </form>
