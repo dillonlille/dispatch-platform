@@ -1376,7 +1376,8 @@ const API_SHAPES: &str = r#"(input) => {
       record.bytes = text.length;
       const json = JSON.parse(text);
       const table = Object.values(json.tableData || {})[0];
-      record.rows = Array.isArray(table?.rows) ? table.rows : [];
+      // Each row arrives as a JSON string inside the JSON reply.
+      record.rows = Array.isArray(table?.rows) ? table.rows.map((row) => (typeof row === 'string' ? JSON.parse(row) : row)) : [];
       return record;
     };
     const datasets = [
