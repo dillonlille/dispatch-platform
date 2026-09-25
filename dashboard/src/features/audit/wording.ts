@@ -38,6 +38,10 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
   ],
   'collection.cancelled': () => ['cancelled a collection'],
   'cortex.collection.requested': () => ['started a Cortex meal break collection'],
+  'scorecard.collection_requested': (e) => [
+    'started a scorecard collection',
+    ...(e.detail ? [' for week ', strong(e.detail)] : []),
+  ],
   'meal_breaks.sync_requested': (e) => [
     'started a meal break sync',
     ...(e.detail ? [' for ', strong(day(e.detail))] : []),
@@ -157,6 +161,7 @@ export const spoken = new Set([
   'collection.failed',
   'collection.retrying',
   'meal_breaks.sync_requested',
+  'scorecard.collection_requested',
   'schedule.created',
   'schedule.updated',
   'schedule.toggled',
@@ -227,6 +232,7 @@ const collections: Record<string, string> = {
   paycom: 'Paycom',
   meal_break: 'Meal breaks',
   both: 'Paycom and meal breaks',
+  scorecard: 'Scorecard',
 };
 export function changeValue(field: string, value: string) {
   if (field === 'permission') return permissionLabels[value as Permission] ?? title(value);

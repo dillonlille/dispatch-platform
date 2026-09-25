@@ -110,6 +110,10 @@ fn bindings() -> BTreeMap<PathBuf, String> {
         RoleSummary,
         ScheduleCollection,
         SchedulePreview,
+        ScorecardDatasetCount,
+        ScorecardPublication,
+        ScorecardWeek,
+        ScorecardWeeks,
         SessionResponse,
         AccountSession,
     )
@@ -140,7 +144,8 @@ fn typescript_contracts_match_the_rust_types() {
 fn the_job_kinds_written_for_typescript_are_the_registered_ones() {
     let kinds: Vec<_> = Provider::ALL
         .iter()
-        .map(|p| format!("{:?}", p.job_kind()))
+        .flat_map(|p| p.job_kinds())
+        .map(|kind| format!("{kind:?}"))
         .collect();
     let cfg = ts_rs::Config::new();
     assert!(

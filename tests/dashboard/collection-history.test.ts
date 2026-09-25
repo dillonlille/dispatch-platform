@@ -41,6 +41,7 @@ function job(
         detail: null,
         itineraries: null,
         meals: null,
+        rows: null,
         queueMs: 0,
         elapsedMs: 12000,
         authenticationMs: 2000,

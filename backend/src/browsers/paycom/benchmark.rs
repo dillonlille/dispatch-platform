@@ -481,7 +481,7 @@ async fn read_in_tab(
 }
 /// The same response over HTTP, read here: its record or why not, and parse time.
 async fn read_here(
-    http: &http::Http,
+    http: &super::super::http::Http,
     source: &str,
     code: &str,
     period: &Value,
@@ -489,8 +489,8 @@ async fn read_here(
 ) -> (std::result::Result<Value, String>, u128) {
     let html = match http.page(source, referer).await {
         Ok(html) => html,
-        Err(http::Refusal::Unavailable) => return (Err("unavailable".into()), 0),
-        Err(http::Refusal::Unreadable(label)) => return (Err(label.into()), 0),
+        Err(super::super::http::Refusal::Unavailable) => return (Err("unavailable".into()), 0),
+        Err(super::super::http::Refusal::Unreadable(label)) => return (Err(label.into()), 0),
     };
     let started = Instant::now();
     let read = extract::timecard(
@@ -705,8 +705,12 @@ async fn http_concurrency() -> Result<()> {
                     let page = http.page(&source, &format!("{origin}{SEARCH}")).await;
                     let ms = fetched.elapsed().as_millis();
                     let outcome = match page {
-                        Err(http::Refusal::Unavailable) => Err("unavailable".to_owned()),
-                        Err(http::Refusal::Unreadable(label)) => Err(label.to_owned()),
+                        Err(super::super::http::Refusal::Unavailable) => {
+                            Err("unavailable".to_owned())
+                        }
+                        Err(super::super::http::Refusal::Unreadable(label)) => {
+                            Err(label.to_owned())
+                        }
                         Ok(html) => {
                             let (code, period) = (s(employee, "code").to_owned(), period.clone());
                             tokio::task::spawn_blocking(move || {

@@ -215,12 +215,26 @@ impl Store {
             .one_as("SELECT * FROM collection_schedules WHERE id=?", [schedule])?
             .ok_or_else(|| Error::new("schedule_not_found", 404))
     }
-    // `both` selects every collector a schedule can run; any other value selects one.
-    fn scheduled_providers(collection: ScheduleCollection) -> impl Iterator<Item = Provider> {
-        Provider::ALL.iter().copied().filter(move |provider| {
-            provider.collector().schedule().is_some_and(|(name, _)| {
-                collection == ScheduleCollection::Both || collection.as_str() == name
-            })
+    // `both` selects every collector's first collection; any other value selects one
+    // collector's named collection. Each comes with the error a schedule answers
+    // while its provider is not connected.
+    fn scheduled_collections(
+        collection: ScheduleCollection,
+    ) -> impl Iterator<Item = (Provider, &'static str, &'static str)> {
+        Provider::ALL.iter().copied().flat_map(move |provider| {
+            provider
+                .collector()
+                .schedules()
+                .iter()
+                .enumerate()
+                .filter(move |(index, (name, _))| {
+                    if collection == ScheduleCollection::Both {
+                        *index == 0
+                    } else {
+                        collection.as_str() == *name
+                    }
+                })
+                .map(move |(_, (name, required))| (provider, *name, *required))
         })
     }
     /// Today, where the DSP is.
@@ -232,11 +246,9 @@ impl Store {
             .to_string())
     }
     fn check_schedule_sources(&self, id: &str, collection: ScheduleCollection) -> Result<()> {
-        for provider in Self::scheduled_providers(collection) {
-            let collector = provider.collector();
-            let (_, required) = collector.schedule().expect("scheduled collector");
+        for (provider, name, required) in Self::scheduled_collections(collection) {
             ensure(self.connection_for(id, provider)?.enabled, required, 409)?;
-            collector.schedule_ready(self, id)?;
+            provider.collector().schedule_ready(self, id, name)?;
         }
         Ok(())
     }
@@ -298,7 +310,11 @@ impl Store {
             ],
         )?;
         let name = v::name(value, "name", 60)?;
-        let collection = v::choice(value, "collection", &["paycom", "meal_break", "both"])?;
+        let collection = v::choice(
+            value,
+            "collection",
+            &["paycom", "meal_break", "both", "scorecard"],
+        )?;
         let collection = ScheduleCollection::parse(collection)
             .ok_or_else(|| Error::new("invalid_input", 400))?;
         let requested = timing(value)?;
@@ -412,10 +428,9 @@ impl Store {
         Ok(())
     }
     pub(crate) fn pause_provider_schedules(&self, id: &str, provider: Provider) -> Result<()> {
-        let Some((target, _)) = provider.collector().schedule() else {
-            return Ok(());
-        };
-        self.dsp(id)?.exec(PAUSE, [target])?;
+        for (target, _) in provider.collector().schedules() {
+            self.dsp(id)?.exec(PAUSE, [target])?;
+        }
         Ok(())
     }
     pub(crate) fn retime_schedules(&self, id: &str, tz: &str) -> Result<()> {
@@ -467,8 +482,8 @@ impl Store {
         }
         self.check_schedule_sources(id, row.collection)?;
         let mut requests = Vec::new();
-        for provider in Self::scheduled_providers(row.collection) {
-            for (suffix, request) in provider.collector().scheduled(self, id)? {
+        for (provider, name, _) in Self::scheduled_collections(row.collection) {
+            for (suffix, request) in provider.collector().scheduled(self, id, name)? {
                 requests.push((format!("{key}{suffix}"), provider, request));
             }
         }

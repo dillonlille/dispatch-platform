@@ -3,4 +3,8 @@ import type { JobOutcome } from "./JobOutcome";
 import type { JobPhase } from "./JobPhase";
 import type { PageReads } from "./PageReads";
 
-export type JobMetrics = { attempt: number, startedAt: string, finishedAt: string | null, outcome: JobOutcome, error: string | null, phase: JobPhase | null, detail: string | null, queueMs: number, elapsedMs: number, authenticationMs: number | null, verificationMs: number | null, collectionMs: number | null, publicationMs: number | null, employees: number | null, timecards: number | null, itineraries: number | null, meals: number | null, peakRssBytes: number | null, peakPssBytes: number | null, peakPrivateBytes: number | null, memorySamples: number, incompleteMemorySamples: number, pageReads?: PageReads, };
+export type JobMetrics = { attempt: number, startedAt: string, finishedAt: string | null, outcome: JobOutcome, error: string | null, phase: JobPhase | null, detail: string | null, queueMs: number, elapsedMs: number, authenticationMs: number | null, verificationMs: number | null, collectionMs: number | null, publicationMs: number | null, employees: number | null, timecards: number | null, itineraries: number | null, meals: number | null,
+/**
+ * Scorecard rows across every dataset. Metrics saved before scorecards have none.
+ */
+rows: number | null, peakRssBytes: number | null, peakPssBytes: number | null, peakPrivateBytes: number | null, memorySamples: number, incompleteMemorySamples: number, pageReads?: PageReads, };

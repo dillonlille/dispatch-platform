@@ -20,7 +20,7 @@ impl Store {
     pub fn start_live(&self, job: &str, owner: &str, metadata: &Value) -> Result<()> {
         let dsp = self.guard_job(job, owner)?;
         let row = self.job(job, None)?;
-        let db = self.collector(s(&dsp, "id"), Provider::from_job_kind(s(&row, "kind"))?)?;
+        let db = self.collector(s(&dsp, "id"), Provider::from_job_kind(s(&row, "kind"))?.0)?;
         db.transaction(|| {
             // Each provider has one running collection per DSP. Discard any old attempt.
             db.exec("DELETE FROM collection_live_runs", [])?;

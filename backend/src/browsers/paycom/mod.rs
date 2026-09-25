@@ -2,7 +2,6 @@
 //! belong to Rust; JavaScript is restricted to provider page operations.
 mod collection;
 mod extract;
-mod http;
 use super::{
     attempt,
     driver::{Collected, Driver as Drives, Pending, Run},

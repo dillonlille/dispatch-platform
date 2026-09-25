@@ -39,6 +39,9 @@ pub struct JobMetrics {
     pub timecards: Option<usize>,
     pub itineraries: Option<usize>,
     pub meals: Option<usize>,
+    /// Scorecard rows across every dataset. Metrics saved before scorecards have none.
+    #[serde(default)]
+    pub rows: Option<usize>,
     #[cfg_attr(test, ts(type = "number | null"))]
     pub peak_rss_bytes: Option<u64>,
     #[cfg_attr(test, ts(type = "number | null"))]

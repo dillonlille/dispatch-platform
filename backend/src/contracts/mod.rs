@@ -28,6 +28,7 @@ mod meals;
 mod metrics;
 mod platform;
 mod requests;
+mod scorecard;
 mod settings;
 mod uniforms;
 mod workforce;
@@ -41,6 +42,7 @@ pub use meals::*;
 pub use metrics::*;
 pub use platform::*;
 pub use requests::*;
+pub use scorecard::*;
 pub use settings::*;
 pub use uniforms::*;
 pub use workforce::*;
@@ -107,6 +109,7 @@ text_enum! {
         Paycom => "paycom",
         MealBreak => "meal_break",
         Both => "both",
+        Scorecard => "scorecard",
     }
 }
 text_enum! {

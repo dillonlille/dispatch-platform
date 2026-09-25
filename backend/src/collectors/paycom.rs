@@ -95,7 +95,7 @@ impl Collector for Paycom {
         };
         Ok(Collected { data, scope: None })
     }
-    fn progress(&self) -> &'static str {
+    fn progress(&self, _: &Value) -> &'static str {
         "Collecting workforce"
     }
     fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()> {
@@ -117,10 +117,10 @@ impl Collector for Paycom {
             [date, date],
         )
     }
-    fn schedule(&self) -> Option<(&'static str, &'static str)> {
-        Some(("paycom", "schedule_paycom_required"))
+    fn schedules(&self) -> &'static [(&'static str, &'static str)] {
+        &[("paycom", "schedule_paycom_required")]
     }
-    fn scheduled(&self, _: &Store, _: &str) -> Result<Vec<(String, Value)>> {
+    fn scheduled(&self, _: &Store, _: &str, _: &str) -> Result<Vec<(String, Value)>> {
         Ok(vec![("paycom".into(), json!({}))])
     }
     // v0.0.9 refuses Paycom settings saves while its old schedule row is on

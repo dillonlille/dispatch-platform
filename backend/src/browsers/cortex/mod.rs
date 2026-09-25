@@ -3,6 +3,7 @@
 mod benchmark;
 mod collection;
 mod discovery;
+mod scorecard;
 use super::{
     attempt::Attempts,
     browseros,
@@ -191,6 +192,13 @@ impl Drives for Driver {
     }
     fn collect<'a>(&'a mut self, run: &'a Run<'a>) -> Pending<'a, Collected> {
         Box::pin(async move {
+            if let Some(request) = crate::scorecard::Request::parse(run.request)? {
+                let capture = self.collect_scorecard(&request, run).await?;
+                return Ok(Collected {
+                    data: serde_json::to_value(capture)?,
+                    scope: None,
+                });
+            }
             let scope = self
                 .resolve_scope(&serde_json::from_value(run.request.clone())?, run.metrics)
                 .await?;
