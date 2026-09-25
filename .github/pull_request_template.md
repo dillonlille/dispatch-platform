@@ -10,4 +10,6 @@ Verification
 
 What proved it: the preview, the local checks run, the tests added or changed.
 
+Review: what the code review found and, for accounts, permissions, migrations or collectors, the security review; or none.
+
 Docs: the docs updated, or none.
