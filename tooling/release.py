@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility entry point for Rust release orchestration; see RELEASES.md."""
+"""Compatibility entry point for Rust release orchestration."""
 import os
 from pathlib import Path
 import sys
