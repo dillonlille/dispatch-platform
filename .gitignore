@@ -28,6 +28,7 @@ target/
 /config/
 /data/
 /dsps/
+/.privacy/
 /.platform.lock
 
 .ci-rust-cache/
