@@ -101,10 +101,10 @@ fn admission(pr: &Value) -> Admission {
 /// Where CodeRabbit's review of the PR stands, read from the status it keeps on each commit.
 #[derive(Debug, PartialEq)]
 enum Review {
-    /// It finished reviewing a commit of the PR and is not reviewing the head.
+    /// It finished reviewing a commit of the PR and is reviewing none now.
     Done,
     Running,
-    /// It reported an error on the head.
+    /// It reported an error on the head, or on an earlier commit with no review since.
     Failed(String),
     /// Never asked, or skipped or rate limited, as the head's status says.
     Unstarted(String),
@@ -121,27 +121,36 @@ fn review(pr: &Value) -> Review {
         .iter()
         .find(|(oid, _)| **oid == pr["headRefOid"])
         .map(|(_, status)| *status);
-    let said = head
-        .and_then(|status| status["description"].as_str())
-        .unwrap_or("none yet")
-        .to_owned();
+    let failed = statuses
+        .iter()
+        .rev()
+        .map(|(_, status)| *status)
+        .find(|status| matches!(status["state"].as_str(), Some("FAILURE" | "ERROR")));
+    let said = |status: Option<&Value>| {
+        status
+            .and_then(|status| status["description"].as_str())
+            .unwrap_or("none yet")
+            .to_owned()
+    };
     match head.and_then(|status| status["state"].as_str()) {
         Some("PENDING") => Review::Running,
-        Some("FAILURE" | "ERROR") => Review::Failed(said),
-        _ if statuses.iter().any(|(_, status)| {
-            status["state"] == "SUCCESS" && status["description"] == REVIEWED
-        }) =>
-        {
-            Review::Done
-        }
-        // A push while it reviews leaves the review on the earlier commit.
+        Some("FAILURE" | "ERROR") => Review::Failed(said(head)),
+        // A push while it reviews leaves the review on the earlier commit, and a review asked
+        // for again outranks the one it follows.
         _ if statuses
             .iter()
             .any(|(_, status)| status["state"] == "PENDING") =>
         {
             Review::Running
         }
-        _ => Review::Unstarted(said),
+        _ if statuses.iter().any(|(_, status)| {
+            status["state"] == "SUCCESS" && status["description"] == REVIEWED
+        }) =>
+        {
+            Review::Done
+        }
+        _ if failed.is_some() => Review::Failed(said(failed)),
+        _ => Review::Unstarted(said(head)),
     }
 }
 
@@ -809,6 +818,7 @@ mod tests {
     }
 
     const SKIPPED: &str = "Review skipped: manual review required for this OSS repository";
+    const MIDDLE: &str = "4444444444444444444444444444444444444444";
 
     #[test]
     fn a_labelled_pr_waits_for_coderabbit_before_it_is_queued() {
@@ -852,6 +862,14 @@ mod tests {
         assert_eq!(review(&again), Review::Running);
         let pushed = labelled(open(NEW), &[(OLD, "PENDING", "Review in progress")]);
         assert_eq!(review(&pushed), Review::Running);
+        let rerun = labelled(
+            open(NEW),
+            &[
+                (OLD, "SUCCESS", REVIEWED),
+                (MIDDLE, "PENDING", "Review in progress"),
+            ],
+        );
+        assert_eq!(review(&rerun), Review::Running);
         // Without the label, CodeRabbit's status holds nothing up.
         let mut unlabelled = labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]);
         unlabelled["labels"]["nodes"] = json!([]);
@@ -892,6 +910,17 @@ mod tests {
             "{error}"
         );
         assert_eq!(pauses, 0);
+        // So does a failure on an earlier commit that nothing reviewed since.
+        let pushed = labelled(open(NEW), &[(OLD, "ERROR", "Review failed")]);
+        assert_eq!(review(&pushed), Review::Failed("Review failed".into()));
+        let retried = labelled(
+            open(NEW),
+            &[
+                (OLD, "ERROR", "Review failed"),
+                (MIDDLE, "SUCCESS", REVIEWED),
+            ],
+        );
+        assert_eq!(review(&retried), Review::Done);
         let skipped = labelled(open(OLD), &[(OLD, "SUCCESS", SKIPPED)]);
         let (result, _, pauses) = ship(&github(vec![skipped]));
         let error = result.unwrap_err().to_string();
