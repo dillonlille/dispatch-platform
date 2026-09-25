@@ -209,8 +209,15 @@ pub fn run(
                     short(&head.into())
                 ));
             }
-            // Refused while GitHub still computes mergeability, or when the head moved
-            // meanwhile: the next look tries again or follows the new head.
+            // Refused until the admission check has reported on this head, which takes a
+            // runner and so a moment; otherwise while GitHub still computes mergeability, or
+            // when the head moved meanwhile: the next look tries again or follows the new head.
+            Err(error) if error.to_string().contains("is expected") => {
+                note(format!(
+                    "Waiting for the admission check on {} of #{number}",
+                    short(&head.into())
+                ));
+            }
             Err(error) => {
                 refused += 1;
                 if refused >= ATTEMPTS {
@@ -460,6 +467,47 @@ mod tests {
         assert_eq!(
             ship(&github).0.unwrap_err().to_string(),
             "Pull request is not mergeable"
+        );
+    }
+
+    #[test]
+    fn the_admission_check_is_awaited_without_limit_and_reported_once() {
+        let github = github(vec![
+            open(OLD),
+            open(OLD),
+            open(OLD),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
+        github.refusals.borrow_mut().extend(
+            (0..ATTEMPTS + 2).map(|_| {
+                r#"Pull request Required status check "platform" is expected."#.to_owned()
+            }),
+        );
+        let github = GitHub {
+            looks: RefCell::new(VecDeque::from([
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(open(OLD)),
+                Ok(in_queue(OLD)),
+                Ok(merged(OLD)),
+            ])),
+            refusals: github.refusals,
+            ..Default::default()
+        };
+        let (result, said, _) = ship(&github);
+        assert_eq!(result.unwrap(), "3333333");
+        assert_eq!(github.queued.borrow().len(), 1);
+        assert_eq!(
+            said.iter()
+                .filter(|text| text.contains("admission"))
+                .count(),
+            1
         );
     }
 

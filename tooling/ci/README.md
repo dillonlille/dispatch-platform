@@ -24,6 +24,10 @@ source commit (`ci-verify.py`, which runs `dispatch-host ci verify`) and publish
 its version into it. A manual run of one suite has no gate, so nothing partial is published;
 the release tool accepts only runs whose `core` and `platform` jobs succeeded.
 
+The ruleset expects the `platform` check on a PR head before the queue admits it, so
+`queue-admission.yml` reports one on every PR head within seconds. It proves nothing; the
+queue's own gate decides.
+
 `backend/ci` builds as `dispatch-ci` and holds what runs on this machine: the Rust build
 cache and compiler fingerprint (`cargo-build.py`), the PR preflight (`npm run pr:prepare`) and
 the ship command. `npm run pr:ship -- <number>` adds the PR to the merge queue at once and
