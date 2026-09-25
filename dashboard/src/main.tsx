@@ -112,9 +112,11 @@ function App() {
   useEffect(() => {
     if (!view || !dspId) return;
     const route = findRoute('dsp', page);
-    // The page a member was on when its feature was switched off is gone; they go home.
+    // A page of a feature the DSP lacks is gone, whether a member was on it when it
+    // was switched off or followed a link to it; they go home.
     if (route?.feature && !hasFeature(view, route.feature)) {
-      if (forgetDestination(dspId, page)) navigate(dspHash(dspId, 'overview'));
+      forgetDestination(dspId, page);
+      navigate(dspHash(dspId, 'overview'));
       return;
     }
     if (navigation('dsp', { session: session!, view }).some((route) => route.id === page))

@@ -8,11 +8,9 @@ export function rememberDestination(dspId: string, page: DspRouteId) {
   while (destinations.size > 100) destinations.delete(destinations.keys().next().value!);
 }
 export const clearDestinations = () => destinations.clear();
-/** Drops the remembered page if it is `page`; answers whether it was. */
+/** Drops the remembered page if it is `page`. */
 export function forgetDestination(dspId: string, page: string) {
-  if (destinations.get(dspId) !== page) return false;
-  destinations.delete(dspId);
-  return true;
+  if (destinations.get(dspId) === page) destinations.delete(dspId);
 }
 
 export const dspHash = (
