@@ -36,13 +36,16 @@ impl JobStatus {
 }
 /// A job kind some registered provider runs. Anything else is not a stored job.
 #[derive(Clone, Copy, Debug)]
-pub struct JobKind(Provider);
+pub struct JobKind {
+    provider: Provider,
+    kind: &'static str,
+}
 impl Serialize for JobKind {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.0.job_kind())
+        serializer.serialize_str(self.kind)
     }
 }
 impl<'de> Deserialize<'de> for JobKind {
@@ -50,21 +53,24 @@ impl<'de> Deserialize<'de> for JobKind {
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
         let kind = String::deserialize(deserializer)?;
-        Provider::from_job_kind(&kind)
-            .map(Self)
-            .map_err(|_| serde::de::Error::custom("unknown job kind"))
+        Self::parse(&kind).map_err(|_| serde::de::Error::custom("unknown job kind"))
     }
 }
 impl JobKind {
+    pub fn parse(kind: &str) -> Result<Self> {
+        let (provider, kind) = Provider::from_job_kind(kind)?;
+        Ok(Self { provider, kind })
+    }
     pub fn provider(self) -> Provider {
-        self.0
+        self.provider
+    }
+    pub fn as_str(self) -> &'static str {
+        self.kind
     }
 }
 impl rusqlite::types::FromSql for JobKind {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        let kind = Provider::from_job_kind(value.as_str()?);
-        kind.map(Self)
-            .map_err(|_| rusqlite::types::FromSqlError::InvalidType)
+        Self::parse(value.as_str()?).map_err(|_| rusqlite::types::FromSqlError::InvalidType)
     }
 }
 // A progress update may only move a claimed job between these active states.
@@ -148,7 +154,12 @@ pub struct PublicJob {
     pub dsp_id: String,
     pub dsp_name: String,
     pub environment: Environment,
-    #[cfg_attr(test, ts(type = "\"paycom.collect\" | \"cortex.meal_breaks.collect\""))]
+    #[cfg_attr(
+        test,
+        ts(
+            type = "\"paycom.collect\" | \"cortex.meal_breaks.collect\" | \"cortex.scorecard.collect\""
+        )
+    )]
     pub kind: JobKind,
     pub status: JobStatus,
     pub progress: u8,

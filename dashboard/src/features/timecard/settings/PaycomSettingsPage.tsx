@@ -33,6 +33,12 @@ function repeat(schedule: ScheduleInput) {
     : `Every ${minutes} minutes`;
 }
 function CollectionLabels({ collection }: Pick<ScheduleInput, 'collection'>) {
+  if (collection === 'scorecard')
+    return (
+      <div className="schedule-collections">
+        <span className="schedule-tag">Scorecard</span>
+      </div>
+    );
   return (
     <div className="schedule-collections">
       {collection !== 'meal_break' && <span className="schedule-tag">Paycom</span>}

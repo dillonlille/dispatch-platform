@@ -5,6 +5,13 @@ const finished = ['succeeded', 'failed', 'cancelled'];
 export const isUnderway = (status: Job['status']) => !finished.includes(status);
 export const providerName = (kind: Job['kind']) =>
   kind === 'paycom.collect' ? 'Paycom' : 'Cortex';
+/** What one unit of a run's workload is, for the per-item comparison. */
+export const unit = (kind: Job['kind']) =>
+  kind === 'paycom.collect'
+    ? 'employee'
+    : kind === 'cortex.scorecard.collect'
+      ? 'row'
+      : 'itinerary';
 function median(values: number[]) {
   if (!values.length) return null;
   const sorted = values.toSorted((a, b) => a - b),
@@ -17,7 +24,12 @@ export function runHistory(job: Job) {
   const collections = metrics.flatMap((m) => (m.collectionMs === null ? [] : [m.collectionMs]));
   const peaks = metrics.flatMap((m) => (m.peakPssBytes === null ? [] : [m.peakPssBytes]));
   const resumed = metrics.reduce((n, m) => n + (m.pageReads?.resumed ?? 0), 0);
-  const count = job.kind === 'paycom.collect' ? latest?.employees : latest?.itineraries;
+  const count =
+    job.kind === 'paycom.collect'
+      ? latest?.employees
+      : job.kind === 'cortex.scorecard.collect'
+        ? latest?.rows
+        : latest?.itineraries;
   const collectionMs = collections.length ? collections.reduce((a, b) => a + b, 0) : null;
   // Interrupted measurements end at the last saved sample. Compare only complete
   // first attempts with a known workload, and normalize collection time by count.
@@ -74,7 +86,7 @@ export function collectionHistory(jobs: Job[]) {
         latest.perItemMs > speed * 1.25
       )
         warnings.push(
-          `Latest full run took ${Math.round((latest.perItemMs / speed - 1) * 100)}% longer per ${latest.job.kind === 'paycom.collect' ? 'employee' : 'itinerary'} than the median of the previous five full runs.`,
+          `Latest full run took ${Math.round((latest.perItemMs / speed - 1) * 100)}% longer per ${unit(latest.job.kind)} than the median of the previous five full runs.`,
         );
       const memory = baseline.flatMap((r) => (r.peakBytes === null ? [] : [r.peakBytes]));
       const peak = median(memory);

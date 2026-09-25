@@ -1,5 +1,6 @@
 //! Cortex: meal evidence from Amazon Logistics. Its storage was added to DSPs that
 //! already existed, which is the path every later provider takes.
+use super::AddedStorage;
 use super::Collector;
 use crate::{
     Error, Result,
@@ -11,7 +12,7 @@ use crate::{
     db::{self, Db, Kind, Store},
     ensure,
     meals::{self, CollectionRequest},
-    validate as v,
+    scorecard, validate as v,
 };
 use serde_json::{Value, json};
 use std::path::Path;
@@ -23,6 +24,19 @@ impl Collector for Cortex {
     }
     fn job_kind(&self) -> &'static str {
         "cortex.meal_breaks.collect"
+    }
+    fn other_job_kinds(&self) -> &'static [&'static str] {
+        &[scorecard::JOB_KIND]
+    }
+    fn job_kind_for(&self, request: &Value) -> &'static str {
+        if scorecard::Request::is(request) {
+            scorecard::JOB_KIND
+        } else {
+            self.job_kind()
+        }
+    }
+    fn added_storages(&self) -> &'static [AddedStorage] {
+        std::slice::from_ref(&scorecard::STORAGE)
     }
     fn database(&self) -> Kind {
         Kind::Cortex
@@ -85,6 +99,12 @@ impl Collector for Cortex {
         })
     }
     fn fixture(&self, _: &str, request: &Value) -> Result<Collected> {
+        if let Some(request) = scorecard::Request::parse(request)? {
+            return Ok(Collected {
+                data: serde_json::to_value(scorecard::fixture(&request)?)?,
+                scope: None,
+            });
+        }
         let scope = match serde_json::from_value(request.clone())? {
             CollectionRequest::Scoped(scope) => scope,
             CollectionRequest::Discover(discovery) => {
@@ -96,10 +116,17 @@ impl Collector for Cortex {
             scope: Some(scope),
         })
     }
-    fn progress(&self) -> &'static str {
-        "Collecting meal breaks"
+    fn progress(&self, request: &Value) -> &'static str {
+        if scorecard::Request::is(request) {
+            "Collecting scorecard"
+        } else {
+            "Collecting meal breaks"
+        }
     }
     fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()> {
+        if scorecard::Request::is(&collected.data) {
+            return store.publish_scorecard(dsp, job, &serde_json::from_value(collected.data)?);
+        }
         store.publish_meals(
             dsp,
             job,
@@ -113,10 +140,16 @@ impl Collector for Cortex {
     fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>> {
         db.one("SELECT MAX(collected_at) collected_at FROM meal_publications WHERE report_date=? AND active=1",[date])
     }
-    fn schedule(&self) -> Option<(&'static str, &'static str)> {
-        Some(("meal_break", "schedule_meals_required"))
+    fn schedules(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("meal_break", "schedule_meals_required"),
+            ("scorecard", "schedule_scorecard_required"),
+        ]
     }
-    fn schedule_ready(&self, store: &Store, dsp: &str) -> Result<()> {
+    fn schedule_ready(&self, store: &Store, dsp: &str, collection: &str) -> Result<()> {
+        if collection == "scorecard" {
+            return store.scorecard_schedule_ready(dsp);
+        }
         ensure(
             !store
                 .meal_sync_scopes(dsp, &store.local_date(dsp)?)?
@@ -125,7 +158,15 @@ impl Collector for Cortex {
             409,
         )
     }
-    fn scheduled(&self, store: &Store, dsp: &str) -> Result<Vec<(String, Value)>> {
+    fn scheduled(
+        &self,
+        store: &Store,
+        dsp: &str,
+        collection: &str,
+    ) -> Result<Vec<(String, Value)>> {
+        if collection == "scorecard" {
+            return store.scorecard_jobs(dsp);
+        }
         store
             .meal_sync_scopes(dsp, &store.local_date(dsp)?)?
             .iter()

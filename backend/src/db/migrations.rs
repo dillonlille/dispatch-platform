@@ -42,6 +42,7 @@ pub enum Kind {
     Dsp,
     Paycom,
     Cortex,
+    Scorecard,
 }
 impl Kind {
     pub const ALL: &[Self] = &[
@@ -50,6 +51,7 @@ impl Kind {
         Self::Dsp,
         Self::Paycom,
         Self::Cortex,
+        Self::Scorecard,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -58,13 +60,14 @@ impl Kind {
             Self::Dsp => "dsp",
             Self::Paycom => "paycom",
             Self::Cortex => "cortex",
+            Self::Scorecard => "scorecard",
         }
     }
     /// Pinned. Released binaries refuse to open a database with any other value.
     pub(crate) fn version(self) -> i64 {
         match self {
             Self::Platform => 3,
-            Self::Jobs | Self::Dsp | Self::Paycom | Self::Cortex => 1,
+            Self::Jobs | Self::Dsp | Self::Paycom | Self::Cortex | Self::Scorecard => 1,
         }
     }
     pub fn migrations(self) -> &'static [Migration] {
@@ -74,6 +77,7 @@ impl Kind {
             Self::Dsp => schema::DSP,
             Self::Paycom => schema::PAYCOM,
             Self::Cortex => schema::CORTEX,
+            Self::Scorecard => schema::SCORECARD,
         }
     }
 }
@@ -269,12 +273,14 @@ mod tests {
         let cortex = store
             .collector(&id, crate::collectors::Provider::Cortex)
             .unwrap();
-        let databases: [(Kind, &Db); 5] = [
+        let scorecard = store.scorecard(&id).unwrap();
+        let databases: [(Kind, &Db); 6] = [
             (Kind::Platform, &store.platform),
             (Kind::Jobs, &store.jobs),
             (Kind::Dsp, &dsp),
             (Kind::Paycom, &paycom),
             (Kind::Cortex, &cortex),
+            (Kind::Scorecard, &scorecard),
         ];
         for (kind, db) in databases {
             if std::env::var_os("DISPATCH_UPDATE_SCHEMA").is_some() {

@@ -1,9 +1,9 @@
-//! Paycom over plain HTTP from this process, with the session a browser signed in.
-//! Signing in stays in the browser; only a collection's repeated reads come here.
-//! Requests keep to the browser's egress rules: Paycom's own HTTPS hosts on public
-//! IPv4 addresses, no redirects and no proxies, bounded in size and time. The
+//! A provider over plain HTTP from this process, with the session a browser signed
+//! in. Signing in stays in the browser; only a collection's repeated reads come here.
+//! Requests keep to the browser's egress rules: the provider's own HTTPS hosts on
+//! public IPv4 addresses, no redirects and no proxies, bounded in size and time. The
 //! session's cookies stay in memory for the job and are never written or logged.
-use super::super::{browseros, egress};
+use super::{browseros, egress};
 use crate::{Error, Result, db::s, ensure};
 use reqwest::{
     Client, Response, StatusCode,
@@ -20,12 +20,15 @@ use url::Url;
 const LIMIT: usize = 2 * 1024 * 1024;
 const FIXTURE: &str = "fixture.dispatch.invalid";
 
-/// Where requests may go: Paycom, or the local stand-in the browser was pointed at.
+/// Where requests may go: one provider's hosts, or the local stand-in the browser
+/// was pointed at.
 #[derive(Clone, Copy)]
 enum Hosts {
     Paycom,
+    Cortex,
     Fixture(u16),
 }
+const CORTEX: &str = "logistics.amazon.com";
 impl Hosts {
     fn allows(self, url: &Url) -> bool {
         let host = url.host_str().unwrap_or("");
@@ -38,18 +41,38 @@ impl Hosts {
                         && url.port_or_known_default() == Some(443)
                         && Self::paycom(host)
                 }
+                Self::Cortex => {
+                    url.scheme() == "https"
+                        && url.port_or_known_default() == Some(443)
+                        && Self::cortex(host)
+                }
                 Self::Fixture(port) => {
                     url.scheme() == "http" && host == FIXTURE && url.port() == Some(port)
                 }
             }
     }
+    /// Whether the provider's own requests may go to `host`.
+    fn host(self, host: &str) -> bool {
+        match self {
+            Self::Paycom => Self::paycom(host),
+            Self::Cortex => Self::cortex(host),
+            Self::Fixture(_) => host == FIXTURE,
+        }
+    }
     fn paycom(host: &str) -> bool {
         egress::allowed_host(host)
             && (host == "paycomonline.net" || host.ends_with(".paycomonline.net"))
     }
+    // Only the application's own host: its data API lives there.
+    fn cortex(host: &str) -> bool {
+        egress::allowed_cortex_host(host) && host == CORTEX
+    }
     fn cookie(self, domain: &str) -> bool {
         match self {
             Self::Paycom => Self::paycom(domain),
+            Self::Cortex => {
+                domain == CORTEX || domain == "amazon.com" || domain.ends_with(".amazon.com")
+            }
             Self::Fixture(_) => domain == FIXTURE,
         }
     }
@@ -65,10 +88,12 @@ impl Resolve for Resolver {
                 Hosts::Fixture(port) if host == FIXTURE => {
                     vec![SocketAddr::from(([127, 0, 0, 1], port))]
                 }
-                Hosts::Paycom if Hosts::paycom(&host) => tokio::net::lookup_host((host, 443))
-                    .await?
-                    .filter(|a| a.is_ipv4() && egress::public_address(a.ip()))
-                    .collect(),
+                Hosts::Paycom | Hosts::Cortex if hosts.host(&host) => {
+                    tokio::net::lookup_host((host, 443))
+                        .await?
+                        .filter(|a| a.is_ipv4() && egress::public_address(a.ip()))
+                        .collect()
+                }
                 _ => Vec::new(),
             };
             if addresses.is_empty() {
@@ -93,7 +118,8 @@ pub(super) struct Http {
     origin: String,
 }
 impl Http {
-    /// The browser's session for Paycom: its cookies and user agent, nothing else.
+    /// The browser's session for the provider at `origin`: its cookies and user
+    /// agent, nothing else.
     pub async fn signed_in(browser: &browseros::Session, origin: &str) -> Result<Self> {
         let origin_url = Url::parse(origin).map_err(|_| Error::new("egress_denied", 403))?;
         let hosts = match origin_url.host_str() {
@@ -102,7 +128,9 @@ impl Http {
                     .port()
                     .ok_or_else(|| Error::new("egress_denied", 403))?,
             ),
-            _ => Hosts::Paycom,
+            Some(CORTEX) => Hosts::Cortex,
+            Some(host) if Hosts::paycom(host) => Hosts::Paycom,
+            _ => return Err(Error::new("egress_denied", 403)),
         };
         let cookies = browser
             .command("Storage.getCookies", json!({}), None)
@@ -140,7 +168,7 @@ impl Http {
             .redirect(Policy::none())
             .no_proxy()
             .dns_resolver(Arc::new(Resolver(hosts)))
-            .https_only(matches!(hosts, Hosts::Paycom))
+            .https_only(!matches!(hosts, Hosts::Fixture(_)))
             .connect_timeout(Duration::from_secs(10))
             .user_agent(s(&version, "userAgent"))
             .build()
@@ -159,6 +187,14 @@ impl Http {
     }
     /// A body of the expected type, within the size a tab would accept.
     async fn body(response: Response, kind: &str) -> std::result::Result<String, Refusal> {
+        Self::body_within(response, kind, LIMIT).await
+    }
+    /// A body of the expected type, within `limit` bytes.
+    async fn body_within(
+        response: Response,
+        kind: &str,
+        limit: usize,
+    ) -> std::result::Result<String, Refusal> {
         let status = response.status();
         if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
             return Err(Refusal::Unavailable);
@@ -182,7 +218,7 @@ impl Http {
         }
         if response
             .content_length()
-            .is_some_and(|length| length > LIMIT as u64)
+            .is_some_and(|length| length > limit as u64)
         {
             return Err(Refusal::Unreadable("http_too_large"));
         }
@@ -190,7 +226,7 @@ impl Http {
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|_| Refusal::Unavailable)? {
             bytes.extend_from_slice(&chunk);
-            if bytes.len() > LIMIT {
+            if bytes.len() > limit {
                 return Err(Refusal::Unreadable("http_too_large"));
             }
         }
@@ -229,6 +265,27 @@ impl Http {
             serde_json::from_str(&text).map_err(|_| Error::new("roster_not_complete", 409))?;
         ensure(value.is_object(), "roster_not_complete", 409)?;
         Ok(value)
+    }
+    /// A JSON document within `limit` bytes, as a tab's `fetch` of it would receive.
+    pub async fn json(
+        &self,
+        url: &str,
+        referer: &str,
+        limit: usize,
+    ) -> std::result::Result<Value, Refusal> {
+        let target = self.target(url)?;
+        let response = self
+            .client
+            .get(target)
+            .timeout(Duration::from_secs(60))
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Referer", referer)
+            .send()
+            .await
+            .map_err(|_| Refusal::Unavailable)?;
+        let text = Self::body_within(response, "application/json", limit).await?;
+        serde_json::from_str(&text).map_err(|_| Refusal::Unreadable("http_not_json"))
     }
     /// One timecard page's HTML, as a tab's `fetch` of it would receive.
     pub async fn page(&self, url: &str, referer: &str) -> std::result::Result<String, Refusal> {

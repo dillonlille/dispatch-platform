@@ -23,6 +23,7 @@ pub mod proxy;
 pub mod read_cache;
 pub mod roles;
 pub mod schedules;
+pub mod scorecard;
 pub mod tenants;
 pub mod uniforms;
 pub mod validate;

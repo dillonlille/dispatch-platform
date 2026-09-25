@@ -5,6 +5,7 @@ pub(crate) mod cortex;
 mod driver;
 pub mod egress;
 mod fixture;
+pub(crate) mod http;
 mod page;
 pub(crate) mod paycom;
 pub use super::collectors::Provider;

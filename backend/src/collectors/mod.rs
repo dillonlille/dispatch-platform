@@ -23,13 +23,36 @@ pub enum Provider {
     Paycom,
     Cortex,
 }
+/// A database a provider added beside its own, for one collection: its files are
+/// named after `id`, and `marker` records that a DSP gained it.
+pub struct AddedStorage {
+    pub id: &'static str,
+    pub kind: Kind,
+    pub marker: &'static str,
+    /// Written into `storage_identity`, so a file cannot pass for another storage.
+    pub source: &'static str,
+    /// Fails closed when initialized storage lost what it must hold.
+    pub verify: fn(&Db) -> Result<()>,
+}
 /// Everything the platform needs to know about one provider. Storage, credentials,
 /// the browser and the job queue ask here instead of matching on the provider.
 pub(crate) trait Collector: Sync {
     /// Names its connection row, its files, its secrets and its API path.
     fn id(&self) -> &'static str;
-    /// The kind of job that runs it.
+    /// The kind of job that runs its main collection.
     fn job_kind(&self) -> &'static str;
+    /// The kinds of its other collections, each chosen by `job_kind_for`.
+    fn other_job_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// The kind of job a request queues.
+    fn job_kind_for(&self, _request: &Value) -> &'static str {
+        self.job_kind()
+    }
+    /// Databases beside its own, one per added collection.
+    fn added_storages(&self) -> &'static [AddedStorage] {
+        &[]
+    }
     /// Its database, and with it the migration list in `db::schema`.
     fn database(&self) -> Kind;
     /// Written into a new database with its schema. Must identify the storage.
@@ -64,8 +87,8 @@ pub(crate) trait Collector: Sync {
     ) -> Pending<'a, Box<dyn Driver>>;
     /// What a collection returns in fixture mode, where no browser runs.
     fn fixture(&self, timezone: &str, request: &Value) -> Result<Collected>;
-    /// The job's message while it collects.
-    fn progress(&self) -> &'static str;
+    /// The job's message while it collects `request`.
+    fn progress(&self, _request: &Value) -> &'static str;
     /// Stores a finished collection. Runs while the job is still this worker's.
     fn publish(&self, store: &Store, dsp: &str, job: &str, collected: Collected) -> Result<()>;
     /// Drops what an unfinished job kept to resume from. `None` means every job.
@@ -74,17 +97,19 @@ pub(crate) trait Collector: Sync {
     }
     /// When `date` was last collected, as a row with `collected_at`.
     fn collected_at(&self, db: &Db, date: &str) -> Result<Option<Value>>;
-    /// The schedule `collection` that runs this collector alone, and the error a
-    /// schedule answers while it is not connected. `both` runs every one of them.
-    fn schedule(&self) -> Option<(&'static str, &'static str)> {
-        None
+    /// The schedule `collection`s that run this collector, each with the error a
+    /// schedule answers while it is not connected. `both` runs the first of every
+    /// collector's.
+    fn schedules(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
     }
-    /// What else a schedule needs before it can run this collector.
-    fn schedule_ready(&self, _: &Store, _dsp: &str) -> Result<()> {
+    /// What else a schedule needs before it can run `collection`.
+    fn schedule_ready(&self, _: &Store, _dsp: &str, _collection: &str) -> Result<()> {
         Ok(())
     }
-    /// The jobs one scheduled run queues: an idempotency key suffix and a request each.
-    fn scheduled(&self, _: &Store, _dsp: &str) -> Result<Vec<(String, Value)>> {
+    /// The jobs one scheduled run of `collection` queues: an idempotency key suffix
+    /// and a request each.
+    fn scheduled(&self, _: &Store, _dsp: &str, _collection: &str) -> Result<Vec<(String, Value)>> {
         Ok(vec![])
     }
     /// Runs with the connection's own disable, in its transaction.
@@ -117,11 +142,17 @@ impl Provider {
     pub fn job_kind(self) -> &'static str {
         self.collector().job_kind()
     }
-    pub fn from_job_kind(kind: &str) -> Result<Self> {
+    /// Every kind of job this provider runs.
+    pub fn job_kinds(self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.collector().job_kind())
+            .chain(self.collector().other_job_kinds().iter().copied())
+    }
+    /// The provider of a job kind, and the kind as it is spelled in the registry.
+    pub fn from_job_kind(kind: &str) -> Result<(Self, &'static str)> {
         Self::ALL
             .iter()
             .copied()
-            .find(|p| p.job_kind() == kind)
+            .find_map(|p| p.job_kinds().find(|k| *k == kind).map(|k| (p, k)))
             .ok_or_else(|| super::Error::new("unsupported_collector", 409))
     }
     pub fn validate_credentials(self, value: &Value) -> Result<()> {
@@ -142,6 +173,15 @@ fn identity(db: &Db, id: &str, provider: Provider) -> Result<()> {
     let rows = db.all("SELECT dsp_id,provider,source FROM storage_identity", [])?;
     ensure(
         rows.len() == 1 && s(&rows[0], "dsp_id") == id && s(&rows[0], "provider") == provider.id(),
+        "collector_storage_identity_mismatch",
+        503,
+    )
+}
+fn added_identity(db: &Db, id: &str, provider: Provider, storage: &AddedStorage) -> Result<()> {
+    identity(db, id, provider)?;
+    let rows = db.all("SELECT source FROM storage_identity", [])?;
+    ensure(
+        s(&rows[0], "source") == storage.source,
         "collector_storage_identity_mismatch",
         503,
     )
@@ -197,7 +237,56 @@ impl Store {
         for provider in Provider::ALL.iter().filter(|p| p.marker().is_some()) {
             self.initialize_added(id, *provider)?;
         }
+        self.initialize_added_storages(id)?;
         self.reset_live(id)
+    }
+    /// A provider's added database, verified as that DSP's.
+    pub(crate) fn added_storage(
+        &self,
+        id: &str,
+        provider: Provider,
+        storage: &AddedStorage,
+    ) -> Result<DspLease<'_>> {
+        let path = self
+            .area(id, "data")?
+            .join(storage.id)
+            .join(format!("{}.sqlite", storage.id));
+        let db = self.cached_database(&path, storage.kind)?;
+        added_identity(&db, id, provider, storage)?;
+        Ok(db)
+    }
+    // Added databases follow the same path as added providers: created for a DSP
+    // that lacks the marker, migrated and verified for one that has it.
+    fn initialize_added_storages(&self, id: &str) -> Result<()> {
+        for provider in Provider::ALL {
+            for storage in provider.collector().added_storages() {
+                let core = self.dsp(id)?;
+                let marker = core.setting(storage.marker, Value::Null)?;
+                if marker == json!(1) {
+                    db::migrate(&*self.added_storage(id, *provider, storage)?, storage.kind)?;
+                    (storage.verify)(&*self.added_storage(id, *provider, storage)?)?;
+                    continue;
+                }
+                ensure(marker.is_null(), "unsupported_storage_layout", 503)?;
+                let data = self.area(id, "data")?;
+                db::private_dir(&data.join(storage.id))?;
+                let seed = format!(
+                    "INSERT INTO storage_identity VALUES ('{id}','{}','{}');",
+                    provider.id(),
+                    storage.source
+                );
+                let target = Db::create(
+                    &data.join(storage.id).join(format!("{}.sqlite", storage.id)),
+                    storage.kind,
+                    &seed,
+                )?;
+                added_identity(&target, id, *provider, storage)?;
+                drop(target);
+                core.set(storage.marker, &json!(1))?;
+                (storage.verify)(&*self.added_storage(id, *provider, storage)?)?;
+            }
+        }
+        Ok(())
     }
     // Called during startup under the platform lock, before serving requests.
     // Provider databases are verified, and gain the migrations they lack.
@@ -214,6 +303,7 @@ impl Store {
                 db::migrate(&*self.collector(id, *provider)?, provider.database())?;
             }
         }
+        self.initialize_added_storages(id)?;
         self.reset_live(id)?;
         for provider in Provider::ALL {
             provider.collector().opened(self, id)?;
@@ -352,18 +442,30 @@ mod tests {
         };
         let all = || Provider::ALL.iter().map(|p| p.collector());
         assert!(unique(all().map(|c| c.id()).collect()));
-        assert!(unique(all().map(|c| c.job_kind()).collect()));
+        assert!(unique(
+            Provider::ALL.iter().flat_map(|p| p.job_kinds()).collect()
+        ));
         assert!(unique(all().filter_map(|c| c.marker()).collect()));
         assert!(unique(
-            all().filter_map(|c| c.schedule()).map(|s| s.0).collect()
+            all()
+                .flat_map(|c| c.schedules().iter().map(|s| s.0))
+                .collect()
+        ));
+        assert!(unique(
+            all()
+                .flat_map(|c| c.added_storages().iter().map(|s| s.marker))
+                .collect()
         ));
         for provider in Provider::ALL {
             let collector = provider.collector();
             assert_eq!(Provider::parse(collector.id()).unwrap(), *provider);
-            assert_eq!(
-                Provider::from_job_kind(collector.job_kind()).unwrap(),
-                *provider
-            );
+            for kind in provider.job_kinds() {
+                assert_eq!(Provider::from_job_kind(kind).unwrap(), (*provider, kind));
+            }
+            for storage in collector.added_storages() {
+                assert_eq!(storage.kind.name(), storage.id);
+                assert!(storage.marker.starts_with("storage."));
+            }
             // Storage, secrets and profiles are all named after the id.
             assert_eq!(collector.database().name(), collector.id());
             assert!(collector.seed("dsp_test").contains(collector.id()));

@@ -1,5 +1,5 @@
 use super::{
-    http::{Http, Refusal},
+    super::http::{Http, Refusal},
     *,
 };
 use crate::{collection_checkpoint::Checkpoint, job_metrics::Recorder};

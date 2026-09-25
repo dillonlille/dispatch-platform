@@ -54,6 +54,7 @@ impl Metrics {
             timecards: None,
             itineraries: None,
             meals: None,
+            rows: None,
             peak_rss_bytes: None,
             peak_pss_bytes: None,
             peak_private_bytes: None,
@@ -254,6 +255,12 @@ impl Recorder {
         clock.value.meals = data["itineraries"].as_array().map(|rows| {
             rows.iter()
                 .map(|r| r["meals"].as_array().map_or(0, Vec::len))
+                .sum()
+        });
+        clock.value.rows = data["datasets"].as_array().map(|datasets| {
+            datasets
+                .iter()
+                .map(|d| d["rows"].as_array().map_or(0, Vec::len))
                 .sum()
         });
     }

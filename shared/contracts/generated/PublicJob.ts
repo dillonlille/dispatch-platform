@@ -3,4 +3,4 @@ import type { Environment } from "./Environment";
 import type { JobMetrics } from "./JobMetrics";
 import type { JobStatus } from "./JobStatus";
 
-export type PublicJob = { id: string, dspId: string, dspName: string, environment: Environment, kind: "paycom.collect" | "cortex.meal_breaks.collect", status: JobStatus, progress: number, message: string, attempt: number, maxAttempts: number, availableAt: string, createdAt: string, startedAt: string | null, completedAt: string | null, error: string | null, release: string, actorId: string | null, metrics: Array<JobMetrics>, };
+export type PublicJob = { id: string, dspId: string, dspName: string, environment: Environment, kind: "paycom.collect" | "cortex.meal_breaks.collect" | "cortex.scorecard.collect", status: JobStatus, progress: number, message: string, attempt: number, maxAttempts: number, availableAt: string, createdAt: string, startedAt: string | null, completedAt: string | null, error: string | null, release: string, actorId: string | null, metrics: Array<JobMetrics>, };

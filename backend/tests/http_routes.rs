@@ -82,6 +82,8 @@ const INVENTORY: &[Row] = &[
     ("POST", "/api/dsp/jobs/{id}/cancel", Dsp("collections.run"), Async, false),
     ("GET", "/api/dsp/jobs/meal-breaks", Dsp("timecard.view"), Read, false),
     ("POST", "/api/dsp/jobs/meal-breaks", Dsp("collections.run"), Write, false),
+    ("GET", "/api/dsp/scorecard/weeks", Dsp("timecard.view"), Read, false),
+    ("POST", "/api/dsp/scorecard/collect", Dsp("collections.run"), Write, false),
     ("GET", "/api/dsp/schedules", Dsp("timecard.manage"), Read, false),
     ("POST", "/api/dsp/schedules", Dsp("timecard.manage"), Write, WAKES_SCHEDULER),
     ("POST", "/api/dsp/schedules/preview", Dsp("timecard.manage"), Write, false),

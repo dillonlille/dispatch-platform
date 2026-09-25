@@ -44,20 +44,15 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
         }
         let jid = id.clone();
         let worker = owner.clone();
+        let request: Value = serde_json::from_str(&job.request)?;
+        let message = provider.collector().progress(&request);
         state
             .run(move |db| {
                 db.guard(&jid, &worker)?;
-                db.progress(
-                    &jid,
-                    &worker,
-                    10,
-                    provider.collector().progress(),
-                    ActiveJobStatus::Running,
-                )
+                db.progress(&jid, &worker, 10, message, ActiveJobStatus::Running)
             })
             .await?;
         metrics.phase(Phase::Collection);
-        let request: Value = serde_json::from_str(&job.request)?;
         let collected = session
             .collect(&state, &id, &owner, &metrics, &request, job.attempt)
             .await?;
@@ -162,7 +157,7 @@ pub(super) async fn execute(state: Arc<State>, job: JobRow, owner: String) {
     crate::observability::event(
         if error.is_some() { "warn" } else { "info" },
         "job.finished",
-        json!({"jobId":id,"dspId":dsp,"kind":provider.job_kind(),"attempt":job.attempt,"error":error,
+        json!({"jobId":id,"dspId":dsp,"kind":job.kind.as_str(),"attempt":job.attempt,"error":error,
             "metrics":job_metrics::summary(&snapshot)}),
     );
     let changed_dsp = dsp.clone();

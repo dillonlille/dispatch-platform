@@ -92,6 +92,11 @@ pub const CORTEX: &[Migration] = &[Migration {
     name: "baseline",
     apply: Sql(include_str!("cortex/0001_baseline.sql")),
 }];
+pub const SCORECARD: &[Migration] = &[Migration {
+    id: 1,
+    name: "baseline",
+    apply: Sql(include_str!("scorecard/0001_baseline.sql")),
+}];
 
 fn role_columns(db: &Db) -> Result<()> {
     add_column(db, "memberships", "role_id", "TEXT REFERENCES roles(id)")?;

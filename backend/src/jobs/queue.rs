@@ -284,7 +284,7 @@ impl Store {
                     )?;
                     if let Some(row) = &row {
                         ensure(
-                            row.provider() == *provider
+                            row.kind.as_str() == provider.collector().job_kind_for(request)
                                 && serde_json::from_str::<Value>(&row.request)? == *request,
                             "idempotency_conflict",
                             409,
@@ -319,7 +319,7 @@ impl Store {
                             job,
                             id,
                             self.config.environment,
-                            provider.job_kind(),
+                            provider.collector().job_kind_for(request),
                             now(),
                             iso(),
                             self.config.release,
@@ -340,8 +340,11 @@ impl Store {
         let (scope, values): (&str, Vec<&dyn rusqlite::ToSql>) = match &filter {
             CancelJobs::Job { id, dsp } => (" AND id=? AND dsp_id=?", vec![id, dsp]),
             CancelJobs::Provider { dsp, provider } => {
-                kind = provider.job_kind();
-                (" AND dsp_id=? AND kind=?", vec![dsp, &kind])
+                kind = serde_json::to_string(&provider.job_kinds().collect::<Vec<_>>())?;
+                (
+                    " AND dsp_id=? AND kind IN (SELECT value FROM json_each(?))",
+                    vec![dsp, &kind],
+                )
             }
             CancelJobs::Dsp(dsp) => (" AND dsp_id=?", vec![dsp]),
         };
@@ -443,7 +446,7 @@ impl Store {
             // A kind no registered provider runs is not a job this release can claim.
             let queued: Vec<Claimable> = self.jobs.query_as(CLAIMABLE, [now()])?;
             let Some(Claimable { id, .. }) = queued.into_iter().find(|job| {
-                Provider::from_job_kind(&job.kind).is_ok_and(|p| eligible(&job.dsp_id, p))
+                Provider::from_job_kind(&job.kind).is_ok_and(|(p, _)| eligible(&job.dsp_id, p))
             }) else {
                 return Ok(None);
             };
@@ -527,7 +530,7 @@ impl Store {
             dsp,
             &JobFacts {
                 idempotency_key: s(job, "idempotency_key"),
-                provider: Provider::from_job_kind(s(job, "kind")).ok(),
+                provider: Provider::from_job_kind(s(job, "kind")).ok().map(|(p, _)| p),
                 attempt: n(job, "attempt"),
                 max_attempts: n(job, "max_attempts"),
                 request: s(job, "request"),
