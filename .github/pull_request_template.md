@@ -10,6 +10,6 @@ Verification
 
 What proved it: the preview, the local checks run, the tests added or changed.
 
-Review: what the code review found and, for accounts, permissions, migrations or collectors, the security review; or none.
+Review: what the code review found; for accounts, permissions, migrations or collectors, the security review; and, when CodeRabbit reviewed the PR, its findings and what became of them; or none.
 
 Docs: the docs updated, or none.
