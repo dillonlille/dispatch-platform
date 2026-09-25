@@ -44,6 +44,9 @@ reviews:
         Keep credentials, runtime state and host-specific configuration out of source and logs.
         Preserve required copyright attribution and narrowly reviewed legacy compatibility identifiers. Do not broadly allowlist
         scanner findings or approve changed binary assets without reviewing their contents.
+        Local exports also need an export audit: inspect screenshots and archive members,
+        run OCR, and bind asset approval to exact content hashes. Never generate review
+        approvals merely to silence findings; local identity hashes and review manifests stay private.
     - path: '{**/*,.github/**}'
       instructions: |
         Review only what the changed lines introduce; older code in the same file is not a

@@ -129,6 +129,28 @@ def gitleaks(root, temporary):
     return executable
 
 
+def secret_findings(executable, tree, temporary):
+    report = temporary / "secrets.json"
+    result = subprocess.run([str(executable), "dir", str(tree), "--no-banner", "--redact=100",
+                             "--ignore-gitleaks-allow", f"--gitleaks-ignore-path={temporary}",
+                             f"--config={ROOT / 'tooling/security/gitleaks.toml'}",
+                             "--report-format=json", f"--report-path={report}"],
+                            capture_output=True, timeout=120,
+                            env={k: v for k, v in os.environ.items() if not k.startswith("GITLEAKS_")})
+    if result.returncode not in (0, 1):
+        raise ValueError("Secret scanner failed; no result accepted")
+    secrets = json.loads(report.read_text()) if report.exists() else []
+    if result.returncode == 1 and not secrets:
+        raise ValueError("Secret scanner failed without a findings report")
+    findings = []
+    for secret in secrets:
+        name = Path(secret["File"])
+        if name.is_absolute():
+            name = name.relative_to(tree)
+        findings.append((str(name), secret["StartLine"], "secret:" + secret["RuleID"]))
+    return findings
+
+
 def main():
     os.umask(0o077)
     policy = json.loads((ROOT / "tooling/security/privacy-policy.json").read_text())
@@ -138,23 +160,7 @@ def main():
         tree.mkdir()
         count, findings = snapshot(ROOT, tree, policy)
         executable = gitleaks(ROOT, temporary)
-        report = temporary / "secrets.json"
-        result = subprocess.run([str(executable), "dir", str(tree), "--no-banner", "--redact=100",
-                                 "--ignore-gitleaks-allow", f"--gitleaks-ignore-path={temporary}",
-                                 f"--config={ROOT / 'tooling/security/gitleaks.toml'}",
-                                 "--report-format=json", f"--report-path={report}"],
-                                capture_output=True, timeout=120,
-                                env={k: v for k, v in os.environ.items() if not k.startswith("GITLEAKS_")})
-        if result.returncode not in (0, 1):
-            raise ValueError("Secret scanner failed; no result accepted")
-        secrets = json.loads(report.read_text()) if report.exists() else []
-        if result.returncode == 1 and not secrets:
-            raise ValueError("Secret scanner failed without a findings report")
-        for secret in secrets:
-            name = Path(secret["File"])
-            if name.is_absolute():
-                name = name.relative_to(tree)
-            findings.append((str(name), secret["StartLine"], "secret:" + secret["RuleID"]))
+        findings.extend(secret_findings(executable, tree, temporary))
         for name, line, rule in sorted(set(findings)):
             print(f"{name}:{line}: {rule}")
         if findings:
