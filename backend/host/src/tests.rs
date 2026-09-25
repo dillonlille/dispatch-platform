@@ -558,28 +558,19 @@ fn dev_download_installs_only_with_still_current_validation() {
 }
 #[test]
 fn dev_installs_the_merge_queue_build_without_waiting_for_the_push_run() {
-    // The queue run publishes the build under main's name; runs of the former workflow
-    // published it under their own.
-    for main_name in [true, false] {
-        let f = Fixture::new(Environment::Dev);
-        let name = if main_name {
-            format!("dispatch-main-{}", f.new)
-        } else {
-            "dispatch-pr-build-23-1".into()
-        };
-        f.publish(23, &name, 43);
-        // No push run is registered: asking for one fails the update.
-        f.system.reply(
-            &queue_url(&f.new),
-            vec![json!({"workflow_runs":[f.queue_run()]})],
-        );
-        f.updater().run_locked().unwrap();
-        assert_eq!(
-            artifact::verify(&f.updater().active, None).unwrap(),
-            f.new_manifest
-        );
-        assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
-    }
+    let f = Fixture::new(Environment::Dev);
+    f.publish(23, &format!("dispatch-main-{}", f.new), 43);
+    // No push run is registered: asking for one fails the update.
+    f.system.reply(
+        &queue_url(&f.new),
+        vec![json!({"workflow_runs":[f.queue_run()]})],
+    );
+    f.updater().run_locked().unwrap();
+    assert_eq!(
+        artifact::verify(&f.updater().active, None).unwrap(),
+        f.new_manifest
+    );
+    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
 }
 #[test]
 fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
@@ -623,7 +614,7 @@ fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
             f.system.reply(
                 &format!("repos/{REPOSITORY}/actions/runs/23/artifacts"),
                 vec![
-                    json!({"artifacts":[{"id":43,"name":"dispatch-pr-build-23-1","expired":true}]}),
+                    json!({"artifacts":[{"id":43,"name":format!("dispatch-main-{}", f.new),"expired":true}]}),
                 ],
             );
         }
@@ -639,7 +630,7 @@ fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
 #[test]
 fn a_queue_build_installs_only_with_still_current_validation() {
     let f = Fixture::new(Environment::Dev);
-    f.publish(23, "dispatch-pr-build-23-1", 43);
+    f.publish(23, &format!("dispatch-main-{}", f.new), 43);
     let mut rerun = f.queue_run();
     rerun["run_attempt"] = json!(2);
     rerun["conclusion"] = json!("failure");

@@ -22,6 +22,8 @@ struct Fake {
     elapsed: Cell<Duration>,
     unhealthy: Cell<bool>,
     health_error: Cell<bool>,
+    /// The build digest Dev reports serving.
+    dev: RefCell<String>,
     asset_error: Cell<bool>,
     wrong_tag: Cell<bool>,
     hide_release_once: Cell<bool>,
@@ -196,7 +198,13 @@ impl System for Fake {
         Ok(serde_json::to_vec(&value)?)
     }
     fn request(&self, url: &str, _head: bool, _follow: bool, _timeout: u64) -> Result<Response> {
-        let (status, bytes) = if url.ends_with("/api/health") {
+        let (status, bytes) = if url == format!("{DEV}/api/health") {
+            (
+                200,
+                serde_json::to_vec(&json!({"status":"ready","environment":"dev",
+                "release":*self.dev.borrow()}))?,
+            )
+        } else if url.ends_with("/api/health") {
             if self.health_error.get() {
                 return Err("network unavailable".into());
             }
@@ -347,6 +355,7 @@ impl Fixture {
             elapsed: Cell::new(Duration::ZERO),
             unhealthy: Cell::new(false),
             health_error: Cell::new(false),
+            dev: RefCell::new(built.digest.clone()),
             asset_error: Cell::new(false),
             wrong_tag: Cell::new(false),
             hide_release_once: Cell::new(false),
@@ -948,6 +957,21 @@ fn a_release_needs_something_new_on_main_since_the_previous_one() {
     assert_eq!(release.pin(None).unwrap(), f.system.commit);
     let compared = format!("repos/{REPOSITORY}/compare/v0.9.0...{}", f.system.commit);
     assert!(f.system.has_call(&["gh", "api", &compared]));
+}
+
+#[test]
+fn preparation_requires_dev_to_serve_the_build() {
+    let f = Fixture::new();
+    f.system.dev.replace("another build".into());
+    let release = f.release();
+    let error = release.prepare(&f.system.commit).unwrap_err().to_string();
+    assert!(error.contains("Dev is not serving"), "{error}");
+    assert!(!release.output.exists());
+    f.system.dev.replace(f.built.digest.clone());
+    assert_eq!(
+        release.prepare(&f.system.commit).unwrap().commit,
+        f.system.commit
+    );
 }
 
 #[test]

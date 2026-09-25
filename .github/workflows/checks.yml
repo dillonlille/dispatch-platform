@@ -355,12 +355,3 @@ jobs:
           if-no-files-found: error
           # A release downloads this build; keep it as long as GitHub allows.
           retention-days: 90
-      # Until every Dev updater reads the name above: the name the former workflow used.
-      - name: Publish the build under its former name
-        if: github.event_name == 'merge_group'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dispatch-dev.tar.gz
-          if-no-files-found: error
-          retention-days: 7

@@ -140,8 +140,16 @@ impl Release<'_> {
         let download = tempfile::tempdir_in(staging.path())?;
         releases::download_run(self.system, artifacts[0], download.path(), commit, None)?;
         // CI built the version main's source names; the release publishes those bytes
-        // under its own version.
+        // under its own version, and only once Dev has served them.
         let candidate = download.path().join("candidate");
+        let built = artifact::manifest(&candidate)?.digest;
+        let health: Value = serde_json::from_slice(&self.fetch(DEV, "/api/health")?)?;
+        require(
+            health["release"] == built,
+            &format!(
+                "Dev is not serving this commit's build; wait for Dev to install {commit}, or release the commit Dev serves"
+            ),
+        )?;
         let manifest = artifact::stamp(&candidate, commit, &self.version)?;
         artifact::pack(&candidate, &staging.path().join(self.archive()))?;
         fs::copy(
@@ -460,13 +468,13 @@ impl Release<'_> {
         say(format!("Published {}", io::text(&release, "html_url")));
         Ok(release)
     }
-    fn fetch(&self, path: &str) -> Result<Vec<u8>> {
+    fn fetch(&self, origin: &str, path: &str) -> Result<Vec<u8>> {
         let response = self
             .system
-            .request(&format!("{PRODUCTION}{path}"), false, true, 20)?;
+            .request(&format!("{origin}{path}"), false, true, 20)?;
         require(
             response.status == 200,
-            "Production returned an unsuccessful response",
+            &format!("{origin} returned an unsuccessful response"),
         )?;
         let mut bytes = vec![];
         response
@@ -475,7 +483,7 @@ impl Release<'_> {
             .read_to_end(&mut bytes)?;
         require(
             !bytes.is_empty() && bytes.len() <= 16 * 1024 * 1024,
-            "Production response empty or oversized",
+            &format!("{origin} response empty or oversized"),
         )?;
         Ok(bytes)
     }
@@ -483,7 +491,7 @@ impl Release<'_> {
         say("Waiting for Production to install the release");
         let deadline = self.system.monotonic() + Duration::from_secs(600);
         let health = loop {
-            if let Ok(bytes) = self.fetch("/api/health")
+            if let Ok(bytes) = self.fetch(PRODUCTION, "/api/health")
                 && let Ok(health) = serde_json::from_slice::<Value>(&bytes)
                 && health["release"] == prepared.runtime_digest
                 && health["status"] == "ready"
@@ -497,7 +505,7 @@ impl Release<'_> {
             )?;
             self.system.sleep(Duration::from_secs(5));
         };
-        let html = String::from_utf8(self.fetch("/")?)?;
+        let html = String::from_utf8(self.fetch(PRODUCTION, "/")?)?;
         let pattern = regex::Regex::new(r#"(?:src|href)="(\.?/assets/[^\"]+)""#)?;
         let assets: BTreeSet<_> = pattern
             .captures_iter(&html)
@@ -508,7 +516,10 @@ impl Release<'_> {
             "Production dashboard is missing its assets",
         )?;
         for asset in &assets {
-            self.fetch(&format!("/{}", asset.trim_start_matches(['.', '/'])))?;
+            self.fetch(
+                PRODUCTION,
+                &format!("/{}", asset.trim_start_matches(['.', '/'])),
+            )?;
         }
         io::write_json(
             &self.output.join("deployment-verification.json"),

@@ -21,10 +21,12 @@ use std::{
 };
 
 const PRODUCTION: &str = "https://dispatch.dillonlille.com";
+/// Production only ever receives bytes Dev has served.
+const DEV: &str = "https://dispatchdev.dillonlille.com";
 const HELP: &str = "Dispatch release [run|status|prepare|publish] [X.Y.Z] --root CHECKOUT
   run       Release main's head, publish and verify Production (the default).
   status    Inspect GitHub, saved assets and public health without changing release state.
-  prepare   Require the full suite on the commit and stop at a smoke-tested, verified draft.
+  prepare   Require the full suite and Dev serving the commit; stop at a verified draft.
   publish   Publish an existing verified preparation and verify Production.
 Options: --bump patch|minor|major, --commit REV, --notes PATH, --releases PATH
 Rerun the same command after fixing a failure. Tags and existing assets are never overwritten.";
