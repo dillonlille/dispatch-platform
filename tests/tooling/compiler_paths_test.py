@@ -60,7 +60,8 @@ class CompilerPathTests(unittest.TestCase):
         env = {"HOME": "/private/operator", "CARGO_HOME": "/cache/private-registry"}
         for mapped in [b"/dispatch-build/cargo/registry/a.rs", b"/dispatch-build/home/folder/a.rs"]:
             self.assertFalse(gate.has_build_paths(mapped, "/checkout", env))
-        for private in ["/" + "home/operator/src/a.rs", "/" + "Users/operator/a.rs",
+        for private in ["/" + "home/operator/src/a.rs", "/" + "home/" + "a" * 32 + "/a.rs",
+                        "/" + "Users/operator/a.rs", "/" + "Users/Example Person/a.rs",
                         "C:" + chr(92) + "Users" + chr(92) + "operator", "/cache/private-registry/a.rs",
                         "/checkout/src/main.rs", "/private/operator/a.rs"]:
             self.assertTrue(gate.has_build_paths(private.encode(), "/checkout", env))
@@ -72,6 +73,16 @@ class CompilerPathTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn(private, result.stdout + result.stderr)
+
+    def test_adjacent_runtime_literals_are_not_one_compiler_path(self):
+        # The backend checks these two directories while verifying browser isolation.
+        literals = (b"/home" + b"/root" + b"DISPATCH_STATE_ROOTbrowser_isolation_required"
+                    + b"pidnetmntipcutsBrowserOSServerBrowserClawServer" + b"/usr/bin/Xvfb")
+        env = {"HOME": "/private/operator"}
+        self.assertFalse(gate.has_build_paths(literals, "/checkout", env))
+        long_home = "/" + "home/" + "a" * 40
+        self.assertTrue(gate.has_build_paths((long_home + "/src/a.rs").encode(),
+                                            "/checkout", {"HOME": long_home}))
 
     def test_real_cargo_remaps_dependencies_and_rebuilds_when_policy_changes(self):
         with tempfile.TemporaryDirectory() as directory:
