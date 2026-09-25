@@ -16,7 +16,7 @@ interface Settings {
 export function mailConfig(settings: Settings) {
   if (!['preview', 'production'].includes(settings.environment))
     throw new Error('Environment must be preview or production');
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(settings.name))
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(settings.name))
     throw new Error('A valid Worker name is required');
   const origin = URL.parse(settings.origin);
   if (

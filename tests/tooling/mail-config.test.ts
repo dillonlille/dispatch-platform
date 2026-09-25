@@ -41,7 +41,10 @@ test('mail configuration rejects ambiguous origins, senders and environments bef
   for (const sender of ['two@example.test,three@example.test', 'bad\r\n@example.test', 'invalid'])
     assert.throws(() => mailConfig({ ...settings, sender }));
   assert.throws(() => mailConfig({ ...settings, environment: 'staging' }));
-  assert.throws(() => mailConfig({ ...settings, name: '../worker' }));
+  for (const name of ['../worker', 'dispatch-mail-', '-dispatch-mail', '', 'a'.repeat(64)])
+    assert.throws(() => mailConfig({ ...settings, name }));
+  for (const name of ['a', 'a'.repeat(63)])
+    assert.equal(mailConfig({ ...settings, name }).name, name);
 });
 
 test('mail config is private, usable outside the source directory and never overwrites another config', () => {

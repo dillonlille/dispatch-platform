@@ -50,7 +50,8 @@ crates, giving compiler paths neutral `/dispatch-build/...` prefixes. The wrappe
 in `build.rustflags` invalidates Cargo's dependency objects when the policy changes; update
 the hash after editing the wrapper. `check:rules` verifies it. Binary-cache schema 4 and the
 tool/fixture keys fingerprint the wrapper and config. Only this exact config allows binary
-reuse; custom configs, wrappers or overriding Rust flags disable it. Packaging and the
+reuse; custom configs, wrappers or overriding Rust flags (including empty and target-specific
+environment flags) disable it. Packaging and the
 artifact test run `tooling/security/check-build-paths.py` even for a reused executable, and
 reject remaining local build paths without printing their contents. The first build after
 adopting this policy recompiles dependencies. Compiler diagnostics use the neutral paths too.

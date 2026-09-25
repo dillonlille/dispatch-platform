@@ -97,7 +97,19 @@ fn custom_build_inputs_and_untracked_external_sources_disable_reuse() {
         ("CARGO_SOURCE_LOCAL_DIRECTORY", "/outside"),
         ("CARGO_BUILD_TARGET", "other"),
         ("RUSTFLAGS", "--cfg=custom"),
+        ("RUSTFLAGS", ""),
         ("CARGO_ENCODED_RUSTFLAGS", "--cfg=custom"),
+        ("CARGO_ENCODED_RUSTFLAGS", ""),
+        (
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+            "--cfg=custom",
+        ),
+        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", ""),
+        (
+            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+            "--cfg=custom",
+        ),
+        ("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS", ""),
     ] {
         let mut env = f.env.clone();
         env.insert(key.into(), value.into());

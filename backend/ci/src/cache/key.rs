@@ -163,12 +163,13 @@ pub fn eligible(root: &Path, env: &Environment, allow_ci: bool) -> Result<bool> 
     if (nonempty("CI") && !allow_ci)
         || nonempty("DISPATCH_DISABLE_RUST_CACHE")
         || nonempty("CARGO_TARGET_DIR")
-        // These override the policy fingerprint in build.rustflags.
-        || nonempty("RUSTFLAGS")
-        || nonempty("CARGO_ENCODED_RUSTFLAGS")
+        // Even empty overrides replace the policy fingerprint in build.rustflags.
+        || env.contains_key("RUSTFLAGS")
+        || env.contains_key("CARGO_ENCODED_RUSTFLAGS")
         || env.keys().any(|key| {
             key.starts_with("CARGO_SOURCE_")
                 || key.starts_with("CARGO_BUILD_")
+                || (key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS"))
                 || [
                     "RUSTC",
                     "RUSTC_WRAPPER",
