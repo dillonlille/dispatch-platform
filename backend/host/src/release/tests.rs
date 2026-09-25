@@ -2,6 +2,7 @@ use super::*;
 use crate::io::{Native, Response};
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     io::{Cursor, Write},
     os::unix::fs::{PermissionsExt, symlink},
 };
@@ -24,6 +25,8 @@ struct Fake {
     health_error: Cell<bool>,
     /// The build digest Dev reports serving.
     dev: RefCell<String>,
+    /// PR bodies GitHub serves, by number.
+    bodies: RefCell<BTreeMap<u64, String>>,
     asset_error: Cell<bool>,
     wrong_tag: Cell<bool>,
     hide_release_once: Cell<bool>,
@@ -83,6 +86,16 @@ impl System for Fake {
                 .to_owned()
         };
         let checks_ref = "refs/heads/release-checks/v1.0.0";
+        if args[0] == "gh" && args[1] == "pr" && args[2] == "view" {
+            let number: u64 = args[3].parse()?;
+            return Ok(self
+                .bodies
+                .borrow()
+                .get(&number)
+                .ok_or("no such pull request")?
+                .clone()
+                .into_bytes());
+        }
         let value = if args[0] == "gh" && args[1] == "api" {
             let endpoint = args[2]
                 .strip_prefix(&format!("repos/{REPOSITORY}/"))
@@ -356,6 +369,7 @@ impl Fixture {
             unhealthy: Cell::new(false),
             health_error: Cell::new(false),
             dev: RefCell::new(built.digest.clone()),
+            bodies: RefCell::new(BTreeMap::new()),
             asset_error: Cell::new(false),
             wrong_tag: Cell::new(false),
             hide_release_once: Cell::new(false),
@@ -957,6 +971,51 @@ fn a_release_needs_something_new_on_main_since_the_previous_one() {
     assert_eq!(release.pin(None).unwrap(), f.system.commit);
     let compared = format!("repos/{REPOSITORY}/compare/v0.9.0...{}", f.system.commit);
     assert!(f.system.has_call(&["gh", "api", &compared]));
+}
+
+#[test]
+fn missing_notes_are_generated_from_the_merged_prs() {
+    for served in [true, false] {
+        let f = Fixture::new();
+        git(
+            &f.root,
+            &["tag", "v0.9.0", &format!("{}^1", f.system.commit)],
+        );
+        f.system.listed.replace(vec![
+            json!({"tag_name":"v0.9.0","draft":false,"prerelease":false}),
+        ]);
+        if served {
+            f.system.bodies.borrow_mut().insert(
+                8,
+                "Problem\n\nIt broke.\n\nChange\n\nThe accepted change.\nIn one paragraph.\n\nMore.\n\nVerification\n\nTests.\n".into(),
+            );
+        }
+        let release = f.release();
+        io::private_directory(&release.directory).unwrap();
+        let prepared = release.prepare(&f.system.commit).unwrap();
+        release.ensure_draft(&prepared).unwrap();
+        let notes = fs::read_to_string(&release.notes).unwrap();
+        assert_eq!(
+            notes,
+            if served {
+                "- Accepted. The accepted change. In one paragraph.\n\nIncludes [#8](https://github.com/dispatch-systems/dispatch-platform/pull/8).\n"
+            } else {
+                "- Accepted.\n\nIncludes [#8](https://github.com/dispatch-systems/dispatch-platform/pull/8).\n"
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(release.output.join("notes.md")).unwrap(),
+            notes
+        );
+    }
+    // Notes already written are kept.
+    let f = Fixture::new();
+    let prepared = f.prepare();
+    f.release().ensure_draft(&prepared).unwrap();
+    assert_eq!(
+        fs::read_to_string(&f.release().notes).unwrap(),
+        "Release notes\n"
+    );
 }
 
 #[test]
