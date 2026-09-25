@@ -29,7 +29,7 @@ const REVIEW_LABEL: &str = "ai-review";
 const REVIEWED: &str = "Review completed";
 /// CodeRabbit's login as the author of review comments.
 const CODERABBIT: &str = "coderabbitai";
-const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description}}}}} reviewThreads(first:100){nodes{isResolved path line comments(first:1){totalCount nodes{author{login} url}} latest:comments(last:1){nodes{author{login}}}}}}}}";
+const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description}}}}} reviewThreads(first:100){nodes{id isResolved path line comments(first:1){totalCount nodes{author{login} url}} latest:comments(last:1){nodes{author{login}}}}}}}}";
 const ENQUEUE: &str = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}";
 
 fn graphql(runner: &dyn Runner, query: &str, variables: &[String]) -> Result<Value> {
@@ -159,9 +159,10 @@ fn review(pr: &Value) -> Review {
 }
 
 /// The PR's unresolved review threads as "path:line author link" lines: those waiting for our
-/// answer, those where CodeRabbit answered our reply and left the thread open, and those where
-/// it has yet to answer. CodeRabbit resolves a thread once it accepts the reply.
-fn unresolved(pr: &Value) -> (Vec<String>, Vec<String>, Vec<String>) {
+/// answer, those where CodeRabbit answered our reply and left the thread open, with the
+/// thread's ID, and those where it has yet to answer. CodeRabbit resolves a thread once it
+/// accepts the reply.
+fn unresolved(pr: &Value) -> (Vec<String>, Vec<(String, String)>, Vec<String>) {
     let (mut ours, mut answered, mut its) = (vec![], vec![], vec![]);
     for thread in pr["reviewThreads"]["nodes"]
         .as_array()
@@ -181,7 +182,10 @@ fn unresolved(pr: &Value) -> (Vec<String>, Vec<String>, Vec<String>) {
         let latest = &thread["latest"]["nodes"][0]["author"]["login"];
         match (author == CODERABBIT, replied, latest == CODERABBIT) {
             (true, true, false) => its.push(line),
-            (true, true, true) => answered.push(format!("{line} (CodeRabbit answered the reply)")),
+            (true, true, true) => answered.push((
+                thread["id"].as_str().unwrap_or("").to_owned(),
+                format!("{line} (CodeRabbit answered the reply)"),
+            )),
             _ => ours.push(line),
         }
     }
@@ -264,9 +268,11 @@ pub fn run(
     // The newest queue run of this PR before this run queued it: only a later run is its own.
     let mut earlier: Option<u64> = None;
     let (mut seen, mut unanswered, mut refused) = (false, 0, 0);
-    // Looks spent waiting for CodeRabbit: in all, since it last reported a running review, on
-    // its answers to our replies, and in a row finding a thread it answered still open.
-    let (mut waited, mut unstarted, mut answering, mut disputed) = (0, 0, 0, 0);
+    // Looks spent waiting for CodeRabbit: in all, since it last reported a running review, and
+    // on its answers to our replies.
+    let (mut waited, mut unstarted, mut answering) = (0, 0, 0);
+    // The threads it had answered and left open at the last look.
+    let mut settling: Vec<String> = vec![];
     for _ in 0..LOOKS {
         let pr = match look(runner, number) {
             Ok(pr) => {
@@ -378,17 +384,22 @@ pub fn run(
             _ if !labelled => None,
             Review::Done => {
                 let (ours, answered, its) = unresolved(&pr);
-                // CodeRabbit answers a reply before it resolves the thread, so an answered
-                // thread is ours only once a second look still finds it open.
-                disputed = if answered.is_empty() { 0 } else { disputed + 1 };
-                if !ours.is_empty() || disputed > 1 {
+                // CodeRabbit answers a reply a moment before it resolves the thread, so a thread
+                // it answered is ours only once the next look still finds it open.
+                let disputed: Vec<_> = answered
+                    .iter()
+                    .filter(|(id, _)| settling.contains(id))
+                    .map(|(_, line)| line.clone())
+                    .collect();
+                settling = answered.into_iter().map(|(id, _)| id).collect();
+                if !ours.is_empty() || !disputed.is_empty() {
                     return Err(format!(
                         "#{number} has review threads to answer; reply to each, then ship it again:\n- {}",
-                        [ours, answered].concat().join("\n- ")
+                        [ours, disputed].concat().join("\n- ")
                     )
                     .into());
                 }
-                if !its.is_empty() || !answered.is_empty() {
+                if !its.is_empty() {
                     answering += 1;
                     if answering > ANSWER_LOOKS {
                         return Err(format!(
@@ -398,6 +409,8 @@ pub fn run(
                         )
                         .into());
                     }
+                }
+                if !its.is_empty() || !settling.is_empty() {
                     note(format!(
                         "Waiting for CodeRabbit to answer the replies on #{number}"
                     ));
@@ -917,7 +930,7 @@ mod tests {
         replies: &[&str],
         resolved: bool,
     ) -> Value {
-        json!({"isResolved":resolved,"path":path,"line":line,
+        json!({"id":path,"isResolved":resolved,"path":path,"line":line,
             "comments":{"totalCount":1 + replies.len(),
                 "nodes":[{"author":{"login":author},"url":format!("https://github.com/{path}")}]},
             "latest":{"nodes":[{"author":{"login":replies.last().unwrap_or(&author)}}]}})
@@ -957,13 +970,13 @@ mod tests {
             thread("docs/ci.md", None, "thepickle", &[], false),
         ])]);
         let error = ship(&github).0.unwrap_err().to_string();
-        // The reply CodeRabbit has yet to answer is not listed; it may still settle.
+        // The reply CodeRabbit has yet to answer, and the one it answered on this first look,
+        // are not listed; they may still settle.
         assert_eq!(
             error,
             "#7 has review threads to answer; reply to each, then ship it again:\n\
              - backend/src/jobs.rs:42 coderabbitai https://github.com/backend/src/jobs.rs\n\
-             - docs/ci.md thepickle https://github.com/docs/ci.md\n\
-             - backend/src/roles.rs:3 coderabbitai https://github.com/backend/src/roles.rs (CodeRabbit answered the reply)"
+             - docs/ci.md thepickle https://github.com/docs/ci.md"
         );
         assert!(github.queued.borrow().is_empty());
     }
@@ -993,7 +1006,7 @@ mod tests {
         );
         assert_eq!(github.queued.borrow().len(), 1);
         // Unanswered for five minutes, the replies are listed for us to settle.
-        let github = self::github(vec![reviewed(vec![replied])]);
+        let github = self::github(vec![reviewed(vec![replied.clone()])]);
         let (result, _, pauses) = ship(&github);
         assert_eq!(
             result.unwrap_err().to_string(),
@@ -1015,12 +1028,12 @@ mod tests {
         resolved["isResolved"] = true.into();
         let github = self::github(vec![
             reviewed(vec![answered.clone()]),
-            reviewed(vec![resolved]),
+            reviewed(vec![resolved.clone()]),
             in_queue(OLD),
             merged(OLD),
         ]);
         assert_eq!(ship(&github).0.unwrap(), "3333333");
-        let github = self::github(vec![reviewed(vec![answered])]);
+        let github = self::github(vec![reviewed(vec![answered.clone()])]);
         let (result, _, pauses) = ship(&github);
         assert!(
             result
@@ -1029,6 +1042,34 @@ mod tests {
                 .ends_with("http.rs (CodeRabbit answered the reply)")
         );
         assert_eq!(pauses, 1);
+        // Each thread gets that second look: one resolving as another is answered is no dispute.
+        let other = thread(
+            "backend/src/jobs.rs",
+            Some(4),
+            CODERABBIT,
+            &["dillonlille", CODERABBIT],
+            false,
+        );
+        let mut other_resolved = other.clone();
+        other_resolved["isResolved"] = true.into();
+        let github = self::github(vec![
+            reviewed(vec![answered.clone(), replied.clone()]),
+            reviewed(vec![resolved.clone(), other.clone()]),
+            reviewed(vec![resolved.clone(), other_resolved]),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
+        assert_eq!(ship(&github).0.unwrap(), "3333333");
+        // An answer that arrives on the last look of the wait still gets its second look.
+        let mut looks = vec![reviewed(vec![replied]); ANSWER_LOOKS as usize];
+        looks.extend([
+            reviewed(vec![answered]),
+            reviewed(vec![resolved]),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
+        let github = self::github(looks);
+        assert_eq!(ship(&github).0.unwrap(), "3333333");
     }
 
     #[test]
