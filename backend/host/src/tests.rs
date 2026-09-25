@@ -560,11 +560,13 @@ fn dev_download_installs_only_with_still_current_validation() {
 fn dev_installs_the_merge_queue_build_without_waiting_for_the_push_run() {
     // The queue run publishes the build under main's name; runs of the former workflow
     // published it under their own.
-    for name in [
-        format!("dispatch-main-{}", Fixture::new(Environment::Dev).new),
-        "dispatch-pr-build-23-1".into(),
-    ] {
+    for main_name in [true, false] {
         let f = Fixture::new(Environment::Dev);
+        let name = if main_name {
+            format!("dispatch-main-{}", f.new)
+        } else {
+            "dispatch-pr-build-23-1".into()
+        };
         f.publish(23, &name, 43);
         // No push run is registered: asking for one fails the update.
         f.system.reply(
