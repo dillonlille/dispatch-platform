@@ -1,6 +1,7 @@
 //! A week's scorecard. The overview page's own first data request names the API
 //! and the parameters that identify this DSP; the datasets are then read over
 //! plain HTTP with the browser's session, a few at once.
+use super::scorecard_csv;
 use super::*;
 use crate::{
     browsers::http::{Http, Refusal},
@@ -8,10 +9,11 @@ use crate::{
     job_metrics::Recorder,
     scorecard::{
         Capture, Collection, DATASETS, Dataset, DatasetCapture, MAX_ROWS, POSTED_SIGNAL, Request,
-        token,
+        Source, token,
     },
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::Mutex;
 
 /// As much as one dataset may send. The largest week seen was 2 MB.
 const LIMIT: usize = 16 * 1024 * 1024;
@@ -45,12 +47,17 @@ impl Api {
         format!("{}/getData?{}", self.base, query.finish())
     }
 }
-fn refused(refusal: Refusal, metrics: &Recorder) -> Error {
+/// The error a refusal is, and whether the dataset's page could still answer: not
+/// when the provider is down or the session has ended, which the page shares.
+fn refused(refusal: Refusal, metrics: &Recorder) -> (Error, bool) {
     match refusal {
-        Refusal::Unavailable => Error::new("provider_unavailable", 502),
+        Refusal::Unavailable => (Error::new("provider_unavailable", 502), false),
         Refusal::Unreadable(label) => {
             metrics.detail(label);
-            Error::new("scorecard_api_unreadable", 502)
+            (
+                Error::new("scorecard_api_unreadable", 502),
+                label != "http_signed_out",
+            )
         }
     }
 }
@@ -223,6 +230,10 @@ impl Driver {
         let referer = format!("{}/performance", self.origin);
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(0);
+        // The page's spreadsheet stands in for a dataset the API would not give; the
+        // one tab reads them one at a time.
+        let tab = Mutex::new(());
+        let this = &*self;
         let lanes = futures_util::future::join_all((0..LANES).map(|_| async {
             let mut read = Vec::new();
             loop {
@@ -232,27 +243,43 @@ impl Driver {
                 };
                 let (from, to) = request.interval(dataset)?;
                 let source_url = api.address(dataset, &request.station, &from, &to);
-                let value = http
-                    .json(&source_url, &referer, LIMIT)
-                    .await
-                    .map_err(|refusal| refused(refusal, run.metrics))?;
-                let rows = rows(dataset.id, &value)?;
+                // What the API gave, or the error and whether the page could stand in.
+                let direct = match http.json(&source_url, &referer, LIMIT).await {
+                    Ok(value) => rows(dataset.id, &value)
+                        .map(|rows| DatasetCapture {
+                            id: dataset.id.into(),
+                            from: from.clone(),
+                            to: to.clone(),
+                            source_url,
+                            source: Source::Api,
+                            rows,
+                        })
+                        .map_err(|error| (error, true)),
+                    Err(refusal) => Err(refused(refusal, run.metrics)),
+                };
+                let captured = match (direct, dataset.page) {
+                    (Ok(captured), _) => captured,
+                    (Err((error, true)), Some((page_id, tab_id))) => {
+                        run.metrics.detail(&error.code);
+                        let _held = tab.lock().await;
+                        this.download_dataset(
+                            request,
+                            &api.company_id,
+                            dataset,
+                            &scorecard_csv::Page { page_id, tab_id },
+                            run,
+                        )
+                        .await?
+                    }
+                    (Err((error, _)), _) => return Err(error),
+                };
                 let finished = done.fetch_add(1, Ordering::SeqCst) + 1;
                 run.progress(
                     20 + (70 * finished / DATASETS.len()) as i64,
                     format!("Reading scorecard datasets ({finished}/{})", DATASETS.len()),
                 )
                 .await?;
-                read.push((
-                    index,
-                    DatasetCapture {
-                        id: dataset.id.into(),
-                        from,
-                        to,
-                        source_url,
-                        rows,
-                    },
-                ));
+                read.push((index, captured));
             }
             Ok::<_, Error>(read)
         }))

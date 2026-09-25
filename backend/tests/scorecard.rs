@@ -117,6 +117,75 @@ fn a_posted_week_is_published_into_one_table_per_dataset_with_its_keys() {
         ),
         job
     );
+    // Where each dataset came from is kept beside its rows.
+    assert_eq!(
+        storage
+            .count(
+                "SELECT count(*) FROM scorecard_sources WHERE source='api'",
+                []
+            )
+            .unwrap() as usize,
+        scorecard::DATASETS.len()
+    );
+    assert!(published.datasets.iter().all(|d| d.source == "api"));
+}
+
+#[test]
+fn a_dataset_read_from_the_pages_spreadsheet_is_marked_as_such() {
+    let (_root, db, id) = ready();
+    let mut capture = scorecard::fixture(&request("2026-W35")).unwrap();
+    let returns = capture
+        .datasets
+        .iter_mut()
+        .find(|d| d.id == "da_dsp_weekly_rts_deep_dive")
+        .unwrap();
+    returns.source = scorecard::Source::Csv;
+    returns.source_url =
+        "https://logistics.amazon.com/performance?pageId=dsp_return_to_station".into();
+    returns.rows = scorecard::csv::rows(
+        "Delivery Associate ,Impacts Scorecard,Tracking ID\nJo,Y,TBA9\n",
+        &[
+            "${da_name}".into(),
+            "${impacting_dcr}".into(),
+            "${tracking_id}".into(),
+        ],
+    )
+    .unwrap();
+    publish(&db, &id, "csv", "2026-W35", &capture);
+    let storage = db.scorecard(&id).unwrap();
+    assert_eq!(
+        storage
+            .all(
+                "SELECT source,row_count FROM scorecard_sources WHERE dataset='da_dsp_weekly_rts_deep_dive'",
+                []
+            )
+            .unwrap(),
+        vec![json!({"source":"csv","row_count":1})]
+    );
+    assert_eq!(
+        storage
+            .all("SELECT tracking_id,impact FROM returns_to_station", [])
+            .unwrap(),
+        vec![json!({"tracking_id":"TBA9","impact":1})]
+    );
+    let weeks = db.scorecard_weeks(&id).unwrap();
+    let datasets = &weeks.weeks[0].publication.as_ref().unwrap().datasets;
+    assert_eq!(
+        datasets
+            .iter()
+            .find(|d| d.table == "returns_to_station")
+            .unwrap()
+            .source,
+        "csv"
+    );
+    assert_eq!(
+        datasets
+            .iter()
+            .find(|d| d.table == "customer_feedback")
+            .unwrap()
+            .source,
+        "api"
+    );
 }
 
 #[test]

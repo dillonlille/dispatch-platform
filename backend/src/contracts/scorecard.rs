@@ -8,6 +8,8 @@ pub struct ScorecardDatasetCount {
     pub id: String,
     pub table: String,
     pub rows: usize,
+    /// `api`, or `csv` when the page's spreadsheet stood in for the API.
+    pub source: String,
 }
 /// One collection of a week's scorecard.
 #[derive(Clone, Debug, PartialEq, Serialize)]

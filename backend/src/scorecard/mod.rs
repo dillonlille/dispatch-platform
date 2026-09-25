@@ -2,6 +2,7 @@
 //! page, one week at a time, published into the DSP's scorecard database. Every row
 //! Amazon sends is kept as JSON beside the keys reads filter on. Browser and HTTP
 //! data is untrusted input.
+pub mod csv;
 use crate::{
     Error, Result,
     collectors::{AddedStorage, Provider},
@@ -61,6 +62,9 @@ pub struct Dataset {
     pub program: Option<&'static str>,
     /// The row field that says whether the row counts against the scorecard.
     pub impact: Option<&'static str>,
+    /// The scorecard page whose spreadsheet is this dataset, as `pageId` and `tabId`,
+    /// for the datasets that have one.
+    pub page: Option<(&'static str, &'static str)>,
 }
 /// Every dataset a week's collection reads. The first six back the scorecard
 /// pages' spreadsheets; the rest are the DSP's own weekly numbers.
@@ -71,6 +75,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: Some("AMZL"),
         impact: None,
+        page: Some(("dsp_dashboard_overview", "overview-dsp-weekly-tab")),
     },
     Dataset {
         id: "da_dsp_weekly_rts_deep_dive",
@@ -78,6 +83,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: Some("impacting_dcr"),
+        page: Some(("dsp_return_to_station", "dsp-return-to-station-weekly-tab")),
     },
     Dataset {
         id: "da_dsp_station_daily_dsb_dnr_tba",
@@ -85,6 +91,10 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Daily,
         program: None,
         impact: Some("dsb_flag"),
+        page: Some((
+            "dsp_delivery_concessions",
+            "delivery-concessions-weekly-tab",
+        )),
     },
     Dataset {
         id: "da_dsp_weekly_cdf_deep_dive",
@@ -92,6 +102,10 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: Some("cdf_impact_flag"),
+        page: Some((
+            "dsp_customer_delivery_feedback_negative",
+            "customer-delivery-feedback-weekly-tab",
+        )),
     },
     Dataset {
         id: "da_dsp_daily_psb_stop",
@@ -99,6 +113,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Daily,
         program: None,
         impact: None,
+        page: Some(("dsp_pickup_failures", "dsp-psb-deep-dive-weekly-tab")),
     },
     Dataset {
         id: "da_dsp_station_daily_safety_oss_events_intraday",
@@ -106,6 +121,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Daily,
         program: None,
         impact: Some("oss_impact_flag"),
+        page: Some(("dsp_safety", "safety-dsp-weekly-tab")),
     },
     Dataset {
         id: "da_dsp_station_weekly_safety_oss_v2",
@@ -113,6 +129,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_station_weekly_quality",
@@ -120,6 +137,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_station_weekly_team",
@@ -127,6 +145,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_station_weekly_compliance",
@@ -134,6 +153,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_station_weekly_safety_oss_v2",
@@ -141,6 +161,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_station_weekly_working_device",
@@ -148,6 +169,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_weekly_cdf",
@@ -155,6 +177,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
     Dataset {
         id: "dsp_weekly_psb",
@@ -162,6 +185,7 @@ pub const DATASETS: &[Dataset] = &[
         time_frame: TimeFrame::Weekly,
         program: None,
         impact: None,
+        page: None,
     },
 ];
 /// The DSP's own scorecard row: a week without one is not posted yet.
@@ -176,9 +200,13 @@ fn verify(db: &Db) -> Result<()> {
         503,
     )?;
     // Missing initialized tables fail closed, rather than recreating lost data.
-    for table in ["scorecard_publications", "scorecard_weeks"]
-        .into_iter()
-        .chain(DATASETS.iter().map(|d| d.table))
+    for table in [
+        "scorecard_publications",
+        "scorecard_weeks",
+        "scorecard_sources",
+    ]
+    .into_iter()
+    .chain(DATASETS.iter().map(|d| d.table))
     {
         db.one(&format!("SELECT count(*) FROM {table} WHERE 0"), [])?;
     }
@@ -289,6 +317,24 @@ impl Request {
     }
 }
 
+/// Where a dataset's rows came from.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    #[default]
+    Api,
+    /// The page's spreadsheet, read when the API could not be: the rows the page
+    /// showed, with its default filter, as text.
+    Csv,
+}
+impl Source {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Api => "api",
+            Self::Csv => "csv",
+        }
+    }
+}
 /// One dataset's rows for the week, as objects, with the address they came from.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -297,6 +343,8 @@ pub struct DatasetCapture {
     pub from: String,
     pub to: String,
     pub source_url: String,
+    #[serde(default)]
+    pub source: Source,
     pub rows: Vec<Value>,
 }
 /// A week's scorecard as collected, before publication.
@@ -450,6 +498,7 @@ pub fn fixture(request: &Request) -> Result<Capture> {
             ),
             from,
             to,
+            source: Source::Api,
             rows,
         });
     }
@@ -661,6 +710,19 @@ impl Store {
                     )?;
                 }
             }
+            for captured in &capture.datasets {
+                db.exec(
+                    "INSERT INTO scorecard_sources(publication_id,dataset,source,url,row_count) \
+                     VALUES (?,?,?,?,?)",
+                    params![
+                        publication,
+                        captured.id,
+                        captured.source.as_str(),
+                        captured.source_url,
+                        captured.rows.len() as i64
+                    ],
+                )?;
+            }
             db.exec(
                 "UPDATE scorecard_publications SET active=0 WHERE week=? AND station=? AND company_id=? AND active=1",
                 params![capture.week, capture.station, capture.company_id],
@@ -684,8 +746,8 @@ impl Store {
         let today = self.scorecard_today(id)?;
         let station = self.profile(id)?.station_code;
         let db = self.scorecard(id)?;
-        // Row counts by publication, one query per table.
-        let mut counts: HashMap<String, Vec<ScorecardDatasetCount>> = HashMap::new();
+        // Row counts by publication and dataset, one query per table.
+        let mut counts: HashMap<(String, String), usize> = HashMap::new();
         for dataset in DATASETS {
             for row in db.all(
                 &format!(
@@ -694,15 +756,24 @@ impl Store {
                 ),
                 [],
             )? {
-                counts
-                    .entry(s(&row, "publication_id").to_owned())
-                    .or_default()
-                    .push(ScorecardDatasetCount {
-                        id: dataset.id.into(),
-                        table: dataset.table.into(),
-                        rows: row["rows"].as_i64().unwrap_or(0) as usize,
-                    });
+                counts.insert(
+                    (s(&row, "publication_id").to_owned(), dataset.id.to_owned()),
+                    row["rows"].as_i64().unwrap_or(0) as usize,
+                );
             }
+        }
+        let mut sources: HashMap<(String, String), String> = HashMap::new();
+        for row in db.all(
+            "SELECT publication_id,dataset,source FROM scorecard_sources",
+            [],
+        )? {
+            sources.insert(
+                (
+                    s(&row, "publication_id").to_owned(),
+                    s(&row, "dataset").to_owned(),
+                ),
+                s(&row, "source").to_owned(),
+            );
         }
         let mut weeks = Vec::new();
         for state in db.all(
@@ -713,19 +784,18 @@ impl Store {
             [&station],
         )? {
             let publication = state["id"].as_str().map(|publication| {
-                let mut datasets: Vec<ScorecardDatasetCount> = DATASETS
+                let datasets: Vec<ScorecardDatasetCount> = DATASETS
                     .iter()
-                    .map(|dataset| ScorecardDatasetCount {
-                        id: dataset.id.into(),
-                        table: dataset.table.into(),
-                        rows: 0,
+                    .map(|dataset| {
+                        let key = (publication.to_owned(), dataset.id.to_owned());
+                        ScorecardDatasetCount {
+                            id: dataset.id.into(),
+                            table: dataset.table.into(),
+                            rows: counts.get(&key).copied().unwrap_or(0),
+                            source: sources.get(&key).cloned().unwrap_or_else(|| "api".into()),
+                        }
                     })
                     .collect();
-                for counted in counts.get(publication).into_iter().flatten() {
-                    if let Some(dataset) = datasets.iter_mut().find(|d| d.id == counted.id) {
-                        dataset.rows = counted.rows;
-                    }
-                }
                 ScorecardPublication {
                     id: publication.into(),
                     week: s(&state, "week").into(),

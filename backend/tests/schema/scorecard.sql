@@ -15,6 +15,7 @@ CREATE TABLE safety_events ( publication_id TEXT NOT NULL REFERENCES scorecard_p
 CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
 CREATE TABLE scorecard_publications ( id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, week TEXT NOT NULL, station TEXT NOT NULL, company_id TEXT NOT NULL, dsp_code TEXT NOT NULL, started_at TEXT NOT NULL, collected_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0 CHECK(active IN (0,1)), row_count INTEGER NOT NULL, adapter_version INTEGER NOT NULL );
 CREATE TABLE scorecard_schema (version INTEGER PRIMARY KEY CHECK(version=1));
+CREATE TABLE scorecard_sources ( publication_id TEXT NOT NULL REFERENCES scorecard_publications(id) ON DELETE CASCADE, dataset TEXT NOT NULL, source TEXT NOT NULL CHECK(source IN ('api','csv')), url TEXT NOT NULL, row_count INTEGER NOT NULL, PRIMARY KEY(publication_id,dataset) );
 CREATE TABLE scorecard_weeks ( week TEXT NOT NULL, station TEXT NOT NULL, checked_at TEXT NOT NULL, posted INTEGER NOT NULL CHECK(posted IN (0,1)), publication_id TEXT REFERENCES scorecard_publications(id) ON DELETE SET NULL, PRIMARY KEY(week,station) );
 CREATE TABLE storage_identity (dsp_id TEXT NOT NULL, provider TEXT NOT NULL, source TEXT NOT NULL);
 CREATE UNIQUE INDEX active_scorecard_week ON scorecard_publications(week,station,company_id) WHERE active=1;
