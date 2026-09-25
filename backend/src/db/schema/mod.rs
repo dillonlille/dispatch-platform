@@ -41,11 +41,18 @@ pub const PLATFORM: &[Migration] = &[
         apply: Sql(include_str!("platform/0006_account_security.sql")),
     },
 ];
-pub const JOBS: &[Migration] = &[Migration {
-    id: 1,
-    name: "baseline",
-    apply: Sql(include_str!("jobs/0001_baseline.sql")),
-}];
+pub const JOBS: &[Migration] = &[
+    Migration {
+        id: 1,
+        name: "baseline",
+        apply: Sql(include_str!("jobs/0001_baseline.sql")),
+    },
+    Migration {
+        id: 2,
+        name: "scorecard_kind",
+        apply: Sql(include_str!("jobs/0002_scorecard_kind.sql")),
+    },
+];
 pub const DSP: &[Migration] = &[
     Migration {
         id: 1,
@@ -56,6 +63,11 @@ pub const DSP: &[Migration] = &[
         id: 2,
         name: "uniform_inventory",
         apply: Sql(include_str!("dsp/0002_uniform_inventory.sql")),
+    },
+    Migration {
+        id: 3,
+        name: "scorecard_collection",
+        apply: Sql(include_str!("dsp/0003_scorecard_collection.sql")),
     },
 ];
 pub const PAYCOM: &[Migration] = &[
