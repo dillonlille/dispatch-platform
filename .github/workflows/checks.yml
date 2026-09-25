@@ -355,3 +355,28 @@ jobs:
           if-no-files-found: error
           # A release downloads this build; keep it as long as GitHub allows.
           retention-days: 90
+  # A failed queue run leaves the PR one timeline line and no way to its run. This posts the
+  # failed jobs, the step each failed at, their logs and the first failure's output as a
+  # comment on the PR the queue was testing. Nothing is posted for a passing run, and a manual
+  # run has no PR.
+  report:
+    needs: platform
+    if: failure() && github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Comment the failed jobs on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          python3 tooling/queue-report.py --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --head-ref "$HEAD_REF" --base-sha "$BASE_SHA" --head-sha "$GITHUB_SHA"
