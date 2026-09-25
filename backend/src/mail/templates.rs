@@ -212,7 +212,7 @@ mod tests {
             dev: false,
             to: "alex@dispatch.test",
             inviter,
-            dsp: "Full <Scale> Logistics",
+            dsp: "North <Line> Logistics",
             role: "manager",
             url: "https://dispatch.test/#invite?token=abc",
             expires_at: 1_790_337_600_000,
@@ -221,20 +221,20 @@ mod tests {
     }
     #[test]
     fn avatar_matches_dashboard_initials_and_tone() {
-        let html = avatar("Full Scale Logistics");
-        assert!(html.contains(">FS<") && html.contains("#eaf0f7"));
+        let html = avatar("Northline Logistics");
+        assert!(html.contains(">NL<") && html.contains("#eaf0f7"));
         assert!(avatar("acme").contains(">AC<") && avatar("").contains(">?<"));
     }
     #[test]
     fn invitation_names_the_inviter_and_escapes_the_dsp() {
-        let mail = sample(false, "Dillon Lillehaug");
-        assert_eq!(mail.subject, "Join Full <Scale> Logistics on Dispatch");
+        let mail = sample(false, "Alex Morgan");
+        assert_eq!(mail.subject, "Join North <Line> Logistics on Dispatch");
         assert!(
-            mail.html.contains("Full &lt;Scale&gt; Logistics") && !mail.html.contains("<Scale>")
+            mail.html.contains("North &lt;Line&gt; Logistics") && !mail.html.contains("<Line>")
         );
         assert!(mail.html.contains(">Accept invitation</a>"));
         assert!(mail.text.ends_with(NO_REPLY) && mail.html.contains(NO_REPLY));
-        assert!(mail.text.contains("Dillon Lillehaug invited you to join"));
+        assert!(mail.text.contains("Alex Morgan invited you to join"));
         assert!(mail.text.contains("expires on September 25, 2026."));
         assert!(
             sample(false, "")
@@ -244,7 +244,7 @@ mod tests {
     }
     #[test]
     fn onboarding_hides_the_placeholder_dsp_name() {
-        let mail = sample(true, "Dillon Lillehaug");
+        let mail = sample(true, "Alex Morgan");
         assert_eq!(mail.subject, "Set up your DSP on Dispatch");
         assert!(
             mail.html.contains(">Start DSP onboarding</a>") && !mail.html.contains("Logistics")

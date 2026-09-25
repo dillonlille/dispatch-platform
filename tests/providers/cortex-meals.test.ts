@@ -4,7 +4,7 @@ import { fixture, until } from '../support/support.js';
 const request = {
   requestId: 'meal-1',
   date: '2026-01-10',
-  station: 'DOT4',
+  station: 'TST1',
   serviceAreaId: 'area-1',
   provider: 'provider-1',
   timezone: 'America/Los_Angeles',

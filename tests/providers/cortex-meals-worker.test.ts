@@ -25,7 +25,7 @@ test(
       if (url.pathname === '/operations/execution/') {
         const areas = {
           'area-2': { serviceAreaID: 'area-2', defaultStationCode: 'ABC1', timeZone: 'US/Pacific' },
-          'area-1': { serviceAreaID: 'area-1', defaultStationCode: 'DOT4', timeZone: 'US/Pacific' },
+          'area-1': { serviceAreaID: 'area-1', defaultStationCode: 'TST1', timeZone: 'US/Pacific' },
         };
         res.setHeader('Content-Type', 'text/html');
         res.end(
@@ -65,14 +65,14 @@ test(
         serviceAreaId: 'area-1',
         selectedStation: {
           serviceAreaID: 'area-1',
-          defaultStationCode: 'DOT4',
+          defaultStationCode: 'TST1',
           timeZone: 'US/Pacific',
         },
         providerFilterValue: url.searchParams.get('provider') ?? 'ALL_DSPS',
         providerFilterOptions: [
           { value: 'ALL_DRIVERS', label: 'All Drivers' },
           { value: 'ALL_DSPS' },
-          { value: 'provider-1', label: 'FSCL' },
+          { value: 'provider-1', label: 'NLOG' },
           { value: 'other-provider', label: 'Other' },
         ],
         isLoadingSummaries: false,
@@ -115,9 +115,9 @@ test(
     assert.equal(
       (
         await owner.post('/api/dsp/profile', {
-          name: 'Full Scale Logistics',
-          abbreviation: 'FSCL',
-          stationCode: 'DOT4',
+          name: 'Northline Logistics',
+          abbreviation: 'NLOG',
+          stationCode: 'TST1',
           timezone: 'America/Los_Angeles',
         })
       ).status,
@@ -251,7 +251,7 @@ test(
         serviceAreaId: 'area-1',
         selectedStation: {
           serviceAreaID: 'area-1',
-          defaultStationCode: 'DOT4',
+          defaultStationCode: 'TST1',
           timeZone: 'US/Pacific',
         },
         providerFilterValue: 'provider-1',
@@ -335,7 +335,7 @@ test(
     assert.equal(saved.value.status, 'ready', saved.body);
     const request = {
       date: '2026-01-10',
-      station: 'DOT4',
+      station: 'TST1',
       serviceAreaId: 'area-1',
       provider: 'provider-1',
       timezone: 'America/Los_Angeles',
@@ -523,7 +523,7 @@ test(
         serviceAreaId: 'area-1',
         selectedStation: {
           serviceAreaID: 'area-1',
-          defaultStationCode: 'DOT4',
+          defaultStationCode: 'TST1',
           timeZone: 'US/Pacific',
         },
         providerFilterValue: 'provider-1',
@@ -587,7 +587,7 @@ test(
     assert.equal(saved.value.status, 'ready', saved.body);
     const response = await owner.post('/api/dsp/cortex/meal-breaks/collect', {
       date,
-      station: 'DOT4',
+      station: 'TST1',
       serviceAreaId: 'area-1',
       provider: 'provider-1',
       timezone: 'America/Los_Angeles',

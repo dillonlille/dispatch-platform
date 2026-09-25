@@ -11,6 +11,15 @@ spec.loader.exec_module(module)
 
 
 class IsolationTests(unittest.TestCase):
+    def test_empty_or_relative_configured_source_never_reaches_verification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            def unexpected_verify(_):
+                self.fail("Invalid source reached artifact verification")
+            for source in ["", "relative/live"]:
+                with self.assertRaises(ValueError):
+                    module.prepare(source, Path(temporary), unexpected_verify)
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
     def test_verified_snapshot_is_read_only_and_bad_replacement_keeps_active(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

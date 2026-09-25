@@ -96,7 +96,7 @@ export function DspSetupForm({
           <span>
             Station code{' '}
             <span className="onboarding-example" aria-hidden="true">
-              (e.g. DOT4)
+              (e.g. TST1)
             </span>
           </span>
           <input

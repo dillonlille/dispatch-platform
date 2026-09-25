@@ -17,12 +17,12 @@ test(
     const rows = (dataSetId: string, week: string) => {
       if (week === '2026-W36')
         return dataSetId === 'dsp_station_weekly_quality'
-          ? [{ dsp_code: 'FSCL', station_code: 'DOT4', data_date: week }]
+          ? [{ dsp_code: 'NLOG', station_code: 'TST1', data_date: week }]
           : [];
       if (week !== '2026-W38') return [];
       switch (dataSetId) {
         case 'dsp_station_weekly_quality':
-          return [{ dsp_code: 'FSCL', station_code: 'DOT4', data_date: week, dsp_final_score: 91 }];
+          return [{ dsp_code: 'NLOG', station_code: 'TST1', data_date: week, dsp_final_score: 91 }];
         case 'da_dsp_weekly_rts_deep_dive':
           return [
             {
@@ -52,7 +52,7 @@ test(
         case 'da_dsp_daily_psb_stop':
           return [];
         default:
-          return [{ dsp_code: 'FSCL', data_date: week }];
+          return [{ dsp_code: 'NLOG', data_date: week }];
       }
     };
     const server = http.createServer(async (req, res) => {
@@ -99,7 +99,7 @@ test(
         // and a download that hands the browser a blob, as the real page does.
         if (url.searchParams.get('to') !== '2026-W36')
           return redirect(
-            '/performance?pageId=dsp_return_to_station&station=DOT4&companyId=company-1&tabId=dsp-return-to-station-weekly-tab&timeFrame=Weekly&to=2026-W38',
+            '/performance?pageId=dsp_return_to_station&station=TST1&companyId=company-1&tabId=dsp-return-to-station-weekly-tab&timeFrame=Weekly&to=2026-W38',
           );
         return html(
           `<div id="bar"><button id="clear">Clear search</button><button id="dl"><svg width="16" height="16"></svg></button></div>` +
@@ -127,7 +127,7 @@ test(
           );
         }
         return html(
-          `<main>Overview</main><script>fetch('/performance/api/v1/getData?dataSetId=dsp_station_weekly_quality&dsp=FSCL&from=2026-W38&station=${station}&timeFrame=Weekly&to=2026-W38',{credentials:'include'});</script>`,
+          `<main>Overview</main><script>fetch('/performance/api/v1/getData?dataSetId=dsp_station_weekly_quality&dsp=NLOG&from=2026-W38&station=${station}&timeFrame=Weekly&to=2026-W38',{credentials:'include'});</script>`,
         );
       }
       if (url.pathname === '/performance/api/v1/getData') {
@@ -182,9 +182,9 @@ test(
     assert.equal(
       (
         await owner.post('/api/dsp/profile', {
-          name: 'Full Scale Logistics',
-          abbreviation: 'FSCL',
-          stationCode: 'DOT4',
+          name: 'Northline Logistics',
+          abbreviation: 'NLOG',
+          stationCode: 'TST1',
           timezone: 'America/Los_Angeles',
         })
       ).status,
@@ -212,7 +212,7 @@ test(
     const weeks = (await owner.get('/api/dsp/scorecard/weeks')).value;
     const posted = weeks.weeks.find((w: any) => w.week === '2026-W38');
     assert.equal(posted.posted, true);
-    assert.equal(posted.publication.dspCode, 'FSCL');
+    assert.equal(posted.publication.dspCode, 'NLOG');
     assert.equal(posted.publication.rowCount, 14);
     assert.equal(
       posted.publication.datasets.find((d: any) => d.table === 'returns_to_station').rows,
@@ -227,8 +227,8 @@ test(
     const read = new Map(datasets.map((u) => [u.searchParams.get('dataSetId')!, u]));
     assert.equal(read.size, 14, [...read.keys()].join(','));
     for (const u of read.values()) {
-      assert.equal(u.searchParams.get('dsp'), 'FSCL');
-      assert.equal(u.searchParams.get('station'), 'DOT4');
+      assert.equal(u.searchParams.get('dsp'), 'NLOG');
+      assert.equal(u.searchParams.get('station'), 'TST1');
     }
     assert.equal(
       read.get('da_dsp_station_weekly_performance')!.searchParams.get('program'),

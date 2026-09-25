@@ -887,7 +887,7 @@ mod tests {
             {"isResolved":true,"path":"backend/src/mail.rs","line":7,
                 "comments":{"nodes":[{"author":{"login":"coderabbitai"},"url":"https://github.com/c/2"}]}},
             {"isResolved":false,"path":"docs/ci.md","line":null,
-                "comments":{"nodes":[{"author":{"login":"thepickle"},"url":"https://github.com/c/3"}]}}
+                "comments":{"nodes":[{"author":{"login":"fixture-owner"},"url":"https://github.com/c/3"}]}}
         ]);
         let github = github(vec![pr]);
         let error = ship(&github).0.unwrap_err().to_string();
@@ -895,7 +895,7 @@ mod tests {
             error,
             "#7 has unresolved review threads; answer and resolve each, then ship it again:\n\
              - backend/src/jobs.rs:42 coderabbitai https://github.com/c/1\n\
-             - docs/ci.md thepickle https://github.com/c/3"
+             - docs/ci.md fixture-owner https://github.com/c/3"
         );
         assert!(github.queued.borrow().is_empty());
     }

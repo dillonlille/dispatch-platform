@@ -30,7 +30,7 @@ fn store() -> (tempfile::TempDir, Store, String) {
 fn scope() -> Scope {
     Scope {
         date: "2026-01-10".into(),
-        station: "DOT4".into(),
+        station: "TST1".into(),
         service_area_id: "area-1".into(),
         provider: "provider-1".into(),
         timezone: "America/Los_Angeles".into(),
@@ -240,7 +240,7 @@ fn migration_minimizes_all_history_and_legacy_runtime_publications() {
     db.execute_batch("DROP TRIGGER minimize_legacy_meal_publication")
         .unwrap();
     let legacy_publish = |id: &str| {
-        db.execute("INSERT INTO meal_publications VALUES (?1,?1,'2026-01-10','DOT4','area','provider','UTC','2026-01-10T20:00:00.000Z','2026-01-10T20:00:00.000Z',0,1,1,1,2)",[id]).unwrap();
+        db.execute("INSERT INTO meal_publications VALUES (?1,?1,'2026-01-10','TST1','area','provider','UTC','2026-01-10T20:00:00.000Z','2026-01-10T20:00:00.000Z',0,1,1,1,2)",[id]).unwrap();
         db.execute("INSERT INTO meal_itineraries VALUES (?1,'route','driver','Driver','R1','2026-01-10T20:00:00.000Z',1,'complete','recorded')",[id]).unwrap();
         for (event, time) in [
             ("irrelevant", "10:00"),

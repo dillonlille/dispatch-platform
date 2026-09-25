@@ -15,6 +15,14 @@ reviews:
   review_progress: false
   commit_status: true
   fail_commit_status: true
+  path_instructions:
+    - path: '**'
+      instructions: |
+        Privacy rules (docs/privacy.md and docs/tests.md, maintained outside Git):
+        Use synthetic people, businesses, example emails and deployment addresses in fixtures.
+        Keep credentials, runtime state and host-specific configuration out of source and logs.
+        Preserve narrowly reviewed legacy compatibility identifiers. Do not broadly allowlist
+        scanner findings or approve changed binary assets without reviewing their contents.
   auto_review:
     # Only a comment starts a review, and pushes after it are not reviewed again.
     enabled: false

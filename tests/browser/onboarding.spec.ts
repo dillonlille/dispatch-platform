@@ -72,7 +72,7 @@ test('owner onboarding stays light and fits desktop and phone viewports, includi
   await page.setViewportSize({ width: 390, height: 600 });
   await page.getByLabel('DSP name', { exact: true }).fill('Responsive Logistics');
   await page.getByLabel('Abbreviation', { exact: true }).fill('RSPL');
-  await page.getByLabel('Station code', { exact: true }).fill('DOT4');
+  await page.getByLabel('Station code', { exact: true }).fill('TST1');
   await page.getByRole('button', { name: 'Continue to profile' }).click();
   await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeFocused();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

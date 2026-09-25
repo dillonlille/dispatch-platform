@@ -47,7 +47,7 @@ test('an existing account opens its newly invited DSP instead of another members
   await expect(page.getByRole('heading', { name: 'Set up your DSP', exact: true })).toBeVisible();
   await page.getByLabel('DSP name', { exact: true }).fill('New invited DSP');
   await page.getByLabel('Abbreviation', { exact: true }).fill('NIDS');
-  await page.getByLabel('Station code', { exact: true }).fill('DOT4');
+  await page.getByLabel('Station code', { exact: true }).fill('TST1');
   await page.getByRole('button', { name: 'Continue to profile', exact: true }).click();
   await page.getByLabel('First name', { exact: true }).fill('Existing');
   await page.getByLabel('Last name', { exact: true }).fill('Member');
@@ -61,7 +61,7 @@ test('an existing account opens its newly invited DSP instead of another members
   const joined = current.dsps.find((dsp: { name: string }) => dsp.name === 'New invited DSP');
   expect(joined.profile).toMatchObject({
     abbreviation: 'NIDS',
-    stationCode: 'DOT4',
+    stationCode: 'TST1',
     setupRequired: false,
   });
   await expect(page).toHaveURL(new RegExp(`#dsp/${joined.id}/`));

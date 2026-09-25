@@ -10,10 +10,12 @@ User=dispatch-runtime
 Group=dispatch-runtime
 StateDirectory=dispatch-production
 StateDirectoryMode=0700
-EnvironmentFile=/home/thepickle/dispatch-platform/public/config/platform.env
+EnvironmentFile=/etc/dispatch-production/platform.env
+EnvironmentFile=/etc/dispatch-production/deployment.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Root executes only this root-owned copier and verifier, never the application.
-ExecStartPre=+/usr/bin/python3 /usr/local/libexec/dispatch-runtime/prepare-isolated-runtime.py --source /home/thepickle/dispatch-platform/public/live
+# The root-owned deployment.env sets DISPATCH_RUNTIME_SOURCE to the updater's live directory.
+ExecStartPre=+/usr/bin/python3 /usr/local/libexec/dispatch-runtime/prepare-isolated-runtime.py --source ${DISPATCH_RUNTIME_SOURCE}
 ExecStart=/usr/bin/env DISPATCH_STATE_ROOT=/var/lib/dispatch-production DISPATCH_ARTIFACT_ROOT=/opt/dispatch-production/current DISPATCH_BWRAP_EXECUTABLE=/usr/local/libexec/dispatch-runtime/bwrap PATH=/usr/bin:/bin /opt/dispatch-production/current/services/rust/dispatch-backend serve
 WorkingDirectory=/opt/dispatch-production
 Restart=on-failure

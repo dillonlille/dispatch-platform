@@ -7,7 +7,7 @@ const script = fs.readFileSync('backend/src/browsers/cortex/meal.js', 'utf8');
 const origin = 'https://logistics.amazon.com';
 const scope = {
   date: '2026-09-15',
-  station: 'DOT4',
+  station: 'TST1',
   serviceAreaId: 'area-1',
   provider: 'provider-1',
   timezone: 'America/Los_Angeles',
@@ -37,7 +37,7 @@ const summary = (progress = 1) => ({
 const page = (day = scope.date, progress = 1) => ({
   selectedDay: day,
   serviceAreaId: 'area-1',
-  selectedStation: { serviceAreaID: 'area-1', defaultStationCode: 'DOT4', timeZone: 'US/Pacific' },
+  selectedStation: { serviceAreaID: 'area-1', defaultStationCode: 'TST1', timeZone: 'US/Pacific' },
   providerFilterValue: 'provider-1',
   providerFilterOptions: [{ value: 'provider-1' }],
   isLoadingSummaries: false,

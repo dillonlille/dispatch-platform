@@ -80,8 +80,8 @@ const events: AuditEvent[] = [
   event('2026-09-15T16:01:00Z', 'dsp.owner_view_opened', 'team', owner),
   event('2026-09-15T15:30:00Z', 'dsp.profile_completed', 'settings', {
     changes: [
-      { field: 'station', from: null, to: 'DEN4' },
-      { field: 'abbreviation', from: null, to: 'FSLG' },
+      { field: 'station', from: null, to: 'TST2' },
+      { field: 'abbreviation', from: null, to: 'NLOG' },
     ],
   }),
   // Written before events named their subject.
@@ -234,7 +234,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   await expect(role).toContainText('member.role_changed · #96');
   await expect(role).toContainText(/Tue, Sep 15, 2026.*3:50:00 PM/);
   await expect(item(page, 'completed the DSP profile')).toContainText(
-    'StationDEN4·AbbreviationFSLG',
+    'StationTST2·AbbreviationNLOG',
   );
   await page.screenshot({ path: test.info().outputPath('audit-log.png'), fullPage: true });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));

@@ -4,6 +4,7 @@ import { ruleTests } from './test-plan.js';
 // Everything a push can fail on without a build: types, formatting and the source-wide rule
 // tests. About half a minute; run it before every push.
 const checks: [string, string, string[]][] = [
+  ['privacy', 'python3', ['tooling/security/scan.py']],
   ['types', 'npx', ['tsc', '--noEmit']],
   ['format', 'npx', ['prettier', '--check', '.']],
   ['Rust format', 'cargo', ['fmt', '--check']],
