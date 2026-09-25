@@ -63,8 +63,10 @@ class PrivacyTests(unittest.TestCase):
             root = Path(directory) / "repo"
             root.mkdir()
             subprocess.run(["git", "init", "-q", str(root)], check=True)
-            (root / ".gitignore").write_text(".env\n")
+            (root / ".gitignore").write_text(".env\n.privacy/\n")
             (root / ".env").write_text("private")
+            (root / ".privacy").mkdir()
+            (root / ".privacy/export-review.json").write_text('{"assets":{}}')
             (root / "source.ts").write_text("safe source")
             external = Path(directory) / "outside"
             external.write_text("private external bytes")
@@ -80,6 +82,12 @@ class PrivacyTests(unittest.TestCase):
             self.assertEqual((target / "source.ts").read_text(), "safe source")
             subprocess.run(["git", "-C", str(root), "rm", "--cached", "-q", ".env"], check=True)
             self.assertNotIn(".env", scan.sources(root))
+            self.assertNotIn(".privacy/export-review.json", scan.sources(root))
+            subprocess.run(["git", "-C", str(root), "add", "-f", ".privacy/export-review.json"], check=True)
+            second = Path(directory) / "forced-private-snapshot"
+            second.mkdir()
+            _, findings = scan.snapshot(root, second, policy())
+            self.assertIn((".privacy/export-review.json", 1, "private-state-file"), findings)
 
 
 if __name__ == "__main__":

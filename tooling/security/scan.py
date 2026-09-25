@@ -37,7 +37,7 @@ def inspect_file(name, data, policy):
             return
         findings.append((name, line, rule))
     path = Path(name)
-    if (PRIVATE.search(name) and path.name != ".env.example") or path.parts[0] in {"config", "data", "dsps", "mockups", "outputs"}:
+    if (PRIVATE.search(name) and path.name != ".env.example") or path.parts[0] in {"config", "data", "dsps", ".privacy", "mockups", "outputs"}:
         add(1, "private-state-file")
     if path.suffix in ARCHIVES:
         add(1, "archive-needs-private-storage")
