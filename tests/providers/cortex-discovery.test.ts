@@ -7,12 +7,12 @@ const script = fs.readFileSync('backend/src/browsers/cortex/discovery.js', 'utf8
 const origin = 'https://logistics.amazon.com';
 const request = {
   date: '2026-01-10',
-  station: 'DOT4',
+  station: 'TST1',
   timezone: 'America/Los_Angeles',
-  dspName: 'Full Scale Logistics',
-  dspAbbreviation: 'FSCL',
+  dspName: 'Northline Logistics',
+  dspAbbreviation: 'NLOG',
 };
-const station = { serviceAreaID: 'area-1', defaultStationCode: 'DOT4', timeZone: 'US/Pacific' };
+const station = { serviceAreaID: 'area-1', defaultStationCode: 'TST1', timeZone: 'US/Pacific' };
 const props = () => ({
   selectedStation: station,
   selectedDay: request.date,
@@ -21,7 +21,7 @@ const props = () => ({
   providerFilterOptions: [
     { value: 'ALL_DRIVERS', label: 'All Drivers' },
     { value: 'ALL_DSPS', label: 'All DSPs' },
-    { value: 'provider-1', label: 'FSCL' },
+    { value: 'provider-1', label: 'NLOG' },
     { value: 'provider-2', label: 'Other DSP' },
   ],
 });
@@ -59,7 +59,7 @@ test('first-use discovery matches the DSP in a station with multiple providers',
   assert.deepEqual(discover(props()), {
     scope: {
       date: request.date,
-      station: 'DOT4',
+      station: 'TST1',
       timezone: request.timezone,
       serviceAreaId: 'area-1',
       provider: 'provider-1',
@@ -73,7 +73,7 @@ test('first-use discovery matches the DSP in a station with multiple providers',
     discover({
       ...props(),
       providerFilterOptions: [
-        { value: 'provider-1', label: ' full scale logistics ' },
+        { value: 'provider-1', label: ' northline logistics ' },
         { value: 'provider-2' },
       ],
     }).scope.provider,
@@ -102,8 +102,8 @@ test('discovery rejects ambiguous DSPs, all-provider filters, wrong origins and 
     [{ value: 'ALL_DRIVERS' }],
     [{ value: 'provider-2' }, { value: 'provider-3' }],
     [
-      { value: 'provider-1', label: 'FSCL' },
-      { value: 'provider-2', label: 'FSCL' },
+      { value: 'provider-1', label: 'NLOG' },
+      { value: 'provider-2', label: 'NLOG' },
     ],
   ]) {
     assert.equal(

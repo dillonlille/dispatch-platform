@@ -13,6 +13,7 @@ const INPUTS: &[&str] = &[
     "rust-toolchain.toml",
     "rust-toolchain",
     "tooling/cargo-build.py",
+    "tooling/rustc-remap.py",
     "tooling/ci_tool.py",
     "tooling/runtime_artifact.py",
     "tooling/update-dev.py",
@@ -78,7 +79,7 @@ pub fn fingerprint(
 ) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(serde_json::to_vec(&(
-        3,
+        4,
         profile,
         compiler,
         std::env::consts::OS,
@@ -136,14 +137,39 @@ fn external(value: &toml::Value, manifest: &Path, backend: &Path) -> bool {
         _ => false,
     }
 }
+/// Only the repository's exact path-remapping config may use the shared binary cache.
+fn remap_config(root: &Path, file: &Path) -> bool {
+    let wrapper = root.join("tooling/rustc-remap.py");
+    if file != root.join(".cargo/config.toml")
+        || file.is_symlink()
+        || file.parent().is_some_and(Path::is_symlink)
+        || wrapper.is_symlink()
+        || wrapper.parent().is_some_and(Path::is_symlink)
+    {
+        return false;
+    }
+    let (Ok(bytes), Ok(text)) = (fs::read(wrapper), fs::read_to_string(file)) else {
+        return false;
+    };
+    let hash = crate::to_hex(&Sha256::digest(bytes));
+    let expected: toml::Value = toml::from_str(&format!(
+        "[build]\nrustc-wrapper = 'tooling/rustc-remap.py'\nrustflags = ['--cfg=dispatch_path_policy_{hash}']\n"
+    ))
+    .unwrap();
+    toml::from_str::<toml::Value>(&text).is_ok_and(|config| config == expected)
+}
 pub fn eligible(root: &Path, env: &Environment, allow_ci: bool) -> Result<bool> {
     let nonempty = |key: &str| env.get(key).is_some_and(|value| !value.is_empty());
     if (nonempty("CI") && !allow_ci)
         || nonempty("DISPATCH_DISABLE_RUST_CACHE")
         || nonempty("CARGO_TARGET_DIR")
+        // Even empty overrides replace the policy fingerprint in build.rustflags.
+        || env.contains_key("RUSTFLAGS")
+        || env.contains_key("CARGO_ENCODED_RUSTFLAGS")
         || env.keys().any(|key| {
             key.starts_with("CARGO_SOURCE_")
                 || key.starts_with("CARGO_BUILD_")
+                || (key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS"))
                 || [
                     "RUSTC",
                     "RUSTC_WRAPPER",
@@ -157,7 +183,7 @@ pub fn eligible(root: &Path, env: &Environment, allow_ci: bool) -> Result<bool> 
         })
         || configs(root, env)?
             .iter()
-            .any(|p| p.exists() || p.is_symlink())
+            .any(|p| (p.exists() || p.is_symlink()) && !remap_config(root, p))
     {
         return Ok(false);
     }

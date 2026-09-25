@@ -143,7 +143,7 @@ impl Release<'_> {
         // under its own version, and only once Dev has served them.
         let candidate = download.path().join("candidate");
         let built = artifact::manifest(&candidate)?.digest;
-        let health: Value = serde_json::from_slice(&self.fetch(DEV, "/api/health")?)?;
+        let health: Value = serde_json::from_slice(&self.fetch(&self.origins.dev, "/api/health")?)?;
         require(
             health["release"] == built,
             &format!(
@@ -495,7 +495,7 @@ impl Release<'_> {
         say("Waiting for Production to install the release");
         let deadline = self.system.monotonic() + Duration::from_secs(600);
         let health = loop {
-            if let Ok(bytes) = self.fetch(PRODUCTION, "/api/health")
+            if let Ok(bytes) = self.fetch(&self.origins.production, "/api/health")
                 && let Ok(health) = serde_json::from_slice::<Value>(&bytes)
                 && health["release"] == prepared.runtime_digest
                 && health["status"] == "ready"
@@ -509,7 +509,7 @@ impl Release<'_> {
             )?;
             self.system.sleep(Duration::from_secs(5));
         };
-        let html = String::from_utf8(self.fetch(PRODUCTION, "/")?)?;
+        let html = String::from_utf8(self.fetch(&self.origins.production, "/")?)?;
         let pattern = regex::Regex::new(r#"(?:src|href)="(\.?/assets/[^\"]+)""#)?;
         let assets: BTreeSet<_> = pattern
             .captures_iter(&html)
@@ -521,7 +521,7 @@ impl Release<'_> {
         )?;
         for asset in &assets {
             self.fetch(
-                PRODUCTION,
+                &self.origins.production,
                 &format!("/{}", asset.trim_start_matches(['.', '/'])),
             )?;
         }

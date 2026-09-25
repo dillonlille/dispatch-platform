@@ -34,7 +34,7 @@ The Python entry points at the top of `tooling/` keep their installed and CI pat
 build cache, PR preflight and ship command delegate to the small `dispatch-ci` executable,
 and artifact verification, releases, fresh setup and the updaters to the Rust host manager.
 See [tooling/ci/README.md](tooling/ci/README.md) for the pipeline. The development, host and
-release guides live outside Git at `/home/thepickle/dispatch-platform/docs/`.
+release guides live outside Git at the workspace’s `docs/` directory.
 
 ## License
 

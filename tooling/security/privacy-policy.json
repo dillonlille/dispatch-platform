@@ -1,0 +1,93 @@
+{
+  "identitySha256": [
+    "0850fb4e57273d5b1c0b9d654586a79454c8c19818350ccaf0f0a168b7071b44",
+    "1dfd237995b5e7f4fd4f08ee37bbcbecbbe4f3c419caa800c14624ed019d917e",
+    "2dd9a43dfd9ce80e2a5ca14ed39f13d06db801f188c4646b0968c6ed20fd0e75",
+    "3b04ee0cd482e4edcd1a9b992dde77146daef19a21c74548e713b15f0d4ffd9d",
+    "457e159cb5efe401d44b51ded70c213df6d5f660cb934879ce4c3427dd4317e6",
+    "561cc3b3617805c96d2a7838e6b5a9cec3c8ee7b832fdafb01d3d2e64052ad87",
+    "de24c66bfd27921a8d07f90fbb0e0e957e1f813f81b55db549d452d9d26300e5"
+  ],
+  "exceptions": [
+    {
+      "path": "backend/ci/src/lib.rs",
+      "rule": "known-private-identity",
+      "lineSha256": "acd8dd2f910848bfe7a4e564c6ee700302052de555cc9987fe38101175ed0e0a",
+      "reason": "Legacy repository identity required to verify existing updater receipts and provenance."
+    },
+    {
+      "path": "backend/host/src/tests.rs",
+      "rule": "known-private-identity",
+      "lineSha256": "fbce8a461a3d13f3ca84abab2a3847458778fea1bfb798927431b7199e43e528",
+      "reason": "Exercise validation of the legacy repository identity."
+    },
+    {
+      "path": "tooling/host/setup-swap.sh",
+      "rule": "non-example-email",
+      "lineSha256": "bf0893437b30efbb2aa3d380bff33e24b5c0f68cd383dd50b68c6f56ab612fc9",
+      "reason": "A systemd instance name, not an email address."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "aead42e64bef28efc05d6652e74387592b5448b018687e1332ce958036705b38",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "5b1f4af095eb41372e977823e256113b56fbf48c1eae2c74054554f19897ea6c",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "dfd036046a554f2ad05de3ebe23d5343d717221d344d9d0bebd33a957071944e",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "0be4def5907d672bf02fc0d53522347331852c50ce5d42f7b8c231b15cff9442",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "0a9bab98b590e7cd1a0b7f66043e605c134ac792072ea9d74a07493f59ee1a80",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "f97a5d081f69c2710f48001862239b2db686fa5d0d3b873bbc92a825b93f9484",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "c577fac4f9f063c5988eb2e6127be27cf913b881663b13b25d6d0f8862f466ff",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "backend/tests/network_policy.rs",
+      "rule": "fixed-network-address",
+      "lineSha256": "ffdeac63e5326e560546318904beed01e921727bedd573e4ff7a980e5afc1a48",
+      "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "README.md",
+      "rule": "known-private-identity",
+      "lineSha256": "93adbef2ee9de2d196a0650f225c57d985398fc569e0860d9989d7a914a134a3",
+      "reason": "Preserve the copyright attribution introduced by the licensing change; no fixture identity is allowed by this exception."
+    }
+  ],
+  "assets": {
+    "dashboard/public/assets/email-mark.png": "eb0c4e4bd09371d8c36029ab72d29155fa15d430e72f26d72ce95d2c6dafb4b8",
+    "dashboard/public/assets/inter.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+    "dashboard/src/features/auth/dsp-onboarding/assets/onboarding-map.svg": "451032a8babc646c24644699e4817fecfdc9851e4e3109d7141ffc9a70fe991b",
+    "dashboard/src/features/auth/member-profile/assets/member-profile-map.svg": "1a8e01c2c9a349ba968645d1948fb71c7240035933390e031e5ef0dbf99a1faf",
+    "dashboard/src/features/auth/sign-in/assets/login-van-poster.png": "b2f96ee29f7b4b8ca2661ef94760fd6bb52db810b54e047ab440658e456a4d84",
+    "dashboard/src/features/auth/sign-in/assets/login-van.glb": "0970dc3fee57cf3ec77c5553482146ba0cfcd856ce8a0cd45b88741b15f5bfb4"
+  }
+}

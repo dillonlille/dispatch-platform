@@ -453,7 +453,7 @@ mod tests {
         let recorder = Recorder::new(&json!({"attempt":1}));
         recorder.detail("summaries_loading");
         assert_eq!(detail(&recorder), "summaries_loading");
-        for label in ["", "Station DOT4", "https://example.test", &"a".repeat(49)] {
+        for label in ["", "Station TST1", "https://example.test", &"a".repeat(49)] {
             recorder.detail(label);
             assert_eq!(detail(&recorder), Value::Null, "{label}");
         }

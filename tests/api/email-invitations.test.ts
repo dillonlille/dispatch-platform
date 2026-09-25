@@ -204,8 +204,8 @@ test('Cloudflare Worker requires the private secret and matching environment bef
   const sent: unknown[] = [];
   const env: Env = {
     DISPATCH_ENVIRONMENT: 'preview',
-    DISPATCH_ORIGIN: 'https://dispatchdev.dillonlille.com',
-    MAIL_FROM: 'no-reply@dispatchdev.dillonlille.com',
+    DISPATCH_ORIGIN: 'https://dev.dispatch.test',
+    MAIL_FROM: 'no-reply@dev.dispatch.test',
     MAIL_TOKEN: token,
     EMAIL: {
       send: async (message) => {
@@ -233,10 +233,7 @@ test('Cloudflare Worker requires the private secret and matching environment bef
     );
   assert.equal((await send(message, 'wrong')).status, 401);
   assert.equal((await send({ ...message, environment: 'production' })).status, 403);
-  assert.equal(
-    (await send({ ...message, origin: 'https://dispatch.dillonlille.com' })).status,
-    403,
-  );
+  assert.equal((await send({ ...message, origin: 'https://dispatch.test' })).status, 403);
   assert.equal(
     (await send({ ...message, to: ['one@example.com', 'two@example.com'] })).status,
     400,

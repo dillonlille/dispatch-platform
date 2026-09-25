@@ -163,7 +163,7 @@ test('owner onboarding validates DSP setup before accepting and denies setup thr
   const dspProfile = {
     name: 'Northstar Logistics',
     abbreviation: 'NSTL',
-    stationCode: 'dot4',
+    stationCode: 'tst1',
     timezone: 'America/Los_Angeles',
   };
   for (const invalid of [
@@ -190,7 +190,7 @@ test('owner onboarding validates DSP setup before accepting and denies setup thr
   assert.equal(view.dsp.timezone, 'America/Los_Angeles');
   assert.deepEqual(
     [view.profile.abbreviation, view.profile.stationCode, view.profile.setupRequired],
-    ['NSTL', 'DOT4', false],
+    ['NSTL', 'TST1', false],
   );
   assert.equal((await f.request(invite + '/accept', { ...account, dspProfile })).status, 404);
   assert.equal(
@@ -208,7 +208,7 @@ test('owner onboarding validates DSP setup before accepting and denies setup thr
   const memberInvite = `/api/invitations/${memberToken}`;
   const details = await f.request(memberInvite);
   assert.equal(details.value.onboarding, false);
-  assert.equal(details.value.stationCode, 'DOT4');
+  assert.equal(details.value.stationCode, 'TST1');
   assert.equal(details.value.timezone, 'America/Los_Angeles');
   assert.equal((await f.request(memberInvite + '/accept', { ...account, dspProfile })).status, 403);
   assert.equal((await f.request(memberInvite)).status, 200);

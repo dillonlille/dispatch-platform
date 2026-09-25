@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
-  "name": "dispatch-dev-email",
+  // Template for types and local checks. Generate a private deployment config with mail:configure.
+  "name": "dispatch-dev-email-example",
   "main": "worker.ts",
   "compatibility_date": "2026-09-17",
   "compatibility_flags": ["nodejs_compat"],
@@ -9,13 +10,13 @@
   "send_email": [
     {
       "name": "EMAIL",
-      "allowed_sender_addresses": ["no-reply@dispatchdev.dillonlille.com"],
+      "allowed_sender_addresses": ["no-reply@dev.dispatch.test"],
     },
   ],
   "vars": {
     "DISPATCH_ENVIRONMENT": "preview",
-    "DISPATCH_ORIGIN": "https://dispatchdev.dillonlille.com",
-    "MAIL_FROM": "no-reply@dispatchdev.dillonlille.com",
+    "DISPATCH_ORIGIN": "https://dev.dispatch.test",
+    "MAIL_FROM": "no-reply@dev.dispatch.test",
   },
   "observability": {
     "enabled": true,

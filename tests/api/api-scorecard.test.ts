@@ -21,7 +21,7 @@ test('a scorecard week is collected on request, stored per dataset and listed, a
       await owner.post('/api/dsp/profile', {
         name: dsp.name,
         abbreviation: 'NLL',
-        stationCode: 'DOT4',
+        stationCode: 'TST1',
         timezone: dsp.timezone,
       })
     ).status,

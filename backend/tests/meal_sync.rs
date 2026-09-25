@@ -66,7 +66,7 @@ fn first_sync_discovers_from_tenant_profile_and_replays_after_publication() {
     let (_root, db, id, actor) = fixture();
     enable(&db, &id, Provider::Paycom);
     enable(&db, &id, Provider::Cortex);
-    db.set_profile(&id, json!({"stationCode":"DOT4", "abbreviation":"FSCL"}))
+    db.set_profile(&id, json!({"stationCode":"TST1", "abbreviation":"NLOG"}))
         .unwrap();
     assert_eq!(
         db.meal_sync_status(&id, "2026-01-11").unwrap()["scopeAvailable"],
@@ -78,8 +78,8 @@ fn first_sync_discovers_from_tenant_profile_and_replays_after_publication() {
     assert_eq!(queued["jobs"].as_array().unwrap().len(), 2);
     let row = db.job(s(&queued["jobs"][1], "id"), Some(&id)).unwrap();
     let request: Value = serde_json::from_str(s(&row, "request")).unwrap();
-    assert_eq!(request["station"], "DOT4");
-    assert_eq!(request["dspAbbreviation"], "FSCL");
+    assert_eq!(request["station"], "TST1");
+    assert_eq!(request["dspAbbreviation"], "NLOG");
     assert_eq!(request["dspName"], db.get_dsp(&id).unwrap()["name"]);
     assert!(request.get("serviceAreaId").is_none());
     db.cancel_dsp(&id).unwrap();

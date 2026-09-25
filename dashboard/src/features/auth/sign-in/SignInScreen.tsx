@@ -78,7 +78,7 @@ export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
                 name="email"
                 type="email"
                 autoComplete="email"
-                placeholder="you@company.com"
+                placeholder="you@example.test"
                 defaultValue={handoff?.email}
                 required
               />

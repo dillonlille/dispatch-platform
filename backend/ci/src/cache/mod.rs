@@ -1,4 +1,4 @@
-//! Exact-input backend cache. Schema 3 deliberately cannot reuse Python-era keys.
+//! Exact-input backend cache. Schema 4 excludes binaries built before path remapping.
 mod key;
 mod store;
 #[cfg(test)]
