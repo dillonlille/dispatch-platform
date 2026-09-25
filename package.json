@@ -29,6 +29,7 @@
     "mail:types": "node services/cloudflare-mail/generate-types.mjs",
     "contracts:generate": "DISPATCH_UPDATE_CONTRACTS=1 cargo test --locked --lib contracts::generated",
     "check:privacy": "python3 tooling/security/scan.py",
+    "check:exports": "python3 tooling/security/exports.py",
     "mail:configure": "tsx tooling/host/mail-config.ts"
   },
   "dependencies": {
