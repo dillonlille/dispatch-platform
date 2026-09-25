@@ -13,6 +13,9 @@ pub struct Config {
     pub origin: String,
     pub port: u16,
     pub release: String,
+    /// The source this runtime was built from: its commit, and its version when it is a published
+    /// release. A server running from a checkout rather than a build knows neither.
+    pub source: crate::contracts::RuntimeSource,
     pub fixture: bool,
     pub fixture_url: Option<String>,
     pub browser_capacity: usize,
@@ -78,6 +81,7 @@ impl Config {
                 .ok()
                 .filter(|v| !v.trim().is_empty())
         };
+        let source = source(&bundle, environment == "production");
         let mut c = Self {
             security: SecurityPolicy::parse(&variable("DISPATCH_SECURITY_POLICY", "{}"))?,
             root: PathBuf::from(variable(
@@ -96,6 +100,7 @@ impl Config {
                 .parse()
                 .map_err(|_| super::Error::new("invalid_port", 400))?,
             release: variable("DISPATCH_RELEASE", "development"),
+            source,
             fixture: provider == "fixture",
             fixture_url: env::var("DISPATCH_FIXTURE_PROVIDER_URL").ok(),
             browser_capacity: 2,
@@ -214,5 +219,50 @@ impl Config {
     }
     pub fn mail_available(&self) -> bool {
         self.mail_mode != "disabled"
+    }
+}
+/// The commit a build was made from, and on Production its version: Production installs only
+/// published releases, whose manifest names it. Any other build still carries package.json's
+/// version, which no release has used.
+fn source(bundle: &std::path::Path, production: bool) -> crate::contracts::RuntimeSource {
+    let field = |file: &str, key: &str| {
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(bundle.join(file)).ok()?).ok()?;
+        value[key].as_str().map(String::from)
+    };
+    crate::contracts::RuntimeSource {
+        version: production
+            .then(|| field("release.json", "version"))
+            .flatten(),
+        commit: field("tooling/build-info.json", "commit"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_production_names_the_release_its_source_came_from() {
+        let bundle = tempfile::tempdir().unwrap();
+        let unbuilt = super::source(bundle.path(), true);
+        assert_eq!((unbuilt.version, unbuilt.commit), (None, None));
+        std::fs::create_dir(bundle.path().join("tooling")).unwrap();
+        std::fs::write(
+            bundle.path().join("release.json"),
+            r#"{"version":"0.0.23"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            bundle.path().join("tooling/build-info.json"),
+            r#"{"commit":"c3f898be7c709f65c9d6e69a391fffbe03ecb5b6"}"#,
+        )
+        .unwrap();
+        let commit = Some("c3f898be7c709f65c9d6e69a391fffbe03ecb5b6".to_owned());
+        let dev = super::source(bundle.path(), false);
+        assert_eq!((dev.version, dev.commit), (None, commit.clone()));
+        let production = super::source(bundle.path(), true);
+        assert_eq!(
+            (production.version, production.commit),
+            (Some("0.0.23".into()), commit)
+        );
     }
 }

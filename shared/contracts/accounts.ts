@@ -21,6 +21,7 @@ export type Permission = (typeof permissions)[number];
 export type Role = Narrow<GeneratedRole, { permissions: Permission[] }>;
 export type { DspSummary } from './generated/DspSummary';
 export type { SessionResponse as SessionView } from './generated/SessionResponse';
+export type { RuntimeSource } from './generated/RuntimeSource';
 type ViewRole = Pick<Role, 'id' | 'name' | 'owner'>;
 export type DspView = Narrow<
   GeneratedDspView,

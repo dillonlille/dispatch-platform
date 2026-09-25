@@ -11,6 +11,7 @@ import {
 } from '../../dashboard/src/lib/format.js';
 import { backoff } from '../../dashboard/src/lib/backoff.js';
 import { messageOf } from '../../dashboard/src/lib/errors.js';
+import { sourceLink } from '../../dashboard/src/lib/source.js';
 import {
   hoursAndMinutes,
   punchTime,
@@ -85,4 +86,18 @@ test('an error message falls back only when there is none', () => {
   );
   assert.equal(messageOf('nope'), 'The request could not be completed.');
   assert.equal(messageOf(new Error('')), 'The request could not be completed.');
+});
+
+test('the source link names the release on Production and the commit elsewhere', () => {
+  const repository = 'https://github.com/dispatch-systems/dispatch-platform';
+  const commit = 'c3f898be7c709f65c9d6e69a391fffbe03ecb5b6';
+  assert.deepEqual(sourceLink({ version: '0.0.23', commit }), {
+    href: `${repository}/tree/v0.0.23`,
+    label: 'v0.0.23',
+  });
+  assert.deepEqual(sourceLink({ version: null, commit }), {
+    href: `${repository}/tree/${commit}`,
+    label: 'c3f898b',
+  });
+  assert.deepEqual(sourceLink({ version: null, commit: null }), { href: repository });
 });
