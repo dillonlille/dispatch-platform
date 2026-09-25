@@ -1,9 +1,9 @@
-//! `npm run pr:ship -- <number>`: add a PR to the merge queue at once and wait until GitHub
-//! merges it. The queue runs the checks on the exact squash commit it will push, so nothing
-//! runs on the PR itself and there is nothing to wait for before queueing. Everything is read
-//! from GitHub's API, never from a command's text: a newer push is queued in its turn, and the
-//! wait stops with the reason when the PR closes or leaves the queue unmerged, naming the
-//! failed jobs of its queue run.
+//! `npm run pr:ship -- <number>`: add a PR to the merge queue as soon as GitHub admits it and
+//! wait until GitHub merges it. The queue runs the checks on the exact squash commit it will
+//! push, so nothing but the admission check runs on the PR itself. Everything is read from
+//! GitHub's API, never from a command's text: a newer push is queued in its turn, and the wait
+//! stops with the reason when the PR closes or leaves the queue unmerged, naming the failed
+//! jobs of its queue run.
 use crate::{REPOSITORY, Result, Runner};
 use serde_json::Value;
 
@@ -13,7 +13,10 @@ const LOOKS: u32 = 270;
 /// Consecutive failed API calls, or refused additions to the queue, before giving up.
 const ATTEMPTS: u32 = 5;
 
-const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeCommit{oid} mergeQueueEntry{state position}}}}";
+/// The check the ruleset expects on a PR head before the queue admits it, which
+/// `queue-admission.yml` reports, and the queue's own gate.
+const REQUIRED: &str = "platform";
+const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}}}}}";
 const ENQUEUE: &str = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}";
 
 fn graphql(runner: &dyn Runner, query: &str, variables: &[String]) -> Result<Value> {
@@ -59,18 +62,43 @@ fn look(runner: &dyn Runner, number: u64) -> Result<Value> {
     }
 }
 
-/// The failed jobs of the newest queue run for `number`, as "name: conclusion link" lines.
-/// The queue names its branch after the PR, which is how the run is found. Any API trouble
-/// here only costs detail, never the verdict.
-fn failed_jobs(runner: &dyn Runner, number: u64) -> Vec<String> {
+/// What the admission check says about the PR's current head.
+#[derive(Debug, PartialEq)]
+enum Admission {
+    Pending,
+    Passed,
+    Failed,
+}
+
+fn admission(pr: &Value) -> Admission {
+    let commit = &pr["commits"]["nodes"][0]["commit"];
+    if commit["oid"] != pr["headRefOid"] {
+        return Admission::Pending;
+    }
+    let contexts = &commit["statusCheckRollup"]["contexts"]["nodes"];
+    match contexts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|context| context["__typename"] == "CheckRun" && context["name"] == REQUIRED)
+        .and_then(|context| context["conclusion"].as_str())
+    {
+        Some("SUCCESS") => Admission::Passed,
+        Some("FAILURE" | "CANCELLED" | "TIMED_OUT" | "STARTUP_FAILURE") => Admission::Failed,
+        _ => Admission::Pending,
+    }
+}
+
+/// The newest queue run for `number`, if any. The queue names its branch after the PR, which
+/// is how the run is found. Any API trouble here only costs detail, never the verdict.
+fn queue_run(runner: &dyn Runner, number: u64) -> Option<Value> {
     let prefix = format!("gh-readonly-queue/main/pr-{number}-");
-    let Ok(runs) = rest(
+    let runs = rest(
         runner,
         "actions/workflows/checks.yml/runs?event=merge_group&per_page=30",
-    ) else {
-        return vec![];
-    };
-    let Some(run) = runs["workflow_runs"]
+    )
+    .ok()?;
+    runs["workflow_runs"]
         .as_array()
         .into_iter()
         .flatten()
@@ -80,9 +108,11 @@ fn failed_jobs(runner: &dyn Runner, number: u64) -> Vec<String> {
                 .is_some_and(|name| name.starts_with(&prefix))
         })
         .max_by_key(|run| run["id"].as_u64().unwrap_or(0))
-    else {
-        return vec![];
-    };
+        .cloned()
+}
+
+/// The failed jobs of `run`, as "name: conclusion link" lines.
+fn failed_jobs(runner: &dyn Runner, run: &Value) -> Vec<String> {
     let Ok(jobs) = rest(
         runner,
         &format!("actions/runs/{}/jobs?per_page=100", run["id"]),
@@ -132,6 +162,8 @@ pub fn run(
     // The head this run queued or found queued, and how often it was then seen outside it.
     let mut queued: Option<Value> = None;
     let mut outside = 0;
+    // The newest queue run of this PR before this run queued it: only a later run is its own.
+    let mut earlier: Option<u64> = None;
     let (mut seen, mut unanswered, mut refused) = (false, 0, 0);
     for _ in 0..LOOKS {
         let pr = match look(runner, number) {
@@ -178,14 +210,23 @@ pub fn run(
             // Just queued or just merged, GitHub can briefly show neither; a second look decides.
             outside += 1;
             if outside >= 2 {
-                let failed = failed_jobs(runner, number);
+                let reason = pr["timelineItems"]["nodes"][0]["reason"]
+                    .as_str()
+                    .unwrap_or("removed")
+                    .to_owned();
+                let failed = match queue_run(runner, number) {
+                    Some(run) if run["id"].as_u64() > earlier || earlier.is_none() => {
+                        failed_jobs(runner, &run)
+                    }
+                    _ => vec![],
+                };
                 return Err(if failed.is_empty() {
                     format!(
-                        "#{number} left the merge queue without merging: its queue run failed or it was removed. Queue runs: https://github.com/{REPOSITORY}/actions?query=event%3Amerge_group"
+                        "#{number} left the merge queue without merging: {reason}. Queue runs: https://github.com/{REPOSITORY}/actions?query=event%3Amerge_group"
                     )
                 } else {
                     format!(
-                        "#{number} left the merge queue without merging. Failed jobs of its queue run:\n- {}",
+                        "#{number} left the merge queue without merging: {reason}. Failed jobs of its queue run:\n- {}",
                         failed.join("\n- ")
                     )
                 }
@@ -193,6 +234,39 @@ pub fn run(
             }
             pause(PAUSE);
             continue;
+        }
+        // The queue admits a head only once its admission check passed and GitHub knows it
+        // merges cleanly; queued before that, GitHub drops it as an invalid merge commit.
+        if pr["mergeable"] == "CONFLICTING" {
+            return Err(format!(
+                "#{number} conflicts with main; merge origin/main, push and ship it again"
+            )
+            .into());
+        }
+        match admission(&pr) {
+            Admission::Failed => {
+                return Err(format!(
+                    "The admission check failed on {} of #{number}; rerun it, or fix queue-admission.yml",
+                    short(head)
+                )
+                .into());
+            }
+            Admission::Passed if pr["mergeable"] == "MERGEABLE" => {}
+            _ => {
+                note(format!(
+                    "Waiting for the admission check on {} of #{number}",
+                    short(head)
+                ));
+                pause(PAUSE);
+                continue;
+            }
+        }
+        if earlier.is_none() {
+            earlier = Some(
+                queue_run(runner, number)
+                    .and_then(|run| run["id"].as_u64())
+                    .unwrap_or(0),
+            );
         }
         let id = pr["id"].as_str().unwrap_or("");
         let head = head.as_str().unwrap_or("");
@@ -209,15 +283,8 @@ pub fn run(
                     short(&head.into())
                 ));
             }
-            // Refused until the admission check has reported on this head, which takes a
-            // runner and so a moment; otherwise while GitHub still computes mergeability, or
-            // when the head moved meanwhile: the next look tries again or follows the new head.
-            Err(error) if error.to_string().contains("is expected") => {
-                note(format!(
-                    "Waiting for the admission check on {} of #{number}",
-                    short(&head.into())
-                ));
-            }
+            // Refused when the head moved meanwhile, or while GitHub catches up with the
+            // admission check: the next look follows the new head or tries again.
             Err(error) => {
                 refused += 1;
                 if refused >= ATTEMPTS {
@@ -243,13 +310,14 @@ mod tests {
     const OLD: &str = "1111111111111111111111111111111111111111";
     const NEW: &str = "2222222222222222222222222222222222222222";
 
-    /// GitHub as a script: each look answers with the next PR state, the last one repeating.
+    /// GitHub as a script: each look answers with the next PR state, the last one repeating,
+    /// and each REST endpoint likewise.
     #[derive(Default)]
     struct GitHub {
         looks: RefCell<VecDeque<Result<Value>>>,
         refusals: RefCell<VecDeque<String>>,
         queued: RefCell<Vec<String>>,
-        rest: RefCell<BTreeMap<String, Value>>,
+        rest: RefCell<BTreeMap<String, VecDeque<Value>>>,
     }
     impl Runner for GitHub {
         fn command(&self, args: &[&str], _cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
@@ -257,8 +325,14 @@ mod tests {
             assert_eq!(timeout, 60);
             if let Some(endpoint) = args[2].strip_prefix(&format!("repos/{REPOSITORY}/")) {
                 assert_eq!(args.len(), 3);
-                let reply = self.rest.borrow().get(endpoint).cloned();
-                return Ok(serde_json::to_vec(&reply.ok_or("not found")?)?);
+                let mut rest = self.rest.borrow_mut();
+                let replies = rest.get_mut(endpoint).ok_or("not found")?;
+                let reply = if replies.len() > 1 {
+                    replies.pop_front().unwrap()
+                } else {
+                    replies.front().ok_or("not found")?.clone()
+                };
+                return Ok(serde_json::to_vec(&reply)?);
             }
             assert_eq!(&args[2..4], ["graphql", "-f"]);
             if args[4].contains("enqueuePullRequest") {
@@ -293,12 +367,29 @@ mod tests {
             ..Default::default()
         }
     }
+    /// An open PR whose head the admission check passed and which merges cleanly.
     fn open(head: &str) -> Value {
-        json!({"id":"PR_1","state":"OPEN","isDraft":false,"headRefOid":head,"mergeCommit":null,"mergeQueueEntry":null})
+        let mut value = unadmitted(head);
+        value["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] =
+            "SUCCESS".into();
+        value
+    }
+    /// An open PR whose admission check has not reported yet.
+    fn unadmitted(head: &str) -> Value {
+        json!({"id":"PR_1","state":"OPEN","isDraft":false,"headRefOid":head,"mergeable":"MERGEABLE",
+            "mergeCommit":null,"mergeQueueEntry":null,
+            "commits":{"nodes":[{"commit":{"oid":head,"statusCheckRollup":{"contexts":{"nodes":[
+                {"__typename":"CheckRun","name":REQUIRED,"conclusion":null}]}}}}]},
+            "timelineItems":{"nodes":[]}})
     }
     fn in_queue(head: &str) -> Value {
         let mut value = open(head);
         value["mergeQueueEntry"] = json!({"state":"AWAITING_CHECKS","position":1});
+        value
+    }
+    fn removed(head: &str, reason: &str) -> Value {
+        let mut value = open(head);
+        value["timelineItems"]["nodes"] = json!([{"reason":reason}]);
         value
     }
     fn merged(head: &str) -> Value {
@@ -321,10 +412,32 @@ mod tests {
         );
         (result, said, pauses.into_inner())
     }
+    const RUNS: &str = "actions/workflows/checks.yml/runs?event=merge_group&per_page=30";
+    fn runs(ids: &[u64]) -> Value {
+        let runs: Vec<_> = ids
+            .iter()
+            .map(|id| json!({"id":id,"head_branch":format!("gh-readonly-queue/main/pr-7-{id}")}))
+            .chain([json!({"id":99,"head_branch":"gh-readonly-queue/main/pr-70-aaaa"})])
+            .collect();
+        json!({ "workflow_runs": runs })
+    }
+    fn jobs() -> Value {
+        json!({"jobs":[
+            {"name":"build","conclusion":"success","html_url":"https://github.com/job/1"},
+            {"name":"core","conclusion":"failure","html_url":"https://github.com/job/2"},
+            {"name":"platform","conclusion":"failure","html_url":"https://github.com/job/3"}]})
+    }
 
     #[test]
-    fn queues_the_head_at_once_and_returns_the_merge() {
-        let github = github(vec![open(OLD), in_queue(OLD), in_queue(OLD), merged(OLD)]);
+    fn queues_an_admitted_head_at_once_and_returns_the_merge() {
+        let github = github(vec![
+            unadmitted(OLD),
+            unadmitted(OLD),
+            open(OLD),
+            in_queue(OLD),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
         let (result, said, _) = ship(&github);
         assert_eq!(result.unwrap(), "3333333");
         assert_eq!(*github.queued.borrow(), [format!("head={OLD}")]);
@@ -332,10 +445,38 @@ mod tests {
         assert_eq!(
             said,
             [
+                "Waiting for the admission check on 1111111 of #7",
                 "Added #7 to the merge queue at 1111111; the queue runs the checks on its squash commit",
                 "#7 is in the merge queue at position 1: awaiting_checks",
             ]
         );
+    }
+
+    #[test]
+    fn unknown_mergeability_waits_and_a_conflict_or_failed_admission_stops_it() {
+        let mut unknown = open(OLD);
+        unknown["mergeable"] = "UNKNOWN".into();
+        let github = github(vec![unknown, open(OLD), in_queue(OLD), merged(OLD)]);
+        let (result, said, _) = ship(&github);
+        assert_eq!(result.unwrap(), "3333333");
+        assert_eq!(said[0], "Waiting for the admission check on 1111111 of #7");
+        let mut conflicting = open(OLD);
+        conflicting["mergeable"] = "CONFLICTING".into();
+        let github = self::github(vec![conflicting]);
+        let error = ship(&github).0.unwrap_err().to_string();
+        assert!(error.contains("conflicts with main"), "{error}");
+        assert!(github.queued.borrow().is_empty());
+        let mut failed = open(OLD);
+        failed["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] =
+            "FAILURE".into();
+        let github = self::github(vec![failed]);
+        let error = ship(&github).0.unwrap_err().to_string();
+        assert!(error.contains("admission check failed"), "{error}");
+        // Checks attached to another commit than the head are not the head's.
+        let mut stale = open(OLD);
+        stale["headRefOid"] = NEW.into();
+        assert_eq!(admission(&stale), Admission::Pending);
+        assert_eq!(admission(&open(OLD)), Admission::Passed);
     }
 
     #[test]
@@ -364,25 +505,25 @@ mod tests {
     }
 
     #[test]
-    fn leaving_the_queue_unmerged_names_the_failed_jobs_of_its_run() {
-        let github = github(vec![in_queue(OLD), open(OLD), open(OLD)]);
-        github.rest.borrow_mut().insert(
-            "actions/workflows/checks.yml/runs?event=merge_group&per_page=30".into(),
-            json!({"workflow_runs":[
-                {"id":40,"head_branch":"gh-readonly-queue/main/pr-7-aaaa"},
-                {"id":41,"head_branch":"gh-readonly-queue/main/pr-70-aaaa"},
-                {"id":39,"head_branch":"gh-readonly-queue/main/pr-7-bbbb"}]}),
-        );
+    fn leaving_the_queue_unmerged_reports_the_reason_and_the_failed_jobs_of_its_own_run() {
+        // Queued here: only a run newer than the one before counts as this attempt's.
+        let github = github(vec![
+            open(OLD),
+            in_queue(OLD),
+            removed(OLD, "failed_checks"),
+            removed(OLD, "failed_checks"),
+        ]);
+        github
+            .rest
+            .borrow_mut()
+            .insert(RUNS.into(), VecDeque::from([runs(&[39]), runs(&[39, 40])]));
         github.rest.borrow_mut().insert(
             "actions/runs/40/jobs?per_page=100".into(),
-            json!({"jobs":[
-                {"name":"build","conclusion":"success","html_url":"https://github.com/job/1"},
-                {"name":"core","conclusion":"failure","html_url":"https://github.com/job/2"},
-                {"name":"platform","conclusion":"failure","html_url":"https://github.com/job/3"}]}),
+            VecDeque::from([jobs()]),
         );
         let error = ship(&github).0.unwrap_err().to_string();
         assert!(
-            error.contains("#7 left the merge queue without merging"),
+            error.contains("#7 left the merge queue without merging: failed_checks"),
             "{error}"
         );
         assert!(
@@ -390,11 +531,42 @@ mod tests {
             "{error}"
         );
         assert!(!error.contains("build"), "{error}");
-        assert!(github.queued.borrow().is_empty());
-        // Without a run to blame, the queue runs are linked instead.
-        let github = self::github(vec![in_queue(OLD), open(OLD), open(OLD)]);
+        // Removed for another reason, the reason is the message and no stale run is blamed.
+        let github = self::github(vec![
+            open(OLD),
+            in_queue(OLD),
+            removed(OLD, "invalid_merge_commit"),
+            removed(OLD, "invalid_merge_commit"),
+        ]);
+        github
+            .rest
+            .borrow_mut()
+            .insert(RUNS.into(), VecDeque::from([runs(&[39])]));
+        github.rest.borrow_mut().insert(
+            "actions/runs/39/jobs?per_page=100".into(),
+            VecDeque::from([jobs()]),
+        );
         let error = ship(&github).0.unwrap_err().to_string();
+        assert!(error.contains("invalid_merge_commit"), "{error}");
+        assert!(!error.contains("core"), "{error}");
         assert!(error.contains("query=event%3Amerge_group"), "{error}");
+        // Found already queued, the newest run is its own.
+        let github = self::github(vec![
+            in_queue(OLD),
+            removed(OLD, "failed_checks"),
+            removed(OLD, "failed_checks"),
+        ]);
+        github
+            .rest
+            .borrow_mut()
+            .insert(RUNS.into(), VecDeque::from([runs(&[40])]));
+        github.rest.borrow_mut().insert(
+            "actions/runs/40/jobs?per_page=100".into(),
+            VecDeque::from([jobs()]),
+        );
+        let error = ship(&github).0.unwrap_err().to_string();
+        assert!(error.contains("- core: failure"), "{error}");
+        assert!(github.queued.borrow().is_empty());
         // One look outside it right after queueing is GitHub catching up, not a failure.
         let github = self::github(vec![open(OLD), open(OLD), in_queue(OLD), merged(OLD)]);
         assert_eq!(ship(&github).0.unwrap(), "3333333");
@@ -471,53 +643,16 @@ mod tests {
     }
 
     #[test]
-    fn the_admission_check_is_awaited_without_limit_and_reported_once() {
-        let github = github(vec![
-            open(OLD),
-            open(OLD),
-            open(OLD),
-            in_queue(OLD),
-            merged(OLD),
-        ]);
-        github.refusals.borrow_mut().extend(
-            (0..ATTEMPTS + 2).map(|_| {
-                r#"Pull request Required status check "platform" is expected."#.to_owned()
-            }),
-        );
-        let github = GitHub {
-            looks: RefCell::new(VecDeque::from([
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(open(OLD)),
-                Ok(in_queue(OLD)),
-                Ok(merged(OLD)),
-            ])),
-            refusals: github.refusals,
-            ..Default::default()
-        };
-        let (result, said, _) = ship(&github);
-        assert_eq!(result.unwrap(), "3333333");
-        assert_eq!(github.queued.borrow().len(), 1);
-        assert_eq!(
-            said.iter()
-                .filter(|text| text.contains("admission"))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
     fn it_gives_up_after_ninety_minutes() {
         let (result, _, pauses) = ship(&github(vec![in_queue(OLD)]));
         assert_eq!(
             result.unwrap_err().to_string(),
             "Gave up after 90 minutes; #7 has not merged"
         );
+        assert_eq!(pauses, LOOKS as usize);
+        // So does a head the admission check never reports on.
+        let (result, _, pauses) = ship(&github(vec![unadmitted(OLD)]));
+        assert!(result.unwrap_err().to_string().contains("Gave up"));
         assert_eq!(pauses, LOOKS as usize);
     }
 }

@@ -1,8 +1,9 @@
 name: Queue admission
 # The ruleset requires the `platform` check on a PR before the merge queue accepts it, and the
 # platform checks run only in the queue, on the squash commit. This reports that check on
-# every PR head at once, so a PR can be queued the moment it opens. It proves nothing itself:
-# the queue's own `platform` gate decides whether the commit lands.
+# every PR head, so a PR can be queued as soon as it has run. It proves nothing itself: the
+# queue's own `platform` gate decides whether the commit lands, and pr:ship waits for this
+# check because a PR queued before it passed is dropped as an invalid merge commit.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]

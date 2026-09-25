@@ -25,16 +25,18 @@ its version into it. A manual run of one suite has no gate, so nothing partial i
 the release tool accepts only runs whose `core` and `platform` jobs succeeded.
 
 The ruleset expects the `platform` check on a PR head before the queue admits it, so
-`queue-admission.yml` reports one on every PR head within seconds. It proves nothing; the
-queue's own gate decides.
+`queue-admission.yml` reports one on every PR head, usually within a minute. It proves
+nothing; the queue's own gate decides, and a PR queued before it passed is dropped as an
+invalid merge commit.
 
 `backend/ci` builds as `dispatch-ci` and holds what runs on this machine: the Rust build
 cache and compiler fingerprint (`cargo-build.py`), the PR preflight (`npm run pr:prepare`) and
-the ship command. `npm run pr:ship -- <number>` adds the PR to the merge queue at once and
-reads it from GitHub's API every 20 seconds until GitHub merges it, printing the squash commit.
-A newer push is queued in its turn. It stops with the reason when the PR is a draft, closes,
-leaves the queue unmerged, naming the failed jobs of its queue run, or has not merged after 90
-minutes.
+the ship command. `npm run pr:ship -- <number>` reads the PR from GitHub's API every 20
+seconds, adds it to the merge queue once its admission check passed and GitHub knows it merges
+cleanly, and waits until GitHub merges it, printing the squash commit. A newer push is queued
+in its turn. It stops with the reason when the PR conflicts with `main`, is a draft, closes,
+leaves the queue unmerged, with GitHub's reason and the failed jobs of its own queue run, or
+has not merged after 90 minutes.
 
 Caches: only `main`'s reach every branch, since the queue's branches are deleted after each
 run. `caches.yml` refreshes them on every push to `main`: the release backend keyed by its
