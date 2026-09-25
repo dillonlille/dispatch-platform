@@ -20,6 +20,10 @@ run and attempt, target branch and validation scope. The newest matching run
 wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
+PRs land on `main` as squash commits, which have one parent, so the merge-commit matching
+below no longer finds anything: queue and push runs check afresh, scoped by their diff, until
+the CI rebuild removes the receipts.
+
 A merge queue on `main` runs the workflow on the exact merge commit it will push,
 scoped against the group's base so every PR in the group counts. A group holding one
 PR that is still current with `main` merges the same base, head and tree that PR's own
@@ -64,7 +68,7 @@ explicit override for intentional overlapping work.
 `npm run pr:ship -- <number>` ships an open PR. It reads the PR from GitHub's API every
 20 seconds: once the checks on its current head pass, including the required `platform`
 gate, it adds the PR to the merge queue bound to that head, then waits until GitHub
-merges it and prints the merge commit. A newer push is followed to its own checks. It
+merges it and prints the squash commit. A newer push is followed to its own checks. It
 stops with the reason when a check fails, with each failed check's name and link, and
 when the PR is a draft, closes, leaves the queue unmerged or has not merged after 90
 minutes. Brief API failures are retried; a PR it cannot read at all stops it at once.

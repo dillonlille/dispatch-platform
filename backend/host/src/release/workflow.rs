@@ -1,13 +1,19 @@
 use super::*;
 use dispatch_ci::policy::Policy;
 
+/// One line per PR in the log: a squash commit names its PR in the `(#N)` suffix of its
+/// subject, and a merge commit from before squash merges in its `Merge pull request #N` subject.
 fn merged_changes(log: &str) -> Result<Vec<String>> {
-    let pattern = regex::Regex::new(r"^Merge pull request #(\d+) from ")?;
+    let squash = regex::Regex::new(r"^(.*) \(#(\d+)\)$")?;
+    let merge = regex::Regex::new(r"^Merge pull request #(\d+) from ")?;
     Ok(log
         .split('\u{1e}')
         .filter_map(|entry| {
             let (subject, body) = entry.trim().split_once('\n').unwrap_or((entry.trim(), ""));
-            pattern.captures(subject).map(|c| {
+            if let Some(c) = squash.captures(subject) {
+                return Some(format!("- #{} {}", &c[2], &c[1]));
+            }
+            merge.captures(subject).map(|c| {
                 format!("- #{} {}", &c[1], body.trim().lines().next().unwrap_or(""))
                     .trim_end()
                     .into()
@@ -79,7 +85,6 @@ impl Release<'_> {
                     &[
                         "log",
                         "--first-parent",
-                        "--merges",
                         "--format=%s%n%b%x1e",
                         &format!("{previous}..{commit}"),
                     ],
@@ -281,8 +286,15 @@ impl Release<'_> {
 mod tests {
     use super::*;
     #[test]
-    fn notes_list_only_first_parent_pr_merges() {
-        let log = "Merge pull request #76 from owner/fix\n\nFix account\n\u{1e}\nMerge dev\n\u{1e}\nMerge pull request #74 from owner/other\n\u{1e}";
-        assert_eq!(merged_changes(log).unwrap(), ["- #76 Fix account", "- #74"]);
+    fn notes_list_squash_and_merge_commits_of_prs() {
+        let log = "fix(host): keep the lock (#80)\n\nThe body.\n\u{1e}\nMerge pull request #76 from owner/fix\n\nFix account\n\u{1e}\nMerge dev\n\u{1e}\nRelease notes\n\u{1e}\nMerge pull request #74 from owner/other\n\u{1e}";
+        assert_eq!(
+            merged_changes(log).unwrap(),
+            [
+                "- #80 fix(host): keep the lock",
+                "- #76 Fix account",
+                "- #74"
+            ]
+        );
     }
 }
