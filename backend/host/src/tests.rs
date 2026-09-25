@@ -290,14 +290,12 @@ impl Fixture {
             json!({"oldDigest":self.old_manifest.digest,"newDigest":self.new_manifest.digest})
         }
     }
+    /// The queue run that landed `new` on main and published its build as run 17.
     fn run(&self) -> Value {
-        json!({"id":17,"head_sha":self.new,"head_branch":"main","event":"push","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
+        json!({"id":17,"head_sha":self.new,"head_branch":format!("gh-readonly-queue/main/pr-7-{}",self.old),"event":"merge_group","status":"completed","conclusion":"success","head_repository":{"full_name":REPOSITORY},"run_attempt":1})
     }
     fn run_url(&self) -> String {
-        format!(
-            "repos/{REPOSITORY}/actions/workflows/checks.yml/runs?branch=main&event=push&head_sha={}&per_page=20",
-            self.new
-        )
+        queue_url(&self.new)
     }
     fn package(&self) -> Vec<u8> {
         let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
@@ -519,7 +517,7 @@ fn latest_workflow_rerun_supersedes_green_validation() {
     bad["run_attempt"] = json!(2);
     bad["conclusion"] = json!("failure");
     let runs = json!([f.run(), bad]);
-    let selected = releases::latest_run(&runs, &f.new, "push", Some("main"), false).unwrap();
+    let selected = releases::latest_run(&runs, &f.new, "merge_group", None, false).unwrap();
     assert!(!releases::passed(selected));
     f.system
         .reply(&f.run_url(), vec![json!({"workflow_runs":runs})]);
@@ -557,29 +555,10 @@ fn dev_download_installs_only_with_still_current_validation() {
     }
 }
 #[test]
-fn dev_installs_the_merge_queue_build_without_waiting_for_the_push_run() {
-    let f = Fixture::new(Environment::Dev);
-    f.publish(23, &format!("dispatch-main-{}", f.new), 43);
-    // No push run is registered: asking for one fails the update.
-    f.system.reply(
-        &queue_url(&f.new),
-        vec![json!({"workflow_runs":[f.queue_run()]})],
-    );
-    f.updater().run_locked().unwrap();
-    assert_eq!(
-        artifact::verify(&f.updater().active, None).unwrap(),
-        f.new_manifest
-    );
-    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
-}
-#[test]
-fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
-    // A pending or failed queue run keeps the old runtime, even beside a green push run.
+fn a_pending_or_failed_queue_run_keeps_the_old_runtime() {
     for failed in [false, true] {
         let f = Fixture::new(Environment::Dev);
-        f.dev_download();
-        f.system
-            .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
+        f.publish(23, &format!("dispatch-main-{}", f.new), 43);
         let mut queued = f.queue_run();
         if failed {
             queued["conclusion"] = json!("failure");
@@ -601,31 +580,37 @@ fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
             }
         );
     }
-    // An expired queue build, or a group merged into another branch, defers to the push run.
-    for foreign in [false, true] {
-        let f = Fixture::new(Environment::Dev);
-        f.dev_download();
-        f.system
-            .reply(&f.run_url(), vec![json!({"workflow_runs":[f.run()]})]);
-        let mut queued = f.queue_run();
-        if foreign {
-            queued["head_branch"] = json!(format!("gh-readonly-queue/other/pr-7-{}", f.old));
-        } else {
-            f.system.reply(
-                &format!("repos/{REPOSITORY}/actions/runs/23/artifacts"),
-                vec![
-                    json!({"artifacts":[{"id":43,"name":format!("dispatch-main-{}", f.new),"expired":true}]}),
-                ],
-            );
-        }
-        f.system
-            .reply(&queue_url(&f.new), vec![json!({"workflow_runs":[queued]})]);
-        f.updater().run_locked().unwrap();
-        assert_eq!(
-            artifact::verify(&f.updater().active, None).unwrap(),
-            f.new_manifest
-        );
-    }
+}
+#[test]
+fn only_a_queue_run_into_main_with_its_build_installs() {
+    // A group merged into another branch is not main's: the commit waits.
+    let f = Fixture::new(Environment::Dev);
+    f.publish(23, &format!("dispatch-main-{}", f.new), 43);
+    let mut foreign = f.queue_run();
+    foreign["head_branch"] = json!(format!("gh-readonly-queue/other/pr-7-{}", f.old));
+    f.system
+        .reply(&queue_url(&f.new), vec![json!({"workflow_runs":[foreign]})]);
+    f.updater().run_locked().unwrap();
+    f.assert_old();
+    assert_eq!(
+        io::read_json(&f.updater().status_file).unwrap()["status"],
+        "waiting_for_checks"
+    );
+    // A passed run whose build expired is an error, not a wait: nothing else can supply it.
+    let f = Fixture::new(Environment::Dev);
+    f.system.reply(
+        &format!("repos/{REPOSITORY}/actions/runs/23/artifacts"),
+        vec![
+            json!({"artifacts":[{"id":43,"name":format!("dispatch-main-{}", f.new),"expired":true}]}),
+        ],
+    );
+    f.system.reply(
+        &queue_url(&f.new),
+        vec![json!({"workflow_runs":[f.queue_run()]})],
+    );
+    let error = f.updater().run_locked().unwrap_err().to_string();
+    assert!(error.contains("build unavailable"), "{error}");
+    f.assert_old();
 }
 #[test]
 fn a_queue_build_installs_only_with_still_current_validation() {

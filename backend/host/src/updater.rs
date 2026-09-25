@@ -500,11 +500,9 @@ impl<'a> Updater<'a> {
         );
         Ok(())
     }
-    /// A passed run of the checks for `commit` and the build it published, or the run still
-    /// deciding, if any. The merge queue tests exactly the commit GitHub then pushes to main,
-    /// whose push run only reuses those bytes, so a queue run decides when there is one. A
-    /// commit that reached the branch another way, or whose queue build expired, waits for
-    /// its push run.
+    /// The passed queue run of `commit` and the build it published, or the run still deciding.
+    /// The queue tests exactly the commit it then pushes to the branch, so its run decides; a
+    /// commit without one waits.
     fn validated_build(&self, branch: &str, commit: &str) -> Result<Checked> {
         let queued = io::github(
             self.system,
@@ -524,38 +522,17 @@ impl<'a> Updater<'a> {
             })
             .cloned()
             .collect();
-        if let Some(run) =
-            releases::latest_run(&Value::Array(groups), commit, "merge_group", None, false)
-        {
-            if !releases::passed(run) {
-                return Ok(Checked::Pending(run.clone()));
-            }
-            if let Some(record) = self.build(run, &format!("dispatch-{branch}-{commit}"))? {
-                return Ok(Checked::Passed(run.clone(), record));
-            }
-        }
-        let pushed = io::github(
-            self.system,
-            &format!(
-                "actions/workflows/checks.yml/runs?branch={branch}&event=push&head_sha={commit}&per_page=20"
-            ),
-        )?;
-        let run = releases::latest_run(
-            &pushed["workflow_runs"],
-            commit,
-            "push",
-            Some(branch),
-            false,
-        )
-        .cloned()
-        .unwrap_or(Value::Null);
-        if !releases::passed(&run) {
-            return Ok(Checked::Pending(run));
+        let groups = Value::Array(groups);
+        let Some(run) = releases::latest_run(&groups, commit, "merge_group", None, false) else {
+            return Ok(Checked::Pending(Value::Null));
+        };
+        if !releases::passed(run) {
+            return Ok(Checked::Pending(run.clone()));
         }
         let record = self
-            .build(&run, &format!("dispatch-{branch}-{commit}"))?
-            .ok_or("Verified Dev artifact unavailable")?;
-        Ok(Checked::Passed(run, record))
+            .build(run, &format!("dispatch-{branch}-{commit}"))?
+            .ok_or("Verified Dev build unavailable")?;
+        Ok(Checked::Passed(run.clone(), record))
     }
     /// The unexpired build `name` that `run` published.
     fn build(&self, run: &Value, name: &str) -> Result<Option<Value>> {
