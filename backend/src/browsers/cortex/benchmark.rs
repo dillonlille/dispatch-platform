@@ -1335,3 +1335,274 @@ async fn record_scorecard_downloads() -> Result<()> {
     driver.browser.close().await;
     result
 }
+
+/// The scorecard data API, asked from the page with its cookies: the request path's
+/// shape, each weekly dataset's row count and the JavaScript types of its fields, and
+/// how many rows summary datasets have for weeks past and not yet posted. Field names,
+/// types, counts and shapes only; the path segment and DSP parameter go back to the
+/// benchmark unprinted so it can repeat one request itself.
+const API_SHAPES: &str = r#"(input) => {
+  if (globalThis.__dispatchApi) return 'already';
+  globalThis.__dispatchApi = { done: false };
+  (async () => {
+    const shape = (v) => (/^[0-9a-f-]{36}$/.test(v) ? 'uuid' : /^\d+$/.test(v) ? 'digits' : /^[A-Za-z0-9]+$/.test(v) ? 'alnum' : 'other');
+    const entries = performance.getEntriesByType('resource').map((e) => e.name).filter((n) => n.includes('/performance/api/') && n.includes('getData'));
+    const sample = new URL(entries[0]);
+    const segment = sample.pathname.split('/')[3];
+    const dsp = sample.searchParams.get('dsp');
+    const out = {
+      path: { prefix: sample.pathname.split('/').slice(0, 3).join('/'), segment: { shape: shape(segment), length: segment.length, equalsCompany: segment === input.company }, stable: new Set(entries.map((n) => new URL(n).pathname.split('/')[3])).size === 1 },
+      dsp: { shape: dsp ? shape(dsp) : null, equalsCompany: dsp === input.company },
+      dspId: { present: entries.some((n) => new URL(n).searchParams.has('dspId')), equalsCompany: entries.some((n) => new URL(n).searchParams.get('dspId') === input.company) },
+      datasets: [], weeks: [],
+    };
+    const address = (dataSetId, timeFrame, from, to, program) => {
+      const u = new URL(`${location.origin}${out.path.prefix}/${segment}/getData`);
+      u.searchParams.set('dataSetId', dataSetId);
+      u.searchParams.set('dsp', dsp);
+      u.searchParams.set('from', from);
+      if (program) u.searchParams.set('program', program);
+      u.searchParams.set('station', input.station);
+      u.searchParams.set('timeFrame', timeFrame);
+      u.searchParams.set('to', to);
+      return u.toString();
+    };
+    const kind = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v !== 'string' ? typeof v : /^\d{4}-\d{2}-\d{2}$/.test(v) ? 'date' : /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v) ? 'datetime' : /^\d{4}-W\d{2}$/.test(v) ? 'week' : /^-?\d+$/.test(v) ? 'intString' : /^-?\d*\.\d+$/.test(v) ? 'decimalString' : v === '' ? 'empty' : /^(Y|N|true|false|TRUE|FALSE)$/.test(v) ? 'flag' : 'text');
+    const fetchRows = async (url) => {
+      const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      const record = { status: r.status };
+      if (!r.ok) return record;
+      const text = await r.text();
+      record.bytes = text.length;
+      const json = JSON.parse(text);
+      const table = Object.values(json.tableData || {})[0];
+      record.rows = Array.isArray(table?.rows) ? table.rows : [];
+      return record;
+    };
+    const datasets = [
+      ['dsp_weekly_cdf', 'Weekly'], ['dsp_weekly_psb', 'Weekly'], ['dsp_station_weekly_team', 'Weekly'], ['dsp_station_weekly_compliance', 'Weekly'],
+      ['dsp_station_weekly_working_device', 'Weekly'], ['dsp_station_weekly_quality', 'Weekly'], ['dsp_station_weekly_safety_oss_v2', 'Weekly'],
+      ['da_dsp_station_weekly_performance', 'Weekly', 'AMZL'], ['da_dsp_station_weekly_safety_oss_v2', 'Weekly'],
+      ['da_dsp_weekly_rts_deep_dive', 'Weekly'], ['da_dsp_weekly_cdf_deep_dive', 'Weekly'],
+      ['da_dsp_station_daily_dsb_dnr_tba', 'Daily'], ['da_dsp_daily_psb_stop', 'Daily'], ['da_dsp_station_daily_safety_oss_events_intraday', 'Daily'],
+    ];
+    for (const [id, timeFrame, program] of datasets) {
+      const record = { id, timeFrame };
+      try {
+        const from = timeFrame === 'Weekly' ? input.week : input.firstDay;
+        const to = timeFrame === 'Weekly' ? input.week : input.lastDay;
+        const got = await fetchRows(address(id, timeFrame, from, to, program));
+        record.status = got.status; record.bytes = got.bytes;
+        if (got.rows) {
+          record.rows = got.rows.length;
+          const fields = {};
+          for (const row of got.rows.slice(0, 400)) for (const [k, v] of Object.entries(row)) (fields[k] = fields[k] || new Set()).add(kind(v));
+          record.fields = Object.fromEntries(Object.entries(fields).slice(0, 90).map(([k, v]) => [k, [...v].sort().join('|')]));
+        }
+      } catch { record.error = 'fetch_failed'; }
+      out.datasets.push(record);
+      globalThis.__dispatchApi.partial = out;
+    }
+    const [year, number] = input.week.split('-W').map(Number);
+    for (const delta of [1, 2, -1, -8, -18, -30]) {
+      let n = number + delta, y = year;
+      if (n > 52) { n -= 52; y += 1; }
+      if (n < 1) { n += 52; y -= 1; }
+      const week = `${y}-W${String(n).padStart(2, '0')}`;
+      const record = { week, delta };
+      for (const id of ['dsp_station_weekly_team', 'da_dsp_station_weekly_performance']) {
+        try { const got = await fetchRows(address(id, 'Weekly', week, week, id.startsWith('da_') ? 'AMZL' : undefined)); record[id] = got.rows ? got.rows.length : 'status ' + got.status; } catch { record[id] = 'fetch_failed'; }
+      }
+      out.weeks.push(record);
+    }
+    globalThis.__dispatchApi = { done: true, out, segment, dsp };
+  })().catch(() => { globalThis.__dispatchApi = { done: true, error: 'probe_failed' }; });
+  return 'started';
+}"#;
+
+// What a collector reading the scorecard API needs to know: signs in, lets the
+// overview resolve the company, records the API's shape, each dataset's fields and
+// row counts and its answers for other weeks, then repeats one request from this
+// process over plain HTTP with the browser's cookies. Prints shapes, names, types
+// and counts only.
+#[tokio::test]
+#[ignore = "requires an explicitly selected DSP and authenticated provider profile"]
+async fn probe_scorecard_api() -> Result<()> {
+    let dsp = env_path("DISPATCH_BENCHMARK_DSP")?;
+    let week = std::env::var("DISPATCH_BENCHMARK_WEEK")
+        .map_err(|_| Error::new("benchmark_configuration_required", 400))?;
+    let station = std::env::var("DISPATCH_BENCHMARK_STATION")
+        .map_err(|_| Error::new("benchmark_configuration_required", 400))?;
+    // Amazon's week runs Sunday to Saturday; its daily datasets take those dates.
+    let (first_day, last_day) = {
+        let (year, number) = week
+            .split_once("-W")
+            .ok_or_else(|| Error::new("benchmark_configuration_required", 400))?;
+        let monday = chrono::NaiveDate::from_isoywd_opt(
+            year.parse()
+                .map_err(|_| Error::new("benchmark_configuration_required", 400))?,
+            number
+                .parse()
+                .map_err(|_| Error::new("benchmark_configuration_required", 400))?,
+            chrono::Weekday::Mon,
+        )
+        .ok_or_else(|| Error::new("benchmark_configuration_required", 400))?;
+        (
+            (monday - chrono::Duration::days(1)).to_string(),
+            (monday + chrono::Duration::days(5)).to_string(),
+        )
+    };
+    let profile = dsp.join("state/browsers/cortex-browseros");
+    let runtime = browseros::Runtime::new(
+        Path::new("/opt/dispatch-browseros/0.50.5/browseros"),
+        Path::new("/usr/local/libexec/dispatch-dev/bwrap"),
+        &env_path("DISPATCH_BENCHMARK_WORKER")?,
+        &env_path("DISPATCH_BENCHMARK_RUNS")?,
+        1,
+    )?;
+    let browser = runtime
+        .start(
+            &profile,
+            browseros::Mode::Windowed,
+            browseros::NetworkPolicy::Cortex,
+        )
+        .await?;
+    let mut driver = Driver::new(browser, &profile, None).await?;
+    let result = async {
+        let secrets = dsp.join("secrets");
+        let credentials = crate::crypto::decrypt(
+            &db::key_file(&secrets.join("vault.key"))?,
+            &format!("{}:cortex:2", dsp.file_name().unwrap().to_str().unwrap()),
+            &std::fs::read_to_string(secrets.join("cortex.enc"))?,
+        )?;
+        let signed = driver
+            .request(json!({"action":"start","credentials":credentials}))
+            .await;
+        ensure(
+            signed.is_ok_and(|v| v["type"] == "ready"),
+            "benchmark_verification_required",
+            409,
+        )?;
+        let driver = &driver;
+        let page = &driver.page;
+        let origin = driver.origin.clone();
+        page.start_navigation(&format!("{origin}/performance?pageId=dsp_dashboard_overview"))
+            .await?;
+        // Until Cortex has chosen the station and company and the page asked for data.
+        let started = Instant::now();
+        let company = loop {
+            ensure(started.elapsed() < Duration::from_secs(45), "cortex_content_incomplete", 502)?;
+            sleep(Duration::from_millis(500)).await;
+            let frame = page.frame().await?;
+            let Ok(url) = url::Url::parse(s(&frame, "url")) else { continue };
+            let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+            if query.get("station") == Some(&station)
+                && let Some(company) = query.get("companyId")
+                && driver
+                    .browser
+                    .evaluate(&page.id, "performance.getEntriesByType('resource').filter(e=>e.name.includes('/performance/api/')&&e.name.includes('getData')).length")
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            {
+                break company.clone();
+            }
+        };
+        let input = json!({"company":company,"week":week,"station":station,"firstDay":first_day,"lastDay":last_day});
+        driver.browser.evaluate(&page.id, &call(API_SHAPES, &input)).await?;
+        let started = Instant::now();
+        let probe = loop {
+            sleep(Duration::from_millis(500)).await;
+            let state = driver
+                .browser
+                .evaluate(&page.id, "JSON.stringify(globalThis.__dispatchApi||{})")
+                .await
+                .ok()
+                .and_then(|v| serde_json::from_str::<Value>(v.as_str().unwrap_or("{}")).ok())
+                .unwrap_or_default();
+            if state["done"] == true || started.elapsed() > Duration::from_secs(120) {
+                break state;
+            }
+        };
+        eprintln!(
+            "SCORECARD_API {}",
+            json!({"ms":started.elapsed().as_millis(),"error":probe.get("error"),"probe":probe.get("out").or(probe.get("partial"))})
+        );
+        // The same request from this process: the browser's cookies and user agent, nothing else.
+        let (Some(segment), Some(dsp_param)) = (probe["segment"].as_str(), probe["dsp"].as_str()) else {
+            return Ok(());
+        };
+        let cookies = driver.browser.command("Storage.getCookies", json!({}), None).await?;
+        let version = driver.browser.command("Browser.getVersion", json!({}), None).await?;
+        let jar = reqwest::cookie::Jar::default();
+        let mut kept = 0;
+        for cookie in cookies["cookies"].as_array().into_iter().flatten() {
+            let domain = s(cookie, "domain");
+            let host = domain.trim_start_matches('.');
+            if !(host == "logistics.amazon.com" || host == "amazon.com") {
+                continue;
+            }
+            let Ok(url) = url::Url::parse(&format!("https://{host}/")) else { continue };
+            let mut line = format!("{}={}; Path={}", s(cookie, "name"), s(cookie, "value"), s(cookie, "path"));
+            if domain.starts_with('.') {
+                line.push_str(&format!("; Domain={host}"));
+            }
+            if cookie["secure"] == true {
+                line.push_str("; Secure");
+            }
+            jar.add_cookie_str(&line, &url);
+            kept += 1;
+        }
+        let client = reqwest::Client::builder()
+            .cookie_provider(std::sync::Arc::new(jar))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(s(&version, "userAgent"))
+            .build()
+            .map_err(|_| Error::new("browser_unavailable", 503))?;
+        let mut target = url::Url::parse(&format!("{origin}/performance/api/{segment}/getData"))
+            .map_err(|_| Error::new("egress_denied", 403))?;
+        target
+            .query_pairs_mut()
+            .append_pair("dataSetId", "dsp_weekly_cdf")
+            .append_pair("dsp", dsp_param)
+            .append_pair("from", &week)
+            .append_pair("station", &station)
+            .append_pair("timeFrame", "Weekly")
+            .append_pair("to", &week);
+        let started = Instant::now();
+        let response = client
+            .get(target)
+            .header("Accept", "application/json, text/plain, */*")
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await;
+        let summary = match response {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let content_type = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_owned();
+                let text = response.text().await.unwrap_or_default();
+                let rows = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|v| v["tableData"].as_object().and_then(|t| t.values().next().cloned()))
+                    .and_then(|t| t["rows"].as_array().map(Vec::len));
+                json!({"status":status,"contentType":content_type,"bytes":text.len(),"rows":rows})
+            }
+            Err(error) => json!({"error":error.to_string().split(':').next().unwrap_or("request_failed")}),
+        };
+        eprintln!(
+            "SCORECARD_API {}",
+            json!({"http":summary,"cookiesKept":kept,"ms":started.elapsed().as_millis()})
+        );
+        Ok(())
+    }
+    .await;
+    driver.browser.close().await;
+    result
+}
