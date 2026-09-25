@@ -11,7 +11,6 @@ publish = false
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
-zip = { version = "8", default-features = false, features = ["deflate"] }
 tempfile = "3"
 libc = "0.2"
 fs2 = "0.4"

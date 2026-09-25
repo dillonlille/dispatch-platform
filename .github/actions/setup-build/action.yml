@@ -1,5 +1,5 @@
 name: Build tools and Rust cache
-description: Pinned tools with separate release/debug caches maintained by trusted branches.
+description: Pinned tools with separate release/debug caches, which only main refreshes.
 inputs:
   profile:
     description: Cache partition, release or debug.
@@ -8,7 +8,7 @@ inputs:
     description: Allow this job to maintain the cache on main.
     default: 'true'
   skip-rust:
-    description: The verified PR artifact already contains the compiled backend.
+    description: Skip the Rust toolchain and caches; the job compiles nothing.
     default: 'false'
 outputs:
   binary-key:

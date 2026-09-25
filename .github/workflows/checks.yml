@@ -1,113 +1,103 @@
 name: Platform checks
+# One run per change, in the merge queue, on the exact squash commit the queue will push:
+# every suite, every time. Nothing runs on the PR itself. The gate publishes the tested
+# build, which Dev installs and a release stamps. Manual runs check a branch, or one suite
+# of it, on GitHub instead of on the machine that serves Dev.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-  # The main merge queue tests the exact merge commit it will push; that run's receipt and
-  # build are what the following main push reuses.
   merge_group:
     types: [checks_requested]
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      suite:
+        description: What to run. Anything but "all" skips the gate, so the run publishes nothing.
+        type: choice
+        default: all
+        options: [all, build, checks, browser, core, api, collectors, benchmark, smoke]
+      spec:
+        description: 'Browser suite only: spec files or a test name to run alone, as for npm run test:ui'
+        type: string
+        default: ''
 permissions:
   contents: read
   actions: read
 concurrency:
-  # A newer push to a PR replaces its run. Every main commit keeps its own run: that run
-  # publishes the build a release of that commit downloads.
-  group: platform-checks-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Every queue commit keeps its own run: it publishes the build Dev installs. Manual runs of
+  # one branch replace each other.
+  group: platform-checks-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 env:
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
+  # Empty for the queue, so every job runs. A manual run names one suite or all.
+  SUITE: ${{ inputs.suite || 'all' }}
 jobs:
-  plan:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ubuntu-24.04
-    timeout-minutes: 3
-    outputs:
-      mode: ${{ steps.validation.outputs.mode }}
-      # A PR from this repository into main, or a merge queue group of such PRs: its
-      # validation and build may be promoted.
-      trusted-pr: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository) }}
-      # Runs whose build is packaged for the final gate: trusted pushes, groups and trusted PRs.
-      candidate: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository) }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: ./.github/actions/setup-tools
-      - name: Select validation
-        id: validation
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tooling/ci-plan.py plan
+  # Packages the runtime: the release backend from the exact-input cache when its sources
+  # are unchanged, the dashboard from Vite. Everything that tests the runtime downloads
+  # this package instead of building again.
   build:
+    if: contains('all build checks browser benchmark smoke', inputs.suite || 'all')
     outputs:
       rust-key: ${{ steps.tools.outputs.binary-key }}
       # Named by the attempt that built it. Rerunning only failed jobs keeps this job's
-      # outputs, so the shards and the gate still find the bytes this job uploaded.
-      candidate-artifact: ${{ steps.candidate.outputs.name }}
-    needs: plan
+      # outputs, so the other jobs still find the bytes this job uploaded.
+      candidate: ${{ steps.candidate.outputs.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: ./.github/actions/setup-tools
-      - name: Reuse the verified PR build
-        id: reuse
-        if: needs.plan.outputs.mode == 'reuse'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tooling/ci-artifact.py
       - uses: ./.github/actions/setup-build
         id: tools
         with:
           profile: release
-          skip-rust: ${{ steps.reuse.outputs.reused == 'true' }}
-      - name: Build, dashboard tests and artifact checks
-        if: steps.reuse.outputs.reused != 'true'
-        env:
-          # The browser suite runs as shard jobs against the packaged build below.
-          DISPATCH_CI_BROWSER_SHARDS: '4'
-        run: npm run check:ci -- build-${{ needs.plan.outputs.mode }}
-      - name: Smoke test the promoted build
-        if: steps.reuse.outputs.reused == 'true'
-        run: npm run test:smoke
-      - name: Save trusted release binary
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: .ci-rust-cache/
-          key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
-      # Every run packages its build: browser shards and the workload benchmark test these
-      # exact bytes, and trusted runs pass them to the final gate.
-      - name: Package runtime candidate
+          save: 'false'
+      - name: Build the runtime
+        run: npm run check:ci -- build
+      - name: Package the runtime
         id: candidate
         run: |
           tar -czf dispatch-dev.tar.gz -C .build .
           echo "name=dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
-      - name: Pass candidate to browser shards and the final gate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.candidate.outputs.name }}
           path: dispatch-dev.tar.gz
           if-no-files-found: error
           retention-days: 2
+  # Types, formatting, the bundle budget and the dashboard logic tests, against the package.
+  checks:
+    needs: build
+    if: contains('all checks', inputs.suite || 'all')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.2
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.candidate }}
+      - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
+      - run: npm run check:ci -- checks
+  # The browser suite in eight shards, three workers each, every test with its own server,
+  # port, database and mail. Failed shards upload their traces.
   browser:
-    needs: [plan, build]
-    if: needs.plan.outputs.mode != 'reuse'
+    needs: build
+    if: contains('all browser', inputs.suite || 'all')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -126,10 +116,9 @@ jobs:
           node-version: 22.23.2
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Retrieve this run's build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: ${{ needs.build.outputs.candidate-artifact }}
+          name: ${{ needs.build.outputs.candidate }}
       - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         if: steps.tools.outputs.fixture-hit != 'true'
@@ -137,8 +126,8 @@ jobs:
           shared-key: dispatch-debug
           cache-bin: 'false'
           save-if: 'false'
-      - name: Browser suite shard ${{ matrix.shard }} of 4
-        run: npm run check:ci -- browser ${{ matrix.shard }}/4
+      - name: Browser suite shard ${{ matrix.shard }} of 8
+        run: npm run check:ci -- browser ${{ matrix.shard }}/8 ${{ inputs.spec }}
       - name: Preserve failure traces
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -147,11 +136,39 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
-  # The workload regression measures the packaged build on a runner of its own, alongside
-  # the browser shards instead of ahead of them.
+  # The packaged runtime starts, signs in and serves: what a release's smoke test asks of the
+  # same bytes, so a release never finds out first.
+  smoke:
+    needs: build
+    if: contains('all smoke', inputs.suite || 'all')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+        id: tools
+      - name: Restore the pinned Playwright browser
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright/
+          key: ${{ steps.tools.outputs.playwright-key }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.2
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.candidate }}
+      - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
+      - run: npm run check:ci -- smoke
+  # The workload regression measures the packaged build on a runner of its own.
   benchmark:
-    needs: [plan, build]
-    if: needs.plan.outputs.mode == 'full'
+    needs: build
+    if: contains('all benchmark', inputs.suite || 'all')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -163,13 +180,11 @@ jobs:
           node-version: 22.23.2
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Retrieve this run's build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: ${{ needs.build.outputs.candidate-artifact }}
+          name: ${{ needs.build.outputs.candidate }}
       - run: mkdir .build && tar -xzf dispatch-dev.tar.gz -C .build
-      - name: Rust workload regression
-        run: npm run check:ci -- benchmark
+      - run: npm run check:ci -- benchmark
       - name: Preserve workload measurements
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -178,25 +193,39 @@ jobs:
           path: /tmp/dispatch-rust-benchmark.json
           if-no-files-found: ignore
           retention-days: 30
+  # Rust formatting, lints and tests.
   core:
-    needs: plan
-    if: needs.plan.outputs.mode == 'full'
+    if: contains('all core', inputs.suite || 'all')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: ./.github/actions/setup-tools
       - uses: ./.github/actions/setup-build
         with:
           profile: debug
-      - name: Backend, API, dependency and Python checks
-        run: npm run check:ci -- core
+          save: 'false'
+      - run: npm run check:ci -- core
+  # The API tests against a debug backend, the Python tooling tests and the npm audit.
+  api:
+    if: contains('all api', inputs.suite || 'all')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+      - uses: ./.github/actions/setup-build
+        with:
+          profile: debug
+          save: 'false'
+      - run: npm run check:ci -- api
+  # The native collectors against their fixtures, with a real isolated browser.
   collectors:
-    needs: plan
-    if: needs.plan.outputs.mode == 'full'
+    if: contains('all collectors', inputs.suite || 'all')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -215,73 +244,29 @@ jobs:
       - uses: ./.github/actions/setup-browseros
       - name: Native collector verification
         run: npm run test:browseros -- --shard ${{ matrix.shard }}
-  # Keep one stable required check. No receipt or deployable artifact is published
-  # until every required job has succeeded, including every collector shard.
-  platform:
-    needs: [plan, build, browser, benchmark, core, collectors, rust-advisories]
-    if: always() && needs.plan.result != 'skipped'
+  rust-advisories:
+    if: contains('all core', inputs.suite || 'all')
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          fetch-depth: 0
-      - uses: ./.github/actions/setup-tools
-      - name: Require complete validation
-        env:
-          CI_NEEDS: ${{ toJSON(needs) }}
-        run: python3 tooling/ci-gate.py
-      # A receipt binds a two-parent merge. A PR run checks out one; the queue pushes squash
-      # commits, which have one parent and which no later run can match, so it records none.
-      - name: Record PR validation
-        if: needs.plan.outputs.trusted-pr == 'true' && github.event_name == 'pull_request'
-        env:
-          # A reuse receipt names the run whose bytes were reused, which means asking GitHub.
-          GH_TOKEN: ${{ github.token }}
-          CI_RUST_KEY: ${{ needs.build.outputs.rust-key }}
-        run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
-      - name: Upload PR validation
-        if: needs.plan.outputs.trusted-pr == 'true' && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - name: Cache audit tool
+        id: audit-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
-          name: dispatch-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/validation.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Retrieve this run's runtime candidate
-        if: needs.plan.outputs.candidate == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: ${{ needs.build.outputs.candidate-artifact }}
-      - name: Verify candidate source and inventory
-        if: needs.plan.outputs.candidate == 'true'
-        run: python3 tooling/ci-gate.py --artifact dispatch-dev.tar.gz
-      - name: Preserve the gated PR build
-        if: needs.plan.outputs.trusted-pr == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dispatch-dev.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-      - name: Publish verified branch build
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: dispatch-${{ github.ref_name }}-${{ github.sha }}
-          path: dispatch-dev.tar.gz
-          if-no-files-found: error
-          # A release downloads this build; keep it as long as GitHub allows.
-          retention-days: 90
-
-  # Every run builds the tools and fixture its inputs lack, off the critical path, and saves
-  # them to its own ref's cache: the gate and the browser shards start later and restore
-  # them instead of compiling. A PR's saves reach only that PR; main's reach every branch.
-  # Every other job only restores them and builds with Cargo when they are absent, so a
-  # failure here only costs time: it never fails the run, which Dev and releases require.
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit-0.22.2
+      - name: Install audit tool
+        if: steps.audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --deny warnings
+  # Builds the tools and fixture this ref's inputs lack, off the critical path, and saves
+  # them to this ref's cache: the jobs that start later restore them instead of compiling.
+  # `main`'s copies come from caches.yml. Every other job builds with Cargo when a tool is
+  # absent, so a failure here only costs time.
   tools:
-    needs: plan
     continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -299,14 +284,14 @@ jobs:
           shared-key: dispatch-release
           cache-bin: 'false'
           save-if: 'false'
-      - name: Build the planner, gate and host tools
+      - name: Build the CI and host tools
         if: steps.restore.outputs.tools-hit != 'true'
         run: |
           cargo build --locked --release -p dispatch-ci -p dispatch-host
           target=$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
           install -d -m 700 .ci-tools/tools
           install -m 700 "$target/release/dispatch-ci" "$target/release/dispatch-host" .ci-tools/tools/
-      - name: Save the planner, gate and host tools
+      - name: Save the CI and host tools
         if: steps.restore.outputs.tools-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -331,22 +316,49 @@ jobs:
         with:
           path: .ci-tools/fixture/
           key: ${{ steps.restore.outputs.fixture-key }}
-
-  rust-advisories:
-    needs: plan
+  # The one required check. It passes only when every suite passed, then publishes the
+  # verified build under the commit's name: Dev installs it and a release stamps it. A
+  # manual run of one suite has no gate, so nothing partial is ever published.
+  platform:
+    needs: [build, checks, browser, smoke, benchmark, core, api, collectors, rust-advisories]
+    if: always() && (inputs.suite || 'all') == 'all'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
+      - name: Require every suite
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failed=$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"')
+          if [ -n "$failed" ]; then
+            echo "Suites that did not pass:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "Every suite passed."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Cache audit tool
-        id: audit-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - uses: ./.github/actions/setup-tools
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-cargo-audit-0.22.2
-      - name: Install audit tool
-        if: steps.audit-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-audit --version 0.22.2 --locked
-      - run: cargo audit --deny warnings
+          name: ${{ needs.build.outputs.candidate }}
+      - name: Verify the build's source commit and inventory
+        run: python3 tooling/ci-verify.py dispatch-dev.tar.gz
+      - name: Publish the verified build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dispatch-main-${{ github.sha }}
+          path: dispatch-dev.tar.gz
+          if-no-files-found: error
+          # A release downloads this build; keep it as long as GitHub allows.
+          retention-days: 90
+      # Until every Dev updater reads the name above: the name the former workflow used.
+      - name: Publish the build under its former name
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dispatch-pr-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dispatch-dev.tar.gz
+          if-no-files-found: error
+          retention-days: 7

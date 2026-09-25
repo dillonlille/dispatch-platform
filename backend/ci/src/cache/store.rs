@@ -1,4 +1,4 @@
-use crate::{Result, policy::hex, require};
+use crate::{Result, hex, require};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use std::{

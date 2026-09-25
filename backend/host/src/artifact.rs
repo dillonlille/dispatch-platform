@@ -32,7 +32,7 @@ pub struct Manifest {
     pub files: Vec<Entry>,
     pub digest: String,
 }
-pub use dispatch_ci::policy::hex;
+pub use dispatch_ci::hex;
 pub fn hash(bytes: &[u8]) -> String {
     crate::to_hex(&Sha256::digest(bytes))
 }
@@ -195,24 +195,6 @@ pub fn verify(root: &Path, commit: Option<&str>) -> Result<Manifest> {
         "Artifact belongs to another commit",
     )?;
     Ok(manifest)
-}
-pub fn retarget(root: &Path, old: &str, new: &str) -> Result<Manifest> {
-    verify(root, Some(old))?;
-    require(hex(new, 40), "Invalid build commit")?;
-    let path = root.join("tooling/build-info.json");
-    let mut metadata: Value = serde_json::from_slice(&fs::read(&path)?)?;
-    metadata["commit"] = json!(new);
-    fs::write(&path, format!("{metadata}\n"))?;
-    // Preserve the order of the original manifest, including inventory entries.
-    let mut value: Value = serde_json::from_slice(&fs::read(root.join("release.json"))?)?;
-    for entry in value["files"].as_array_mut().ok_or("Invalid inventory")? {
-        if entry["path"] == "tooling/build-info.json" {
-            entry["sha256"] = json!(file_hash(&path)?);
-            entry["size"] = json!(path.metadata()?.len());
-        }
-    }
-    fs::write(root.join("release.json"), format!("{}\n", seal(value)?))?;
-    verify(root, Some(new))
 }
 /// Names the version a release publishes. Only the manifest changes: the files, their
 /// inventory and the source commit stay exactly what CI built and tested.

@@ -1,5 +1,4 @@
 use super::*;
-use dispatch_ci::policy::Policy;
 
 /// One line per PR in the log: a squash commit names its PR in the `(#N)` suffix of its
 /// subject, and a merge commit from before squash merges in its `Merge pull request #N` subject.
@@ -104,22 +103,26 @@ impl Release<'_> {
         say(format!("Releasing main commit {commit}"));
         Ok(commit)
     }
-    fn ran_core(&self, run: &Value) -> Result<bool> {
+    /// Whether `run` ran the whole suite: its `core` job ran, which a scoped run of the
+    /// former workflow skipped, and its `platform` gate ran, which a partial manual run skips.
+    fn full_run(&self, run: &Value) -> Result<bool> {
         let jobs = io::github(
             self.system,
             &format!("actions/runs/{}/jobs?filter=latest&per_page=100", run["id"]),
         )?;
-        Ok(jobs["jobs"]
-            .as_array()
-            .ok_or("Missing workflow jobs")?
-            .iter()
-            .any(|job| job["name"] == "core" && job["conclusion"] == "success"))
+        let passed = |name: &str| {
+            jobs["jobs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|job| job["name"] == name && job["conclusion"] == "success")
+        };
+        Ok(passed("core") && passed("platform"))
     }
-    /// A run that passed the full suite on exactly `commit`. The core suite runs only in
-    /// full validation. A run of the commit itself counts: its merge queue group, main's
-    /// push or a dispatched run, the newest of each deciding. So does a group that reused
-    /// its PR run, when that run's receipt records full validation of this same merge.
-    fn fully_validated(&self, commit: &str) -> Result<Option<String>> {
+    /// The newest run that passed the full suite on exactly `commit`: its merge queue group,
+    /// which published the build, a dispatched run, or the push run of history before the
+    /// queue published builds.
+    pub(super) fn fully_validated(&self, commit: &str) -> Result<Option<Value>> {
         let runs = io::github(
             self.system,
             &format!("actions/workflows/checks.yml/runs?head_sha={commit}&per_page=100"),
@@ -132,37 +135,20 @@ impl Release<'_> {
             if let Some(run) =
                 releases::latest_run(&runs["workflow_runs"], commit, event, branch, false)
                 && releases::passed(run)
-                && self.ran_core(run)?
+                && self.full_run(run)?
             {
-                return Ok(Some(io::text(run, "html_url")));
+                return Ok(Some(run.clone()));
             }
-        }
-        let runner = crate::ci::Runner(self.system);
-        let policy = Policy {
-            root: &self.root,
-            runner: &runner,
-        };
-        if let Some(context) = policy.context_at(commit)?
-            && let Some(validation) = policy.validated(&context, "main")?
-            && validation.receipt["scope"] == "full"
-        {
-            return Ok(Some(io::text(&validation.run, "html_url")));
         }
         Ok(None)
     }
-    /// Requires the full suite on exactly `commit`. When nothing has run it, one full run
-    /// is dispatched on a temporary branch at the commit and awaited.
+    /// Requires the full suite on exactly `commit`. Every queue run is one, so only a build
+    /// that expired or a commit that reached `main` another way gets a run dispatched on a
+    /// temporary branch at the commit and awaited.
     pub(super) fn full_suite(&self, commit: &str) -> Result<()> {
         let url = match self.fully_validated(commit)? {
-            Some(url) => url,
-            None => {
-                // A commit merged without the queue is validated by main's push run alone.
-                self.checks(commit, "push", Some("main"), true)?;
-                match self.fully_validated(commit)? {
-                    Some(url) => url,
-                    None => self.dispatch_full(commit)?,
-                }
-            }
+            Some(run) => io::text(&run, "html_url"),
+            None => self.dispatch_full(commit)?,
         };
         say(format!("Full checks: {url}"));
         // The temporary branch only ever serves a dispatched run.
@@ -204,7 +190,7 @@ impl Release<'_> {
         // A failure stays for inspection; rerunning its failed jobs lets this resume.
         let run = self.checks(commit, "workflow_dispatch", Some(&self.checks_branch), true)?;
         require(
-            self.ran_core(&run)?,
+            self.full_run(&run)?,
             "The dispatched checks did not run the full suite",
         )?;
         Ok(io::text(&run, "html_url"))

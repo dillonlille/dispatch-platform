@@ -530,13 +530,18 @@ impl<'a> Updater<'a> {
             if !releases::passed(run) {
                 return Ok(Checked::Pending(run.clone()));
             }
-            let name = format!(
-                "dispatch-pr-build-{}-{}",
-                run["id"].as_u64().ok_or("Invalid workflow id")?,
-                run["run_attempt"].as_u64().unwrap_or(1)
-            );
-            if let Some(record) = self.build(run, &name)? {
-                return Ok(Checked::Passed(run.clone(), record));
+            let names = [
+                format!("dispatch-{branch}-{commit}"),
+                format!(
+                    "dispatch-pr-build-{}-{}",
+                    run["id"].as_u64().ok_or("Invalid workflow id")?,
+                    run["run_attempt"].as_u64().unwrap_or(1)
+                ),
+            ];
+            for name in names {
+                if let Some(record) = self.build(run, &name)? {
+                    return Ok(Checked::Passed(run.clone(), record));
+                }
             }
         }
         let pushed = io::github(

@@ -558,19 +558,26 @@ fn dev_download_installs_only_with_still_current_validation() {
 }
 #[test]
 fn dev_installs_the_merge_queue_build_without_waiting_for_the_push_run() {
-    let f = Fixture::new(Environment::Dev);
-    f.publish(23, "dispatch-pr-build-23-1", 43);
-    // No push run is registered: asking for one fails the update.
-    f.system.reply(
-        &queue_url(&f.new),
-        vec![json!({"workflow_runs":[f.queue_run()]})],
-    );
-    f.updater().run_locked().unwrap();
-    assert_eq!(
-        artifact::verify(&f.updater().active, None).unwrap(),
-        f.new_manifest
-    );
-    assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
+    // The queue run publishes the build under main's name; runs of the former workflow
+    // published it under their own.
+    for name in [
+        format!("dispatch-main-{}", Fixture::new(Environment::Dev).new),
+        "dispatch-pr-build-23-1".into(),
+    ] {
+        let f = Fixture::new(Environment::Dev);
+        f.publish(23, &name, 43);
+        // No push run is registered: asking for one fails the update.
+        f.system.reply(
+            &queue_url(&f.new),
+            vec![json!({"workflow_runs":[f.queue_run()]})],
+        );
+        f.updater().run_locked().unwrap();
+        assert_eq!(
+            artifact::verify(&f.updater().active, None).unwrap(),
+            f.new_manifest
+        );
+        assert_eq!(git(&f.root, &["rev-parse", "HEAD"]), f.new);
+    }
 }
 #[test]
 fn a_queue_run_decides_unless_its_build_expired_or_it_merged_elsewhere() {
@@ -1028,10 +1035,10 @@ fn broken_management_self_check_preserves_working_copy() {
 }
 
 #[test]
-fn manifests_preserve_legacy_digest_order_and_metadata_when_promoted() {
+fn manifests_preserve_legacy_digest_order_and_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("bundle");
-    let old = artifact(&root, &"a".repeat(40), "0.1.0", true);
+    artifact(&root, &"a".repeat(40), "0.1.0", true);
     // Python's verifier hashes JSON insertion order, including nested entries.
     let mut value: Value = io::read_json(&root.join("release.json")).unwrap();
     value.as_object_mut().unwrap().shift_remove("digest");
@@ -1047,13 +1054,6 @@ fn manifests_preserve_legacy_digest_order_and_metadata_when_promoted() {
             .unwrap()
             .digest,
         reordered["digest"]
-    );
-    let bytes = fs::read(root.join("services/rust/dispatch-backend")).unwrap();
-    let promoted = artifact::retarget(&root, &"a".repeat(40), &"b".repeat(40)).unwrap();
-    assert_ne!(promoted.digest, old.digest);
-    assert_eq!(
-        fs::read(root.join("services/rust/dispatch-backend")).unwrap(),
-        bytes
     );
     assert_eq!(
         io::read_json(&root.join("tooling/build-info.json")).unwrap()["hostManagement"],

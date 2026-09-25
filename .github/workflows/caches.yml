@@ -1,6 +1,7 @@
 name: Shared caches
-# Only main's caches reach every branch. This refills those the platform checks only
-# restore, in a workflow of its own so a refill never holds up Dev or a release.
+# Only main's caches reach every branch: a merge queue run saves to a branch GitHub deletes.
+# This refills, on every push to main, everything the platform checks only restore, and
+# nothing waits on it.
 on:
   push:
     branches: [main]
@@ -56,9 +57,9 @@ jobs:
         with:
           path: ~/.cache/dispatch-browseros/browseros.deb
           key: dispatch-browseros-${{ hashFiles('tooling/browseros-release.json') }}
-  # The build job compiles the release backend on the dependencies cached here. Main's own
-  # runs reuse the PR's build, so without this job nothing would ever refresh them.
-  release-dependencies:
+  # The release backend, both as Cargo's dependency cache and as the exact-input binary the
+  # build job restores when the Rust sources are unchanged.
+  release-binary:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -66,12 +67,68 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - run: rustup show active-toolchain
+      - uses: ./.github/actions/setup-tools
+      - uses: ./.github/actions/setup-build
+        id: tools
+        with:
+          profile: release
+      - name: Compile the release backend
+        if: steps.tools.outputs.binary-hit != 'true'
+        run: python3 tooling/cargo-build.py --release
+      - name: Save the release backend
+        if: steps.tools.outputs.binary-key != '' && steps.tools.outputs.binary-hit != 'true' && hashFiles('.ci-rust-cache/**/sha256') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .ci-rust-cache/
+          key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.binary-key }}
+  # The CI and host tools and the assessment fixture, built from main's inputs so every
+  # branch whose inputs match restores them instead of compiling.
+  tools:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-tools
+        id: restore
+        with:
+          fixture: 'true'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        id: rust
+        if: steps.restore.outputs.tools-hit != 'true'
         with:
           shared-key: dispatch-release
           cache-bin: 'false'
-      - name: Compile the release build for its dependencies
-        if: steps.rust.outputs.cache-hit != 'true'
-        run: cargo build --locked --release
+          save-if: 'false'
+      - name: Build the CI and host tools
+        if: steps.restore.outputs.tools-hit != 'true'
+        run: |
+          cargo build --locked --release -p dispatch-ci -p dispatch-host
+          target=$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+          install -d -m 700 .ci-tools/tools
+          install -m 700 "$target/release/dispatch-ci" "$target/release/dispatch-host" .ci-tools/tools/
+      - name: Save the CI and host tools
+        if: steps.restore.outputs.tools-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .ci-tools/tools/
+          key: ${{ steps.restore.outputs.tools-key }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        if: steps.restore.outputs.fixture-hit != 'true'
+        with:
+          shared-key: dispatch-debug
+          cache-bin: 'false'
+      - name: Build the assessment fixture
+        if: steps.restore.outputs.fixture-hit != 'true'
+        run: |
+          cargo build --locked --example assessment-fixture
+          target=$(cargo metadata --locked --no-deps --format-version=1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+          install -d -m 700 .ci-tools/fixture
+          install -m 700 "$target/debug/examples/assessment-fixture" .ci-tools/fixture/
+      - name: Save the assessment fixture
+        if: steps.restore.outputs.fixture-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .ci-tools/fixture/
+          key: ${{ steps.restore.outputs.fixture-key }}

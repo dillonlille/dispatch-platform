@@ -90,7 +90,7 @@ pub fn seed(
     env: &Environment,
     runner: &dyn Runner,
 ) -> Result<()> {
-    if !crate::policy::hex(expected, 64)
+    if !crate::hex(expected, 64)
         || !eligible(root, env, true)?
         || key(root, "release", env, runner)? != expected
     {

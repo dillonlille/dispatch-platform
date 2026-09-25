@@ -66,7 +66,7 @@ pub fn run(root: &Path, concurrent: bool, runner: &dyn Runner) -> Result<()> {
         .into());
     }
     println!(
-        "Run focused local checks for the changed behavior. GitHub runs the full required validation; review the PR while it runs. Repeat checks only for new changes or failures."
+        "Run focused local checks for the changed behavior. The merge queue runs the full suite on the squash commit; nothing runs on the PR itself."
     );
     println!(
         "Ready for final validation against {}.",
@@ -93,9 +93,9 @@ pub fn run(root: &Path, concurrent: bool, runner: &dyn Runner) -> Result<()> {
     println!(
         "{}",
         if running {
-            "This PR already has checks running. Avoid another push unless there is a necessary correction."
+            "This PR is already being checked in the queue. Avoid another push unless there is a necessary correction."
         } else {
-            "Push the final head and open the PR, or mark its draft ready once. Await checks before merging."
+            "Push the final head, open the PR and ship it: npm run pr:ship -- <n> queues it at once."
         }
     );
     Ok(())

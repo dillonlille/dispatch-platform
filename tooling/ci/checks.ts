@@ -3,20 +3,12 @@ import os from 'node:os';
 import { assessmentFixture } from '../testing/ci-tools.js';
 import { coreTests, dashboardTests } from './test-plan.js';
 
+// One job of the platform checks, or locally the whole suite in sequence. CI runs each mode
+// on its own runner: `build` packages the runtime, and the modes that need it download that
+// package into `.build` first.
 const mode = process.argv[2] ?? 'full';
-const modes = [
-  'full',
-  'build-full',
-  'build-dashboard',
-  'build-reuse',
-  'core',
-  'browser',
-  'benchmark',
-];
+const modes = ['full', 'build', 'checks', 'browser', 'core', 'api', 'benchmark', 'smoke'];
 if (!modes.includes(mode)) throw new Error('Unknown validation mode');
-// CI runs the browser suite as separate shard jobs against the packaged build; the build
-// check then skips it. Locally the build check still runs the whole suite.
-const shardedBrowser = process.env.DISPATCH_CI_BROWSER_SHARDS !== undefined && mode !== 'browser';
 const started = Date.now();
 const failures: string[] = [];
 async function run(name: string, command: string, args: string[], env = process.env) {
@@ -33,39 +25,21 @@ async function run(name: string, command: string, args: string[], env = process.
   if (!ok) failures.push(name);
   return ok;
 }
-const npm = (name: string) => run(name, 'npm', ['run', name]);
-/** CI measures in a job of its own; a local full check measures after its build. */
-async function build(scope: string, measure = false) {
-  const built = npm('build');
-  if (scope === 'reuse') {
-    if (await built) await npm('test:smoke');
-    return;
-  }
-  const browsers = shardedBrowser ? Promise.resolve(true) : installBrowsers();
-  await Promise.all([
-    built,
-    browsers,
+const npm = (name: string, ...args: string[]) =>
+  run(name, 'npm', ['run', name, ...(args.length ? ['--', ...args] : [])]);
+/** Types, formatting, the bundle budget and the dashboard logic tests, against `.build`. */
+function checks() {
+  return Promise.all([
     npm('check'),
     npm('format:check'),
-    built.then(async (ok) => {
-      if (!ok) return;
-      await Promise.all([
-        npm('test:artifact'),
-        run(
-          'dashboard logic',
-          process.execPath,
-          ['node_modules/tsx/dist/cli.mjs', '--test', '--test-concurrency=1', ...dashboardTests],
-          { ...process.env, DISPATCH_TEST_BINARY: '.build/services/rust/dispatch-backend' },
-        ),
-      ]);
-    }),
-    Promise.all([built, browsers]).then(
-      ([ok, installed]) => ok && installed && !shardedBrowser && npm('test:ui'),
+    npm('test:artifact'),
+    run(
+      'dashboard logic',
+      process.execPath,
+      ['node_modules/tsx/dist/cli.mjs', '--test', '--test-concurrency=1', ...dashboardTests],
+      { ...process.env, DISPATCH_TEST_BINARY: '.build/services/rust/dispatch-backend' },
     ),
   ]);
-  // Measure after the other build checks finish so this process does not compete
-  // with browser tests or compilers on the same runner.
-  if (measure && !failures.length) await benchmark();
 }
 /** The workload regression, against the build already in `.build`. */
 function benchmark() {
@@ -87,10 +61,14 @@ function installBrowsers() {
     'chromium',
   ]);
 }
-/** One shard of the browser suite against the build already in `.build`. */
+/**
+ * One shard of the browser suite against the build already in `.build`, as `browser 3/8`.
+ * A manual lane names a spec or test after the shard; shards it leaves empty still pass.
+ */
 async function browser() {
   const shard = process.argv[3];
-  if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard ?? '')) throw new Error('Browser shard required, as 1/3');
+  if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard ?? '')) throw new Error('Browser shard required, as 1/8');
+  const only = process.argv.slice(4).filter(Boolean);
   // The browser downloads and installs its system packages while Cargo compiles the
   // fixture; test:ui then finds the fixture already built.
   const fixture = assessmentFixture(process.env, process.cwd())
@@ -100,9 +78,19 @@ async function browser() {
   // Three workers on a four-core runner: the fourth core keeps the private servers and the
   // sign-in animation responsive, so long multi-login tests stay well inside their budget.
   if (ready.every(Boolean))
-    await run('test:ui', 'npm', ['run', 'test:ui', '--', `--shard=${shard}`, '--workers=3']);
+    await npm(
+      'test:ui',
+      `--shard=${shard}`,
+      '--workers=3',
+      ...(only.length ? ['--pass-with-no-tests', ...only] : []),
+    );
 }
-async function core() {
+/** Rust formatting, lints and tests: `npm run check:rust` compiles what it checks. */
+function core() {
+  return npm('check:rust');
+}
+/** The API tests against a debug backend, with the Python tooling tests and the npm audit. */
+async function api() {
   const python = run('Python tests', 'python3', [
     '-m',
     'unittest',
@@ -114,32 +102,34 @@ async function core() {
   ]);
   const audit = run('dependency audit', 'npm', ['audit', '--audit-level=high']);
   if (await run('debug build', 'python3', ['tooling/cargo-build.py'])) {
-    // Compile once before starting API fixtures; clippy/test no longer compete
-    // with a second debug build. Release builds run on a separate CI runner.
-    await Promise.all([
-      npm('check:rust'),
-      run('core API tests', process.execPath, [
-        'node_modules/tsx/dist/cli.mjs',
-        '--test',
-        // Every test file owns its servers, ports, state and mail, so files run in parallel.
-        `--test-concurrency=${os.availableParallelism()}`,
-        // The build check owns the dashboard logic tests, in dashboard-only mode too.
-        ...coreTests(),
-      ]),
+    await run('core API tests', process.execPath, [
+      'node_modules/tsx/dist/cli.mjs',
+      '--test',
+      // Every test file owns its servers, ports, state and mail, so files run in parallel.
+      `--test-concurrency=${os.availableParallelism()}`,
+      // The checks mode owns the dashboard logic tests.
+      ...coreTests(),
     ]);
   }
   await Promise.all([python, audit]);
 }
-if (mode === 'core') await core();
+if (mode === 'build') await npm('build');
+else if (mode === 'checks') await checks();
 else if (mode === 'browser') await browser();
+else if (mode === 'core') await core();
+else if (mode === 'api') await api();
 else if (mode === 'benchmark') await benchmark();
-else if (mode === 'full') {
-  // CI shards compile on separate runners; local runs share Cargo's build lock.
+else if (mode === 'smoke') await npm('test:smoke');
+else {
+  // Locally, in sequence: CI's jobs share one machine here, and Cargo's build lock.
   await core();
-  if (!failures.length) await build('full', true);
-  // Local full checks still isolate capacity measurements from compilers.
+  if (!failures.length) await api();
+  if (!failures.length) await npm('build');
+  if (!failures.length) await checks();
+  if (!failures.length && (await installBrowsers())) await npm('test:ui');
+  if (!failures.length) await benchmark();
   if (!failures.length) await npm('test:browseros');
-} else await build(mode.replace('build-', ''));
+}
 process.stdout.write(`Validation ${mode}: ${((Date.now() - started) / 1000).toFixed(1)}s\n`);
 if (failures.length) {
   process.stderr.write(`Failed checks: ${failures.join(', ')}\n`);

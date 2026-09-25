@@ -22,7 +22,7 @@ sets the global import order. Shared contracts and tooling never import dashboar
 
 Use an isolated worktree branched from `origin/main`, then `npm ci` and `npm run dev`.
 The preview prints a private fixture URL. `npm run check:ci` runs full validation;
-`npm run check:ci build-dashboard` runs the dashboard checks. `npm test` discovers
+`npm run check:ci -- checks` runs the dashboard checks against a build. `npm test` discovers
 TypeScript tests recursively; Python tooling tests use
 `python3 -m unittest discover -s tests/tooling -p '*_test.py'`.
 

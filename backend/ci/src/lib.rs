@@ -1,13 +1,13 @@
-//! CI decisions shared by the lightweight planner and the host artifact verifier.
+//! Local CI tooling: the Rust build cache, the PR preflight and the ship command, with the
+//! GitHub helpers the host manager shares.
 pub mod cache;
-pub mod policy;
 pub mod preflight;
 pub mod process;
 pub mod runs;
 pub mod ship;
 use std::path::Path;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-/// Where API calls, receipts and provenance name this repository.
+/// Where API calls and provenance name this repository.
 pub const REPOSITORY: &str = "dispatch-systems/dispatch-platform";
 /// Every name this repository answers to: its organization name and the personal account
 /// it moved from, whose URLs GitHub still redirects. Only their owners can create
@@ -27,6 +27,13 @@ pub fn web_path(url: &str) -> Option<&str> {
     REPOSITORIES
         .iter()
         .find_map(|name| url.strip_prefix(&format!("https://github.com/{name}/")))
+}
+/// Whether `value` is lowercase hex of exactly `length` characters, as Git and digests print.
+pub fn hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 /// Lowercase hex of a digest, as `sha256sum` prints it.
 pub fn to_hex(bytes: &[u8]) -> String {

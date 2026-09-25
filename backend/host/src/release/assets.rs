@@ -117,8 +117,7 @@ impl Release<'_> {
             ).into());
         }
         self.full_suite(commit)?;
-        // Main's push run publishes the build of this commit.
-        self.checks(commit, "push", Some("main"), true)?;
+        // The full run of this commit published its build.
         let run = self.checked_source(commit)?;
         let records = io::github(
             self.system,
