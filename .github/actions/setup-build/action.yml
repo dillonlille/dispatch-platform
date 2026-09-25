@@ -7,9 +7,6 @@ inputs:
   save:
     description: Allow this job to maintain the cache on main.
     default: 'true'
-  skip-rust:
-    description: Skip the Rust toolchain and caches; the job compiles nothing.
-    default: 'false'
 outputs:
   binary-key:
     description: Exact Rust input key for the release binary.
@@ -27,7 +24,6 @@ runs:
     - run: npm ci --ignore-scripts
       shell: bash
     - run: rustup show active-toolchain
-      if: inputs.skip-rust != 'true'
       shell: bash
     - name: Identify reusable release binary
       id: binary-key
@@ -44,13 +40,13 @@ runs:
       run: echo "DISPATCH_CI_RUST_KEY=$BINARY_KEY" >> "$GITHUB_ENV"
     - name: Restore exact release binary
       id: binary-cache
-      if: steps.binary-key.outputs.key != '' && inputs.skip-rust != 'true'
+      if: steps.binary-key.outputs.key != ''
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
       with:
         path: .ci-rust-cache/
         key: dispatch-rust-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.binary-key.outputs.key }}
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      if: inputs.skip-rust != 'true' && steps.binary-cache.outputs.cache-hit != 'true'
+      if: steps.binary-cache.outputs.cache-hit != 'true'
       with:
         shared-key: dispatch-${{ inputs.profile }}
         cache-bin: 'false'
