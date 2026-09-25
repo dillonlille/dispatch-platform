@@ -274,7 +274,8 @@ impl<'a> Release<'a> {
             matches!(comparison["status"].as_str(), Some("ahead" | "identical")),
             "Source must be merged into main",
         )?;
-        self.checks(commit, "push", Some("main"), false)
+        self.fully_validated(commit)?
+            .ok_or_else(|| "Checks have not passed for the selected commit".into())
     }
     fn execute(&self, stage: Stage, requested: Option<&str>) -> Result<Value> {
         if stage == Stage::Status {

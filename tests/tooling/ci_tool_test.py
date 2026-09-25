@@ -1,4 +1,4 @@
-"""Policy and trust cases live in backend/ci/src/tests.rs; these test the bootstrap."""
+"""The Python launchers only find or build the Rust tools; these test that bootstrap."""
 import importlib.util
 import json
 import os
@@ -20,15 +20,15 @@ def module(name, filename):
     return value
 
 
-plan = module("ci_plan", "ci-plan.py")
+verify = module("ci_verify", "ci-verify.py")
 
 
 class CiLauncherTests(unittest.TestCase):
-    def test_plan_and_receipt_arguments_are_preserved(self):
-        for args in [["plan"], ["receipt", "--scope", "dashboard", "--output", "/tmp/receipt with spaces.json"]]:
-            with patch.object(plan, "launch") as launch:
-                plan.main(args)
-                launch.assert_called_once_with(*args)
+    def test_verify_hands_the_archive_to_the_checkout_host(self):
+        with patch.object(verify, "host_binary", return_value=Path("/tmp/host")), \
+                patch.object(verify.os, "execv") as execute:
+            verify.main(["/tmp/artifact with spaces.tar.gz"])
+            execute.assert_called_once_with("/tmp/host", ["/tmp/host", "host", "ci", "verify", "/tmp/artifact with spaces.tar.gz"])
 
     def test_bootstrap_builds_only_small_ci_binary_and_uses_configured_cargo_target(self):
         # Without a restored tool of its own, which CI has whenever that cache hits.
@@ -36,10 +36,10 @@ class CiLauncherTests(unittest.TestCase):
                 patch.object(ci_tool.subprocess, "check_call") as build, \
                 patch.object(ci_tool.subprocess, "check_output", return_value=json.dumps({"target_directory": "/custom target"})), \
                 patch.object(ci_tool.os, "execv") as execute:
-            ci_tool.launch("plan")
+            ci_tool.launch("preflight")
             build.assert_called_once_with(["cargo", "build", "--locked", "-p", "dispatch-ci"], cwd=ROOT, stdout=sys.stderr)
             execute.assert_called_once_with(Path("/custom target/debug/dispatch-ci"),
-                                            ["/custom target/debug/dispatch-ci", "plan", "--root", str(ROOT)])
+                                            ["/custom target/debug/dispatch-ci", "preflight", "--root", str(ROOT)])
 
     def test_bootstrap_runs_a_restored_tool_without_cargo_and_only_from_its_own_ci_cache(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -67,9 +67,9 @@ class CiLauncherTests(unittest.TestCase):
             with patch.object(ci_tool, "prebuilt", return_value=binary), \
                     patch.object(ci_tool.subprocess, "check_call") as build, \
                     patch.object(ci_tool.os, "execv") as execute:
-                ci_tool.launch("gate")
+                ci_tool.launch("preflight")
                 build.assert_not_called()
-                execute.assert_called_once_with(binary, [str(binary), "gate", "--root", str(ROOT)])
+                execute.assert_called_once_with(binary, [str(binary), "preflight", "--root", str(ROOT)])
 
 
 if __name__ == "__main__":

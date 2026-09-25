@@ -23,7 +23,7 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "Dispatch host management: capabilities | release --help | artifact <inventory|write|verify|unpack|retarget|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management] | dev --root PATH --wait COMMIT [--timeout SECONDS]"
+            "Dispatch host management: capabilities | release --help | artifact <inventory|write|verify|unpack|actions|download> ... | <dev|production> --root PATH [--verify|--verify-management|--install-management] | dev --root PATH --wait COMMIT [--timeout SECONDS]"
         );
         return Ok(());
     }
@@ -45,9 +45,6 @@ pub fn run(args: &[String]) -> Result<()> {
         ["artifact", "unpack", archive, destination] => {
             artifact::unpack(Path::new(archive), Path::new(destination))?;
             Value::Null
-        }
-        ["artifact", "retarget", root, old, new] => {
-            serde_json::to_value(artifact::retarget(Path::new(root), old, new)?)?
         }
         ["artifact", "actions", download, directory, package, commit] => {
             let record = stdin_json()?;

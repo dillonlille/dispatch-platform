@@ -2,7 +2,6 @@ use super::*;
 use crate::io::{Native, Response};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     io::{Cursor, Write},
     os::unix::fs::{PermissionsExt, symlink},
 };
@@ -33,8 +32,6 @@ struct Fake {
     branch: RefCell<Option<String>>,
     /// The conclusion a dispatched run reaches.
     dispatched: Cell<&'static str>,
-    /// Validation receipt archives by the run that published them.
-    receipts: RefCell<BTreeMap<u64, Vec<u8>>>,
 }
 impl Fake {
     fn fail(&self, point: &str) {
@@ -98,7 +95,10 @@ impl System for Fake {
                 json!({"workflow_runs":self.runs.borrow().clone()})
             } else if endpoint.starts_with("compare/") {
                 json!({"status":*self.comparison.borrow()})
-            } else if endpoint == "actions/runs/5/artifacts?per_page=100" {
+            } else if endpoint.starts_with("actions/runs/")
+                && endpoint.ends_with("/artifacts?per_page=100")
+            {
+                // Every full run publishes the build, the dispatched one included.
                 json!({"artifacts":[self.artifact.borrow().clone()]})
             } else if endpoint == "actions/artifacts/31/zip" {
                 fs::write(output.ok_or("Expected download file")?, &self.download)?;
@@ -110,34 +110,8 @@ impl System for Fake {
             {
                 let partial = self.partial.borrow().contains(&run.parse()?);
                 json!({"jobs":[{"name":"build","conclusion":"success"},
+                    {"name":"platform","conclusion":"success"},
                     {"name":"core","conclusion":if partial { "skipped" } else { "success" }}]})
-            } else if let Some(run) = endpoint
-                .strip_prefix("actions/runs/")
-                .and_then(|s| s.strip_suffix("/artifacts"))
-            {
-                let run: u64 = run.parse()?;
-                let receipts = self.receipts.borrow();
-                let artifacts: Vec<_> = receipts
-                    .get(&run)
-                    .map(|zip| {
-                        json!({"name":format!("dispatch-validation-{run}-1"),"id":100 + run,
-                        "expired":false,"size_in_bytes":zip.len(),
-                        "digest":format!("sha256:{}",artifact::hash(zip))})
-                    })
-                    .into_iter()
-                    .collect();
-                json!({ "artifacts": artifacts })
-            } else if let Some(id) = endpoint
-                .strip_prefix("actions/artifacts/")
-                .and_then(|s| s.strip_suffix("/zip"))
-            {
-                let run = id.parse::<u64>()? - 100;
-                return Ok(self
-                    .receipts
-                    .borrow()
-                    .get(&run)
-                    .ok_or("Unknown artifact")?
-                    .clone());
             } else if endpoint.starts_with("git/matching-refs/tags/") {
                 if self.listed.borrow().iter().any(|r| r["draft"] == false) || self.wrong_tag.get()
                 {
@@ -380,7 +354,6 @@ impl Fixture {
             partial: RefCell::new(BTreeSet::new()),
             branch: RefCell::new(None),
             dispatched: Cell::new("success"),
-            receipts: RefCell::new(BTreeMap::new()),
         };
         Self {
             temp,
@@ -418,32 +391,6 @@ impl Fixture {
         release.smoke(&prepared).unwrap();
         release.ensure_draft(&prepared).unwrap();
         prepared
-    }
-    /// Main's merge queue group for the release commit reused the PR run that validated
-    /// the same merge, whose receipt records `scope`. Neither the group nor main's push
-    /// ran the suites themselves.
-    fn reused_group(&self, scope: &str) {
-        let commit = &self.system.commit;
-        let parents = git(&self.root, &["rev-list", "--parents", "-n", "1", commit]);
-        let parents: Vec<_> = parents.split_whitespace().collect();
-        let tree = git(&self.root, &["rev-parse", &format!("{commit}^{{tree}}")]);
-        let receipt = json!({"format":1,"repository":REPOSITORY,"workflow":WORKFLOW,"baseRef":"main",
-            "runId":6,"attempt":1,"base":parents[1],"head":parents[2],"tree":tree,"commit":commit,
-            "scope":scope});
-        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        zip.start_file("validation.json", zip::write::SimpleFileOptions::default())
-            .unwrap();
-        zip.write_all(&serde_json::to_vec(&receipt).unwrap())
-            .unwrap();
-        self.system
-            .receipts
-            .borrow_mut()
-            .insert(6, zip.finish().unwrap().into_inner());
-        self.system.runs.borrow_mut().as_array_mut().unwrap().push(json!({"id":6,"run_attempt":1,
-            "head_sha":commit,"event":"merge_group","head_branch":"gh-readonly-queue/main/pr-8",
-            "status":"completed","conclusion":"success","path":WORKFLOW,
-            "head_repository":{"full_name":REPOSITORY},"html_url":"https://example.invalid/run/6"}));
-        self.system.partial.borrow_mut().extend([5, 6]);
     }
 }
 
@@ -1001,29 +948,6 @@ fn a_release_needs_something_new_on_main_since_the_previous_one() {
     assert_eq!(release.pin(None).unwrap(), f.system.commit);
     let compared = format!("repos/{REPOSITORY}/compare/v0.9.0...{}", f.system.commit);
     assert!(f.system.has_call(&["gh", "api", &compared]));
-}
-
-#[test]
-fn a_queue_group_that_reused_a_full_pr_validation_needs_no_other_run() {
-    let f = Fixture::new();
-    f.reused_group("full");
-    let release = f.release();
-    io::private_directory(&release.directory).unwrap();
-    fs::write(&release.notes, "Notes").unwrap();
-    assert_eq!(
-        release.execute(Stage::Prepare, None).unwrap()["stage"],
-        "draft-verified"
-    );
-    assert!(!f.system.has_call(&["gh", "workflow", "run"]));
-    assert!(f.system.branch.borrow().is_none());
-    // A receipt short of the full suite does not count.
-    let f = Fixture::new();
-    f.reused_group("dashboard");
-    let release = f.release();
-    io::private_directory(&release.directory).unwrap();
-    fs::write(&release.notes, "Notes").unwrap();
-    release.execute(Stage::Prepare, None).unwrap();
-    assert_eq!(f.system.count(&["gh", "workflow", "run"]), 1);
 }
 
 #[test]

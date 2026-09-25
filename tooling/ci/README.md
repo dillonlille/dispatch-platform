@@ -1,97 +1,53 @@
-# CI policy
+# CI tooling
 
-`backend/ci` owns conservative check selection, PR validation receipts and the
-required-job gate, Rust build cache and PR preflight. It builds as `dispatch-ci` in the debug profile so the planner
-can start inside its existing three-minute job budget without compiling the host
-manager's networking stack. The existing `ci-plan.py`, `ci-gate.py`, `cargo-build.py` and
-`ci/pr-prepare.py` paths are bootstrap adapters. Cargo selects the configured target directory.
+One run per change, in the merge queue, on the exact squash commit the queue will push. Every
+suite runs every time; nothing runs on the PR itself. `.github/workflows/checks.yml` is the
+whole pipeline, and `tooling/ci/checks.ts` runs one of its jobs by name, or locally the whole
+suite in sequence:
 
-The planner chooses full validation for backend, shared, infrastructure or
-unknown changes. Dashboard code, listed dashboard tests, browser TypeScript and
-Markdown outside the backend can use dashboard validation. `test-plan.json`
-remains the shared list of executed dashboard tests. Renames count both paths.
-PRs into `main`, its merge queue groups and its pushes are scoped by what they change
-and reuse a matching receipt. Any other branch is validated in full. A release
-separately requires the full suite on the exact commit it publishes. API failures
-fall back to ordinary check selection.
+| Job             | `npm run check:ci -- …`                    | What it proves                                                   |
+| --------------- | ------------------------------------------ | ---------------------------------------------------------------- |
+| build           | `build`                                    | The runtime packages: the release backend and the dashboard.     |
+| checks          | `checks`                                   | Types, formatting, the bundle budget, the dashboard logic tests. |
+| browser ×8      | `browser <n>/8 [spec]`                     | The browser suite against the packaged runtime.                  |
+| smoke           | `smoke`                                    | The package starts, signs in and serves, as a release asks.      |
+| benchmark       | `benchmark`                                | The Rust workload budget.                                        |
+| core            | `core`                                     | Rust formatting, lints and tests.                                |
+| api             | `api`                                      | The API tests, the Python tooling tests, the npm audit.          |
+| collectors ×4   | `npm run test:browseros -- --shard <name>` | The native collectors with a real browser.                       |
+| rust-advisories |                                            | `cargo audit`.                                                   |
+| platform        |                                            | The gate: the one required check.                                |
 
-A receipt binds the same-repository PR merge's base, head and tree, workflow,
-run and attempt, target branch and validation scope. The newest matching run
-wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
-JSON and GitHub digest are verified before reuse.
+The gate passes only when every job passed. It then verifies the package's inventory and
+source commit (`ci-verify.py`, which runs `dispatch-host ci verify`) and publishes it as
+`dispatch-main-<sha>` for 90 days. The Dev updater installs that build, and a release stamps
+its version into it. A manual run of one suite has no gate, so nothing partial is published;
+the release tool accepts only runs whose `core` and `platform` jobs succeeded.
 
-PRs land on `main` as squash commits, which have one parent, so the merge-commit matching
-below no longer finds anything: queue and push runs check afresh, scoped by their diff, and
-only PR runs, whose checkout is a real merge, record a receipt. The receipts stay until the CI
-rebuild removes them.
+The ruleset expects the `platform` check on a PR head before the queue admits it, so
+`queue-admission.yml` reports one on every PR head, usually within a minute. It proves
+nothing; the queue's own gate decides, and a PR queued before it passed is dropped as an
+invalid merge commit.
 
-A merge queue on `main` runs the workflow on the exact merge commit it will push,
-scoped against the group's base so every PR in the group counts. A group holding one
-PR that is still current with `main` merges the same base, head and tree that PR's own
-run validated, so it reuses that run's gated build and only smoke tests it, and its
-receipt records that run's scope. A batched group, a group built on another base and
-a stale PR are validated afresh. That run issues the receipt and gated build, and the
-following `main` push looks for it first: the newest merge queue run of the pushed
-commit decides, and only a commit with no queue run falls back to its PR head's run.
-The preflight stops treating a moved `main` or other ready PRs as blockers while the
-queue exists.
+`backend/ci` builds as `dispatch-ci` and holds what runs on this machine: the Rust build
+cache and compiler fingerprint (`cargo-build.py`), the PR preflight (`npm run pr:prepare`) and
+the ship command. `npm run pr:ship -- <number>` reads the PR from GitHub's API every 20
+seconds, adds it to the merge queue once its admission check passed and GitHub knows it merges
+cleanly, and waits until GitHub merges it, printing the squash commit. A newer push is queued
+in its turn. It stops with the reason when the PR conflicts with `main`, is a draft, closes,
+leaves the queue unmerged, with GitHub's reason and the failed jobs of its own queue run, or
+has not merged after 90 minutes.
 
-`backend/host/src/ci` promotes builds through that same receipt policy and the
-host artifact verifier. It checks the artifact's GitHub record, file inventory
-and original source commit, changes only commit metadata, then rechecks PR
-validation before publishing the candidate. Existing destinations are never
-replaced. An unavailable build falls back to compilation only after confirming
-validation again; revoked or unavailable validation fails the job because other
-suites may already have been skipped.
+Caches: only `main`'s reach every branch, since the queue's branches are deleted after each
+run. `caches.yml` refreshes them on every push to `main`: the release backend keyed by its
+inputs, the CI and host tools, the assessment fixture, the Playwright browser and the
+BrowserOS package. A run's own `tools` job builds what its inputs lack for the jobs that start
+later in that run. Launchers use a restored tool only on CI and only from the workspace's own
+`.ci-tools` directory; otherwise they build with Cargo.
 
-A promoted binary seeds the Rust build cache only when Cargo's current compiler
-and source fingerprint equals the key recorded by the PR. Fingerprints, cache
-eligibility, atomic copies, digest checks, locking and pruning live in
-`backend/ci/src/cache`. The fingerprint includes embedded manager launchers,
-Rust sources, schemas, provider scripts, Cargo inputs, compiler identity and
-compiler environment. Schema 3 deliberately invalidates Python-era cache keys.
-
-The fingerprint names the Rust compiler, C compiler and linker by version and the
-runner's distribution, not its weekly image build, so an image rollout that runs two
-builds side by side does not split the cache in half.
-
-Local worktrees share at most eight recently used entries under Git's common
-`dispatch-rust-builds` directory. Each restored binary is a separate copy. Pruning
-skips locked entries; readers recheck lock identity after concurrent pruning.
-Custom build scripts, Cargo configuration, compiler overrides and dependencies
-outside `backend` disable reuse. CI reuse additionally requires the explicit
-`.ci-rust-cache` path and the selected key to match current inputs.
-
-`npm run pr:prepare` checks the feature branch, committed changes, fetched Dev
-ancestry and other ready PRs through Rust. `--allow-concurrent` retains the
-explicit override for intentional overlapping work.
-
-`npm run pr:ship -- <number>` ships an open PR. It reads the PR from GitHub's API every
-20 seconds: once the checks on its current head pass, including the required `platform`
-gate, it adds the PR to the merge queue bound to that head, then waits until GitHub
-merges it and prints the squash commit. A newer push is followed to its own checks. It
-stops with the reason when a check fails, with each failed check's name and link, and
-when the PR is a draft, closes, leaves the queue unmerged or has not merged after 90
-minutes. Brief API failures are retried; a PR it cannot read at all stops it at once.
-
-Run policy and promotion tests with:
+Run the tests with:
 
 ```sh
 cargo test --locked -p dispatch-ci -p dispatch-host
 python3 -m unittest discover -s tests/tooling -p '*_test.py'
 ```
-
-The final `platform` job requires every expected job result, including every
-browser shard, every collector shard and Rust advisories. The build job packages
-its build for every run; four `browser` jobs, three workers each, test those exact
-bytes in parallel while `core` and the collectors run, and reuse runs skip them.
-The build job names that artifact after its own attempt and passes the name as an
-output, so rerunning only failed jobs still finds the bytes it uploaded. Artifact publication still happens only
-after that gate succeeds. Draft PRs produce no validation receipt.
-
-`.github/actions/setup-tools` restores `dispatch-ci`, `dispatch-host` and the browser
-assessment fixture that a trusted branch built from identical inputs, keyed by the Rust
-inputs, the pinned toolchain and the runner's distribution. Launchers use a restored tool only on
-CI and only from the workspace's own `.ci-tools` directory; otherwise they build with
-Cargo exactly as before. Only the `tools` job on `main` pushes saves those
-caches, and the pinned Playwright browser, off the critical path.

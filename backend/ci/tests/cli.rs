@@ -1,47 +1,33 @@
-use serde_json::json;
-use std::{fs, process::Command};
+use std::process::Command;
 
 #[test]
-fn native_entry_point_appends_plan_outputs_and_fails_closed_at_the_gate() {
-    let temp = tempfile::tempdir().unwrap();
-    let event = temp.path().join("event.json");
-    let output = temp.path().join("output");
-    let summary = temp.path().join("summary");
-    fs::write(&event, "{}").unwrap();
-    fs::write(&output, "previous=value\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_dispatch-ci"))
-        .args(["plan", "--root", temp.path().to_str().unwrap()])
-        .env("GITHUB_EVENT_PATH", &event)
-        .env("GITHUB_EVENT_NAME", "workflow_dispatch")
-        .env("GITHUB_REF", "refs/heads/main")
-        .env("GITHUB_OUTPUT", &output)
-        .env("GITHUB_STEP_SUMMARY", &summary)
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert_eq!(
-        fs::read_to_string(&output).unwrap(),
-        "previous=value\nmode=full\n"
-    );
-    assert!(fs::read_to_string(&summary).unwrap().contains("**full**"));
-    let needs = json!({"plan":{"result":"success","outputs":{"mode":"full"}},"build":{"result":"success"},"browser":{"result":"success"},"benchmark":{"result":"success"},"core":{"result":"success"},"collectors":{"result":"success"},"rust-advisories":{"result":"success"}});
-    for valid in [true, false] {
-        let mut value = needs.clone();
-        if !valid {
-            value["collectors"]["result"] = "failure".into();
-        }
+fn native_entry_point_names_its_commands_and_refuses_the_rest() {
+    let run = |args: &[&str]| {
         let result = Command::new(env!("CARGO_BIN_EXE_dispatch-ci"))
-            .arg("gate")
-            .env("CI_NEEDS", value.to_string())
+            .args(args)
             .output()
             .unwrap();
-        assert_eq!(result.status.success(), valid);
-        if !valid {
-            assert!(String::from_utf8_lossy(&result.stderr).contains("collectors"));
-        }
+        (
+            result.status.success(),
+            String::from_utf8_lossy(&result.stderr).into_owned(),
+        )
+    };
+    let (ok, error) = run(&[]);
+    assert!(!ok);
+    assert!(error.contains("Choose build, preflight or ship"), "{error}");
+    // The planner, receipts and gate are gone: every suite runs in every queue run.
+    for gone in ["plan", "receipt", "gate"] {
+        let (ok, error) = run(&[gone]);
+        assert!(!ok, "{gone}");
+        assert!(error.contains("Unknown CI command"), "{error}");
     }
+    let (ok, error) = run(&["ship"]);
+    assert!(!ok);
+    assert!(
+        error.contains("Usage: npm run pr:ship -- <PR number>"),
+        "{error}"
+    );
+    let (ok, error) = run(&["build", "--scope", "full"]);
+    assert!(!ok);
+    assert!(error.contains("Unknown CI option"), "{error}");
 }
