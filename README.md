@@ -30,12 +30,8 @@ TypeScript tests recursively; Python tooling tests use
 tests verify them without rewriting files. Generated types, schema snapshots and
 approved artwork remain with their owners.
 
-The Python entry points at the top of `tooling/` retain their installed/CI paths;
-CI policy, build caching and PR preflight delegate to the small `dispatch-ci` executable.
-Artifact verification and promotion, releases, fresh setup and updaters delegate to
-the Rust host manager.
-See [CI policy](tooling/ci/README.md) for validation and artifact reuse rules.
-The [release command guide](tooling/RELEASES.md) covers preparation, publication and recovery.
-See [the Dev host guide](tooling/DEV-HOST.md) for that layout. The development and
-release guides remain outside Git at `/home/thepickle/dispatch-platform/docs/`,
-routed by the `dispatch-development` skill.
+The Python entry points at the top of `tooling/` keep their installed and CI paths; the
+build cache, PR preflight and ship command delegate to the small `dispatch-ci` executable,
+and artifact verification, releases, fresh setup and the updaters to the Rust host manager.
+See [tooling/ci/README.md](tooling/ci/README.md) for the pipeline. The development, host and
+release guides live outside Git at `/home/thepickle/dispatch-platform/docs/`.
