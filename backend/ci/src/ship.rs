@@ -3,7 +3,8 @@
 //! push, so nothing but the admission check runs on the PR itself. Everything is read from
 //! GitHub's API, never from a command's text: a newer push is queued in its turn, and the wait
 //! stops with the reason when the PR closes or leaves the queue unmerged, naming the failed
-//! jobs of its queue run.
+//! jobs of its queue run. A PR labelled `ai-review` is queued only once CodeRabbit reviewed it
+//! and its review threads are resolved.
 use crate::{REPOSITORY, Result, Runner};
 use serde_json::Value;
 
@@ -12,11 +13,19 @@ const PAUSE: u64 = 20;
 const LOOKS: u32 = 270;
 /// Consecutive failed API calls, or refused additions to the queue, before giving up.
 const ATTEMPTS: u32 = 5;
+/// Looks spent waiting for CodeRabbit before giving up: 20 minutes in all, and 5 while it has
+/// not started.
+const REVIEW_LOOKS: u32 = 60;
+const UNSTARTED_LOOKS: u32 = 15;
 
 /// The check the ruleset expects on a PR head before the queue admits it, which
 /// `queue-admission.yml` reports, and the queue's own gate.
 const REQUIRED: &str = "platform";
-const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}}}}}";
+/// The label that holds a PR for CodeRabbit's review, and the text of the `CodeRabbit` commit
+/// status on a commit it finished reviewing.
+const REVIEW_LABEL: &str = "ai-review";
+const REVIEWED: &str = "Review completed";
+const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description}}}}} reviewThreads(first:100){nodes{isResolved path line comments(first:1){nodes{author{login} url}}}}}}}";
 const ENQUEUE: &str = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}";
 
 fn graphql(runner: &dyn Runner, query: &str, variables: &[String]) -> Result<Value> {
@@ -87,6 +96,85 @@ fn admission(pr: &Value) -> Admission {
         Some("FAILURE" | "CANCELLED" | "TIMED_OUT" | "STARTUP_FAILURE") => Admission::Failed,
         _ => Admission::Pending,
     }
+}
+
+/// Where CodeRabbit's review of the PR stands, read from the status it keeps on each commit.
+#[derive(Debug, PartialEq)]
+enum Review {
+    /// It finished reviewing a commit of the PR and is reviewing none now.
+    Done,
+    Running,
+    /// It reported an error on the head, or on an earlier commit with no review since.
+    Failed(String),
+    /// Never asked, or skipped or rate limited, as the head's status says.
+    Unstarted(String),
+}
+
+fn review(pr: &Value) -> Review {
+    let statuses: Vec<_> = pr["reviewed"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|node| (&node["commit"]["oid"], &node["commit"]["status"]["context"]))
+        .collect();
+    let head = statuses
+        .iter()
+        .find(|(oid, _)| **oid == pr["headRefOid"])
+        .map(|(_, status)| *status);
+    let failed = statuses
+        .iter()
+        .rev()
+        .map(|(_, status)| *status)
+        .find(|status| matches!(status["state"].as_str(), Some("FAILURE" | "ERROR")));
+    let said = |status: Option<&Value>| {
+        status
+            .and_then(|status| status["description"].as_str())
+            .unwrap_or("none yet")
+            .to_owned()
+    };
+    match head.and_then(|status| status["state"].as_str()) {
+        Some("PENDING") => Review::Running,
+        Some("FAILURE" | "ERROR") => Review::Failed(said(head)),
+        // A push while it reviews leaves the review on the earlier commit, and a review asked
+        // for again outranks the one it follows.
+        _ if statuses
+            .iter()
+            .any(|(_, status)| status["state"] == "PENDING") =>
+        {
+            Review::Running
+        }
+        _ if statuses.iter().any(|(_, status)| {
+            status["state"] == "SUCCESS" && status["description"] == REVIEWED
+        }) =>
+        {
+            Review::Done
+        }
+        _ if failed.is_some() => Review::Failed(said(failed)),
+        _ => Review::Unstarted(said(head)),
+    }
+}
+
+/// The PR's unresolved review threads, as "path:line author link" lines.
+fn unresolved(pr: &Value) -> Vec<String> {
+    pr["reviewThreads"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|thread| thread["isResolved"] == false)
+        .map(|thread| {
+            let comment = &thread["comments"]["nodes"][0];
+            let path = thread["path"].as_str().unwrap_or("");
+            let place = match thread["line"].as_u64() {
+                Some(line) => format!("{path}:{line}"),
+                None => path.to_owned(),
+            };
+            format!(
+                "{place} {} {}",
+                comment["author"]["login"].as_str().unwrap_or("someone"),
+                comment["url"].as_str().unwrap_or("")
+            )
+        })
+        .collect()
 }
 
 /// The newest queue run for `number`, if any. The queue names its branch after the PR, which
@@ -165,6 +253,8 @@ pub fn run(
     // The newest queue run of this PR before this run queued it: only a later run is its own.
     let mut earlier: Option<u64> = None;
     let (mut seen, mut unanswered, mut refused) = (false, 0, 0);
+    // Looks spent waiting for CodeRabbit, in all and since it last reported a running review.
+    let (mut waited, mut unstarted) = (0, 0);
     for _ in 0..LOOKS {
         let pr = match look(runner, number) {
             Ok(pr) => {
@@ -260,6 +350,65 @@ pub fn run(
                 pause(PAUSE);
                 continue;
             }
+        }
+        // Asked for with the label, CodeRabbit's review comes first; any commit it reviewed
+        // counts, since later pushes are not reviewed again. Its threads must then be resolved,
+        // as GitHub queues no PR with an open conversation.
+        let labelled = pr["labels"]["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|label| label["name"] == REVIEW_LABEL);
+        let unreviewed = format!(
+            "comment `@coderabbitai review` on it, or remove the {REVIEW_LABEL} label to ship it unreviewed"
+        );
+        let waiting = match review(&pr) {
+            _ if !labelled => None,
+            Review::Done => {
+                let open = unresolved(&pr);
+                if !open.is_empty() {
+                    return Err(format!(
+                        "#{number} has unresolved review threads; answer and resolve each, then ship it again:\n- {}",
+                        open.join("\n- ")
+                    )
+                    .into());
+                }
+                None
+            }
+            Review::Failed(said) => {
+                return Err(
+                    format!("CodeRabbit failed to review #{number}: {said}; {unreviewed}").into(),
+                );
+            }
+            Review::Running => {
+                unstarted = 0;
+                Some(format!("Waiting for CodeRabbit to review #{number}"))
+            }
+            Review::Unstarted(said) => {
+                unstarted += 1;
+                if unstarted > UNSTARTED_LOOKS {
+                    return Err(format!(
+                        "CodeRabbit has not started reviewing #{number}, its status: {said}; {unreviewed}"
+                    )
+                    .into());
+                }
+                Some(format!(
+                    "Waiting for CodeRabbit to start reviewing #{number}"
+                ))
+            }
+        };
+        if let Some(text) = waiting {
+            waited += 1;
+            if waited > REVIEW_LOOKS {
+                return Err(format!(
+                    "CodeRabbit has not finished reviewing #{number} after {} minutes; ship it again to keep waiting, or remove the {REVIEW_LABEL} label to ship it unreviewed",
+                    u64::from(REVIEW_LOOKS) * PAUSE / 60
+                )
+                .into());
+            }
+            note(text);
+            pause(PAUSE);
+            continue;
         }
         if earlier.is_none() {
             earlier = Some(
@@ -397,6 +546,18 @@ mod tests {
         value["state"] = "MERGED".into();
         value["mergeCommit"] = json!({"oid":"3333333"});
         value
+    }
+    /// `pr` labelled for CodeRabbit's review, with its status on each listed commit.
+    fn labelled(mut pr: Value, statuses: &[(&str, &str, &str)]) -> Value {
+        pr["labels"] = json!({"nodes":[{"name":"collectors"},{"name":REVIEW_LABEL}]});
+        let nodes: Vec<_> = statuses
+            .iter()
+            .map(|(oid, state, description)| {
+                json!({"commit":{"oid":oid,"status":{"context":{"state":state,"description":description}}}})
+            })
+            .collect();
+        pr["reviewed"] = json!({ "nodes": nodes });
+        pr
     }
     fn ship(github: &GitHub) -> (Result<String>, Vec<String>, usize) {
         let pauses = RefCell::new(0);
@@ -654,5 +815,136 @@ mod tests {
         let (result, _, pauses) = ship(&github(vec![unadmitted(OLD)]));
         assert!(result.unwrap_err().to_string().contains("Gave up"));
         assert_eq!(pauses, LOOKS as usize);
+    }
+
+    const SKIPPED: &str = "Review skipped: manual review required for this OSS repository";
+    const MIDDLE: &str = "4444444444444444444444444444444444444444";
+
+    #[test]
+    fn a_labelled_pr_waits_for_coderabbit_before_it_is_queued() {
+        let github = github(vec![
+            labelled(open(OLD), &[]),
+            labelled(open(OLD), &[(OLD, "SUCCESS", SKIPPED)]),
+            labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]),
+            labelled(open(OLD), &[(OLD, "SUCCESS", REVIEWED)]),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
+        let (result, said, _) = ship(&github);
+        assert_eq!(result.unwrap(), "3333333");
+        assert_eq!(*github.queued.borrow(), [format!("head={OLD}")]);
+        assert_eq!(
+            said[..3],
+            [
+                "Waiting for CodeRabbit to start reviewing #7",
+                "Waiting for CodeRabbit to review #7",
+                "Added #7 to the merge queue at 1111111; the queue runs the checks on its squash commit",
+            ]
+        );
+        // A push after the review is not reviewed again; a review still running on an earlier
+        // commit, or asked for again, is awaited.
+        let github = self::github(vec![
+            labelled(
+                open(NEW),
+                &[(OLD, "SUCCESS", REVIEWED), (NEW, "SUCCESS", SKIPPED)],
+            ),
+            in_queue(NEW),
+            merged(NEW),
+        ]);
+        assert_eq!(ship(&github).0.unwrap(), "3333333");
+        let again = labelled(
+            open(NEW),
+            &[
+                (OLD, "SUCCESS", REVIEWED),
+                (NEW, "PENDING", "Review in progress"),
+            ],
+        );
+        assert_eq!(review(&again), Review::Running);
+        let pushed = labelled(open(NEW), &[(OLD, "PENDING", "Review in progress")]);
+        assert_eq!(review(&pushed), Review::Running);
+        let rerun = labelled(
+            open(NEW),
+            &[
+                (OLD, "SUCCESS", REVIEWED),
+                (MIDDLE, "PENDING", "Review in progress"),
+            ],
+        );
+        assert_eq!(review(&rerun), Review::Running);
+        // Without the label, CodeRabbit's status holds nothing up.
+        let mut unlabelled = labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]);
+        unlabelled["labels"]["nodes"] = json!([]);
+        let github = self::github(vec![unlabelled, in_queue(OLD), merged(OLD)]);
+        assert_eq!(ship(&github).0.unwrap(), "3333333");
+        assert_eq!(github.queued.borrow().len(), 1);
+    }
+
+    #[test]
+    fn unresolved_review_threads_stop_a_labelled_pr() {
+        let mut pr = labelled(open(OLD), &[(OLD, "SUCCESS", REVIEWED)]);
+        pr["reviewThreads"]["nodes"] = json!([
+            {"isResolved":false,"path":"backend/src/jobs.rs","line":42,
+                "comments":{"nodes":[{"author":{"login":"coderabbitai"},"url":"https://github.com/c/1"}]}},
+            {"isResolved":true,"path":"backend/src/mail.rs","line":7,
+                "comments":{"nodes":[{"author":{"login":"coderabbitai"},"url":"https://github.com/c/2"}]}},
+            {"isResolved":false,"path":"docs/ci.md","line":null,
+                "comments":{"nodes":[{"author":{"login":"thepickle"},"url":"https://github.com/c/3"}]}}
+        ]);
+        let github = github(vec![pr]);
+        let error = ship(&github).0.unwrap_err().to_string();
+        assert_eq!(
+            error,
+            "#7 has unresolved review threads; answer and resolve each, then ship it again:\n\
+             - backend/src/jobs.rs:42 coderabbitai https://github.com/c/1\n\
+             - docs/ci.md thepickle https://github.com/c/3"
+        );
+        assert!(github.queued.borrow().is_empty());
+    }
+
+    #[test]
+    fn coderabbit_failing_never_starting_or_running_too_long_stops_it() {
+        let failed = labelled(open(OLD), &[(OLD, "FAILURE", "Review failed")]);
+        let (result, _, pauses) = ship(&github(vec![failed]));
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.starts_with("CodeRabbit failed to review #7: Review failed;"),
+            "{error}"
+        );
+        assert_eq!(pauses, 0);
+        // So does a failure on an earlier commit that nothing reviewed since.
+        let pushed = labelled(open(NEW), &[(OLD, "ERROR", "Review failed")]);
+        assert_eq!(review(&pushed), Review::Failed("Review failed".into()));
+        let retried = labelled(
+            open(NEW),
+            &[
+                (OLD, "ERROR", "Review failed"),
+                (MIDDLE, "SUCCESS", REVIEWED),
+            ],
+        );
+        assert_eq!(review(&retried), Review::Done);
+        let skipped = labelled(open(OLD), &[(OLD, "SUCCESS", SKIPPED)]);
+        let (result, _, pauses) = ship(&github(vec![skipped]));
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains(&format!(
+                "has not started reviewing #7, its status: {SKIPPED};"
+            )),
+            "{error}"
+        );
+        assert!(
+            error.contains("comment `@coderabbitai review` on it"),
+            "{error}"
+        );
+        assert_eq!(pauses, UNSTARTED_LOOKS as usize);
+        let running = labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]);
+        let github = github(vec![running]);
+        let (result, _, pauses) = ship(&github);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .starts_with("CodeRabbit has not finished reviewing #7 after 20 minutes;")
+        );
+        assert_eq!(pauses, REVIEW_LOOKS as usize);
+        assert!(github.queued.borrow().is_empty());
     }
 }
