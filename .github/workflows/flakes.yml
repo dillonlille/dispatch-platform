@@ -1,0 +1,46 @@
+name: Flaky tests
+# A job that failed and then passed on a rerun of the same commit is a flake, or a runner
+# problem, and either costs a merge. This lists them weekly, from the platform checks' reruns,
+# in the run's summary. It changes nothing.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: List jobs that failed on one attempt and passed on a later one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "## Jobs that failed, then passed on a rerun, since $since"
+            echo
+            echo "| Run | Job | Failed attempt |"
+            echo "| --- | --- | --- |"
+          } > report.md
+          found=0
+          for run in $(gh api "repos/$REPO/actions/workflows/checks.yml/runs?created=>=$since&status=success&per_page=100" --paginate \
+              --jq '.workflow_runs[] | select(.run_attempt > 1) | "\(.id):\(.run_attempt)"'); do
+            id=${run%%:*}
+            attempts=${run##*:}
+            attempt=1
+            while [ "$attempt" -lt "$attempts" ]; do
+              gh api "repos/$REPO/actions/runs/$id/attempts/$attempt/jobs?per_page=100" \
+                --jq ".jobs[] | select(.conclusion == \"failure\" or .conclusion == \"timed_out\") | \"| [$id](https://github.com/$REPO/actions/runs/$id) | \\(.name) | $attempt |\"" >> report.md \
+                && found=1 || true
+              attempt=$((attempt + 1))
+            done
+          done
+          if ! grep -q '^| \[' report.md; then
+            echo "| none | | |" >> report.md
+          fi
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
