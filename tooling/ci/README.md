@@ -45,6 +45,16 @@ BrowserOS package. A run's own `tools` job builds what its inputs lack for the j
 later in that run. Launchers use a restored tool only on CI and only from the workspace's own
 `.ci-tools` directory; otherwise they build with Cargo.
 
+The repository Cargo config runs `tooling/rustc-remap.py` for dependencies and workspace
+crates, giving compiler paths neutral `/dispatch-build/...` prefixes. The wrapper's SHA-256
+in `build.rustflags` invalidates Cargo's dependency objects when the policy changes; update
+the hash after editing the wrapper. `check:rules` verifies it. Binary-cache schema 4 and the
+tool/fixture keys fingerprint the wrapper and config. Only this exact config allows binary
+reuse; custom configs, wrappers or overriding Rust flags disable it. Packaging and the
+artifact test run `tooling/security/check-build-paths.py` even for a reused executable, and
+reject remaining local build paths without printing their contents. The first build after
+adopting this policy recompiles dependencies. Compiler diagnostics use the neutral paths too.
+
 Run the tests with:
 
 ```sh

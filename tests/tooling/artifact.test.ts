@@ -12,6 +12,10 @@ test(
   { skip: process.env.DISPATCH_TEST_ARTIFACT !== '1', timeout: 60000 },
   async (t) => {
     const artifact = path.resolve('.build');
+    execFileSync('python3', [
+      'tooling/security/check-build-paths.py',
+      path.join(artifact, 'services/rust/dispatch-backend'),
+    ]);
     const manifest = verifyArtifact(artifact);
     assert.equal(manifest.format, 3);
     // The updater owns verification and restores executable permissions lost by extraction.

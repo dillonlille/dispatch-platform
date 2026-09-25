@@ -1,4 +1,5 @@
 use super::*;
+use sha2::Digest;
 use std::{
     cell::Cell,
     os::unix::fs::{PermissionsExt, symlink},
@@ -95,6 +96,8 @@ fn custom_build_inputs_and_untracked_external_sources_disable_reuse() {
         ("RUSTC_WRAPPER", "/wrapper"),
         ("CARGO_SOURCE_LOCAL_DIRECTORY", "/outside"),
         ("CARGO_BUILD_TARGET", "other"),
+        ("RUSTFLAGS", "--cfg=custom"),
+        ("CARGO_ENCODED_RUSTFLAGS", "--cfg=custom"),
     ] {
         let mut env = f.env.clone();
         env.insert(key.into(), value.into());
@@ -168,6 +171,7 @@ fn every_rust_and_embedded_launcher_input_is_fingerprinted_but_dashboard_is_not(
         "backend/host/src/management.rs",
         "backend/ci/src/cache.rs",
         "tooling/cargo-build.py",
+        "tooling/rustc-remap.py",
         "tooling/ci_tool.py",
         "tooling/runtime_artifact.py",
         "tooling/update-dev.py",
@@ -193,6 +197,42 @@ fn every_rust_and_embedded_launcher_input_is_fingerprinted_but_dashboard_is_not(
         fingerprint(&f.root, "release", "compiler", &f.env).unwrap(),
         fingerprint(&f.root, "release", "new compiler", &f.env).unwrap()
     );
+}
+
+#[test]
+fn only_the_exact_fingerprinted_remap_config_allows_cache_reuse() {
+    let f = Fixture::new();
+    fs::create_dir(f.root.join(".cargo")).unwrap();
+    let config = f.root.join(".cargo/config.toml");
+    let wrapper = f.root.join("tooling/rustc-remap.py");
+    fs::write(&wrapper, "reviewed policy").unwrap();
+    let hash = crate::to_hex(&sha2::Sha256::digest(b"reviewed policy"));
+    let text = format!(
+        "[build]\nrustc-wrapper = 'tooling/rustc-remap.py'\nrustflags = ['--cfg=dispatch_path_policy_{hash}']\n"
+    );
+    fs::write(&config, &text).unwrap();
+    assert!(eligible(&f.root, &f.env, false).unwrap());
+    let before = fingerprint(&f.root, "release", "compiler", &f.env).unwrap();
+    fs::write(&wrapper, "changed policy").unwrap();
+    assert!(!eligible(&f.root, &f.env, false).unwrap());
+    assert_ne!(
+        before,
+        fingerprint(&f.root, "release", "compiler", &f.env).unwrap()
+    );
+    fs::write(&wrapper, "reviewed policy").unwrap();
+    fs::write(&config, format!("{text}target = 'custom-target'\n")).unwrap();
+    assert!(!eligible(&f.root, &f.env, false).unwrap());
+    fs::write(&config, &text).unwrap();
+    let elsewhere = f.temp.path().join("external-policy");
+    fs::rename(&wrapper, &elsewhere).unwrap();
+    symlink(&elsewhere, &wrapper).unwrap();
+    assert!(!eligible(&f.root, &f.env, false).unwrap());
+    fs::remove_file(&wrapper).unwrap();
+    fs::rename(&elsewhere, &wrapper).unwrap();
+    let external_tools = f.temp.path().join("external-tools");
+    fs::rename(f.root.join("tooling"), &external_tools).unwrap();
+    symlink(&external_tools, f.root.join("tooling")).unwrap();
+    assert!(!eligible(&f.root, &f.env, false).unwrap());
 }
 #[test]
 fn cache_reuses_intact_binaries_refreshes_recency_and_rebuilds_corruption() {
