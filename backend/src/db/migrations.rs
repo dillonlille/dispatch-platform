@@ -5,8 +5,11 @@
 //! defaulted columns, and new indexes. The previous release must keep working on
 //! a database this release has migrated, so never drop, rename or rewrite what
 //! it reads. Anything else takes two releases: the first stops using it and ships,
-//! and only the next, whose rollback target no longer needs it, removes it.
-//! Never edit or renumber a migration that has shipped; append a new one.
+//! and only the next, whose rollback target no longer needs it, removes it. The one
+//! rewrite allowed is widening a `CHECK` list by rebuilding the table under the same
+//! name with the same columns (`docs/database.md`, Rebuilding a table): the previous
+//! release reads it unchanged, and the release that rebuilds never writes the new
+//! values. Never edit or renumber a migration that has shipped; append a new one.
 //!
 //! A database may record ids this binary does not know. That is a rollback: the
 //! next release added a migration and this release was started again on its data.
@@ -385,6 +388,80 @@ mod tests {
                 vec![json!({"action":"kept","data":null,"shown":null,"actor_name":null})]
             );
         }
+    }
+
+    #[test]
+    fn jobs_and_schedules_from_before_the_scorecard_keep_their_rows_through_the_rebuild() {
+        let root = private();
+        // v0.0.9 names neither the scorecard job kind nor the scorecard collection.
+        let jobs_schema = recorded(Kind::Jobs)
+            .replace(RECORD, "")
+            .replace(",'cortex.scorecard.collect'", "");
+        assert!(!jobs_schema.contains("scorecard"));
+        let file = root.path().join("jobs.sqlite");
+        older(&file, Kind::Jobs, &jobs_schema);
+        rusqlite::Connection::open(&file)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,\
+                 release,connection_revision,idempotency_key) VALUES ('job_1','dsp_1','preview',\
+                 'paycom.collect','succeeded',0,'2026-01-01T00:00:00Z','0.0.9',1,'k1'); \
+                 INSERT INTO job_metrics VALUES ('job_1',1,'worker','{}');",
+            )
+            .unwrap();
+        let db = Db::create(&file, Kind::Jobs, "").unwrap();
+        assert_eq!(dump(&db), recorded(Kind::Jobs));
+        assert_eq!(
+            db.all("SELECT id,kind FROM jobs", []).unwrap(),
+            vec![json!({"id":"job_1","kind":"paycom.collect"})]
+        );
+        assert_eq!(
+            db.all("SELECT job_id,attempt,owner FROM job_metrics", [])
+                .unwrap(),
+            vec![json!({"job_id":"job_1","attempt":1,"owner":"worker"})]
+        );
+        assert!(db.all("PRAGMA foreign_key_check", []).unwrap().is_empty());
+        db.exec(
+            "INSERT INTO jobs(id,dsp_id,environment,kind,status,available_at,created_at,\
+             release,connection_revision,idempotency_key) VALUES ('job_2','dsp_1','preview',\
+             'cortex.scorecard.collect','queued',0,'2026-01-02T00:00:00Z','0.0.10',1,'k2')",
+            [],
+        )
+        .unwrap();
+        // Metrics still follow their job.
+        db.exec("DELETE FROM jobs WHERE id='job_1'", []).unwrap();
+        assert!(
+            db.all("SELECT job_id FROM job_metrics", [])
+                .unwrap()
+                .is_empty()
+        );
+
+        let dsp_schema = recorded(Kind::Dsp)
+            .replace(RECORD, "")
+            .replace(",'scorecard'", "");
+        assert!(!dsp_schema.contains("scorecard"));
+        let file = root.path().join("dsp.sqlite");
+        older(&file, Kind::Dsp, &dsp_schema);
+        rusqlite::Connection::open(&file)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO collection_schedules(id,name,collection,cadence,local_time,anchor,\
+                 enabled,created_at) VALUES ('s1','Meals','meal_break','daily','06:00',0,1,'2026-01-01')",
+            )
+            .unwrap();
+        let db = Db::create(&file, Kind::Dsp, "").unwrap();
+        assert_eq!(dump(&db), recorded(Kind::Dsp));
+        assert_eq!(
+            db.all("SELECT id,collection,enabled FROM collection_schedules", [])
+                .unwrap(),
+            vec![json!({"id":"s1","collection":"meal_break","enabled":1})]
+        );
+        db.exec(
+            "INSERT INTO collection_schedules(id,name,collection,cadence,local_time,anchor,\
+             enabled,created_at) VALUES ('s2','Scorecard','scorecard','daily','07:00',0,1,'2026-01-02')",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]
