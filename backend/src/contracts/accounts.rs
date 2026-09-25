@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -65,10 +66,16 @@ pub struct DspSummary {
     pub owner_email: Option<String>,
     pub owner_status: OwnerStatus,
     pub paycom: ConnectionStatus,
+    /// Every connection's state, by provider.
+    pub connections: BTreeMap<String, ConnectionStatus>,
     pub last_collection: Option<String>,
+    /// The next scheduled collection, if a schedule is enabled.
+    pub next_collection: Option<String>,
     pub role: Option<String>,
     /// The features the DSP has (`features`).
     pub features: Vec<String>,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub members: i64,
     /// The query's own columns, which earlier releases sent along. No dashboard reads
     /// them; they stay until a release has shipped without a reader that could.
     #[serde(flatten)]

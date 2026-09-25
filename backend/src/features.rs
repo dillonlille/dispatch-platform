@@ -8,9 +8,9 @@ use super::{
     Result,
     audit::AuditChange,
     collectors::Provider,
-    contracts::{DspFeatures, FeatureChange},
+    contracts::{DspFeatureReport, DspFeatures, DspStatus, FeatureChange, FeatureState},
     db::{FromRow, Row, Store, iso},
-    ensure,
+    ensure, job_statuses,
 };
 use rusqlite::params;
 use std::collections::BTreeMap;
@@ -128,6 +128,16 @@ impl FromRow for FeatureRow {
         })
     }
 }
+impl FromRow for FeatureState {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            feature: row.get("feature")?,
+            enabled: row.get("enabled")?,
+            changed_at: row.get("changed_at")?,
+            changed_by: row.get("changed_by")?,
+        })
+    }
+}
 impl Store {
     /// The DSP's enabled features, in catalog order. A feature without a row of its
     /// own is at its default, which is how a DSP made before the feature existed reads.
@@ -142,6 +152,50 @@ impl Store {
             .filter(|f| stored.get(f.id).copied().unwrap_or(f.default))
             .map(|f| f.id.to_owned())
             .collect())
+    }
+    /// Every feature of the catalog as the DSP has it, with what switching the
+    /// schedules' page off would stop, for the platform's DSP page.
+    pub fn feature_report(&self, dsp: &str) -> Result<DspFeatureReport> {
+        let row = self.find_dsp(dsp)?;
+        let stored: Vec<FeatureState> = self.platform.query_as(
+            "SELECT f.feature,f.enabled,f.changed_at,u.first_name||' '||u.last_name changed_by \
+             FROM dsp_features f LEFT JOIN users u ON u.id=f.changed_by WHERE f.dsp_id=?",
+            [dsp],
+        )?;
+        let features = catalog()
+            .iter()
+            .map(|f| {
+                stored
+                    .iter()
+                    .find(|s| s.feature == f.id)
+                    .cloned()
+                    .unwrap_or(FeatureState {
+                        feature: f.id.to_owned(),
+                        enabled: f.default,
+                        changed_at: None,
+                        changed_by: None,
+                    })
+            })
+            .collect();
+        let provisioned = [DspStatus::Active, DspStatus::Suspended].contains(&row.status);
+        Ok(DspFeatureReport {
+            features,
+            schedules: if provisioned {
+                self.dsp(dsp)?.count(
+                    "SELECT count(*) FROM collection_schedules WHERE enabled=1",
+                    [],
+                )?
+            } else {
+                0
+            },
+            active_jobs: self.jobs.count(
+                concat!(
+                    "SELECT count(*) FROM jobs WHERE dsp_id=? AND status IN ",
+                    job_statuses!(active)
+                ),
+                [dsp],
+            )?,
+        })
     }
     pub fn feature_enabled(&self, dsp: &str, id: &str) -> Result<bool> {
         Ok(self.features(dsp)?.iter().any(|f| f == id))

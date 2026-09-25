@@ -24,7 +24,7 @@ const loadPlatform = () => import('../features/platform/index.js');
 const DiagnosticsPage = lazy(() =>
   loadPlatform().then((module) => ({ default: module.DiagnosticsPage })),
 );
-const DspList = lazy(() => loadPlatform().then((module) => ({ default: module.DspList })));
+const DspsPage = lazy(() => loadPlatform().then((module) => ({ default: module.DspsPage })));
 const DspPicker = lazy(() => loadPlatform().then((module) => ({ default: module.DspPicker })));
 const loadSettings = () => import('../features/settings/index.js');
 const SettingsPage = lazy(() =>
@@ -115,7 +115,7 @@ const platformPages: Record<PlatformRouteId, Entry<PageContext>> = {
     icon: Building2,
     nav: true,
     render: ({ session }) =>
-      session.user.platformOwner ? <DspList /> : <DspPicker session={session} />,
+      session.user.platformOwner ? <DspsPage /> : <DspPicker session={session} />,
   },
   jobs: {
     preload: loadPlatform,

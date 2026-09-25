@@ -18,6 +18,18 @@ test('a feature switched off for a DSP stops existing there until it is switched
   assert.equal((await member.get('/api/dsp/uniforms')).status, 200);
 
   const url = `/api/platform/dsps/${north.id}/features`;
+  // The platform's page reads each feature's state with what a switch would stop.
+  assert.equal((await member.get(url)).status, 403);
+  const report = (await platform.get(url)).value;
+  assert.deepEqual(
+    report.features.map((state: { feature: string; enabled: boolean }) => [
+      state.feature,
+      state.enabled,
+    ]),
+    all.map((feature) => [feature, true]),
+  );
+  assert.equal(typeof report.features[0].changedAt, 'string');
+  assert.deepEqual([report.schedules, report.activeJobs], [0, 0]);
   assert.equal((await member.post(url, { feature: 'uniforms', enabled: false })).status, 403);
   assert.equal((await platform.post(url, { feature: 'nothing', enabled: false })).status, 404);
   assert.equal((await platform.post(url, { feature: 'uniforms' })).status, 400);
@@ -62,6 +74,10 @@ test('a feature switched off for a DSP stops existing there until it is switched
   assert.equal((await member.get('/api/dsp/uniforms')).status, 200);
   result = await platform.post(url, { feature: 'uniforms', enabled: true });
   assert.deepEqual(result.value.changed, []);
+  const restored = (await platform.get(url)).value.features.find(
+    (state: { feature: string }) => state.feature === 'uniforms',
+  );
+  assert.equal(restored.changedBy, 'Platform Owner');
 
   // A connection is its own feature; a page requiring what it provides goes with it.
   result = await platform.post(url, { feature: 'cortex', enabled: false });

@@ -48,6 +48,27 @@ pub struct FeatureChange {
     pub feature: String,
     pub enabled: bool,
 }
+/// One feature of a DSP: whether it has it, and who last switched it and when.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct FeatureState {
+    pub feature: String,
+    pub enabled: bool,
+    pub changed_at: Option<String>,
+    pub changed_by: Option<String>,
+}
+/// A DSP's features, with what switching its schedules' page off would stop.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DspFeatureReport {
+    pub features: Vec<FeatureState>,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub schedules: i64,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub active_jobs: i64,
+}
 /// A DSP's features after a switch: what it has now, and what the switch changed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]

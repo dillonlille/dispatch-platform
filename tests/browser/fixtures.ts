@@ -56,10 +56,16 @@ export async function login(page: Page, email = demo.email) {
   await page.goto('/');
   await signIn(page, email);
 }
-/** From the platform's DSP list, open a DSP's dialog and enter its view. */
+/** From the platform's DSP list, choose a DSP and enter its view from its pane. */
 export async function openDsp(page: Page, name: string) {
-  await page.getByRole('button', { name: new RegExp(name) }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'DSPs', exact: true })
+    .getByRole('button', { name: new RegExp(name) })
+    .click();
+  await page
+    .getByRole('region', { name: new RegExp(name) })
+    .getByRole('button', { name: 'View', exact: true })
+    .click();
 }
 
 const shown = (day: string) => `${day.slice(5, 7)}/${day.slice(8)}/${day.slice(0, 4)}`;
