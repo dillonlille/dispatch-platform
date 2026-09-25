@@ -171,6 +171,17 @@ pub struct SessionResponse {
     pub environment: Environment,
     pub release: String,
     pub provider_mode: ProviderMode,
+    pub source: RuntimeSource,
+}
+
+/// What the running build was made from, so the dashboard can link its source.
+#[derive(Clone, Default, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSource {
+    /// Set only on Production, which runs published releases.
+    pub version: Option<String>,
+    pub commit: Option<String>,
 }
 
 #[derive(Serialize)]

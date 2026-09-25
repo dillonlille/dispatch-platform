@@ -35,3 +35,11 @@ build cache, PR preflight and ship command delegate to the small `dispatch-ci` e
 and artifact verification, releases, fresh setup and the updaters to the Rust host manager.
 See [tooling/ci/README.md](tooling/ci/README.md) for the pipeline. The development, host and
 release guides live outside Git at `/home/thepickle/dispatch-platform/docs/`.
+
+## License
+
+Copyright (C) 2026 Dillon Lillehaug. Dispatch is free software under the GNU Affero General
+Public License, version 3 only ([LICENSE](LICENSE)). Anyone may use, change and share it, and
+anyone who offers a changed version to others, including as a hosted service, must publish that
+version's source under the same license. The dashboard's account menu links each running build
+to its source.

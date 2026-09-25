@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Menu, X, ChevronDown, LogOut, Eye, type LucideIcon } from 'lucide-react';
+import { Menu, X, ChevronDown, LogOut, Eye, ArrowUpRight, type LucideIcon } from 'lucide-react';
 import type { DspView, SessionView } from '../../../shared/contracts/index.js';
 import { Brand } from '../app/Brand.js';
 import { Popover, useFocusTrap } from '../ui/index.js';
 import { dspHash, platformHash } from '../app/navigation.js';
+import { sourceLink } from '../lib/source.js';
 import type { DspRouteId, PlatformRouteId } from '../app/route-meta.js';
 import { ViewRoleMenu } from './ViewRoleMenu.js';
 
@@ -42,6 +43,7 @@ export function Shell({
   const sidebar = useRef<HTMLElement>(null);
   const name = `${session.user.firstName} ${session.user.lastName}`;
   const workspace = view?.dsp.name ?? (session.user.platformOwner ? 'Platform' : 'Workspace');
+  const source = sourceLink(session.source);
   useEffect(() => {
     document.title = `${label} · Dispatch`;
   }, [label]);
@@ -132,6 +134,13 @@ export function Shell({
             {!session.user.platformOwner && session.dsps.length > 1 && (
               <a href={platformHash()}>Switch DSP</a>
             )}
+            <a href={source.href} target="_blank" rel="noreferrer">
+              Source code
+              <span className="source-version">
+                {source.label}
+                <ArrowUpRight aria-hidden="true" />
+              </span>
+            </a>
             <button onClick={logout}>
               <LogOut size={16} />
               Sign out
