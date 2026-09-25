@@ -33,18 +33,36 @@ fn plain_title(title: &str) -> String {
     }
 }
 
-/// The first paragraph of a PR body's Change section, as the template lays it out.
+/// The first paragraph of a PR body's Summary section, or of its Change section for a body
+/// written before the templates had one. Headings and plain section names both count.
 fn change_summary(body: &str) -> Option<String> {
+    section_paragraph(body, "Summary").or_else(|| section_paragraph(body, "Change"))
+}
+const SECTIONS: [&str; 11] = [
+    "Summary",
+    "Problem",
+    "Symptom",
+    "Cause",
+    "Fix",
+    "Change",
+    "Why",
+    "Rollout",
+    "Risk",
+    "Verification",
+    "Review",
+];
+fn section_paragraph(body: &str, name: &str) -> Option<String> {
+    let heading = |line: &str| line.trim_start_matches('#').trim().to_owned();
     let mut lines = body
         .lines()
         .map(str::trim)
-        .skip_while(|line| line.trim_start_matches('#').trim() != "Change")
+        .skip_while(|line| heading(line) != name)
         .skip(1)
         .skip_while(|line| line.is_empty())
         .take_while(|line| {
             !line.is_empty()
                 && !line.starts_with('#')
-                && !matches!(*line, "Verification" | "Problem")
+                && !SECTIONS.contains(&heading(line).as_str())
                 && !line.starts_with("Review:")
                 && !line.starts_with("Docs:")
         })
@@ -149,8 +167,8 @@ impl Release<'_> {
         )?)
     }
     /// Writes the release notes from the merged PRs: one line per PR, its title and the first
-    /// paragraph of its Change section, then the list of PRs. A body GitHub cannot serve
-    /// leaves the title alone.
+    /// paragraph of its Summary section (or of Change, for older PRs), then the list of PRs.
+    /// A body GitHub cannot serve leaves the title alone.
     pub(super) fn generate_notes(&self, commit: &str) -> Result<()> {
         let changes = match self.previous()? {
             Some(previous) => self.changes_after(&previous, commit)?,
@@ -382,7 +400,7 @@ mod tests {
         );
     }
     #[test]
-    fn notes_read_titles_and_the_first_paragraph_of_a_change_section() {
+    fn notes_read_titles_and_the_summary_or_the_first_paragraph_of_a_change_section() {
         assert_eq!(plain_title("fix(host): keep the lock"), "Keep the lock");
         assert_eq!(plain_title("ci!: rebuild"), "Rebuild");
         assert_eq!(plain_title("Sort every column"), "Sort every column");
@@ -397,5 +415,15 @@ mod tests {
         );
         assert_eq!(change_summary("Problem\n\nNo change section.\n"), None);
         assert_eq!(change_summary("Change\n\nVerification\n\nx"), None);
+        let templated = "## Summary\n\nOwners switch a page per DSP.\n\n## Problem\n\nEvery DSP got every page.\n\n## Change\n\n- A catalog.\n";
+        assert_eq!(
+            change_summary(templated).as_deref(),
+            Some("Owners switch a page per DSP.")
+        );
+        assert_eq!(change_summary("## Summary\n\n## Symptom\n\nx"), None);
+        assert_eq!(
+            change_summary("## Summary\n\n## Change\n\nFrom change.\n").as_deref(),
+            Some("From change.")
+        );
     }
 }

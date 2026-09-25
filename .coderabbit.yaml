@@ -18,9 +18,11 @@ reviews:
   commit_status: true
   fail_commit_status: true
   auto_review:
-    # Only a comment starts a review, and pushes after it are not reviewed again.
+    # Only a comment starts a review, and pushes after it are not reviewed again. A PR is a
+    # draft from its preview until it ships, so a requested review must not skip drafts.
     enabled: false
     auto_incremental_review: false
+    drafts: true
   pre_merge_checks:
     docstrings:
       mode: 'off'
