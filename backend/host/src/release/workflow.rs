@@ -1,8 +1,9 @@
 use super::*;
 
-/// One line per PR in the log: a squash commit names its PR in the `(#N)` suffix of its
-/// subject, and a merge commit from before squash merges in its `Merge pull request #N` subject.
-fn merged_changes(log: &str) -> Result<Vec<String>> {
+/// The PRs in the log, as number and title: a squash commit names its PR in the `(#N)`
+/// suffix of its subject, and a merge commit from before squash merges in its
+/// `Merge pull request #N` subject, with the title on its body's first line.
+fn merged_changes(log: &str) -> Result<Vec<(u64, String)>> {
     let squash = regex::Regex::new(r"^(.*) \(#(\d+)\)$")?;
     let merge = regex::Regex::new(r"^Merge pull request #(\d+) from ")?;
     Ok(log
@@ -10,15 +11,51 @@ fn merged_changes(log: &str) -> Result<Vec<String>> {
         .filter_map(|entry| {
             let (subject, body) = entry.trim().split_once('\n').unwrap_or((entry.trim(), ""));
             if let Some(c) = squash.captures(subject) {
-                return Some(format!("- #{} {}", &c[2], &c[1]));
+                return Some((c[2].parse().ok()?, c[1].to_owned()));
             }
-            merge.captures(subject).map(|c| {
-                format!("- #{} {}", &c[1], body.trim().lines().next().unwrap_or(""))
-                    .trim_end()
-                    .into()
-            })
+            let c = merge.captures(subject)?;
+            Some((
+                c[1].parse().ok()?,
+                body.trim().lines().next().unwrap_or("").trim().to_owned(),
+            ))
         })
         .collect())
+}
+
+/// A PR title as a release note reads it: without the `type(scope):` prefix, capitalized.
+fn plain_title(title: &str) -> String {
+    let prefix = regex::Regex::new(r"^[a-z]+(\([^)]*\))?!?: ").unwrap();
+    let title = prefix.replace(title, "");
+    let mut chars = title.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// The first paragraph of a PR body's Change section, as the template lays it out.
+fn change_summary(body: &str) -> Option<String> {
+    let mut lines = body
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| line.trim_start_matches('#').trim() != "Change")
+        .skip(1)
+        .skip_while(|line| line.is_empty())
+        .take_while(|line| {
+            !line.is_empty()
+                && !line.starts_with('#')
+                && !matches!(*line, "Verification" | "Problem")
+                && !line.starts_with("Review:")
+                && !line.starts_with("Docs:")
+        })
+        .map(|line| line.trim_start_matches("- ").trim());
+    let first = lines.next()?;
+    Some(
+        std::iter::once(first)
+            .chain(lines)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 impl Release<'_> {
@@ -80,20 +117,15 @@ impl Release<'_> {
                     comparison["status"] == "ahead",
                     &format!("Main has nothing new since {previous}"),
                 )?;
-                let changes = merged_changes(&self.git(
-                    &[
-                        "log",
-                        "--first-parent",
-                        "--format=%s%n%b%x1e",
-                        &format!("{previous}..{commit}"),
-                    ],
-                    None,
-                    120,
-                )?)?;
+                let changes = self.changes_after(&previous, &commit)?;
                 if !changes.is_empty() {
                     say(format!(
-                        "Included changes, for the release notes:\n{}",
-                        changes.join("\n")
+                        "Included changes:\n{}",
+                        changes
+                            .iter()
+                            .map(|(number, title)| format!("- #{number} {title}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     ));
                 }
             }
@@ -102,6 +134,72 @@ impl Release<'_> {
         }
         say(format!("Releasing main commit {commit}"));
         Ok(commit)
+    }
+    /// The PRs on main's first-parent line after `previous` up to `commit`.
+    fn changes_after(&self, previous: &str, commit: &str) -> Result<Vec<(u64, String)>> {
+        merged_changes(&self.git(
+            &[
+                "log",
+                "--first-parent",
+                "--format=%s%n%b%x1e",
+                &format!("{previous}..{commit}"),
+            ],
+            None,
+            120,
+        )?)
+    }
+    /// Writes the release notes from the merged PRs: one line per PR, its title and the first
+    /// paragraph of its Change section, then the list of PRs. A body GitHub cannot serve
+    /// leaves the title alone.
+    pub(super) fn generate_notes(&self, commit: &str) -> Result<()> {
+        let changes = match self.previous()? {
+            Some(previous) => self.changes_after(&previous, commit)?,
+            None => vec![],
+        };
+        let mut notes = String::new();
+        for (number, title) in &changes {
+            let body = self
+                .command(
+                    &[
+                        "gh",
+                        "pr",
+                        "view",
+                        &number.to_string(),
+                        "--repo",
+                        REPOSITORY,
+                        "--json",
+                        "body",
+                        "--jq",
+                        ".body",
+                    ],
+                    None,
+                    60,
+                )
+                .ok();
+            let summary = body.as_deref().and_then(change_summary);
+            let title = plain_title(title).trim_end_matches('.').to_owned();
+            notes.push_str(&match summary {
+                Some(summary) => format!("- {title}. {summary}\n"),
+                None => format!("- {title}.\n"),
+            });
+        }
+        let links: Vec<_> = changes
+            .iter()
+            .map(|(number, _)| {
+                format!("[#{number}](https://github.com/{REPOSITORY}/pull/{number})")
+            })
+            .collect();
+        match links.len() {
+            0 => notes.push_str(&format!("Release {}.\n", self.tag)),
+            1 => notes.push_str(&format!("\nIncludes {}.\n", links[0])),
+            n => notes.push_str(&format!(
+                "\nIncludes {} and {}.\n",
+                links[..n - 1].join(", "),
+                links[n - 1]
+            )),
+        }
+        fs::write(&self.notes, notes)?;
+        Ok(())
     }
     /// Whether `run` ran the whole suite: its `core` job ran, which a scoped run of the
     /// former workflow skipped, and its `platform` gate ran, which a partial manual run skips.
@@ -277,10 +375,27 @@ mod tests {
         assert_eq!(
             merged_changes(log).unwrap(),
             [
-                "- #80 fix(host): keep the lock",
-                "- #76 Fix account",
-                "- #74"
+                (80, "fix(host): keep the lock".to_owned()),
+                (76, "Fix account".to_owned()),
+                (74, String::new())
             ]
         );
+    }
+    #[test]
+    fn notes_read_titles_and_the_first_paragraph_of_a_change_section() {
+        assert_eq!(plain_title("fix(host): keep the lock"), "Keep the lock");
+        assert_eq!(plain_title("ci!: rebuild"), "Rebuild");
+        assert_eq!(plain_title("Sort every column"), "Sort every column");
+        let body = "Problem\n\nIt broke.\n\nChange\n\nThe lock is held explicitly.\nIt unlocks on drop.\n\nMore detail.\n\nVerification\n\nTests.\n";
+        assert_eq!(
+            change_summary(body).as_deref(),
+            Some("The lock is held explicitly. It unlocks on drop.")
+        );
+        assert_eq!(
+            change_summary("## Change\n\n- one\n- two\n").as_deref(),
+            Some("one two")
+        );
+        assert_eq!(change_summary("Problem\n\nNo change section.\n"), None);
+        assert_eq!(change_summary("Change\n\nVerification\n\nx"), None);
     }
 }

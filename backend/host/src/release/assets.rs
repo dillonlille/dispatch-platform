@@ -351,6 +351,10 @@ impl Release<'_> {
         let release = match self.listed_release()? {
             Some(release) => release,
             None => {
+                if !self.notes.try_exists()? || fs::read_to_string(&self.notes)?.trim().is_empty() {
+                    self.generate_notes(&prepared.commit)?;
+                    say("Generated the release notes from the merged PRs");
+                }
                 say(format!("Release notes: {}", self.notes.display()));
                 let deadline = self.system.monotonic() + Duration::from_secs(1800);
                 while !self.notes.try_exists()?
