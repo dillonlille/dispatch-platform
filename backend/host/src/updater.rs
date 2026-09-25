@@ -4,7 +4,6 @@ use crate::{
     io::{self, System},
     management, releases, require,
 };
-use fs2::FileExt;
 use serde_json::{Value, json};
 use std::{
     fs::{self, OpenOptions},
@@ -382,18 +381,15 @@ impl<'a> Updater<'a> {
         Ok(())
     }
     pub fn run_locked(&self) -> Result<()> {
-        let lock = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(
-                self.platform
-                    .join(format!("{}-update.lock", self.environment.name())),
-            )?;
-        match FileExt::try_lock_exclusive(&lock) {
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-            result => result?,
-        }
+        // Another run of this environment holds the lock: this one has nothing to do.
+        let Some(_lock) = io::ExclusiveLock::try_acquire(
+            &self
+                .platform
+                .join(format!("{}-update.lock", self.environment.name())),
+        )?
+        else {
+            return Ok(());
+        };
         self.recover()?;
         match self.environment {
             Environment::Dev => self.update_dev(),

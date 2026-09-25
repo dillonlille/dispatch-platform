@@ -161,17 +161,26 @@ pub fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or("").into()
 }
 
+/// A held `flock` that is released explicitly. Closing the descriptor alone leaves the lock
+/// held by any child another thread forked meanwhile, until that child execs.
 pub struct ExclusiveLock(fs::File);
 impl ExclusiveLock {
     pub fn acquire(path: &Path) -> Result<Self> {
+        Self::try_acquire(path)?.ok_or_else(|| "Lock is held by another process".into())
+    }
+    /// `None` when another holder has the lock right now.
+    pub fn try_acquire(path: &Path) -> Result<Option<Self>> {
         let file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
             .open(path)?;
-        fs2::FileExt::try_lock_exclusive(&file)?;
-        Ok(Self(file))
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => Ok(Some(Self(file))),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 }
 impl Drop for ExclusiveLock {
