@@ -19,6 +19,9 @@ const REVIEW_LOOKS: u32 = 60;
 const UNSTARTED_LOOKS: u32 = 15;
 /// Looks spent waiting for CodeRabbit to answer the replies to its threads: 5 minutes.
 const ANSWER_LOOKS: u32 = 15;
+/// Looks in a row that must find CodeRabbit rate limited before stopping: a request made again
+/// takes it up to half a minute to replace an earlier rate-limited status.
+const LIMITED_LOOKS: u32 = 3;
 
 /// The check the ruleset expects on a PR head before the queue admits it, which
 /// `queue-admission.yml` reports, and the queue's own gate.
@@ -30,6 +33,8 @@ const REVIEWED: &str = "Review completed";
 /// CodeRabbit's login as the author of review comments.
 const CODERABBIT: &str = "coderabbitai";
 const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description}}}}} reviewThreads(first:100){nodes{id isResolved path line comments(first:1){totalCount nodes{author{login} url}} latest:comments(last:1){nodes{author{login}}}}}}}}";
+/// The PR's newest comments, where CodeRabbit says when a rate limit ends.
+const NOTICES: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){notices:comments(last:30){nodes{author{login} body updatedAt}}}}}";
 const ENQUEUE: &str = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}";
 
 fn graphql(runner: &dyn Runner, query: &str, variables: &[String]) -> Result<Value> {
@@ -57,10 +62,15 @@ fn rest(runner: &dyn Runner, endpoint: &str) -> Result<Value> {
 }
 
 fn look(runner: &dyn Runner, number: u64) -> Result<Value> {
+    pull_request(runner, LOOK, number)
+}
+
+/// `query`'s answer about PR `number`.
+fn pull_request(runner: &dyn Runner, query: &str, number: u64) -> Result<Value> {
     let (owner, name) = REPOSITORY.split_once('/').ok_or("Invalid repository")?;
     let data = graphql(
         runner,
-        LOOK,
+        query,
         &[
             format!("owner={owner}"),
             format!("name={name}"),
@@ -110,7 +120,9 @@ enum Review {
     Running,
     /// It reported an error on the head, or on an earlier commit with no review since.
     Failed(String),
-    /// Never asked, or skipped or rate limited, as the head's status says.
+    /// Out of reviews for now, as the head's status says.
+    Limited(String),
+    /// Never asked, or skipped, as the head's status says.
     Unstarted(String),
 }
 
@@ -154,8 +166,28 @@ fn review(pr: &Value) -> Review {
             Review::Done
         }
         _ if failed.is_some() => Review::Failed(said(failed)),
+        _ if said(head).to_lowercase().contains("rate limited") => Review::Limited(said(head)),
         _ => Review::Unstarted(said(head)),
     }
+}
+
+/// When CodeRabbit's newest rate-limit comment on the PR was written, and the wait it named, as
+/// in "Next included review available in 28 minutes."
+fn next_review(runner: &dyn Runner, number: u64) -> Option<(String, String)> {
+    let pr = pull_request(runner, NOTICES, number).ok()?;
+    pr["notices"]["nodes"]
+        .as_array()?
+        .iter()
+        .rev()
+        .filter(|comment| comment["author"]["login"] == CODERABBIT)
+        .find_map(|comment| {
+            let (_, after) = comment["body"]
+                .as_str()?
+                .split_once("review available in ")?;
+            let wait = after.split(['.', '*', '\n']).next()?.trim();
+            let at = comment["updatedAt"].as_str().filter(|at| at.len() >= 16)?;
+            (!wait.is_empty()).then(|| (format!("{} {}", &at[..10], &at[11..16]), wait.to_owned()))
+        })
 }
 
 /// The PR's unresolved review threads as "path:line author link" lines: those waiting for our
@@ -271,6 +303,8 @@ pub fn run(
     // Looks spent waiting for CodeRabbit: in all, since it last reported a running review, and
     // on its answers to our replies.
     let (mut waited, mut unstarted, mut answering) = (0, 0, 0);
+    // Looks in a row that found CodeRabbit rate limited.
+    let mut limited = 0;
     // The threads it had answered and left open at the last look.
     let mut settling: Vec<String> = vec![];
     for _ in 0..LOOKS {
@@ -380,7 +414,11 @@ pub fn run(
         let unreviewed = format!(
             "comment `@coderabbitai review` on it, or remove the {REVIEW_LABEL} label to ship it unreviewed"
         );
-        let waiting = match review(&pr) {
+        let state = review(&pr);
+        if !matches!(state, Review::Limited(_)) {
+            limited = 0;
+        }
+        let waiting = match state {
             _ if !labelled => None,
             Review::Done => {
                 let (ours, answered, its) = unresolved(&pr);
@@ -427,6 +465,21 @@ pub fn run(
             Review::Running => {
                 unstarted = 0;
                 Some(format!("Waiting for CodeRabbit to review #{number}"))
+            }
+            Review::Limited(said) => {
+                limited += 1;
+                if limited >= LIMITED_LOOKS {
+                    let wait = next_review(runner, number).map_or(String::new(), |(at, wait)| {
+                        format!(" At {at} UTC it said its next review is available in {wait}.")
+                    });
+                    return Err(format!(
+                        "CodeRabbit is rate limited and has not reviewed #{number} ({said}).{wait} To ship it unreviewed, remove the {REVIEW_LABEL} label and ship it again; to wait, comment `@coderabbitai review` once the limit passes"
+                    )
+                    .into());
+                }
+                Some(format!(
+                    "Waiting for CodeRabbit to start reviewing #{number}"
+                ))
             }
             Review::Unstarted(said) => {
                 unstarted += 1;
@@ -511,6 +564,7 @@ mod tests {
         refusals: RefCell<VecDeque<String>>,
         queued: RefCell<Vec<String>>,
         rest: RefCell<BTreeMap<String, VecDeque<Value>>>,
+        notices: RefCell<Option<Value>>,
     }
     impl Runner for GitHub {
         fn command(&self, args: &[&str], _cwd: Option<&Path>, timeout: u64) -> Result<Vec<u8>> {
@@ -540,6 +594,12 @@ mod tests {
                 );
             }
             assert!(args.contains(&"number=7") && args.contains(&"-F"));
+            if args[4].contains("notices:") {
+                let notices = self.notices.borrow().clone().ok_or("not found")?;
+                return Ok(serde_json::to_vec(
+                    &json!({"data":{"repository":{"pullRequest":{"notices":{"nodes":notices}}}}}),
+                )?);
+            }
             let mut looks = self.looks.borrow_mut();
             let next = if looks.len() > 1 {
                 looks.pop_front().unwrap()
@@ -1118,5 +1178,47 @@ mod tests {
         );
         assert_eq!(pauses, REVIEW_LOOKS as usize);
         assert!(github.queued.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_rate_limited_review_stops_it_with_the_wait() {
+        const LIMITED: &str = "Review rate limited";
+        let limited = labelled(open(OLD), &[(OLD, "SUCCESS", LIMITED)]);
+        let github = github(vec![limited.clone()]);
+        *github.notices.borrow_mut() = Some(json!([
+            {"author":{"login":CODERABBIT},"updatedAt":"2026-09-25T16:20:00Z",
+                "body":"> **Next included review available in 12 minutes.**"},
+            {"author":{"login":"dillonlille"},"updatedAt":"2026-09-25T17:00:00Z","body":"@coderabbitai review"},
+            {"author":{"login":CODERABBIT},"updatedAt":"2026-09-25T17:01:26Z",
+                "body":"> [!WARNING]\n> ## Review limit reached\n>\n> **Next included review available in 28 minutes.**"}
+        ]));
+        let (result, _, pauses) = ship(&github);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "CodeRabbit is rate limited and has not reviewed #7 (Review rate limited). At 2026-09-25 17:01 UTC it said its next review is available in 28 minutes. To ship it unreviewed, remove the ai-review label and ship it again; to wait, comment `@coderabbitai review` once the limit passes"
+        );
+        // A request made again replaces the status within a few looks, so it gets them.
+        assert_eq!(pauses, LIMITED_LOOKS as usize - 1);
+        assert!(github.queued.borrow().is_empty());
+        // Without its comment, the stop still says it is rate limited.
+        let (result, _, _) = ship(&self::github(vec![limited.clone()]));
+        assert!(result.unwrap_err().to_string().starts_with(
+            "CodeRabbit is rate limited and has not reviewed #7 (Review rate limited). To ship"
+        ));
+        // An earlier status replaced by a running review holds nothing up.
+        let github = self::github(vec![
+            limited,
+            labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]),
+            labelled(open(OLD), &[(OLD, "SUCCESS", REVIEWED)]),
+            in_queue(OLD),
+            merged(OLD),
+        ]);
+        assert_eq!(ship(&github).0.unwrap(), "3333333");
+        // Nor does a second review asked for after a finished one.
+        let again = labelled(
+            open(NEW),
+            &[(OLD, "SUCCESS", REVIEWED), (NEW, "SUCCESS", LIMITED)],
+        );
+        assert_eq!(review(&again), Review::Done);
     }
 }
