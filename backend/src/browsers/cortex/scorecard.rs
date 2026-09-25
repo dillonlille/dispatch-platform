@@ -340,22 +340,22 @@ mod tests {
     fn data_requests_name_the_api_and_this_dsp_on_the_pages_origin_only() {
         let origin = "https://logistics.amazon.com";
         let (base, dsp, station) = data_request(
-            "https://logistics.amazon.com/performance/api/v1/getData?dataSetId=x&dsp=FSCL&station=DOT4",
+            "https://logistics.amazon.com/performance/api/v1/getData?dataSetId=x&dsp=NLOG&station=TST1",
             origin,
         )
         .unwrap();
         assert_eq!(base, "https://logistics.amazon.com/performance/api/v1");
-        assert_eq!((dsp.as_str(), station.as_str()), ("FSCL", "DOT4"));
+        assert_eq!((dsp.as_str(), station.as_str()), ("NLOG", "TST1"));
         assert!(
             data_request(
-                "https://evil.example/performance/api/v1/getData?dsp=FSCL",
+                "https://evil.example/performance/api/v1/getData?dsp=NLOG",
                 origin
             )
             .is_err()
         );
         assert!(
             data_request(
-                "https://logistics.amazon.com/other/api/v1/getData?dsp=FSCL",
+                "https://logistics.amazon.com/other/api/v1/getData?dsp=NLOG",
                 origin
             )
             .is_err()
@@ -372,16 +372,16 @@ mod tests {
     fn addresses_follow_the_pages_parameter_order() {
         let api = Api {
             base: "https://logistics.amazon.com/performance/api/v1".into(),
-            dsp: "FSCL".into(),
+            dsp: "NLOG".into(),
             company_id: "company".into(),
         };
         let dataset = crate::scorecard::dataset("da_dsp_station_weekly_performance").unwrap();
         assert_eq!(
-            api.address(dataset, "DOT4", "2026-W38", "2026-W38"),
+            api.address(dataset, "TST1", "2026-W38", "2026-W38"),
             concat!(
                 "https://logistics.amazon.com/performance/api/v1/getData?dataSetId=",
-                "da_dsp_station_weekly_performance&dsp=FSCL&from=2026-W38&program=AMZL",
-                "&station=DOT4&timeFrame=Weekly&to=2026-W38"
+                "da_dsp_station_weekly_performance&dsp=NLOG&from=2026-W38&program=AMZL",
+                "&station=TST1&timeFrame=Weekly&to=2026-W38"
             )
         );
     }

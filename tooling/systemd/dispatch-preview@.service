@@ -9,11 +9,12 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/dispatch-platform/worktrees/%i
 # DISPATCH_DEV_PORT pins this worktree's port so its link survives restarts.
+EnvironmentFile=%h/.config/dispatch-preview/host.env
 EnvironmentFile=%h/.config/dispatch-preview/%i.env
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Previews serve unreviewed code with fixture data: Tailscale only, never 0.0.0.0.
-Environment=DISPATCH_DEV_HOST=100.120.159.116
+# Set DISPATCH_DEV_HOST to the host's private address in host.env.
 # Everything the preview makes, including its fixture data, stays in the worktree's own
 # scratch directory, which is deleted with the worktree once its PR merges.
 Environment=TMPDIR=/tmp/dispatch-%i

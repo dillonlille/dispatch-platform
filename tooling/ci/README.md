@@ -5,19 +5,19 @@ suite runs every time; nothing runs on the PR itself. `.github/workflows/checks.
 whole pipeline, and `tooling/ci/checks.ts` runs one of its jobs by name, or locally the whole
 suite in sequence:
 
-| Job             | `npm run check:ci -- …`                    | What it proves                                                    |
-| --------------- | ------------------------------------------ | ----------------------------------------------------------------- |
-| build           | `build`                                    | The runtime packages: the release backend and the dashboard.      |
-| checks          | `checks`                                   | Types, formatting, the bundle budget, the dashboard logic tests.  |
-| browser ×8      | `browser <n>/8 [spec]`                     | The browser suite against the packaged runtime.                   |
-| smoke           | `smoke`                                    | The package starts, signs in and serves, as a release asks.       |
-| benchmark       | `benchmark`                                | The Rust workload budget.                                         |
-| core            | `core`                                     | Rust formatting, lints and tests.                                 |
-| api             | `api`                                      | The API tests, the Python tooling tests, the npm audit.           |
-| collectors ×4   | `npm run test:browseros -- --shard <name>` | The native collectors with a real browser.                        |
-| rust-advisories |                                            | `cargo audit`.                                                    |
-| platform        |                                            | The gate: the one required check.                                 |
-| report          |                                            | A failed queue run's jobs and first failure, commented on its PR. |
+| Job             | `npm run check:ci -- …`                    | What it proves                                                                |
+| --------------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| build           | `build`                                    | The runtime packages: the release backend and the dashboard.                  |
+| checks          | `checks`                                   | Source privacy/secrets, types, formatting, bundle budget and dashboard logic. |
+| browser ×8      | `browser <n>/8 [spec]`                     | The browser suite against the packaged runtime.                               |
+| smoke           | `smoke`                                    | The package starts, signs in and serves, as a release asks.                   |
+| benchmark       | `benchmark`                                | The Rust workload budget.                                                     |
+| core            | `core`                                     | Rust formatting, lints and tests.                                             |
+| api             | `api`                                      | The API tests, the Python tooling tests, the npm audit.                       |
+| collectors ×4   | `npm run test:browseros -- --shard <name>` | The native collectors with a real browser.                                    |
+| rust-advisories |                                            | `cargo audit`.                                                                |
+| platform        |                                            | The gate: the one required check.                                             |
+| report          |                                            | A failed queue run's jobs and first failure, commented on its PR.             |
 
 The gate passes only when every job passed. It then verifies the package's inventory and
 source commit (`ci-verify.py`, which runs `dispatch-host ci verify`) and publishes it as
@@ -54,9 +54,28 @@ BrowserOS package. A run's own `tools` job builds what its inputs lack for the j
 later in that run. Launchers use a restored tool only on CI and only from the workspace's own
 `.ci-tools` directory; otherwise they build with Cargo.
 
+The repository Cargo config runs `tooling/rustc-remap.py` for dependencies and workspace
+crates, giving compiler paths neutral `/dispatch-build/...` prefixes. The wrapper's SHA-256
+in `build.rustflags` invalidates Cargo's dependency objects when the policy changes; update
+the hash after editing the wrapper. `check:rules` verifies it. Binary-cache schema 4 and the
+tool/fixture keys fingerprint the wrapper and config. Only this exact config allows binary
+reuse; custom configs, wrappers or overriding Rust flags (including empty and target-specific
+environment flags) disable it. Packaging and the
+artifact test run `tooling/security/check-build-paths.py` even for a reused executable, and
+reject remaining local build paths without printing their contents. The first build after
+adopting this policy recompiles dependencies. Compiler diagnostics use the neutral paths too.
+
 Run the tests with:
 
 ```sh
 cargo test --locked -p dispatch-ci -p dispatch-host
 python3 -m unittest discover -s tests/tooling -p '*_test.py'
 ```
+
+`npm run check:privacy` scans publishable working files, also through `check:rules` before
+pushes and the required `checks` job. It downloads the checksum-pinned Gitleaks release in
+`tooling/security/gitleaks.json`, checks for private paths, emails and known identifiers,
+and requires exact hashes for reviewed binary assets. Findings show locations and rules,
+never matched values. The scan excludes private ignored state and does not cover Git history
+or external exports; review prose and images manually. Do not broaden policy exceptions to
+silence a finding.

@@ -860,7 +860,7 @@ mod tests {
                 .is_none()
         );
         let request =
-            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"DOT4"}))
+            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"TST1"}))
                 .unwrap()
                 .unwrap();
         assert_eq!(
@@ -871,12 +871,12 @@ mod tests {
             "2026-09-13"
         );
         assert!(
-            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"dot4"}))
+            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"tst1"}))
                 .is_err()
         );
         assert!(
             Request::parse(
-                &json!({"collection":"scorecard","week":"2026-W38","station":"DOT4","extra":1})
+                &json!({"collection":"scorecard","week":"2026-W38","station":"TST1","extra":1})
             )
             .is_err()
         );
@@ -884,7 +884,7 @@ mod tests {
     #[test]
     fn the_fixture_is_a_valid_posted_week_and_its_keys_are_read_from_rows() {
         let request =
-            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"DOT4"}))
+            Request::parse(&json!({"collection":"scorecard","week":"2026-W38","station":"TST1"}))
                 .unwrap()
                 .unwrap();
         let capture = fixture(&request).unwrap();

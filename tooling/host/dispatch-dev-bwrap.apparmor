@@ -1,7 +1,7 @@
 abi <abi/4.0>,
 include <tunables/global>
 
-# Dedicated root-owned bubblewrap copy, executable only by root/thepickle.
+# Dedicated root-owned bubblewrap copy, executable only by root/the deployment operator.
 # Allows nested Chromium user namespaces; application launch flags still enforce
 # private mounts, PID/network namespaces and dropped outer capabilities.
 profile dispatch-dev-bwrap /usr/local/libexec/dispatch-dev/bwrap flags=(unconfined) {

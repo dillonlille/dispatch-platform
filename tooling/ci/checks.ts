@@ -27,9 +27,10 @@ async function run(name: string, command: string, args: string[], env = process.
 }
 const npm = (name: string, ...args: string[]) =>
   run(name, 'npm', ['run', name, ...(args.length ? ['--', ...args] : [])]);
-/** Types, formatting, the bundle budget and the dashboard logic tests, against `.build`. */
+/** Source privacy, types, formatting, bundle budget and dashboard logic against `.build`. */
 function checks() {
   return Promise.all([
+    npm('check:privacy'),
     npm('check'),
     npm('format:check'),
     npm('test:artifact'),

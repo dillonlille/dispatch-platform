@@ -24,6 +24,11 @@ const manifest = await replaceBuild(out, async (staging) => {
     path.join(metadata.target_directory, 'release/dispatch-backend'),
     path.join(staging, 'services/rust/dispatch-backend'),
   );
+  execFileSync(
+    'python3',
+    ['tooling/security/check-build-paths.py', path.join(staging, 'services/rust/dispatch-backend')],
+    { stdio: 'inherit' },
+  );
   await viteBuild({ build: { outDir: path.join(staging, 'dashboard') } });
   await compressAssets(path.join(staging, 'dashboard/assets'));
   // Every copy of the build carries its license. Installed updaters accept new files only under

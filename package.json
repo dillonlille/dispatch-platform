@@ -27,7 +27,9 @@
     "pr:prepare": "python3 tooling/ci/pr-prepare.py",
     "pr:ship": "python3 tooling/ci/pr-ship.py",
     "mail:types": "node services/cloudflare-mail/generate-types.mjs",
-    "contracts:generate": "DISPATCH_UPDATE_CONTRACTS=1 cargo test --locked --lib contracts::generated"
+    "contracts:generate": "DISPATCH_UPDATE_CONTRACTS=1 cargo test --locked --lib contracts::generated",
+    "check:privacy": "python3 tooling/security/scan.py",
+    "mail:configure": "tsx tooling/host/mail-config.ts"
   },
   "dependencies": {
     "@tanstack/react-table": "^9.2.4",

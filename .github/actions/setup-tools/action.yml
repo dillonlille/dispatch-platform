@@ -35,8 +35,8 @@ runs:
       # The host embeds the Python launchers, so they are inputs too.
       run: |
         image="${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}"
-        echo "tools=dispatch-tools-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/ci/**', 'backend/host/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
-        echo "fixture=dispatch-fixture-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'backend/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
+        echo "tools=dispatch-tools-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'backend/ci/**', 'backend/host/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
+        echo "fixture=dispatch-fixture-$image-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'backend/**', 'tooling/*.py') }}" >> "$GITHUB_OUTPUT"
         playwright=$(jq -er '.packages["node_modules/playwright-core"].version' package-lock.json)
         echo "playwright=dispatch-playwright-${{ runner.os }}-${{ runner.arch }}-$playwright" >> "$GITHUB_OUTPUT"
         echo "DISPATCH_CI_TOOLS=$GITHUB_WORKSPACE/.ci-tools" >> "$GITHUB_ENV"

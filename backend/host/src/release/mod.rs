@@ -2,6 +2,7 @@
 //! stamped into the build CI made of it. GitHub and immutable assets are the source of
 //! truth; the small local journal only pins intent across process interruptions.
 mod assets;
+mod origins;
 mod workflow;
 
 use crate::{
@@ -20,15 +21,14 @@ use std::{
     time::Duration,
 };
 
-const PRODUCTION: &str = "https://dispatch.dillonlille.com";
-/// Production only ever receives bytes Dev has served.
-const DEV: &str = "https://dispatchdev.dillonlille.com";
 const HELP: &str = "Dispatch release [run|status|prepare|publish] [X.Y.Z] --root CHECKOUT
   run       Release main's head, publish and verify Production (the default).
   status    Inspect GitHub, saved assets and public health without changing release state.
   prepare   Require the full suite and Dev serving the commit; stop at a verified draft.
   publish   Publish an existing verified preparation and verify Production.
 Options: --bump patch|minor|major, --commit REV, --notes PATH, --releases PATH
+Origins: --dev-origin HTTPS_ORIGIN --production-origin HTTPS_ORIGIN
+  Or set devOrigin and productionOrigin in CHECKOUT/config/release.json.
 Rerun the same command after fixing a failure. Tags and existing assets are never overwritten.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +47,7 @@ struct Options {
     commit: Option<String>,
     notes: Option<PathBuf>,
     releases: Option<PathBuf>,
+    origins: origins::Origins,
 }
 impl Options {
     fn parse(args: &[String]) -> Result<Self> {
@@ -58,6 +59,7 @@ impl Options {
             commit: None,
             notes: None,
             releases: None,
+            origins: origins::Origins::default(),
         };
         let mut iter = args.iter().peekable();
         if let Some(stage) = iter.peek().and_then(|s| match s.as_str() {
@@ -73,7 +75,13 @@ impl Options {
         let mut seen = BTreeSet::new();
         while let Some(arg) = iter.next() {
             match arg.as_str() {
-                "--root" | "--bump" | "--commit" | "--notes" | "--releases" => {
+                "--root"
+                | "--bump"
+                | "--commit"
+                | "--notes"
+                | "--releases"
+                | "--dev-origin"
+                | "--production-origin" => {
                     require(seen.insert(arg), "Duplicate release option")?;
                     let next = iter.next().ok_or("Release option needs a value")?;
                     require(!next.starts_with('-'), "Release option needs a value")?;
@@ -82,6 +90,8 @@ impl Options {
                         "--bump" => value.bump = next.clone(),
                         "--commit" => value.commit = Some(next.clone()),
                         "--notes" => value.notes = Some(std::path::absolute(next)?),
+                        "--dev-origin" => value.origins.dev = next.clone(),
+                        "--production-origin" => value.origins.production = next.clone(),
                         _ => value.releases = Some(std::path::absolute(next)?),
                     }
                 }
@@ -93,6 +103,7 @@ impl Options {
             }
         }
         require(value.root.is_absolute(), "--root CHECKOUT is required")?;
+        value.origins = origins::Origins::load(&value.root, value.origins)?;
         require(
             matches!(value.bump.as_str(), "patch" | "minor" | "major"),
             "Invalid version bump",
@@ -132,6 +143,7 @@ struct Release<'a> {
     tag: String,
     /// A temporary branch at the release commit, only for dispatching its full checks.
     checks_branch: String,
+    origins: origins::Origins,
 }
 
 fn say(message: impl std::fmt::Display) {
@@ -168,6 +180,7 @@ impl<'a> Release<'a> {
             version: version.into(),
             tag: format!("v{version}"),
             checks_branch: format!("release-checks/v{version}"),
+            origins: options.origins.clone(),
         }
     }
     fn command(&self, args: &[&str], cwd: Option<&Path>, timeout: u64) -> Result<String> {
@@ -336,7 +349,12 @@ impl<'a> Release<'a> {
         };
         let health = self
             .system
-            .request(&format!("{PRODUCTION}/api/health"), false, true, 20)
+            .request(
+                &format!("{}/api/health", self.origins.production),
+                false,
+                true,
+                20,
+            )
             .and_then(io::json_response)
             .unwrap_or_else(|error| json!({"problem": error.to_string()}));
         Ok(

@@ -37,6 +37,13 @@ reviews:
   # The project's rules, which live outside the repository. Keep them in step with the docs
   # they come from, named in each entry.
   path_instructions:
+    - path: '**'
+      instructions: |
+        Privacy rules (docs/privacy.md and docs/tests.md, maintained outside Git):
+        Use synthetic people, businesses, example emails and deployment addresses in fixtures.
+        Keep credentials, runtime state and host-specific configuration out of source and logs.
+        Preserve required copyright attribution and narrowly reviewed legacy compatibility identifiers. Do not broadly allowlist
+        scanner findings or approve changed binary assets without reviewing their contents.
     - path: '{**/*,.github/**}'
       instructions: |
         Review only what the changed lines introduce; older code in the same file is not a

@@ -1,3 +1,5 @@
+const DEV: &str = "https://dev.dispatch.test";
+const PRODUCTION: &str = "https://dispatch.test";
 use super::*;
 use crate::io::{Native, Response};
 use std::{
@@ -394,6 +396,10 @@ impl Fixture {
             commit: None,
             notes: None,
             releases: None,
+            origins: origins::Origins {
+                dev: DEV.into(),
+                production: PRODUCTION.into(),
+            },
         };
         Release::new(
             &self.system,
@@ -419,8 +425,11 @@ impl Fixture {
 
 #[test]
 fn legacy_cli_defaults_and_explicit_stages_are_validated_before_effects() {
-    let parse =
-        |args: &[&str]| Options::parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    let parse = |args: &[&str]| {
+        let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        args.extend(["--dev-origin", DEV, "--production-origin", PRODUCTION].map(String::from));
+        Options::parse(&args)
+    };
     assert_eq!(parse(&["--root", "/checkout"]).unwrap().stage, Stage::Run);
     assert_eq!(
         parse(&["prepare", "1.0.0", "--root", "/checkout"])
@@ -448,6 +457,63 @@ fn legacy_cli_defaults_and_explicit_stages_are_validated_before_effects() {
     assert_eq!(next_version("1.4.9", "minor").unwrap(), "1.5.0");
     assert_eq!(next_version("1.4.9", "major").unwrap(), "2.0.0");
     assert!(next_version("1.0.0-dev.0", "patch").is_err());
+}
+
+#[test]
+fn release_origins_are_required_canonical_distinct_and_overridable() {
+    let f = Fixture::new();
+    let args = vec![
+        "status".into(),
+        "--root".into(),
+        f.root.to_str().unwrap().into(),
+    ];
+    assert!(Options::parse(&args).is_err());
+    assert!(f.system.calls.borrow().is_empty());
+    io::private_directory(&f.root.join("config")).unwrap();
+    let config = f.root.join("config/release.json");
+    for origin in [
+        "",
+        "http://dev.dispatch.test",
+        "https://dev.dispatch.test/",
+        "https://dev.dispatch.test/path",
+        "https://dev.dispatch.test?query=1",
+        "https://dev.dispatch.test#fragment",
+        "https://user:password@dev.dispatch.test",
+        PRODUCTION,
+    ] {
+        io::write_json(
+            &config,
+            &json!({"devOrigin":origin,"productionOrigin":PRODUCTION}),
+        )
+        .unwrap();
+        assert!(Options::parse(&args).is_err(), "invalid origin accepted");
+    }
+    io::write_json(
+        &config,
+        &json!({"devOrigin":DEV,"productionOrigin":PRODUCTION}),
+    )
+    .unwrap();
+    let options = Options::parse(&args).unwrap();
+    assert_eq!(options.origins.dev, DEV);
+    assert_eq!(options.origins.production, PRODUCTION);
+    let mut override_args = args.clone();
+    override_args.extend(["--dev-origin", "https://other-dev.example.test"].map(String::from));
+    assert_eq!(
+        Options::parse(&override_args).unwrap().origins.dev,
+        "https://other-dev.example.test"
+    );
+    override_args.extend(["--dev-origin", DEV].map(String::from));
+    assert!(Options::parse(&override_args).is_err());
+    fs::remove_file(&config).unwrap();
+    let mut explicit = args.clone();
+    explicit.extend(["--dev-origin", DEV, "--production-origin", PRODUCTION].map(String::from));
+    assert!(Options::parse(&explicit).is_ok());
+    io::write_json(
+        &config,
+        &json!({"devOrigin":DEV,"productionOrigin":PRODUCTION,"extra":true}),
+    )
+    .unwrap();
+    assert!(Options::parse(&args).is_err());
 }
 
 #[test]

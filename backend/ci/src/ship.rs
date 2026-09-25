@@ -1010,24 +1010,24 @@ mod tests {
                 "backend/src/mail.rs",
                 Some(7),
                 CODERABBIT,
-                &["dillonlille"],
+                &["fixture-owner"],
                 true,
             ),
             thread(
                 "backend/src/http.rs",
                 Some(9),
                 CODERABBIT,
-                &["dillonlille"],
+                &["fixture-owner"],
                 false,
             ),
             thread(
                 "backend/src/roles.rs",
                 Some(3),
                 CODERABBIT,
-                &["dillonlille", CODERABBIT],
+                &["fixture-owner", CODERABBIT],
                 false,
             ),
-            thread("docs/ci.md", None, "thepickle", &[], false),
+            thread("docs/ci.md", None, "fixture-owner", &[], false),
         ])]);
         let error = ship(&github).0.unwrap_err().to_string();
         // The reply CodeRabbit has yet to answer, and the one it answered on this first look,
@@ -1036,7 +1036,7 @@ mod tests {
             error,
             "#7 has review threads to answer; reply to each, then ship it again:\n\
              - backend/src/jobs.rs:42 coderabbitai https://github.com/backend/src/jobs.rs\n\
-             - docs/ci.md thepickle https://github.com/docs/ci.md"
+             - docs/ci.md fixture-owner https://github.com/docs/ci.md"
         );
         assert!(github.queued.borrow().is_empty());
     }
@@ -1047,7 +1047,7 @@ mod tests {
             "backend/src/http.rs",
             Some(9),
             CODERABBIT,
-            &["dillonlille"],
+            &["fixture-owner"],
             false,
         );
         let mut settled = replied.clone();
@@ -1081,7 +1081,7 @@ mod tests {
             "backend/src/http.rs",
             Some(9),
             CODERABBIT,
-            &["dillonlille", CODERABBIT],
+            &["fixture-owner", CODERABBIT],
             false,
         );
         let mut resolved = answered.clone();
@@ -1107,7 +1107,7 @@ mod tests {
             "backend/src/jobs.rs",
             Some(4),
             CODERABBIT,
-            &["dillonlille", CODERABBIT],
+            &["fixture-owner", CODERABBIT],
             false,
         );
         let mut other_resolved = other.clone();
@@ -1188,7 +1188,7 @@ mod tests {
         *github.notices.borrow_mut() = Some(json!([
             {"author":{"login":CODERABBIT},"updatedAt":"2026-09-25T16:20:00Z",
                 "body":"> **Next included review available in 12 minutes.**"},
-            {"author":{"login":"dillonlille"},"updatedAt":"2026-09-25T17:00:00Z","body":"@coderabbitai review"},
+            {"author":{"login":"fixture-owner"},"updatedAt":"2026-09-25T17:00:00Z","body":"@coderabbitai review"},
             {"author":{"login":CODERABBIT},"updatedAt":"2026-09-25T17:01:26Z",
                 "body":"> [!WARNING]\n> ## Review limit reached\n>\n> **Next included review available in 28 minutes.**"}
         ]));

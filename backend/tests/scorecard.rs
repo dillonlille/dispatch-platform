@@ -9,7 +9,7 @@ use dispatch_backend::{
 use serde_json::{Value, json};
 
 fn request(week: &str) -> Request {
-    Request::parse(&json!({"collection":"scorecard","week":week,"station":"DOT4"}))
+    Request::parse(&json!({"collection":"scorecard","week":week,"station":"TST1"}))
         .unwrap()
         .unwrap()
 }
@@ -18,7 +18,7 @@ fn ready() -> (tempfile::TempDir, Store, String) {
     let (root, db, id) = common::bootstrapped();
     db.set_profile(
         &id,
-        json!({"stationCode":"DOT4","abbreviation":"FSCL","setupRequired":false}),
+        json!({"stationCode":"TST1","abbreviation":"NLOG","setupRequired":false}),
     )
     .unwrap();
     db.collector(&id, Provider::Cortex)
@@ -92,7 +92,7 @@ fn a_posted_week_is_published_into_one_table_per_dataset_with_its_keys() {
         vec![json!({"data_date":"2026-09-19","event_id":"90000001","impact":1})]
     );
     let weeks = db.scorecard_weeks(&id).unwrap();
-    assert_eq!(weeks.station, "DOT4");
+    assert_eq!(weeks.station, "TST1");
     assert_eq!(weeks.weeks.len(), 1);
     let week = &weeks.weeks[0];
     assert!(week.posted);
@@ -270,7 +270,7 @@ fn a_schedule_queues_the_newest_week_then_backfills_and_refreshes_within_the_lim
     assert_eq!(jobs.len(), scorecard::MAX_JOBS_PER_RUN);
     let latest = db.scorecard_weeks(&id).unwrap().latest_week;
     assert_eq!(jobs[0].0, format!("scorecard:{latest}"));
-    assert_eq!(jobs[0].1["station"], "DOT4");
+    assert_eq!(jobs[0].1["station"], "TST1");
     let expected = scorecard::weeks_before(&latest, scorecard::MAX_JOBS_PER_RUN - 1).unwrap();
     let keys: Vec<String> = jobs.iter().map(|(key, _)| key.clone()).collect();
     let expected_keys: Vec<String> = expected
