@@ -1,7 +1,16 @@
 import type { DspView, Permission } from '../../../shared/contracts/index.js';
+import { featureCatalog, grants } from './features.js';
 
+// A permission of a feature the DSP lacks is held by nobody, owners included.
 export const can = (view: DspView | undefined, permission: Permission) =>
-  Boolean(view && (view.role.owner || view.permissions.includes(permission)));
+  Boolean(
+    view &&
+    grants(view.features, permission) &&
+    (view.role.owner || view.permissions.includes(permission)),
+  );
+/** The permissions of `stored` that exist in the DSP; the rest are kept but never shown. */
+export const visiblePermissions = (view: DspView, stored: readonly Permission[]) =>
+  stored.filter((permission) => grants(view.features, permission));
 
 export const permissionLabels: Record<Permission, string> = {
   'uniforms.view': 'View Uniform Inventory',
@@ -18,13 +27,16 @@ export const permissionLabels: Record<Permission, string> = {
 };
 /** The role sheet's sections. Every permission in the catalog belongs to exactly one. */
 export const permissionGroups: [string, Permission[]][] = [
-  ['Timecard', ['timecard.view', 'timecard.manage']],
-  ['Uniform Inventory', ['uniforms.view', 'uniforms.adjust', 'uniforms.manage']],
-  ['Collections', ['collections.run']],
+  ...featureCatalog
+    .filter((feature) => feature.kind === 'page')
+    .map((feature): [string, Permission[]] => [feature.label, feature.permissions]),
   ['Connections', ['connections.manage']],
   ['Team', ['members.invite', 'members.manage', 'roles.manage']],
   ['DSP', ['settings.manage']],
 ];
+/** The sections the role sheet shows a DSP: those whose permissions exist in it. */
+export const visiblePermissionGroups = (view: DspView) =>
+  permissionGroups.filter(([, items]) => items.some((p) => grants(view.features, p)));
 /** Granting the key includes its value, mirroring `IMPLIED` in `backend/src/roles.rs`. */
 export const impliedPermissions: Partial<Record<Permission, Permission>> = {
   'timecard.manage': 'timecard.view',

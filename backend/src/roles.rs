@@ -260,7 +260,7 @@ impl Store {
             if role.system {
                 c.owner
             } else {
-                role.permissions.iter().all(|p| c.can(p))
+                c.visible(&role.permissions).all(|p| c.can(p))
             },
             "role_exceeds_permissions",
             403,
@@ -348,6 +348,18 @@ impl Store {
             ensure(!role.system, "owner_role_locked", 409)?;
             self.ensure_assignable(c, &role)?;
             self.ensure_name_free(dsp, &name, id)?;
+            // A permission of a feature the DSP lacks was never shown, so it stays as
+            // it was; switching the feature back on finds the role unchanged.
+            let hidden: Vec<&String> = role
+                .permissions
+                .iter()
+                .filter(|p| !super::features::grants(&c.features, p))
+                .collect();
+            let permissions: Vec<String> = PERMISSIONS
+                .iter()
+                .filter(|p| permissions.iter().any(|v| v == *p) || hidden.iter().any(|v| v == p))
+                .map(|p| (*p).to_owned())
+                .collect();
             self.platform.exec(
                 "UPDATE roles SET name=?,permissions=? WHERE id=?",
                 params![name, json!(permissions).to_string(), id],

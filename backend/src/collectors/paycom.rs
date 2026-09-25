@@ -19,6 +19,12 @@ impl Collector for Paycom {
     fn id(&self) -> &'static str {
         "paycom"
     }
+    fn label(&self) -> &'static str {
+        "Paycom"
+    }
+    fn capability(&self) -> &'static str {
+        "timecards"
+    }
     fn job_kind(&self) -> &'static str {
         "paycom.collect"
     }

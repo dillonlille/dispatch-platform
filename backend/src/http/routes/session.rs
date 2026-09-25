@@ -68,14 +68,16 @@ fn open_dsp(db: &Store, user: &User, input: &Input) -> Result<Reply> {
     } else {
         None
     };
+    let held = if c.owner {
+        roles::all()
+    } else {
+        c.permissions.clone()
+    };
     Reply::of(&DspView {
         token: db.view_token(&c),
         profile: db.profile(&c.dsp.id)?,
-        permissions: if c.owner {
-            roles::all()
-        } else {
-            c.permissions.clone()
-        },
+        permissions: c.visible(&held).cloned().collect(),
+        features: c.features.clone(),
         role: RoleSummary {
             id: c.role,
             name: c.role_name,

@@ -1,0 +1,315 @@
+//! What a DSP may use. A feature is a page with the permissions it owns, or a
+//! connection to a provider. The platform owner switches features per DSP: a
+//! switched-off feature's pages, permissions and automation do not exist for
+//! that DSP, and nothing it stored is touched, so switching it back on restores
+//! everything. Connections come from the collector registry, each providing a
+//! capability; a page requires capabilities, never a provider by name.
+use super::{
+    Result,
+    audit::AuditChange,
+    collectors::Provider,
+    contracts::{DspFeatures, FeatureChange},
+    db::{FromRow, Row, Store, iso},
+    ensure,
+};
+use rusqlite::params;
+use std::collections::BTreeMap;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Kind {
+    Page,
+    Connection,
+}
+#[derive(Clone, Debug)]
+pub struct Feature {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub kind: Kind,
+    /// The permissions this feature owns. Without it, nobody in the DSP holds them.
+    pub permissions: &'static [&'static str],
+    /// What a connection supplies, such as timecards.
+    pub provides: Option<&'static str>,
+    /// What a page needs one enabled provider of.
+    pub requires: &'static [&'static str],
+    /// Whether a DSP gets it when created, or while it has no row of its own.
+    pub default: bool,
+}
+// Every page. Connections are listed by the collector registry below.
+pub const PAGES: &[Feature] = &[
+    Feature {
+        id: "timecard",
+        label: "Timecard",
+        kind: Kind::Page,
+        permissions: &["timecard.view", "timecard.manage", "collections.run"],
+        provides: None,
+        requires: &["timecards", "meal_breaks"],
+        default: true,
+    },
+    Feature {
+        id: "uniforms",
+        label: "Uniform Inventory",
+        kind: Kind::Page,
+        permissions: &["uniforms.view", "uniforms.adjust", "uniforms.manage"],
+        provides: None,
+        requires: &[],
+        default: true,
+    },
+];
+/// The page whose schedules, collections and jobs run. Nothing collects without it.
+pub const SCHEDULES: &str = "timecard";
+/// The permission every connection shares; it exists while any connection does.
+const CONNECTIONS: &str = "connections.manage";
+
+fn connection(provider: Provider) -> Feature {
+    let collector = provider.collector();
+    Feature {
+        id: collector.id(),
+        label: collector.label(),
+        kind: Kind::Connection,
+        permissions: &[],
+        provides: Some(collector.capability()),
+        requires: &[],
+        default: true,
+    }
+}
+/// The catalog, pages first, then every registered connection.
+pub fn catalog() -> Vec<Feature> {
+    PAGES
+        .iter()
+        .cloned()
+        .chain(Provider::ALL.iter().map(|p| connection(*p)))
+        .collect()
+}
+pub fn find(id: &str) -> Option<Feature> {
+    catalog().into_iter().find(|f| f.id == id)
+}
+/// Whether `permission` exists in a DSP with `enabled` features: its owning page
+/// is on, or for the connections permission any connection is on. A permission
+/// no feature owns always exists.
+pub fn grants(enabled: &[String], permission: &str) -> bool {
+    let on = |f: &Feature| enabled.iter().any(|e| e == f.id);
+    if permission == CONNECTIONS {
+        return catalog()
+            .iter()
+            .any(|f| f.kind == Kind::Connection && on(f));
+    }
+    PAGES
+        .iter()
+        .find(|f| f.permissions.contains(&permission))
+        .is_none_or(on)
+}
+/// The permissions of `stored` that exist with `enabled` features.
+pub fn visible<'a>(
+    enabled: &'a [String],
+    stored: &'a [String],
+) -> impl Iterator<Item = &'a String> {
+    stored.iter().filter(move |p| grants(enabled, p))
+}
+/// Whether an enabled connection provides `capability`.
+fn provided(capability: &str, enabled: &[String]) -> bool {
+    catalog()
+        .iter()
+        .any(|f| f.provides == Some(capability) && enabled.iter().any(|e| e == f.id))
+}
+/// Whether every requirement of `feature` has an enabled provider.
+fn satisfied(feature: &Feature, enabled: &[String]) -> bool {
+    feature.requires.iter().all(|c| provided(c, enabled))
+}
+
+struct FeatureRow {
+    feature: String,
+    enabled: bool,
+}
+impl FromRow for FeatureRow {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            feature: row.get("feature")?,
+            enabled: row.get("enabled")?,
+        })
+    }
+}
+impl Store {
+    /// The DSP's enabled features, in catalog order. A feature without a row of its
+    /// own is at its default, which is how a DSP made before the feature existed reads.
+    pub fn features(&self, dsp: &str) -> Result<Vec<String>> {
+        let rows: Vec<FeatureRow> = self.platform.query_as(
+            "SELECT feature,enabled FROM dsp_features WHERE dsp_id=?",
+            [dsp],
+        )?;
+        let stored: BTreeMap<_, _> = rows.into_iter().map(|r| (r.feature, r.enabled)).collect();
+        Ok(catalog()
+            .iter()
+            .filter(|f| stored.get(f.id).copied().unwrap_or(f.default))
+            .map(|f| f.id.to_owned())
+            .collect())
+    }
+    pub fn feature_enabled(&self, dsp: &str, id: &str) -> Result<bool> {
+        Ok(self.features(dsp)?.iter().any(|f| f == id))
+    }
+    /// Writes a new DSP's rows, so a later change of a default leaves it as it was made.
+    pub fn seed_features(&self, dsp: &str) -> Result<()> {
+        for feature in catalog() {
+            self.platform.exec(
+                "INSERT OR IGNORE INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,?,?)",
+                params![dsp, feature.id, feature.default, iso()],
+            )?;
+        }
+        Ok(())
+    }
+    /// Switches one feature, and with it whatever depends on it: enabling a page
+    /// enables a provider of each capability it lacks, enabling a provider switches
+    /// off another of the same capability, and disabling a provider disables the
+    /// pages left without one. Every switch is audited; the answer lists them.
+    pub fn set_feature(
+        &self,
+        dsp: &str,
+        id: &str,
+        enabled: bool,
+        actor: &str,
+    ) -> Result<DspFeatures> {
+        let all = catalog();
+        let feature = find(id).ok_or_else(|| super::Error::new("feature_not_found", 404))?;
+        self.platform.transaction(|| {
+            self.find_dsp(dsp)?;
+            let mut current = self.features(dsp)?;
+            let mut changed = Vec::new();
+            let mut flip = |current: &mut Vec<String>, f: &Feature, on: bool| {
+                let is_on = current.iter().any(|e| e == f.id);
+                if is_on == on {
+                    return;
+                }
+                if on {
+                    current.push(f.id.to_owned());
+                } else {
+                    current.retain(|e| e != f.id);
+                }
+                changed.push(FeatureChange {
+                    feature: f.id.to_owned(),
+                    enabled: on,
+                });
+            };
+            if enabled {
+                if let Some(capability) = feature.provides {
+                    for other in all
+                        .iter()
+                        .filter(|f| f.provides == Some(capability) && f.id != feature.id)
+                    {
+                        flip(&mut current, other, false);
+                    }
+                }
+                for capability in feature.requires {
+                    if provided(capability, &current) {
+                        continue;
+                    }
+                    let providers: Vec<_> = all
+                        .iter()
+                        .filter(|f| f.provides == Some(*capability))
+                        .collect();
+                    ensure(providers.len() == 1, "provider_required", 409)?;
+                    flip(&mut current, providers[0], true);
+                }
+                flip(&mut current, &feature, true);
+            } else {
+                flip(&mut current, &feature, false);
+                for page in all.iter().filter(|f| f.kind == Kind::Page) {
+                    if !satisfied(page, &current) {
+                        flip(&mut current, page, false);
+                    }
+                }
+            }
+            for change in &changed {
+                self.platform.exec(
+                    "INSERT INTO dsp_features(dsp_id,feature,enabled,changed_by,changed_at) \
+                     VALUES (?1,?2,?3,?4,?5) ON CONFLICT(dsp_id,feature) DO UPDATE SET \
+                     enabled=?3,changed_by=?4,changed_at=?5",
+                    params![dsp, change.feature, change.enabled, actor, iso()],
+                )?;
+                let label =
+                    find(&change.feature).map_or(change.feature.clone(), |f| f.label.to_owned());
+                let cause: Vec<AuditChange> = if change.feature == id {
+                    vec![]
+                } else {
+                    vec![("cause", None, Some(feature.label.to_owned()))]
+                };
+                self.audit_with(
+                    Some(actor),
+                    Some(dsp),
+                    if change.enabled {
+                        "dsp.feature_enabled"
+                    } else {
+                        "dsp.feature_disabled"
+                    },
+                    &change.feature,
+                    Some(&label),
+                    &cause,
+                )?;
+            }
+            if !changed.is_empty() {
+                // Open views sign the DSP revision, so members pick up the change.
+                self.platform
+                    .exec("UPDATE dsps SET revision=revision+1 WHERE id=?", [dsp])?;
+            }
+            Ok(DspFeatures {
+                features: self.features(dsp)?,
+                changed,
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn the_catalog_is_consistent() {
+        let all = catalog();
+        let mut ids: Vec<_> = all.iter().map(|f| f.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), all.len(), "feature ids repeat");
+        let mut owned = Vec::new();
+        for feature in &all {
+            for permission in feature.permissions {
+                assert!(
+                    super::super::roles::PERMISSIONS.contains(permission),
+                    "{permission} is not a permission"
+                );
+                assert!(!owned.contains(permission), "{permission} has two features");
+                owned.push(*permission);
+            }
+            match feature.kind {
+                Kind::Page => assert!(feature.provides.is_none()),
+                Kind::Connection => {
+                    assert!(feature.provides.is_some() && feature.requires.is_empty())
+                }
+            }
+            for capability in feature.requires {
+                assert!(
+                    all.iter().any(|f| f.provides == Some(*capability)),
+                    "nothing provides {capability}"
+                );
+            }
+        }
+        assert!(!owned.contains(&CONNECTIONS));
+        assert!(find(SCHEDULES).is_some_and(|f| f.kind == Kind::Page));
+    }
+    #[test]
+    fn permissions_follow_their_feature() {
+        let on = |ids: &[&str]| ids.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(grants(&on(&["uniforms"]), "uniforms.view"));
+        assert!(!grants(&on(&["timecard"]), "uniforms.view"));
+        assert!(grants(&on(&[]), "members.invite"));
+        assert!(grants(&on(&["cortex"]), "connections.manage"));
+        assert!(!grants(
+            &on(&["timecard", "uniforms"]),
+            "connections.manage"
+        ));
+        let stored = on(&["uniforms.view", "roles.manage", "timecard.view"]);
+        let enabled = on(&["timecard"]);
+        let seen: Vec<_> = visible(&enabled, &stored).collect();
+        assert_eq!(
+            seen,
+            [&"roles.manage".to_owned(), &"timecard.view".to_owned()]
+        );
+    }
+}

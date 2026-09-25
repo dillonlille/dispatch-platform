@@ -22,6 +22,12 @@ impl Collector for Cortex {
     fn id(&self) -> &'static str {
         "cortex"
     }
+    fn label(&self) -> &'static str {
+        "Cortex"
+    }
+    fn capability(&self) -> &'static str {
+        "meal_breaks"
+    }
     fn job_kind(&self) -> &'static str {
         "cortex.meal_breaks.collect"
     }

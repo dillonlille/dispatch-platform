@@ -6,7 +6,15 @@ import type { RoleSummary } from "./RoleSummary";
 /**
  * What opening a DSP answers with: the signed view token and what the role may do.
  */
-export type DspView = { dsp: Dsp, role: RoleSummary, permissions: Array<string>, token: string, profile: DspProfile,
+export type DspView = { dsp: Dsp, role: RoleSummary,
+/**
+ * What the role may do, within the DSP's features.
+ */
+permissions: Array<string>,
+/**
+ * The features the DSP has; a page of another does not exist here.
+ */
+features: Array<string>, token: string, profile: DspProfile,
 /**
  * Every role of the DSP, sent only to a platform owner so they can look through one.
  */

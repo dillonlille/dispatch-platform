@@ -3,6 +3,7 @@ import type { AuditChange, AuditEvent, Permission } from '../../../../shared/con
 import { errorLabel } from '../../app/api.js';
 import { elapsed, timeOfDay, title } from '../../lib/format.js';
 import { permissionLabels } from '../../app/permissions.js';
+import { featureLabel } from '../../app/features.js';
 import { paycomColumns } from '../../lib/paycom.js';
 
 export const views = new Set(['dsp.view_opened', 'dsp.owner_view_opened']);
@@ -76,6 +77,18 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
   ],
   'dsp.support_visibility_changed': (e) => [
     e.detail === 'shown' ? 'showed Platform support to ' : 'hid Platform support from ',
+    strong(e.dspName ?? 'a DSP'),
+  ],
+  'dsp.feature_enabled': (e) => [
+    'enabled ',
+    strong(featureLabel(e.detail)),
+    ' for ',
+    strong(e.dspName ?? 'a DSP'),
+  ],
+  'dsp.feature_disabled': (e) => [
+    'disabled ',
+    strong(featureLabel(e.detail)),
+    ' for ',
     strong(e.dspName ?? 'a DSP'),
   ],
   'dsp.settings_updated': () => ['updated DSP settings'],
@@ -172,6 +185,8 @@ export const spoken = new Set([
   'connection.verification_submitted',
   'dsp.owner_view_opened',
   'dsp.support_visibility_changed',
+  'dsp.feature_enabled',
+  'dsp.feature_disabled',
   'employees.links_updated',
   'paycom.settings_updated',
 ]);
@@ -200,6 +215,7 @@ export const fields: Record<string, string> = {
   interval: 'Every',
   time: 'Time',
   enabled: 'Status',
+  cause: 'With',
   abbreviation: 'Abbreviation',
   station: 'Station',
   'paycom.automatic_sync': 'Automatic sync',

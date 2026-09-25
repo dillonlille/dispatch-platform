@@ -67,6 +67,8 @@ pub struct DspSummary {
     pub paycom: ConnectionStatus,
     pub last_collection: Option<String>,
     pub role: Option<String>,
+    /// The features the DSP has (`features`).
+    pub features: Vec<String>,
     /// The query's own columns, which earlier releases sent along. No dashboard reads
     /// them; they stay until a release has shipped without a reader that could.
     #[serde(flatten)]
@@ -152,7 +154,10 @@ pub struct RoleSummary {
 pub struct DspView {
     pub dsp: Dsp,
     pub role: RoleSummary,
+    /// What the role may do, within the DSP's features.
     pub permissions: Vec<String>,
+    /// The features the DSP has; a page of another does not exist here.
+    pub features: Vec<String>,
     pub token: String,
     pub profile: DspProfile,
     /// Every role of the DSP, sent only to a platform owner so they can look through one.

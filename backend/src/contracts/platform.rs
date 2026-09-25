@@ -41,6 +41,20 @@ pub struct MailHealth {
     pub last_error: Option<String>,
     pub transport: TransportHealth,
 }
+/// One feature switched for a DSP, by the platform owner or by a dependency.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct FeatureChange {
+    pub feature: String,
+    pub enabled: bool,
+}
+/// A DSP's features after a switch: what it has now, and what the switch changed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct DspFeatures {
+    pub features: Vec<String>,
+    pub changed: Vec<FeatureChange>,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

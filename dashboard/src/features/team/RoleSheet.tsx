@@ -9,8 +9,9 @@ import { Modal } from '../../ui/index.js';
 import {
   can,
   impliedPermissions as implied,
-  permissionGroups as groups,
   permissionLabels,
+  visiblePermissionGroups,
+  visiblePermissions,
 } from '../../app/permissions.js';
 import { useAction } from '../../app/useAction.js';
 import { saveTeamRole } from '../../app/endpoints.js';
@@ -27,13 +28,14 @@ export function RoleSheet({
   saved: (permissionsChanged: boolean) => Promise<void> | void;
 }) {
   const [name, setName] = useState(role?.name ?? '');
-  const [chosen, setChosen] = useState<Permission[]>(role?.permissions ?? []);
+  // Permissions of features the DSP lacks are never shown; the server keeps them as they are.
+  const shown = visiblePermissions(view, role?.permissions ?? []);
+  const groups = visiblePermissionGroups(view);
+  const [chosen, setChosen] = useState<Permission[]>(shown);
   const [confirming, setConfirming] = useState(false);
   const ordered = (permissions: Permission[]) =>
     allPermissions.filter((p) => permissions.includes(p));
-  const dirty =
-    name !== (role?.name ?? '') ||
-    ordered(chosen).join() !== ordered(role?.permissions ?? []).join();
+  const dirty = name !== (role?.name ?? '') || ordered(chosen).join() !== ordered(shown).join();
   // Edits leave only through Save or Discard; closing the tab drops them silently.
   const leave = () => (dirty ? setConfirming(true) : close());
   const locked = (permission: Permission) =>
