@@ -3,4 +3,8 @@
 /**
  * How many rows one dataset of a publication holds.
  */
-export type ScorecardDatasetCount = { id: string, table: string, rows: number, };
+export type ScorecardDatasetCount = { id: string, table: string, rows: number,
+/**
+ * `api`, or `csv` when the page's spreadsheet stood in for the API.
+ */
+source: string, };

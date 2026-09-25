@@ -12,7 +12,13 @@ test(
   { skip: process.env.DISPATCH_TEST_NATIVE !== '1', timeout: 240000 },
   async (t) => {
     const requests: URL[] = [];
+    // Week 36 is posted, but its returns dataset answers an error: the page's
+    // spreadsheet stands in for it.
     const rows = (dataSetId: string, week: string) => {
+      if (week === '2026-W36')
+        return dataSetId === 'dsp_station_weekly_quality'
+          ? [{ dsp_code: 'FSCL', station_code: 'DOT4', data_date: week }]
+          : [];
       if (week !== '2026-W38') return [];
       switch (dataSetId) {
         case 'dsp_station_weekly_quality':
@@ -83,6 +89,32 @@ test(
         res.setHeader('set-cookie', 'authenticated=yes; Path=/; Max-Age=3600');
         return redirect('/dspconsolev2');
       }
+      if (
+        url.pathname === '/performance' &&
+        url.searchParams.get('pageId') === 'dsp_return_to_station'
+      ) {
+        if (!authenticated) return redirect('/ap/signin');
+        // The returns page for week 36: a table whose component carries the
+        // spreadsheet's templates, an action bar with an unlabeled download button,
+        // and a download that hands the browser a blob, as the real page does.
+        if (url.searchParams.get('to') !== '2026-W36')
+          return redirect(
+            '/performance?pageId=dsp_return_to_station&station=DOT4&companyId=company-1&tabId=dsp-return-to-station-weekly-tab&timeFrame=Weekly&to=2026-W38',
+          );
+        return html(
+          `<div id="bar"><button id="clear">Clear search</button><button id="dl"><svg width="16" height="16"></svg></button></div>` +
+            `<table id="t"><thead><tr><th>Delivery Associate</th></tr></thead><tbody><tr><th>Jo</th></tr></tbody></table>` +
+            `<script>
+            const table = document.querySelector('#t');
+            table.__reactInternalInstance$fixture = { memoizedProps: {}, return: { memoizedProps: { csvDownloadData: { fields: [{ header: 'a', value: '\${da_name}' }, { header: 'b', value: '\${impacting_dcr}' }, { header: 'c', value: '\${tracking_id}' }], csvDataRows: [1], csvFileName: 'Quality_RTS.csv' } }, type: { displayName: 'mo' } } };
+            document.querySelector('#bar').__reactInternalInstance$fixture = { memoizedProps: {}, type: { displayName: 'TableActionBar' }, return: null };
+            document.querySelector('#dl').onclick = () => {
+              const blob = new Blob(['\\ufeffDelivery Associate ,Impacts Scorecard,Tracking ID\\nJo,Y,TBA9\\nAl,N,TBA10\\n'], { type: 'text/csv;charset=utf-8;' });
+              const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Quality_RTS.csv'; a.click();
+            };
+            </script>`,
+        );
+      }
       if (url.pathname === '/performance') {
         if (!authenticated) return redirect('/ap/signin');
         // Like Cortex, the overview settles on a station and company of its own
@@ -105,12 +137,20 @@ test(
         }
         requests.push(url);
         const dataSetId = url.searchParams.get('dataSetId')!;
+        const to = url.searchParams.get('to')!;
         const week =
           url.searchParams.get('timeFrame') === 'Weekly'
-            ? url.searchParams.get('to')!
-            : url.searchParams.get('to') === '2026-09-19'
+            ? to
+            : to === '2026-09-19'
               ? '2026-W38'
-              : 'other';
+              : to === '2026-09-05'
+                ? '2026-W36'
+                : 'other';
+        // Refused in a way the page can answer; a server error would mean Cortex is down.
+        if (week === '2026-W36' && dataSetId === 'da_dsp_weekly_rts_deep_dive') {
+          res.writeHead(404);
+          return res.end();
+        }
         res.setHeader('content-type', 'application/json;charset=UTF-8');
         return res.end(
           JSON.stringify({
@@ -219,5 +259,31 @@ test(
     const unposted = after.weeks.find((w: any) => w.week === '2026-W37');
     assert.equal(unposted.posted, false);
     assert.equal(unposted.publication, null);
+    // A dataset the API refuses comes from the page's spreadsheet instead.
+    await collect('2026-W36');
+    const fallback = (await owner.get('/api/dsp/scorecard/weeks')).value.weeks.find(
+      (w: any) => w.week === '2026-W36',
+    );
+    assert.equal(fallback.posted, true);
+    const returns = fallback.publication.datasets.find(
+      (d: any) => d.table === 'returns_to_station',
+    );
+    assert.deepEqual({ rows: returns.rows, source: returns.source }, { rows: 2, source: 'csv' });
+    assert.equal(
+      fallback.publication.datasets.find((d: any) => d.table === 'dsp_quality').source,
+      'api',
+    );
+    const fromPage = f.database(`dsps/${dsp.id}/data/scorecard/scorecard.sqlite`, (db) =>
+      db
+        .prepare(
+          "SELECT r.tracking_id,r.impact,json_extract(r.row,'$.da_name') name FROM returns_to_station r JOIN scorecard_publications p ON p.id=r.publication_id WHERE p.week='2026-W36' ORDER BY r.row_index",
+        )
+        .all()
+        .map((r) => ({ ...r })),
+    );
+    assert.deepEqual(fromPage, [
+      { tracking_id: 'TBA9', impact: 1, name: 'Jo' },
+      { tracking_id: 'TBA10', impact: 0, name: 'Al' },
+    ]);
   },
 );

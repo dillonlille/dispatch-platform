@@ -49,6 +49,7 @@ codes! {
     CortexInvalidMealEvidence => "cortex_invalid_meal_evidence",
     CortexInvalidIdentity => "cortex_invalid_identity",
     InvalidCortexScope => "invalid_cortex_scope",
+    ScorecardWeekUnavailable => "scorecard_week_unavailable",
     TimecardExtractionFailed => "timecard_extraction_failed",
     InvalidTimecardHours => "invalid_timecard_hours",
     VerificationRequired => "verification_required",

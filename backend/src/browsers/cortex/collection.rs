@@ -15,7 +15,7 @@ use std::{
 /// instead of 42 s for 6% more memory; more share the same renderer and connection.
 pub(super) const TABS: usize = 2;
 // The route's content has not settled yet; read it again.
-const CONTENT_NOT_READY: &[crate::Code] = &[
+pub(super) const CONTENT_NOT_READY: &[crate::Code] = &[
     crate::Code::CortexContentIncomplete,
     crate::Code::BrowserNavigationPending,
     crate::Code::BrowserScriptFailed,
