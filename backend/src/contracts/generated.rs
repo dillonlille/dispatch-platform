@@ -108,6 +108,7 @@ fn bindings() -> BTreeMap<PathBuf, String> {
         PublicUser,
         Role,
         RoleSummary,
+        RuntimeSource,
         ScheduleCollection,
         SchedulePreview,
         ScorecardDatasetCount,

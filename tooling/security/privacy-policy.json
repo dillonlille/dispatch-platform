@@ -74,6 +74,12 @@
       "rule": "fixed-network-address",
       "lineSha256": "ffdeac63e5326e560546318904beed01e921727bedd573e4ff7a980e5afc1a48",
       "reason": "Exercise blocked address ranges and a public resolver in network-policy tests."
+    },
+    {
+      "path": "README.md",
+      "rule": "known-private-identity",
+      "lineSha256": "93adbef2ee9de2d196a0650f225c57d985398fc569e0860d9989d7a914a134a3",
+      "reason": "Preserve the copyright attribution introduced by the licensing change; no fixture identity is allowed by this exception."
     }
   ],
   "assets": {

@@ -31,6 +31,9 @@ const manifest = await replaceBuild(out, async (staging) => {
   );
   await viteBuild({ build: { outDir: path.join(staging, 'dashboard') } });
   await compressAssets(path.join(staging, 'dashboard/assets'));
+  // Every copy of the build carries its license. Installed updaters accept new files only under
+  // dashboard/, and the server does not serve this one.
+  fs.copyFileSync(path.join(root, 'LICENSE'), path.join(staging, 'dashboard/LICENSE.txt'));
   fs.mkdirSync(path.join(staging, 'tooling'));
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   fs.writeFileSync(

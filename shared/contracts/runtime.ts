@@ -81,6 +81,7 @@ export const sessionSchema = z.object({
   environment,
   release: text,
   providerMode: z.enum(['fixture', 'native']),
+  source: z.object({ version: text.nullable(), commit: text.nullable() }),
 }) satisfies z.ZodType<SessionView>;
 const viewRole = z.object({ id: text, name: text, owner: z.boolean() });
 const viewSchema = z.object({

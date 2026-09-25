@@ -31,6 +31,7 @@ fn session(db: &Store, user: &User, _: &Input) -> Result<Reply> {
         } else {
             ProviderMode::Native
         },
+        source: db.config.source.clone(),
     })
 }
 

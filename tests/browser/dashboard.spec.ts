@@ -284,6 +284,17 @@ test('the account menu closes on a press outside it and on Escape', async ({ pag
   await expect(menu.locator('.account-popover')).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+test('the account menu links the running build’s source in a new tab', async ({ page }) => {
+  await login(page);
+  await page.locator('details.account-menu summary').click();
+  const source = page.locator('.account-popover a').filter({ hasText: 'Source code' });
+  await expect(source).toHaveAttribute('target', '_blank');
+  // A packaged build names its commit; a server running from a checkout links the repository.
+  await expect(source).toHaveAttribute(
+    'href',
+    /^https:\/\/github\.com\/dispatch-systems\/dispatch-platform(\/tree\/[0-9a-f]{40})?$/,
+  );
+});
 test('archived account tabs preserve names and appearance preferences', async ({ page }) => {
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();

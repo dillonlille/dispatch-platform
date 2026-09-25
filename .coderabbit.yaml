@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit reviews only the PRs we ask it to: a `@coderabbitai review` comment on a PR
-# labelled `ai-review`, which `npm run pr:ship` holds until the review is done and its threads
-# are resolved.
+# labelled `ai-review`, which `npm run pr:ship` holds until the review is done and CodeRabbit
+# has resolved its threads.
 reviews:
   profile: chill
   request_changes_workflow: false
@@ -11,18 +11,12 @@ reviews:
   in_progress_fortune: false
   suggested_labels: false
   suggested_reviewers: false
+  # No notes on the PRs it skips, which are most of them.
+  review_status: false
   # pr:ship reads the `CodeRabbit` commit status, which says "Review completed" once it is done.
   review_progress: false
   commit_status: true
   fail_commit_status: true
-  path_instructions:
-    - path: '**'
-      instructions: |
-        Privacy rules (docs/privacy.md and docs/tests.md, maintained outside Git):
-        Use synthetic people, businesses, example emails and deployment addresses in fixtures.
-        Keep credentials, runtime state and host-specific configuration out of source and logs.
-        Preserve narrowly reviewed legacy compatibility identifiers. Do not broadly allowlist
-        scanner findings or approve changed binary assets without reviewing their contents.
   auto_review:
     # Only a comment starts a review, and pushes after it are not reviewed again.
     enabled: false
@@ -40,3 +34,82 @@ reviews:
     - '!package-lock.json'
     - '!Cargo.lock'
     - '!shared/contracts/generated/**'
+  # The project's rules, which live outside the repository. Keep them in step with the docs
+  # they come from, named in each entry.
+  path_instructions:
+    - path: '**'
+      instructions: |
+        Privacy rules (docs/privacy.md and docs/tests.md, maintained outside Git):
+        Use synthetic people, businesses, example emails and deployment addresses in fixtures.
+        Keep credentials, runtime state and host-specific configuration out of source and logs.
+        Preserve required copyright attribution and narrowly reviewed legacy compatibility identifiers. Do not broadly allowlist
+        scanner findings or approve changed binary assets without reviewing their contents.
+    - path: '{**/*,.github/**}'
+      instructions: |
+        Review only what the changed lines introduce; older code in the same file is not a
+        finding, and do not ask for cleanup outside the PR's scope.
+        Never accept a change that weakens a test, budget or check to get a pass: a deleted or
+        loosened assertion, a skipped or removed test, a raised limit or budget, or a new
+        suppression such as `#[allow]`, `eslint-disable`, `@ts-ignore` or `@ts-expect-error`.
+        Flag each and ask why it is needed. (workflow.md)
+    - path: 'backend/src/db/schema/**'
+      instructions: |
+        Production rolls back one release, so each release must open, and leave usable, the
+        previous release's data (database.md):
+        - Migrations are additive only: new tables, nullable or defaulted columns, indexes.
+          Flag any edit to or renumbering of an existing migration, any change to
+          `PRAGMA user_version`, and any drop, rename or rewrite of what the previous release
+          still uses; that takes two releases.
+        - Adding a column is a `Code` step with `add_column`, not a plain `ALTER TABLE` in a
+          `.sql` file.
+        - A `CHECK` that lists values is widened by rebuilding the table under a `_v2` name,
+          copying rows with an explicit column list, rebuilding referencing tables before
+          their parent, and recreating the indexes, as `jobs/0002_scorecard_kind.sql` does.
+          The release that rebuilds must not write the new values yet.
+    - path: 'backend/src/**'
+      instructions: |
+        - Logs and request events never carry request bodies, raw emails or IP addresses,
+          cookies, tokens or employee records. Session identifiers shown to users are HMAC
+          identifiers, never bearer tokens or token hashes. Browser data and provider
+          profiles are credentials. (security.md)
+        - Compare errors with `error.is(Code::X)`, never by their text. Never hard-code job
+          titles; customizable roles stay in the role system. (codebase.md, security.md)
+    - path: 'backend/src/http/routes/**'
+      instructions: |
+        A route's access (`Public`, `Session`, `PlatformOwner` or `Dsp("permission")`) must be
+        no broader than what it reads or changes. Work that waits outside the database uses
+        `async_get`/`async_post` and re-authorizes after each wait. A new route needs its row
+        in `backend/tests/http_routes.rs`. A password change verifies the current password.
+        (codebase.md, security.md)
+    - path: '{backend/src/roles.rs,shared/contracts/accounts.ts,dashboard/src/app/permissions.ts}'
+      instructions: |
+        A permission lives in all three of `backend/src/roles.rs`, `shared/contracts/accounts.ts`
+        and `dashboard/src/app/permissions.ts`, with a label and a section in
+        `permissionGroups`. Flag a change that updates one without the others. (codebase.md)
+    - path: 'backend/src/browsers/paycom/{extract.rs,timecard.js}'
+      instructions: |
+        `extract.rs` ports `timecard.js`'s detached reading. A change to one must be matched in
+        the other and proved with `http_extraction_parity`. (providers.md)
+    - path: 'dashboard/src/**'
+      instructions: |
+        (ui.md, codebase.md)
+        - No Tailwind, shadcn, Motion or TanStack Virtual. TanStack Table is used only through
+          `ui/useDataTable.ts`. Styles use the tokens in `styles/tokens.css` and live with the
+          component that owns them. Animation is hand-written CSS or a small rAF loop, and is
+          off under `prefers-reduced-motion`.
+        - Use the existing primitives before new markup: `Header`, `Tabs`, `Modal`,
+          `ConfirmDialog`, `Popover`, `DataState` (for loading and errors), `SearchInput`,
+          `Pagination`, `SortHeader`, `DetailList`, `Badge`, `DspAvatar`, `Empty`, `ErrorBox`,
+          `Loading`, `useDataTable`, `useFocusTrap`. Mutations use `useAction`; formatting
+          comes from `lib/format.ts`.
+        - An editor with unsaved changes never just closes: Escape, the backdrop and the close
+          button ask "Save changes?" with only Save and Discard, as `features/team/RoleSheet.tsx`
+          does. Closing or refreshing the browser tab discards silently, with no
+          `beforeunload` prompt.
+        - No subtitles, taglines or descriptive text beneath page titles, section headings or
+          card titles.
+        - Links use `dspHash`/`platformHash` and `navigate`, never hand-written hash strings.
+chat:
+  # pr:ship waits for CodeRabbit to answer each reply to its threads and resolve the ones it
+  # accepts.
+  auto_reply: true

@@ -39,6 +39,15 @@ test(
     assert.equal((await f.request('/api/health')).value.release, manifest.digest);
     const owner = await f.client();
     await owner.select(owner.session.dsps[0].id);
+    // The build carries its license and tells the dashboard which commit it came from.
+    assert.equal(
+      fs.readFileSync(path.join(artifact, 'dashboard/LICENSE.txt'), 'utf8'),
+      fs.readFileSync('LICENSE', 'utf8'),
+    );
+    const { commit } = JSON.parse(
+      fs.readFileSync(path.join(artifact, 'tooling/build-info.json'), 'utf8'),
+    );
+    assert.deepEqual(owner.session.source, { version: null, commit });
     assert.equal((await owner.get('/api/dsp/employees')).value.total, 0);
     assert.equal(fs.readFileSync(`/proc/${f.pid()}/task/${f.pid()}/children`, 'utf8').trim(), '');
     const html = await fetch(f.env.DISPATCH_ORIGIN + '/');
