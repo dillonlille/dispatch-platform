@@ -232,15 +232,17 @@ jobs:
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python3 tooling/ci-gate.py
+      # A receipt binds a two-parent merge. A PR run checks out one; the queue pushes squash
+      # commits, which have one parent and which no later run can match, so it records none.
       - name: Record PR validation
-        if: needs.plan.outputs.trusted-pr == 'true'
+        if: needs.plan.outputs.trusted-pr == 'true' && github.event_name == 'pull_request'
         env:
           # A reuse receipt names the run whose bytes were reused, which means asking GitHub.
           GH_TOKEN: ${{ github.token }}
           CI_RUST_KEY: ${{ needs.build.outputs.rust-key }}
         run: python3 tooling/ci-plan.py receipt --scope '${{ needs.plan.outputs.mode }}' --output "$RUNNER_TEMP/validation.json"
       - name: Upload PR validation
-        if: needs.plan.outputs.trusted-pr == 'true'
+        if: needs.plan.outputs.trusted-pr == 'true' && github.event_name == 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: dispatch-validation-${{ github.run_id }}-${{ github.run_attempt }}

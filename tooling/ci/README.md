@@ -21,8 +21,9 @@ wins even when it failed, is pending or was skipped. Receipt ZIP size, entry,
 JSON and GitHub digest are verified before reuse.
 
 PRs land on `main` as squash commits, which have one parent, so the merge-commit matching
-below no longer finds anything: queue and push runs check afresh, scoped by their diff, until
-the CI rebuild removes the receipts.
+below no longer finds anything: queue and push runs check afresh, scoped by their diff, and
+only PR runs, whose checkout is a real merge, record a receipt. The receipts stay until the CI
+rebuild removes them.
 
 A merge queue on `main` runs the workflow on the exact merge commit it will push,
 scoped against the group's base so every PR in the group counts. A group holding one
