@@ -44,6 +44,7 @@ const INVENTORY: &[Row] = &[
     ("POST", "/api/platform/dsps/{id}/retry", PlatformOwner, Write, WAKES_SCHEDULER),
     ("POST", "/api/platform/dsps/{id}/status", PlatformOwner, Async, false),
     ("POST", "/api/platform/dsps/{id}/support-visibility", PlatformOwner, Async, false),
+    ("POST", "/api/platform/dsps/{id}/features", PlatformOwner, Async, false),
     ("POST", "/api/platform/dsps/{id}/remove", PlatformOwner, Async, false),
     ("POST", "/api/platform/dsps/{id}/restore", PlatformOwner, Async, false),
     ("GET", "/api/platform/jobs", PlatformOwner, Read, false),

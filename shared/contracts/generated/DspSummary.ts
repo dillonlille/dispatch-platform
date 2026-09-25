@@ -8,4 +8,8 @@ import type { OwnerStatus } from "./OwnerStatus";
 /**
  * A DSP as the session lists it: who owns it, the caller's role, and its collection state.
  */
-export type DspSummary = { profile: DspProfile, ownerEmail: string | null, ownerStatus: OwnerStatus, paycom: ConnectionStatus, lastCollection: string | null, role: string | null, id: string, name: string, environment: Environment, status: DspStatus, timezone: string, permanent: boolean, revision: number, createdAt: string, };
+export type DspSummary = { profile: DspProfile, ownerEmail: string | null, ownerStatus: OwnerStatus, paycom: ConnectionStatus, lastCollection: string | null, role: string | null,
+/**
+ * The features the DSP has (`features`).
+ */
+features: Array<string>, id: string, name: string, environment: Environment, status: DspStatus, timezone: string, permanent: boolean, revision: number, createdAt: string, };

@@ -143,6 +143,7 @@ impl Store {
             ],
         )?;
         super::roles::seed(&self.platform, &id)?;
+        self.seed_features(&id)?;
         self.provision(&id)?;
         self.audit(Some(actor), Some(&id), "dsp.created", "")?;
         self.find_dsp(&id)
@@ -198,7 +199,9 @@ impl Store {
             } else {
                 OwnerStatus::Missing
             };
+            let features = self.features(&dsp.id)?;
             let mut summary = DspSummary {
+                features,
                 profile: profile_default(),
                 owner_email: owner.or(invite).map(str::to_owned),
                 owner_status,

@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 import type { Dsp } from './generated/Dsp';
 import {
+  features,
   permissions,
   type DspView,
   type CollectionUpdates,
@@ -63,6 +64,7 @@ const profile = z.object({
   supportVisible: z.boolean(),
 }) satisfies z.ZodType<DspProfile>;
 const permission = z.enum(permissions);
+const feature = z.enum(features);
 const dspSummary = dsp
   .extend({
     profile,
@@ -71,6 +73,7 @@ const dspSummary = dsp
     paycom: connectionStatus,
     lastCollection: text.nullable(),
     role: text.nullable(),
+    features: z.array(feature),
   })
   .passthrough() satisfies z.ZodType<DspSummary>;
 export const sessionSchema = z.object({
@@ -90,6 +93,7 @@ const viewSchema = z.object({
   role: viewRole,
   roles: z.array(viewRole).optional(),
   permissions: z.array(permission),
+  features: z.array(feature),
   profile,
 }) satisfies z.ZodType<DspView>;
 const pageRead = z.object({

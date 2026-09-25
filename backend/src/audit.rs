@@ -9,8 +9,10 @@ const VISIT_WINDOW: i64 = 30 * 60 * 1000;
 // Activity older than a year is removed by the collector's periodic cleanup.
 const AUDIT_RETENTION: i64 = 365 * 24 * 60 * 60 * 1000;
 // Managing a DSP from the platform is never part of that DSP's own log.
-const PLATFORM_ONLY: [&str; 8] = [
+const PLATFORM_ONLY: [&str; 10] = [
     "dsp.created",
+    "dsp.feature_enabled",
+    "dsp.feature_disabled",
     "dsp.removed",
     "dsp.restored",
     "dsp.suspended",
@@ -144,7 +146,8 @@ impl Store {
             'schedules' WHEN a.action LIKE 'connection.%' THEN 'connections' WHEN a.action \
             IN ('dsp.view_opened','dsp.owner_view_opened') THEN CASE WHEN ?1 IS NULL THEN \
             'access' ELSE 'team' END WHEN a.action LIKE 'account.%' THEN 'access' WHEN \
-            a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed') THEN 'dsps' ELSE 'settings' END";
+            a.action IN ('dsp.created','dsp.removed','dsp.restored','dsp.suspended','dsp.resumed',\
+            'dsp.feature_enabled','dsp.feature_disabled') THEN 'dsps' ELSE 'settings' END";
         const FAILED: &str = "a.action LIKE '%.failed'";
         let filters = format!(
             "{FROM} AND (?2='' OR a.at>=?2) AND (?3='' OR {actor}=?3) AND (?4='' OR a.action \

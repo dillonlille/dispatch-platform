@@ -389,6 +389,11 @@ impl Store {
             409,
         )?;
         let dsp = self.ensure_dsp_active(&row.dsp_id)?;
+        ensure(
+            self.feature_enabled(&row.dsp_id, crate::features::SCHEDULES)?,
+            "feature_disabled",
+            409,
+        )?;
         if let Some(actor) = row.actor_id.as_deref() {
             let user: (UserStatus, bool) = self
                 .platform

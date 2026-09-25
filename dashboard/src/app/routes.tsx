@@ -10,8 +10,9 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import type { DspView, SessionView } from '../../../shared/contracts/index.js';
+import type { DspView, Feature, SessionView } from '../../../shared/contracts/index.js';
 import { ErrorBox, Loading, PageBoundary } from '../ui/index.js';
+import { hasFeature } from './features.js';
 import { can } from './permissions.js';
 import { routeMeta, type DspRouteId, type PlatformRouteId, type RouteMeta } from './route-meta.js';
 
@@ -51,6 +52,8 @@ type Entry<Context> = {
   nav: boolean | ((access: Access) => boolean);
   /** Who may open the page; omitted means everyone in the scope. */
   permission?: (access: Access) => boolean;
+  /** The feature the page belongs to; a DSP without it has no such page. */
+  feature?: Feature;
   render: (context: Context) => ReactNode;
 };
 type Route =
@@ -65,6 +68,7 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
     preload: loadUniforms,
     icon: Shirt,
     nav: true,
+    feature: 'uniforms',
     permission: ({ view }) => can(view, 'uniforms.view'),
     render: ({ view }) => <UniformInventoryPage key={view.token} view={view} />,
   },
@@ -78,6 +82,7 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
     preload: loadTimecard,
     icon: CalendarDays,
     nav: true,
+    feature: 'timecard',
     // The link stays put while a view loads; the page itself waits for the view.
     permission: ({ view }) => !view || can(view, 'timecard.view'),
     render: ({ view }) => <PaycomPage view={view} />,
@@ -85,6 +90,7 @@ const dspPages: Record<DspRouteId, Entry<DspPageContext>> = {
   'paycom-settings': {
     preload: loadTimecard,
     nav: false,
+    feature: 'timecard',
     permission: ({ view }) => can(view, 'timecard.manage'),
     render: ({ view }) => <PaycomSettingsPage dspId={view.dsp.id} />,
   },
@@ -157,12 +163,16 @@ function PageContent({
   const { session, view } = context;
   const route = findRoute(view ? 'dsp' : 'platform', page);
   const open = route && allowed(route, context) ? route : undefined;
-  if (view)
-    return open?.scope === 'dsp' ? (
-      open.render({ ...context, view, reopen })
-    ) : (
-      <ErrorBox message="This page is not available for your role." />
+  if (view) {
+    if (open?.scope === 'dsp') return open.render({ ...context, view, reopen });
+    // A page of a feature the DSP lacks does not exist for it.
+    const missing = route?.scope === 'dsp' && route.feature && !hasFeature(view, route.feature);
+    return (
+      <ErrorBox
+        message={missing ? 'Page not found.' : 'This page is not available for your role.'}
+      />
     );
+  }
   if (open?.scope === 'platform') return open.render(context);
   // Members have one platform page: the DSPs they belong to.
   return session.user.platformOwner ? (

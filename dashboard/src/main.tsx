@@ -6,6 +6,7 @@ import { api, credentials, ApiError } from './app/api.js';
 import { FeedbackMessages, FeedbackProvider, useFeedback } from './app/feedback.js';
 import {
   dspHash,
+  forgetDestination,
   navigate,
   parseHash,
   platformHash,
@@ -23,6 +24,7 @@ const DspOnboarding = lazy(() =>
 import { messageOf } from './lib/errors.js';
 import { Loading, PageBoundary } from './ui/index.js';
 import { can } from './app/permissions.js';
+import { hasFeature } from './app/features.js';
 import './styles.css';
 import { Shell } from './shell/Shell.js';
 type Session = SessionView;
@@ -108,11 +110,16 @@ function App() {
         .catch(() => undefined);
   }, [session, showAuth, dspId, page]);
   useEffect(() => {
-    if (
-      view &&
-      dspId &&
-      navigation('dsp', { session: session!, view }).some((route) => route.id === page)
-    )
+    if (!view || !dspId) return;
+    const route = findRoute('dsp', page);
+    // A page of a feature the DSP lacks is gone, whether a member was on it when it
+    // was switched off or followed a link to it; they go home.
+    if (route?.feature && !hasFeature(view, route.feature)) {
+      forgetDestination(dspId, page);
+      navigate(dspHash(dspId, 'overview'));
+      return;
+    }
+    if (navigation('dsp', { session: session!, view }).some((route) => route.id === page))
       rememberDestination(dspId, page as DspRouteId);
   }, [view, dspId, page, session]);
   useBrowserUpdate(Boolean(session) && (!dspId || Boolean(view)) && !switching);

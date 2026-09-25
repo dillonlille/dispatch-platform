@@ -1,4 +1,5 @@
 import type { Narrow } from './narrow.js';
+import type { Feature } from './features.js';
 import type { Role as GeneratedRole } from './generated/Role';
 import type { DspView as GeneratedDspView } from './generated/DspView';
 export type { PublicUser as User } from './generated/PublicUser';
@@ -25,7 +26,7 @@ export type { RuntimeSource } from './generated/RuntimeSource';
 type ViewRole = Pick<Role, 'id' | 'name' | 'owner'>;
 export type DspView = Narrow<
   GeneratedDspView,
-  { permissions: Permission[]; role: ViewRole; roles?: ViewRole[] }
+  { permissions: Permission[]; features: Feature[]; role: ViewRole; roles?: ViewRole[] }
 >;
 export type { DspProfile } from './generated/DspProfile';
 export type { AccountSession } from './generated/AccountSession';

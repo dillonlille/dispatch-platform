@@ -1,9 +1,10 @@
 //! What only a platform owner sees: every DSP, the platform's health and diagnostics.
 use crate::{
     Error, Result, State,
-    contracts::{BrowserHealth, DspStatus, JobStatus, PlatformHealth, ProviderMode},
+    collectors::Provider,
+    contracts::{BrowserHealth, DspFeatures, DspStatus, JobStatus, PlatformHealth, ProviderMode},
     db::{Store, iso},
-    ensure,
+    ensure, features,
     http::{
         input::{Input, Reply, optional},
         route::{Grant, PlatformOwner, Route, User, async_post, read, write},
@@ -27,6 +28,11 @@ pub fn routes() -> Vec<Route> {
             "/api/platform/dsps/{id}/support-visibility",
             PlatformOwner,
             set_support_visibility,
+        ),
+        async_post(
+            "/api/platform/dsps/{id}/features",
+            PlatformOwner,
+            set_feature,
         ),
         async_post("/api/platform/dsps/{id}/remove", PlatformOwner, remove_dsp),
         async_post(
@@ -148,6 +154,57 @@ async fn set_support_visibility(
         Ok(json!({"ok":true}))
     })
     .await
+}
+
+// Switching a feature off stops what it ran for the DSP: its jobs and live
+// collection in the database, then its browsers outside it. Switching the
+// schedules' page back on retimes them from now and wakes the scheduler.
+async fn set_feature(state: Arc<State>, input: Input, access: PlatformOwner) -> Result<Reply> {
+    let id = input.param("id").to_owned();
+    let dsp = id.clone();
+    let result = state
+        .run(move |db| {
+            let owner = access.authorize(db, &input)?;
+            let b = &input.body;
+            v::fields(b, &["feature", "enabled"])?;
+            let feature = v::text(b, "feature", 1, 40)?.to_owned();
+            let enabled = v::boolean(b, "enabled")?;
+            let result = db.set_feature(&dsp, &feature, enabled, owner.user.id.as_str())?;
+            if switched(&result, features::SCHEDULES, false) {
+                db.cancel_dsp(&dsp)?;
+            } else {
+                for provider in Provider::ALL {
+                    if switched(&result, provider.id(), false) {
+                        db.cancel_provider(&dsp, *provider)?;
+                    }
+                }
+            }
+            if switched(&result, features::SCHEDULES, true) {
+                let row = db.find_dsp(&dsp)?;
+                db.retime_schedules(&dsp, &row.timezone)?;
+            }
+            Ok(result)
+        })
+        .await?;
+    if switched(&result, features::SCHEDULES, false) {
+        state.browsers.revoke(&id).await;
+    } else {
+        for provider in Provider::ALL {
+            if switched(&result, provider.id(), false) {
+                state.browsers.revoke_for(&id, *provider).await;
+            }
+        }
+    }
+    state
+        .schedule_revision
+        .fetch_add(1, std::sync::atomic::Ordering::Release);
+    Reply::of(&result)
+}
+fn switched(result: &DspFeatures, feature: &str, enabled: bool) -> bool {
+    result
+        .changed
+        .iter()
+        .any(|c| c.feature == feature && c.enabled == enabled)
 }
 
 async fn remove_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> Result<Reply> {

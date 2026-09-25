@@ -6,6 +6,7 @@
     "tests/dashboard/dashboard-structure.test.ts",
     "tests/dashboard/data-policy.test.ts",
     "tests/dashboard/diagnostics.test.ts",
+    "tests/dashboard/features.test.ts",
     "tests/dashboard/meal-breaks.test.ts",
     "tests/dashboard/permissions.test.ts",
     "tests/dashboard/response-cache.test.ts",

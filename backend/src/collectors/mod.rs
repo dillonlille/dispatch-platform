@@ -39,6 +39,10 @@ pub struct AddedStorage {
 pub(crate) trait Collector: Sync {
     /// Names its connection row, its files, its secrets and its API path.
     fn id(&self) -> &'static str;
+    /// Its name as the dashboard shows it.
+    fn label(&self) -> &'static str;
+    /// What its connection supplies to the pages that require it (`features`).
+    fn capability(&self) -> &'static str;
     /// The kind of job that runs its main collection.
     fn job_kind(&self) -> &'static str;
     /// The kinds of its other collections, each chosen by `job_kind_for`.

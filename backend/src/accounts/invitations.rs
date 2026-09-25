@@ -139,12 +139,11 @@ impl Store {
         let Some(role) = self.find_role(&dsp, &role)? else {
             return Ok(false);
         };
+        let features = self.features(&dsp)?;
         Ok(grant.owner
             || (!role.system
                 && grant.permissions.iter().any(|p| p == "members.invite")
-                && role
-                    .permissions
-                    .iter()
+                && crate::features::visible(&features, &role.permissions)
                     .all(|p| grant.permissions.contains(p))))
     }
     pub fn invitation_mail(

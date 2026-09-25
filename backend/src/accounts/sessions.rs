@@ -81,6 +81,7 @@ impl Store {
             })
         };
         let grant = grant.ok_or_else(|| Error::new("permission_denied", 403))?;
+        let features = self.features(&dsp.id)?;
         let c = Context {
             auth: a.clone(),
             dsp,
@@ -88,6 +89,7 @@ impl Store {
             role_name: grant.name,
             owner: grant.owner,
             permissions: grant.permissions,
+            features,
         };
         ensure(c.allows(permission), "permission_denied", 403)?;
         ensure(c.dsp.status == DspStatus::Active, "dsp_unavailable", 409)?;
@@ -148,7 +150,8 @@ impl Store {
         ensure(
             fresh.dsp.revision == c.dsp.revision
                 && fresh.role == c.role
-                && fresh.permissions == c.permissions,
+                && fresh.permissions == c.permissions
+                && fresh.features == c.features,
             "dsp_view_expired",
             409,
         )?;

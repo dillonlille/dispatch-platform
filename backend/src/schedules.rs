@@ -455,6 +455,9 @@ impl Store {
             [&self.config.environment],
         )?;
         for (id,) in dsps {
+            if !self.feature_enabled(&id, crate::features::SCHEDULES)? {
+                continue;
+            }
             let next: Option<(Option<String>,)> = self.dsp(&id)?.one_as(NEXT_DEADLINE, [])?;
             if let Some((next_run,)) = next {
                 let deadline = next_run
@@ -498,7 +501,7 @@ impl Store {
     }
     pub fn schedule_due(&self, id: &str) -> Result<Option<i64>> {
         let dsp = self.find_dsp(id)?;
-        if !self.serves(&dsp) {
+        if !self.serves(&dsp) || !self.feature_enabled(id, crate::features::SCHEDULES)? {
             return Ok(None);
         }
         let db = self.dsp(id)?;

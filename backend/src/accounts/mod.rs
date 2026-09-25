@@ -102,11 +102,20 @@ pub struct Context {
     pub role: String,
     pub role_name: String,
     pub owner: bool,
+    /// The role's permissions as stored; `can` reads them within `features`.
     pub permissions: Vec<String>,
+    /// The features the DSP has (`features`).
+    pub features: Vec<String>,
 }
 impl Context {
+    // A permission of a feature the DSP lacks is held by nobody, owners included.
     pub fn can(&self, permission: &str) -> bool {
-        self.owner || self.permissions.iter().any(|p| p == permission)
+        crate::features::grants(&self.features, permission)
+            && (self.owner || self.permissions.iter().any(|p| p == permission))
+    }
+    /// The permissions of `stored` that exist in this DSP.
+    pub fn visible<'a>(&'a self, stored: &'a [String]) -> impl Iterator<Item = &'a String> {
+        crate::features::visible(&self.features, stored)
     }
     // Alternatives are separated by `|`; any one of them grants the request.
     pub fn allows(&self, permission: &str) -> bool {

@@ -8,16 +8,16 @@ import {
   useDataTable,
   type TableColumn,
 } from '../../ui/index.js';
-import { can, permissionLabels } from '../../app/permissions.js';
+import { can, permissionLabels, visiblePermissions } from '../../app/permissions.js';
 import { assignable } from './assignable.js';
 
 const visible = 2;
 const none: Role[] = [];
 
-function PermissionSummary({ role }: { role: Role }) {
+function PermissionSummary({ view, role }: { view: DspView; role: Role }) {
   if (role.owner) return <span className="muted">All permissions</span>;
-  if (!role.permissions.length) return <span className="muted">No permissions</span>;
-  const names = role.permissions.map((p) => permissionLabels[p]);
+  const names = visiblePermissions(view, role.permissions).map((p) => permissionLabels[p]);
+  if (!names.length) return <span className="muted">No permissions</span>;
   if (names.length <= visible) return <span className="muted">{names.join(', ')}</span>;
   return (
     <span
@@ -69,7 +69,7 @@ export function RolesTab({
     {
       id: 'permissions',
       header: 'Permissions',
-      cell: (role) => <PermissionSummary role={role} />,
+      cell: (role) => <PermissionSummary view={view} role={role} />,
     },
     {
       id: 'members',

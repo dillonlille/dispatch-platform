@@ -202,3 +202,87 @@ fn schedule_deadlines_track_changes_and_due_ticks_are_idempotent() {
             .any(|(d, _)| d == id)
     );
 }
+
+#[test]
+fn nothing_collects_for_a_dsp_without_the_timecard() {
+    let (_root, db) = seeded();
+    let tenant = db
+        .platform
+        .one("SELECT id FROM dsps WHERE name='Northline Logistics'", [])
+        .unwrap()
+        .unwrap();
+    let id = s(&tenant, "id");
+    let user = db
+        .platform
+        .one("SELECT id FROM users WHERE platform_owner=1", [])
+        .unwrap()
+        .unwrap();
+    let actor = s(&user, "id");
+    db.enqueue(id, Some(actor), "request-0").unwrap();
+    let job = db.claim("worker", |_, _| true).unwrap().unwrap();
+    let jid = s(&job, "id");
+    db.guard_job(jid, "worker").unwrap();
+    db.save_collection_schedule(
+        id,
+        None,
+        &json!({"name":"Morning","collection":"paycom","cadence":"daily","intervalMinutes":null,"localTime":"06:00","enabled":true}),
+    )
+    .unwrap();
+    assert!(
+        db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(dsp, _)| dsp == id)
+    );
+
+    let result = db
+        .set_feature(id, dispatch_backend::features::SCHEDULES, false, actor)
+        .unwrap();
+    assert_eq!(
+        result
+            .changed
+            .iter()
+            .map(|c| c.feature.as_str())
+            .collect::<Vec<_>>(),
+        ["timecard"]
+    );
+    assert_eq!(
+        db.guard_job(jid, "worker").unwrap_err().code,
+        "feature_disabled"
+    );
+    assert!(db.schedule_due(id).unwrap().is_none());
+    assert!(
+        !db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(dsp, _)| dsp == id)
+    );
+    // Its schedules are exactly as they were, and run again once the page is back.
+    let enabled = db
+        .dsp(id)
+        .unwrap()
+        .count(
+            "SELECT count(*) FROM collection_schedules WHERE enabled=1",
+            [],
+        )
+        .unwrap();
+    db.set_feature(id, dispatch_backend::features::SCHEDULES, true, actor)
+        .unwrap();
+    assert_eq!(
+        db.dsp(id)
+            .unwrap()
+            .count(
+                "SELECT count(*) FROM collection_schedules WHERE enabled=1",
+                []
+            )
+            .unwrap(),
+        enabled
+    );
+    assert!(
+        db.schedule_deadlines()
+            .unwrap()
+            .iter()
+            .any(|(dsp, _)| dsp == id)
+    );
+    db.guard_job(jid, "worker").unwrap();
+}

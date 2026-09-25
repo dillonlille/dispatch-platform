@@ -40,6 +40,11 @@ pub const PLATFORM: &[Migration] = &[
         name: "account_security",
         apply: Sql(include_str!("platform/0006_account_security.sql")),
     },
+    Migration {
+        id: 7,
+        name: "dsp_features",
+        apply: Sql(include_str!("platform/0007_dsp_features.sql")),
+    },
 ];
 pub const JOBS: &[Migration] = &[
     Migration {
