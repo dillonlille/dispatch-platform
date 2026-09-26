@@ -471,6 +471,46 @@ mod tests {
     }
 
     #[test]
+    fn dsps_from_before_features_defaulted_off_keep_what_they_had() {
+        let root = private();
+        let file = root.path().join("platform.sqlite");
+        older(
+            &file,
+            Kind::Platform,
+            &recorded(Kind::Platform).replace(RECORD, ""),
+        );
+        // One DSP read every feature at its old default, on; the other had switched one off.
+        rusqlite::Connection::open(&file)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO dsps(id,name,environment,status,timezone,created_at) VALUES \
+                 ('dsp_a','A','preview','active','UTC','2026-01-01'),\
+                 ('dsp_b','B','preview','active','UTC','2026-01-01'); \
+                 INSERT INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES \
+                 ('dsp_b','uniforms',0,'2026-01-02');",
+            )
+            .unwrap();
+        let db = Db::create(&file, Kind::Platform, "").unwrap();
+        assert_eq!(
+            db.all(
+                "SELECT dsp_id,feature,enabled FROM dsp_features ORDER BY dsp_id,feature",
+                []
+            )
+            .unwrap(),
+            vec![
+                json!({"dsp_id":"dsp_a","feature":"cortex","enabled":1}),
+                json!({"dsp_id":"dsp_a","feature":"paycom","enabled":1}),
+                json!({"dsp_id":"dsp_a","feature":"timecard","enabled":1}),
+                json!({"dsp_id":"dsp_a","feature":"uniforms","enabled":1}),
+                json!({"dsp_id":"dsp_b","feature":"cortex","enabled":1}),
+                json!({"dsp_id":"dsp_b","feature":"paycom","enabled":1}),
+                json!({"dsp_id":"dsp_b","feature":"timecard","enabled":1}),
+                json!({"dsp_id":"dsp_b","feature":"uniforms","enabled":0}),
+            ]
+        );
+    }
+
+    #[test]
     fn migrations_a_newer_release_recorded_are_tolerated() {
         let root = private();
         let file = root.path().join("dsp.sqlite");
