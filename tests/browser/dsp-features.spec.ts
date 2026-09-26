@@ -9,23 +9,24 @@ test('the platform switches a DSP’s features with their dependencies, and the 
   await expect(page.getByLabel('DSP summary')).toContainText('Online');
   await list.getByRole('button', { name: /Northline Logistics/ }).click();
   const pane = page.getByRole('region', { name: 'Northline Logistics', exact: true });
-  await pane.getByRole('tab', { name: /^Features/ }).click();
+  await pane.getByRole('tab', { name: 'Features', exact: true }).click();
+  const areas = pane.getByRole('tablist', { name: 'Feature areas' });
+  await expect(areas.getByRole('tab', { name: /^Pages/ })).toHaveAttribute('aria-selected', 'true');
   const cortex = pane.getByRole('switch', { name: 'Cortex', exact: true });
   const timecard = pane.getByRole('switch', { name: 'Timecard', exact: true });
+  await expect(timecard).toBeChecked();
+  await areas.getByRole('tab', { name: /^Connections/ }).click();
   await expect(cortex).toBeChecked();
-  await expect(
-    pane.getByText('Requires a timecard source (Paycom) and a meal-break source (Cortex)'),
-  ).toBeVisible();
   await cortex.click();
   const off = page.getByRole('dialog', { name: 'Switch off Cortex for Northline Logistics?' });
   await expect(off).toContainText('Timecard needs a meal-break source, so it switches off too.');
   await expect(off).toContainText('Credentials, schedules and collected data are kept.');
   await page.screenshot({ path: test.info().outputPath('switch-off.png') });
   await off.getByRole('button', { name: 'Switch off Cortex and Timecard', exact: true }).click();
-  await expect(timecard).not.toBeChecked();
   await expect(cortex).not.toBeChecked();
-  await expect(pane).toContainText('Cortex, off');
-  await expect(list.getByRole('button', { name: /Northline Logistics/ })).toContainText('2 of 4');
+  await expect(areas.getByRole('tab', { name: /^Pages/ })).toContainText('1/2');
+  await areas.getByRole('tab', { name: /^Pages/ }).click();
+  await expect(timecard).not.toBeChecked();
   await page.screenshot({ path: test.info().outputPath('features-tab.png') });
 
   const context = await browser.newContext();
@@ -49,14 +50,14 @@ test('the platform switches a DSP’s features with their dependencies, and the 
 
   // Switching the page back on brings the connection it needs.
   await list.getByRole('button', { name: /Northline Logistics/ }).click();
-  await pane.getByRole('tab', { name: /^Features/ }).click();
+  await pane.getByRole('tab', { name: 'Features', exact: true }).click();
   await timecard.click();
   const on = page.getByRole('dialog', { name: 'Switch on Timecard for Northline Logistics?' });
   await expect(on).toContainText('Timecard needs a meal-break source, so Cortex switches on too.');
   await on.getByRole('button', { name: 'Switch on Timecard and Cortex', exact: true }).click();
-  await expect(cortex).toBeChecked();
   await expect(timecard).toBeChecked();
-  await expect(pane).toContainText('by Platform Owner');
+  await areas.getByRole('tab', { name: /^Connections/ }).click();
+  await expect(cortex).toBeChecked();
   // The member's next request finds their view expired and reopens it with the page back.
   await member.getByRole('link', { name: 'Uniform Inventory', exact: true }).click();
   await expect(member.getByRole('link', { name: 'Timecard', exact: true })).toBeVisible();

@@ -110,15 +110,7 @@ export function DspDetail({
         onChange={setTab}
         items={[
           ['details', 'Details'],
-          [
-            'features',
-            <>
-              Features
-              <span className="dsp-tab-count">
-                {dsp.features.length} of {featureCatalog.length}
-              </span>
-            </>,
-          ],
+          ['features', 'Features'],
         ]}
         label="DSP"
       />

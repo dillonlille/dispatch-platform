@@ -1,4 +1,4 @@
-/* The DSPs page: counts, the list on the left and the chosen DSP's pane. */
+/* The DSPs page: counts, the list on the left of a divider, the chosen DSP on the right. */
 .dsp-counts {
   display: flex;
   flex-wrap: wrap;
@@ -47,31 +47,25 @@
 
 .dsps-master {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 32px;
   align-items: start;
 }
-.dsps-list,
-.dsps-detail {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--card);
-  overflow: hidden;
+.dsps-list {
+  border-right: 1px solid var(--border);
+  padding-right: 24px;
 }
 .dsps-list-tools {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
 }
 .dsps-list-tools .search {
   width: 100%;
 }
 .dsp-group {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 16px 6px;
+  padding: 18px 12px 6px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -84,9 +78,9 @@
   gap: 12px;
   width: 100%;
   min-height: 0;
-  padding: 10px 16px;
+  padding: 9px 12px;
   border: 0;
-  border-radius: 0;
+  background: transparent;
   text-align: left;
 }
 .dsp-row .dsp-avatar {
@@ -111,29 +105,21 @@
 }
 .dsp-row[aria-current='true'] {
   background: var(--selection);
-  box-shadow: inset 3px 0 0 var(--primary);
 }
-.dsp-row-count {
-  font-size: 12px;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.dsps-list > div:last-of-type {
-  padding-bottom: 8px;
+.dsp-row[aria-current='true'] strong {
+  color: var(--primary);
 }
 
 .dsp-back {
   display: none;
   gap: 4px;
-  margin: 12px 12px 0;
+  margin-bottom: 8px;
 }
 .dsp-detail-head {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
+  padding: 4px 0 22px;
 }
 .dsp-detail-head .dsp-avatar {
   width: 44px;
@@ -150,9 +136,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 12px;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.4px;
 }
 .dsp-detail-copy small {
   display: block;
@@ -168,23 +154,13 @@
   flex-shrink: 0;
 }
 .dsps-detail .restored-tabs {
-  height: 46px;
-  margin: 0;
-  padding: 0 24px;
-}
-.dsps-detail .restored-tabs button {
-  padding-top: 4px;
-}
-.dsp-tab-count {
-  margin-left: 6px;
-  font-weight: 400;
-  color: var(--muted-foreground);
+  margin-bottom: 20px;
 }
 .dsp-facts {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 18px 24px;
-  padding: 22px 24px;
+  padding: 4px 0;
 }
 .dsp-facts dt {
   font-size: 12px;
@@ -195,24 +171,67 @@
   font-size: 14px;
   overflow-wrap: anywhere;
 }
+
+/* Features: areas on the left, the chosen area's switches on the right. */
 .dsp-features {
-  padding: 8px 24px 12px;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
 }
-.dsp-feature-group {
+.dsp-features .error {
+  grid-column: 1 / -1;
+}
+.dsp-areas {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dsp-areas button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 18px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 450;
+  text-align: left;
+}
+.dsp-areas button svg {
   color: var(--muted-foreground);
 }
-.dsp-feature-group span + span {
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
+.dsp-areas button span {
+  flex: 1;
+}
+.dsp-areas button small {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.dsp-areas button[aria-selected='true'] {
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 550;
+}
+.dsp-areas button[aria-selected='true'] svg {
+  color: var(--primary);
+}
+.dsp-area h3 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.dsp-area h3 span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
 }
 .dsp-feature-row {
   display: flex;
@@ -222,23 +241,14 @@
   padding: 12px 0;
   border-top: 1px solid var(--border);
 }
-.dsp-feature-name {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
+.dsp-feature-row:first-of-type {
+  border-top: 0;
 }
-.dsp-feature-name strong {
+.dsp-feature-row strong {
   font-size: 14px;
   font-weight: 500;
 }
-.dsp-feature-row.off .dsp-feature-name strong {
-  color: var(--muted-foreground);
-}
-.dsp-feature-name small,
-.dsp-feature-end small {
-  font-size: 12px;
+.dsp-feature-row.off strong {
   color: var(--muted-foreground);
 }
 .dsp-feature-end {
@@ -246,9 +256,6 @@
   align-items: center;
   gap: 14px;
   flex-shrink: 0;
-}
-.dsp-feature-end small {
-  white-space: nowrap;
 }
 .dsp-feature-row input[role='switch'] {
   appearance: none;
@@ -290,8 +297,7 @@
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  padding: 16px 24px 20px;
-  border-top: 1px solid var(--border);
+  padding-top: 32px;
 }
 .dsp-switch-effects {
   display: grid;
@@ -327,12 +333,16 @@
   .dsps-master:not(.chosen) .dsps-detail {
     display: none;
   }
+  .dsps-list {
+    border-right: 0;
+    padding-right: 0;
+  }
   .dsp-back {
     display: inline-flex;
   }
   .dsp-detail-head {
     flex-wrap: wrap;
-    padding: 14px 16px 16px;
+    padding: 0 0 16px;
   }
   .dsp-detail-copy {
     flex: 1 1 60%;
@@ -344,17 +354,16 @@
     flex-basis: 100%;
     justify-content: flex-end;
   }
-  .dsps-detail .restored-tabs,
-  .dsp-features,
-  .dsp-facts,
-  .dsp-detail-foot {
-    padding-inline: 16px;
-  }
   .dsp-facts {
     grid-template-columns: 1fr 1fr;
   }
-  .dsp-feature-end small {
-    display: none;
+  .dsp-features {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .dsp-areas {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
   .dsp-counts {
     margin-bottom: 18px;

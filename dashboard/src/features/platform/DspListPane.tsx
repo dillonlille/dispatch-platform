@@ -1,6 +1,5 @@
 import { RefreshCw } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
-import { featureCatalog } from '../../app/features.js';
 import { DspAvatar, Empty, SearchInput } from '../../ui/index.js';
 import { dspState, dspStates, stateLabels } from './status.js';
 
@@ -38,10 +37,7 @@ export function DspListPane({
       </div>
       {groups.map(([state, rows]) => (
         <div key={state}>
-          <h2 className="dsp-group">
-            <span>{stateLabels[state]}</span>
-            <span>{rows.length}</span>
-          </h2>
+          <h2 className="dsp-group">{stateLabels[state]}</h2>
           {rows.map((dsp) => (
             <button
               className="dsp-row"
@@ -54,9 +50,6 @@ export function DspListPane({
                 <strong>{dsp.name}</strong>
                 <span>{dsp.ownerEmail ?? 'No owner assigned'}</span>
               </span>
-              <small className="dsp-row-count">
-                {dsp.features.length} of {featureCatalog.length}
-              </small>
             </button>
           ))}
         </div>

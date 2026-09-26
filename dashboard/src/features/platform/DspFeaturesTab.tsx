@@ -1,78 +1,78 @@
 import { useState } from 'react';
+import { AppWindow, Plug, type LucideIcon } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
 import { useDspFeatures } from '../../app/endpoints.js';
-import { featureCatalog, requirementText, type FeatureEntry } from '../../app/features.js';
+import { featureCatalog, type FeatureEntry } from '../../app/features.js';
 import { Badge, ErrorBox } from '../../ui/index.js';
-import { deviceTimezone, time } from '../../lib/format.js';
 import { FeatureSwitchDialog } from './FeatureSwitchDialog.js';
 
-const groups: [string, FeatureEntry['kind']][] = [
-  ['Pages', 'page'],
-  ['Connections', 'connection'],
+type Area = { kind: FeatureEntry['kind']; label: string; icon: LucideIcon };
+const areas: Area[] = [
+  { kind: 'page', label: 'Pages', icon: AppWindow },
+  { kind: 'connection', label: 'Connections', icon: Plug },
 ];
 
-// Every feature the DSP could have, with a switch; a switch asks before it acts.
+// The catalog by area: choose an area on the left, switch its features on the right.
+// A switch asks before it acts.
 export function DspFeaturesTab({ dsp, changed }: { dsp: DspSummary; changed: () => void }) {
   const { data, error, refresh } = useDspFeatures(dsp.id);
+  const [kind, setKind] = useState<Area['kind']>('page');
   const [pending, setPending] = useState<{ feature: FeatureEntry; on: boolean }>();
   const enabled = data
     ? data.features.filter((state) => state.enabled).map((state) => state.feature)
     : dsp.features;
-  const zone = deviceTimezone();
-  const since = (id: string) => {
-    const state = data?.features.find((state) => state.feature === id);
-    if (!state?.enabled || !state.changedAt) return null;
-    return (
-      <small>
-        Enabled {time(state.changedAt, zone)}
-        {state.changedBy ? ` by ${state.changedBy}` : ''}
-      </small>
-    );
-  };
+  const of = (area: Area) => featureCatalog.filter((feature) => feature.kind === area.kind);
+  const on = (features: FeatureEntry[]) => features.filter((f) => enabled.includes(f.id)).length;
+  const area = areas.find((candidate) => candidate.kind === kind)!;
+  const items = of(area);
   return (
     <div className="dsp-features">
       <ErrorBox message={error} />
-      {groups.map(([label, kind]) => {
-        const items = featureCatalog.filter((feature) => feature.kind === kind);
-        return (
-          <div key={kind}>
-            <h3 className="dsp-feature-group">
-              <span>{label}</span>
-              <span>
-                {items.filter((feature) => enabled.includes(feature.id)).length} of {items.length}
-              </span>
-            </h3>
-            {items.map((feature) => {
-              const on = enabled.includes(feature.id);
-              return (
-                <div className={`dsp-feature-row ${on ? '' : 'off'}`} key={feature.id}>
-                  <div className="dsp-feature-name">
-                    <strong>{feature.label}</strong>
-                    {feature.requires.length > 0 && (
-                      <small>{requirementText(feature, enabled)}</small>
-                    )}
-                    {kind === 'connection' && since(feature.id)}
-                  </div>
-                  <div className="dsp-feature-end">
-                    {kind === 'page' && since(feature.id)}
-                    {kind === 'connection' && on && (
-                      <Badge value={dsp.connections[feature.id] ?? 'not_connected'} />
-                    )}
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={feature.label}
-                      checked={on}
-                      disabled={!data}
-                      onChange={(event) => setPending({ feature, on: event.target.checked })}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+      <div className="dsp-areas" role="tablist" aria-label="Feature areas">
+        {areas.map((candidate) => (
+          <button
+            key={candidate.kind}
+            role="tab"
+            aria-selected={candidate.kind === kind}
+            onClick={() => setKind(candidate.kind)}
+          >
+            <candidate.icon size={16} aria-hidden="true" />
+            <span>{candidate.label}</span>
+            <small>
+              {on(of(candidate))}/{of(candidate).length}
+            </small>
+          </button>
+        ))}
+      </div>
+      <div className="dsp-area" role="tabpanel" aria-label={area.label}>
+        <h3>
+          {area.label}
+          <span>
+            {on(items)} of {items.length}
+          </span>
+        </h3>
+        {items.map((feature) => {
+          const has = enabled.includes(feature.id);
+          return (
+            <div className={`dsp-feature-row ${has ? '' : 'off'}`} key={feature.id}>
+              <strong>{feature.label}</strong>
+              <div className="dsp-feature-end">
+                {feature.kind === 'connection' && has && (
+                  <Badge value={dsp.connections[feature.id] ?? 'not_connected'} />
+                )}
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={feature.label}
+                  checked={has}
+                  disabled={!data}
+                  onChange={(event) => setPending({ feature, on: event.target.checked })}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
       {pending && data && (
         <FeatureSwitchDialog
           dsp={dsp}
