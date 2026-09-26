@@ -1,6 +1,6 @@
 import { assessMealResponse, type MealComparisonSource } from '../support/assessment.js';
 import type { Page } from '@playwright/test';
-import { test, expect, demo, login, setDate, expectDate } from './fixtures.js';
+import { test, expect, demo, login, openDsp, setDate, expectDate } from './fixtures.js';
 import type { MealSource } from '../../shared/contracts/meals.js';
 import { paycomDefaults } from '../../dashboard/src/lib/paycom.js';
 
@@ -91,14 +91,7 @@ function sample(): MealComparisonSource {
 }
 async function open(page: Page, member = false, selectedDate: string | null = date) {
   await login(page, member ? demo.member : demo.email);
-  if (!member) {
-    await page
-      .getByRole('row')
-      .filter({ hasText: 'Northline Logistics' })
-      .getByRole('button', { name: /Northline Logistics/ })
-      .click();
-    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
-  }
+  if (!member) await openDsp(page, 'Northline Logistics');
   await expect(page.getByRole('heading', { name: 'Currently under development' })).toBeVisible();
   if (page.viewportSize()!.width < 700)
     await page.getByRole('button', { name: 'Open navigation' }).click();
@@ -693,12 +686,7 @@ test('shared date and sync controls survive tabs, navigation, reload and collect
   await timecards.click();
   await expectDate(page, '2026-09-14');
   await page.getByRole('button', { name: 'Exit view', exact: true }).click();
-  await page
-    .getByRole('row')
-    .filter({ hasText: 'Summit Delivery' })
-    .getByRole('button', { name: /Summit Delivery/ })
-    .click();
-  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+  await openDsp(page, 'Summit Delivery');
   await page.getByRole('link', { name: 'Timecard', exact: true }).click();
   // Another DSP starts on its own day, not the one chosen for the last DSP.
   await expect(page.getByLabel('Paycom date')).toBeVisible();
