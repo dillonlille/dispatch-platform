@@ -5,6 +5,16 @@ import { parseApiResponse } from '../../shared/contracts/runtime.js';
 import type { AuditPage, DspSummary, Job, PlatformHealth } from '../../shared/contracts/index.js';
 import type { PaycomSettings } from '../../shared/contracts/paycom.js';
 
+test('recovery-code responses accept the active and previous rollout formats', () => {
+  const route = '/api/auth/security/recovery-codes';
+  for (const code of ['Ab1_-Cd2.-Ef3_-Gh4.', 'A'.repeat(43)])
+    assert.deepEqual(parseApiResponse(route, 'POST', { codes: [code] }), { codes: [code] });
+  assert.throws(
+    () => parseApiResponse(route, 'POST', { codes: ['A'.repeat(32)] }),
+    /invalid_api_response/,
+  );
+});
+
 test('generated platform contracts validate real responses and settings round trips preserve every preference', async (t) => {
   const f = await fixture();
   t.after(f.close);

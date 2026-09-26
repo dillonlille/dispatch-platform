@@ -191,6 +191,7 @@ export async function fixture(options: boolean | FixtureOptions = true) {
     assert.equal(login.status, 200, JSON.stringify(login.value));
     const headers: Record<string, string> = {
       cookie: login.headers.get('set-cookie')!.split(';')[0]!,
+      'x-dispatch-recovery-code-format': 'grouped-v1',
     };
     const session = await request('/api/session', undefined, headers);
     headers['x-csrf-token'] = session.value.csrf;

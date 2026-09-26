@@ -25,6 +25,18 @@ pub fn id(prefix: &str) -> Result<String> {
 pub fn token() -> Result<String> {
     Ok(B64.encode(random::<32>()?))
 }
+pub fn recovery_code() -> Result<String> {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.";
+    let random = random::<16>()?;
+    let mut code = String::with_capacity(19);
+    for (index, byte) in random.into_iter().enumerate() {
+        if index > 0 && index % 4 == 0 {
+            code.push('-');
+        }
+        code.push(ALPHABET[usize::from(byte & 63)] as char);
+    }
+    Ok(code)
+}
 pub fn sha(value: impl AsRef<[u8]>) -> String {
     hex(&Sha256::digest(value))
 }
@@ -170,5 +182,21 @@ mod tests {
             assert_eq!(hash_password(value).unwrap_err().code, "invalid_password");
         }
         assert!(hash_password("a unique dispatch password").is_ok());
+    }
+
+    #[test]
+    fn recovery_codes_are_short_grouped_and_random() {
+        let first = recovery_code().unwrap();
+        let second = recovery_code().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 19);
+        let groups = first.split('-').collect::<Vec<_>>();
+        assert_eq!(groups.len(), 4);
+        assert!(groups.iter().all(|group| group.len() == 4));
+        assert!(groups.iter().all(|group| {
+            group
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+        }));
     }
 }

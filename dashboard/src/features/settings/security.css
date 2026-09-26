@@ -113,16 +113,6 @@ button.security-quiet:hover {
   min-height: 30px;
   padding: 4px 8px;
 }
-.security-factor-form {
-  display: flex;
-  gap: 8px;
-  max-width: 450px;
-  margin-top: 12px;
-}
-.security-factor-form input {
-  min-width: 0;
-  flex: 1;
-}
 .authenticator-setup {
   display: grid;
   gap: 16px;
@@ -143,13 +133,34 @@ button.security-quiet:hover {
   overflow-wrap: anywhere;
   user-select: all;
 }
-.recovery-codes pre {
-  max-height: 320px;
-  overflow: auto;
-  padding: 16px;
+.recovery-code-box {
+  margin: 16px 0;
   border: 1px solid var(--border);
   border-radius: 8px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.recovery-code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.recovery-code-actions button {
+  min-height: 30px;
+  padding: 4px 9px;
+  background: var(--background);
   font-size: 12px;
+}
+.recovery-code-box pre {
+  max-height: 300px;
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre;
   user-select: all;
 }
 .security-prompt {
@@ -277,10 +288,6 @@ button.security-quiet:hover {
   .security-password-fields {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;
-  }
-  .security-factor-form {
-    align-items: stretch;
-    flex-direction: column;
   }
   .security-prompt {
     margin-block: 24px;

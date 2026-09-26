@@ -107,7 +107,11 @@ const accountSession = z.object({
   expiresAt: milliseconds,
   device: text.nullable(),
 }) satisfies z.ZodType<AccountSession>;
-const recoveryCodes = z.object({ codes: z.array(text.min(32)).max(10) });
+const recoveryCodes = z.object({
+  codes: z
+    .array(text.regex(/^(?:[A-Za-z0-9_.]{4}(?:-[A-Za-z0-9_.]{4}){3}|[A-Za-z0-9_-]{43})$/))
+    .max(10),
+});
 const passkeyOptions = z.object({
   publicKey: z.object({ challenge: text.min(1) }).passthrough(),
 });

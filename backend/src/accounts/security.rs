@@ -491,7 +491,7 @@ impl Store {
             .exec("DELETE FROM recovery_codes WHERE user_id=?", [&a.user.id])?;
         let mut codes = Vec::new();
         for _ in 0..10 {
-            let code = crypto::token()?;
+            let code = crypto::recovery_code()?;
             self.platform.exec(
                 "INSERT INTO recovery_codes VALUES (?,?)",
                 params![crypto::sha(&code), a.user.id],

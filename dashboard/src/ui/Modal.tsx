@@ -9,10 +9,12 @@ export function Modal({
   variant = 'dialog',
   description,
   dismissible = true,
+  initialFocus = 'input,button,select',
 }: {
   title: ReactNode;
   description?: string;
   dismissible?: boolean;
+  initialFocus?: string;
   children: ReactNode;
   onClose: () => void;
   variant?: 'dialog' | 'sheet' | 'browser';
@@ -22,7 +24,7 @@ export function Modal({
   const dismiss = () => {
     if (dismissible) onClose();
   };
-  useFocusTrap(ref, { initialFocus: 'input,button,select', onEscape: dismiss });
+  useFocusTrap(ref, { initialFocus, onEscape: dismiss });
   return (
     <div
       className={`modal-backdrop ${variant === 'sheet' ? 'sheet-backdrop' : ''}`}
