@@ -299,6 +299,7 @@ fn load_test_dsp(db: &Store, owner: &User, input: &Input) -> Result<Reply> {
     let name = format!("Test DSP {}", iso());
     let dsp = db.new_dsp(&name, "America/Chicago", owner.actor(), false)?;
     let id = dsp.id.as_str();
+    db.enable_all_features(id)?;
     db.publish(id, &workforce::fixture("America/Chicago")?)?;
     db.audit(
         Some(owner.actor()),

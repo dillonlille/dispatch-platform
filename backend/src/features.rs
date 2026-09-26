@@ -43,7 +43,7 @@ pub const PAGES: &[Feature] = &[
         permissions: &["timecard.view", "timecard.manage", "collections.run"],
         provides: None,
         requires: &["timecards", "meal_breaks"],
-        default: true,
+        default: false,
     },
     Feature {
         id: "uniforms",
@@ -52,7 +52,7 @@ pub const PAGES: &[Feature] = &[
         permissions: &["uniforms.view", "uniforms.adjust", "uniforms.manage"],
         provides: None,
         requires: &[],
-        default: true,
+        default: false,
     },
 ];
 /// The page whose schedules, collections and jobs run. Nothing collects without it.
@@ -69,7 +69,7 @@ fn connection(provider: Provider) -> Feature {
         permissions: &[],
         provides: Some(collector.capability()),
         requires: &[],
-        default: true,
+        default: false,
     }
 }
 /// The catalog, pages first, then every registered connection.
@@ -200,6 +200,18 @@ impl Store {
     pub fn feature_enabled(&self, dsp: &str, id: &str) -> Result<bool> {
         Ok(self.features(dsp)?.iter().any(|f| f == id))
     }
+    /// Switches every feature on for a development or preview DSP, so its demo shows every
+    /// page. Real DSPs start with none and get theirs from the platform owner.
+    pub fn enable_all_features(&self, dsp: &str) -> Result<()> {
+        for feature in catalog() {
+            self.platform.exec(
+                "INSERT INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,1,?) \
+                 ON CONFLICT(dsp_id,feature) DO UPDATE SET enabled=1,changed_at=excluded.changed_at",
+                params![dsp, feature.id, iso()],
+            )?;
+        }
+        Ok(())
+    }
     /// Writes a new DSP's rows, so a later change of a default leaves it as it was made.
     pub fn seed_features(&self, dsp: &str) -> Result<()> {
         for feature in catalog() {
@@ -314,6 +326,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_new_dsp_starts_with_no_features_and_a_demo_dsp_with_all() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = super::super::config::Config::load().unwrap();
+        config.root = root.path().into();
+        let db = Store::initialize(config).unwrap();
+        let owner = db
+            .create_user(
+                "owner@example.test",
+                "Platform",
+                "Owner",
+                "Features-test-2026!",
+                true,
+            )
+            .unwrap();
+        let dsp = db.new_dsp("New DSP", "UTC", &owner.id, false).unwrap();
+        assert!(db.features(&dsp.id).unwrap().is_empty());
+        db.enable_all_features(&dsp.id).unwrap();
+        let all: Vec<_> = catalog().iter().map(|f| f.id.to_owned()).collect();
+        assert_eq!(db.features(&dsp.id).unwrap(), all);
+    }
     #[test]
     fn the_catalog_is_consistent() {
         let all = catalog();

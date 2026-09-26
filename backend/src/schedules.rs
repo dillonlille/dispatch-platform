@@ -564,6 +564,7 @@ mod tests {
             )
             .unwrap();
         db.provision(&id).unwrap();
+        db.enable_all_features(&id).unwrap();
         db.collector(&id, Provider::Paycom)
             .unwrap()
             .exec("UPDATE connections SET enabled=1", [])

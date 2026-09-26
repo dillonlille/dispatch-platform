@@ -98,7 +98,9 @@ pub fn bootstrap(
     )?;
     let owner = db.create_user(email, first, last, password, true)?;
     let dsp = if db.config.env().is_preview() {
-        Some(db.new_dsp("Dev DSP", "UTC", &owner.id, true)?)
+        let dsp = db.new_dsp("Dev DSP", "UTC", &owner.id, true)?;
+        db.enable_all_features(&dsp.id)?;
+        Some(dsp)
     } else {
         None
     };
@@ -129,7 +131,10 @@ pub fn seed(db: &Store) -> Result<()> {
     )?;
     let dev = db.new_dsp("Dev DSP", "America/Chicago", &owner.id, true)?;
     let north = db.new_dsp("Northline Logistics", "America/Chicago", &owner.id, false)?;
-    db.new_dsp("Summit Delivery", "America/Denver", &owner.id, false)?;
+    let summit = db.new_dsp("Summit Delivery", "America/Denver", &owner.id, false)?;
+    for dsp in [&dev, &north, &summit] {
+        db.enable_all_features(&dsp.id)?;
+    }
     let member = db.create_user(
         "member@dispatch.test",
         "Jordan",
