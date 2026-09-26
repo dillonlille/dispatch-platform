@@ -5,12 +5,12 @@ import {
   featureCatalog,
   featureLabel,
   previewSwitch,
+  schedulesFeature,
   type FeatureEntry,
 } from '../../app/features.js';
 import { useAction } from '../../app/useAction.js';
 import { Modal } from '../../ui/index.js';
 
-const SCHEDULES = 'timecard';
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const names = (labels: string[]) =>
   labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}` : (labels[0] ?? '');
@@ -33,8 +33,15 @@ export function FeatureSwitchDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const changes = previewSwitch(enabled, feature.id, on);
+  const preview = previewSwitch(enabled, feature.id, on);
+  const changes = preview ?? [];
   const entry = (id: string) => featureCatalog.find((f) => f.id === id)!;
+  // The capabilities the page lacks a provider of, when one must be chosen first.
+  const unmet = preview
+    ? []
+    : feature.requires.filter(
+        (c) => !featureCatalog.some((f) => f.provides === c && enabled.includes(f.id)),
+      );
   const others = changes.filter((change) => change.feature !== feature.id);
   const reasons = others.map((change) => {
     const other = entry(change.feature);
@@ -52,7 +59,7 @@ export function FeatureSwitchDialog({
     effects.push(
       `The ${names(pagesOff.map((c) => featureLabel(c.feature)))} ${pagesOff.length > 1 ? 'pages and their' : 'page and its'} permissions disappear for the team.`,
     );
-  if (pagesOff.some((c) => c.feature === SCHEDULES))
+  if (pagesOff.some((c) => c.feature === schedulesFeature))
     effects.push(
       report.schedules || report.activeJobs
         ? `${plural(report.schedules, 'schedule')} pause${report.schedules === 1 ? 's' : ''}${
@@ -73,7 +80,7 @@ export function FeatureSwitchDialog({
         dsp.connections[change.feature] === 'ready' ? '' : ' and is not connected yet'
       }.`,
     );
-  if (pagesOn.some((c) => c.feature === SCHEDULES))
+  if (pagesOn.some((c) => c.feature === schedulesFeature))
     effects.push('Schedules resume from their next run.');
   // The feature asked for first, then what it brings along.
   const labels = names([feature.label, ...others.map((c) => featureLabel(c.feature))]);
@@ -89,26 +96,42 @@ export function FeatureSwitchDialog({
       title={`Switch ${on ? 'on' : 'off'} ${feature.label} for ${dsp.name}?`}
       onClose={onClose}
     >
-      {reasons.map((reason) => (
-        <p key={reason}>{reason}</p>
-      ))}
-      <ul className="dsp-switch-effects">
-        {effects.map((effect) => (
-          <li key={effect}>{effect}</li>
-        ))}
-      </ul>
-      <div className="form-actions">
-        <button type="button" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          className={on ? 'primary' : 'danger'}
-          disabled={save.busy}
-          onClick={() => void save.run()}
-        >
-          Switch {on ? 'on' : 'off'} {labels}
-        </button>
-      </div>
+      {preview ? (
+        <>
+          {reasons.map((reason) => (
+            <p key={reason}>{reason}</p>
+          ))}
+          <ul className="dsp-switch-effects">
+            {effects.map((effect) => (
+              <li key={effect}>{effect}</li>
+            ))}
+          </ul>
+          <div className="form-actions">
+            <button type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className={on ? 'primary' : 'danger'}
+              disabled={save.busy}
+              onClick={() => void save.run()}
+            >
+              Switch {on ? 'on' : 'off'} {labels}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>
+            {feature.label} needs {names(unmet.map(capabilityLabel))}. Switch on one of its
+            connections first.
+          </p>
+          <div className="form-actions">
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

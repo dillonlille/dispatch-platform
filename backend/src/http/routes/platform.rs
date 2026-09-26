@@ -179,12 +179,11 @@ async fn set_feature(state: Arc<State>, input: Input, access: PlatformOwner) -> 
             let feature = v::text(b, "feature", 1, 40)?.to_owned();
             let enabled = v::boolean(b, "enabled")?;
             let result = db.set_feature(&dsp, &feature, enabled, owner.user.id.as_str())?;
-            if switched(&result, features::SCHEDULES, false) {
-                db.cancel_dsp(&dsp)?;
-            } else {
-                for provider in Provider::ALL {
-                    if switched(&result, provider.id(), false) {
-                        db.cancel_provider(&dsp, *provider)?;
+            match stopped(&result) {
+                Stopped::Dsp => db.cancel_dsp(&dsp)?,
+                Stopped::Providers(providers) => {
+                    for provider in providers {
+                        db.cancel_provider(&dsp, provider)?;
                     }
                 }
             }
@@ -195,12 +194,11 @@ async fn set_feature(state: Arc<State>, input: Input, access: PlatformOwner) -> 
             Ok(result)
         })
         .await?;
-    if switched(&result, features::SCHEDULES, false) {
-        state.browsers.revoke(&id).await;
-    } else {
-        for provider in Provider::ALL {
-            if switched(&result, provider.id(), false) {
-                state.browsers.revoke_for(&id, *provider).await;
+    match stopped(&result) {
+        Stopped::Dsp => state.browsers.revoke(&id).await,
+        Stopped::Providers(providers) => {
+            for provider in providers {
+                state.browsers.revoke_for(&id, provider).await;
             }
         }
     }
@@ -214,6 +212,24 @@ fn switched(result: &DspFeatures, feature: &str, enabled: bool) -> bool {
         .changed
         .iter()
         .any(|c| c.feature == feature && c.enabled == enabled)
+}
+/// What a switch stopped: everything of the DSP when its schedules' page went off,
+/// else each connection that did.
+enum Stopped {
+    Dsp,
+    Providers(Vec<Provider>),
+}
+fn stopped(result: &DspFeatures) -> Stopped {
+    if switched(result, features::SCHEDULES, false) {
+        return Stopped::Dsp;
+    }
+    Stopped::Providers(
+        Provider::ALL
+            .iter()
+            .copied()
+            .filter(|p| switched(result, p.id(), false))
+            .collect(),
+    )
 }
 
 async fn remove_dsp(state: Arc<State>, input: Input, access: PlatformOwner) -> Result<Reply> {

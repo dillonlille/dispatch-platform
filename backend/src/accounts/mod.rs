@@ -117,6 +117,11 @@ impl Context {
     pub fn visible<'a>(&'a self, stored: &'a [String]) -> impl Iterator<Item = &'a String> {
         crate::features::visible(&self.features, stored)
     }
+    /// Whether the DSP has `feature`. A page gates on its permissions instead; this is for
+    /// a connection, which owns none.
+    pub fn has(&self, feature: &str) -> bool {
+        self.features.iter().any(|f| f == feature)
+    }
     // Alternatives are separated by `|`; any one of them grants the request.
     pub fn allows(&self, permission: &str) -> bool {
         permission
