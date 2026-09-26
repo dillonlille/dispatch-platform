@@ -14,7 +14,7 @@ import zipfile
 
 import scan
 
-AREAS = ("mockups", "outputs", "design")
+AREAS = ("mockups", "outputs", "design", "screenshots")
 IMAGES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff", ".bmp"}
 ARCHIVES = scan.ARCHIVES | {".bz2", ".xz", ".zst", ".rar"}
 MAX_FILE = 32 * 1024 * 1024
