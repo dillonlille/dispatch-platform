@@ -1,6 +1,7 @@
 use crate::{
     Result,
     db::Store,
+    ensure,
     http::{
         input::{Input, Reply},
         route::{Grant, Route, Session, User, async_post, read, write},
@@ -8,6 +9,16 @@ use crate::{
     validate as v,
 };
 use serde_json::json;
+
+const RECOVERY_CODE_FORMAT: &str = "grouped-v1";
+
+fn ensure_recovery_code_format(input: &Input) -> Result<()> {
+    ensure(
+        input.header("x-dispatch-recovery-code-format") == RECOVERY_CODE_FORMAT,
+        "browser_update_required",
+        409,
+    )
+}
 
 pub fn routes() -> Vec<Route> {
     vec![
@@ -105,6 +116,7 @@ fn passkey_register_start(db: &Store, user: &User, input: &Input) -> Result<Repl
 
 fn passkey_register_finish(db: &Store, user: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &["credential", "name"])?;
+    ensure_recovery_code_format(input)?;
     let name = v::text(&input.body, "name", 1, 60)?;
     let codes = db.passkey_register_finish(user, input.body["credential"].clone(), name)?;
     Ok(Reply::json(json!({"codes":codes})))
@@ -134,6 +146,7 @@ fn authenticator_register_start(db: &Store, user: &User, input: &Input) -> Resul
 
 fn authenticator_register_finish(db: &Store, user: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &["code"])?;
+    ensure_recovery_code_format(input)?;
     let code = v::text(&input.body, "code", 6, 6)?;
     let codes = db.authenticator_register_finish(user, code)?;
     Ok(Reply::json(json!({"codes":codes})))
@@ -159,6 +172,7 @@ fn recover(db: &Store, user: &User, input: &Input) -> Result<Reply> {
 
 fn recovery_codes(db: &Store, user: &User, input: &Input) -> Result<Reply> {
     v::fields(&input.body, &[])?;
+    ensure_recovery_code_format(input)?;
     Ok(Reply::json(json!({"codes":db.new_recovery_codes(user)?})))
 }
 

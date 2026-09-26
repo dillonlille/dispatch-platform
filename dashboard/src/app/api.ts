@@ -41,6 +41,7 @@ const labels: Record<string, string> = {
   invalid_authenticator_code: 'That authenticator code is invalid, expired, or already used.',
   authenticator_exists: 'An authenticator app is already registered.',
   invalid_recovery_code: 'That recovery code is invalid or has already been used.',
+  browser_update_required: 'Dispatch was updated. Refresh the page and try again.',
   uniform_changed:
     'This uniform changed in another session. Close and reopen the editor before saving.',
   uniform_not_found: 'This uniform was removed. Refresh the inventory.',
@@ -104,6 +105,11 @@ const labels: Record<string, string> = {
   rate_limited: 'Too many attempts. Wait a few minutes and try again.',
   invalid_credentials: 'The provider could not verify those credentials.',
 };
+const recoveryCodeResponses = new Set([
+  '/api/auth/security/passkeys/register/finish',
+  '/api/auth/security/authenticator/register/finish',
+  '/api/auth/security/recovery-codes',
+]);
 export function errorLabel(code: string): string | undefined {
   return labels[code];
 }
@@ -116,6 +122,9 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
       credentials: 'same-origin',
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}),
+        ...(body !== undefined && recoveryCodeResponses.has(url)
+          ? { 'X-Dispatch-Recovery-Code-Format': 'grouped-v1' }
+          : {}),
         ...(view ? { 'X-Dispatch-View': view } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

@@ -62,6 +62,10 @@ test('passkeys gate new sessions, reject replay, and recovery codes work once', 
   const recoveryHeading = page.getByRole('heading', { name: 'Save your recovery codes' });
   await expect(recoveryHeading).toBeVisible();
   await expect(recoveryHeading).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'I saved my recovery codes' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeFocused();
   const formatted = (await page.getByLabel('Formatted recovery codes').textContent())!;
   const lines = formatted.split('\n');
   expect(lines.slice(0, 2)).toEqual(['DISPATCH RECOVERY CODES', '']);

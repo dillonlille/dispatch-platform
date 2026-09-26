@@ -163,6 +163,14 @@ test('authenticator MFA gates new sessions, resists replay, and recovery can dis
   assert.match(setup.secret, /^[A-Z2-7]{32}$/);
   assert.match(setup.qrCode, /^data:image\/svg\+xml;base64,/);
   const enrollmentCode = authenticatorCode(setup.secret);
+  delete owner.headers['x-dispatch-recovery-code-format'];
+  const staleEnrollment = await owner.post('/api/auth/security/authenticator/register/finish', {
+    code: enrollmentCode,
+  });
+  assert.equal(staleEnrollment.status, 409);
+  assert.equal(staleEnrollment.value.error, 'browser_update_required');
+  assert.equal((await owner.get('/api/auth/security/status')).value.enrolled, false);
+  owner.headers['x-dispatch-recovery-code-format'] = 'grouped-v1';
   const finished = await owner.post('/api/auth/security/authenticator/register/finish', {
     code: enrollmentCode,
   });
@@ -183,6 +191,18 @@ test('authenticator MFA gates new sessions, resists replay, and recovery can dis
   assert.equal(storage.recovery.length, 10);
   for (const code of finished.value.codes)
     assert(!storage.recovery.some((row) => row.hash === code || row.hash.includes(code)));
+  delete owner.headers['x-dispatch-recovery-code-format'];
+  const staleReplacement = await owner.post('/api/auth/security/recovery-codes');
+  assert.equal(staleReplacement.status, 409);
+  assert.equal(staleReplacement.value.error, 'browser_update_required');
+  assert.equal(
+    f.database(
+      'data/platform/accounts.sqlite',
+      (db) => (db.prepare('SELECT count(*) n FROM recovery_codes').get() as { n: number }).n,
+    ),
+    10,
+  );
+  owner.headers['x-dispatch-recovery-code-format'] = 'grouped-v1';
   assert.equal((await other.get('/api/session')).status, 401, 'enrollment revokes other sessions');
 
   const gated = await f.client();
