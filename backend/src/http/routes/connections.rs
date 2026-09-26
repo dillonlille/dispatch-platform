@@ -54,11 +54,7 @@ pub fn summary(db: &Store, c: &Member) -> Result<Connection> {
 }
 
 fn connection(db: &Store, c: &Member, _: &Input) -> Result<Reply> {
-    ensure(
-        c.features.iter().any(|f| f == Provider::Paycom.id()),
-        "not_found",
-        404,
-    )?;
+    ensure(c.has(Provider::Paycom.id()), "not_found", 404)?;
     Reply::of(&summary(db, c)?)
 }
 
@@ -69,11 +65,7 @@ async fn open(state: &Arc<State>, input: &Input, access: Dsp) -> Result<(Context
     let c = state.run(move |db| access.authorize(db, &auth)).await?;
     let provider = Provider::parse(input.param("provider"))?;
     // A connection the DSP does not have is as unknown as one that never existed.
-    ensure(
-        c.features.iter().any(|f| f == provider.id()),
-        "not_found",
-        404,
-    )?;
+    ensure(c.has(provider.id()), "not_found", 404)?;
     Ok((c, provider))
 }
 

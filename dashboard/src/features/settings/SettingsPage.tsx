@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DspView, SessionView } from '../../../../shared/contracts/index.js';
 import { Header, Tabs } from '../../ui/index.js';
 import { can } from '../../app/permissions.js';
-import { hasFeature } from '../../app/features.js';
+import { connectionFeatures } from '../../app/features.js';
 import { ConnectionsPage } from '../connections/index.js';
 import { ThemeSection } from './ThemeSection.js';
 import { hashQuery, replaceHashQuery } from '../../app/navigation.js';
@@ -39,7 +39,7 @@ export function SettingsPage({ session, view }: { session: SessionView; view?: D
           <ConnectionsPage
             development={session.providerMode === 'fixture'}
             timezone={view.dsp.timezone}
-            providers={(['paycom', 'cortex'] as const).filter((p) => hasFeature(view, p))}
+            providers={connectionFeatures(view.features).map((f) => f.id)}
           />
         </div>
       )}

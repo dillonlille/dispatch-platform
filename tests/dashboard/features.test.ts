@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { features, permissions } from '../../shared/contracts/index.js';
-import { featureCatalog, grants } from '../../dashboard/src/app/features.js';
+import {
+  capabilityLabel,
+  featureCatalog,
+  grants,
+  previewSwitch,
+  schedulesFeature,
+} from '../../dashboard/src/app/features.js';
 
 test('the dashboard mirrors the backend feature catalog', () => {
   const source = fs.readFileSync('backend/src/features.rs', 'utf8');
@@ -43,6 +49,35 @@ test('the dashboard mirrors the backend feature catalog', () => {
     featureCatalog.map((feature) => feature.id),
     [...features],
   );
+  assert.equal(/pub const SCHEDULES: &str = "([^"]+)";/.exec(source)![1], schedulesFeature);
+  for (const capability of featureCatalog.flatMap((feature) => feature.requires))
+    assert.notEqual(capabilityLabel(capability), capability, `${capability} has no label`);
+});
+
+test('a switch brings its dependencies along, as the backend does', () => {
+  const all = [...features];
+  assert.deepEqual(previewSwitch(all, 'uniforms', false), [
+    { feature: 'uniforms', enabled: false },
+  ]);
+  assert.deepEqual(previewSwitch(all, 'uniforms', true), []);
+  // Disabling a provider disables the pages left without one.
+  assert.deepEqual(previewSwitch(all, 'cortex', false), [
+    { feature: 'cortex', enabled: false },
+    { feature: 'timecard', enabled: false },
+  ]);
+  // Enabling a page enables the one provider of each capability it lacks.
+  assert.deepEqual(previewSwitch(['uniforms', 'paycom'], 'timecard', true), [
+    { feature: 'cortex', enabled: true },
+    { feature: 'timecard', enabled: true },
+  ]);
+  assert.deepEqual(previewSwitch(['uniforms'], 'timecard', true), [
+    { feature: 'paycom', enabled: true },
+    { feature: 'cortex', enabled: true },
+    { feature: 'timecard', enabled: true },
+  ]);
+  assert.deepEqual(previewSwitch(['uniforms'], 'paycom', true), [
+    { feature: 'paycom', enabled: true },
+  ]);
 });
 
 test('a permission exists only with its feature', () => {

@@ -13,14 +13,14 @@ use super::{
     ensure, job_statuses,
 };
 use rusqlite::params;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
     Page,
     Connection,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Feature {
     pub id: &'static str,
     pub label: &'static str,
@@ -73,15 +73,18 @@ fn connection(provider: Provider) -> Feature {
     }
 }
 /// The catalog, pages first, then every registered connection.
-pub fn catalog() -> Vec<Feature> {
+static CATALOG: LazyLock<Vec<Feature>> = LazyLock::new(|| {
     PAGES
         .iter()
-        .cloned()
+        .copied()
         .chain(Provider::ALL.iter().map(|p| connection(*p)))
         .collect()
+});
+pub fn catalog() -> &'static [Feature] {
+    &CATALOG
 }
-pub fn find(id: &str) -> Option<Feature> {
-    catalog().into_iter().find(|f| f.id == id)
+pub fn find(id: &str) -> Option<&'static Feature> {
+    catalog().iter().find(|f| f.id == id)
 }
 /// Whether `permission` exists in a DSP with `enabled` features: its owning page
 /// is on, or for the connections permission any connection is on. A permission
@@ -116,18 +119,6 @@ fn satisfied(feature: &Feature, enabled: &[String]) -> bool {
     feature.requires.iter().all(|c| provided(c, enabled))
 }
 
-struct FeatureRow {
-    feature: String,
-    enabled: bool,
-}
-impl FromRow for FeatureRow {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        Ok(Self {
-            feature: row.get("feature")?,
-            enabled: row.get("enabled")?,
-        })
-    }
-}
 impl FromRow for FeatureState {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         Ok(Self {
@@ -142,11 +133,14 @@ impl Store {
     /// The DSP's enabled features, in catalog order. A feature without a row of its
     /// own is at its default, which is how a DSP made before the feature existed reads.
     pub fn features(&self, dsp: &str) -> Result<Vec<String>> {
-        let rows: Vec<FeatureRow> = self.platform.query_as(
-            "SELECT feature,enabled FROM dsp_features WHERE dsp_id=?",
-            [dsp],
-        )?;
-        let stored: BTreeMap<_, _> = rows.into_iter().map(|r| (r.feature, r.enabled)).collect();
+        let stored: BTreeMap<String, bool> = self
+            .platform
+            .query_as(
+                "SELECT feature,enabled FROM dsp_features WHERE dsp_id=?",
+                [dsp],
+            )?
+            .into_iter()
+            .collect();
         Ok(catalog()
             .iter()
             .filter(|f| stored.get(f.id).copied().unwrap_or(f.default))
@@ -203,22 +197,23 @@ impl Store {
     /// Switches every feature on for a development or preview DSP, so its demo shows every
     /// page. Real DSPs start with none and get theirs from the platform owner.
     pub fn enable_all_features(&self, dsp: &str) -> Result<()> {
-        for feature in catalog() {
-            self.platform.exec(
-                "INSERT INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,1,?) \
-                 ON CONFLICT(dsp_id,feature) DO UPDATE SET enabled=1,changed_at=excluded.changed_at",
-                params![dsp, feature.id, iso()],
-            )?;
-        }
-        Ok(())
+        self.write_features(dsp, |_| true, true)
     }
     /// Writes a new DSP's rows, so a later change of a default leaves it as it was made.
     pub fn seed_features(&self, dsp: &str) -> Result<()> {
+        self.write_features(dsp, |f| f.default, false)
+    }
+    /// A row for every feature, `on` or not; `overwrite` replaces rows the DSP has.
+    fn write_features(&self, dsp: &str, on: fn(&Feature) -> bool, overwrite: bool) -> Result<()> {
+        let sql = if overwrite {
+            "INSERT INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,?,?) \
+             ON CONFLICT(dsp_id,feature) DO UPDATE SET enabled=excluded.enabled,changed_at=excluded.changed_at"
+        } else {
+            "INSERT OR IGNORE INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,?,?)"
+        };
         for feature in catalog() {
-            self.platform.exec(
-                "INSERT OR IGNORE INTO dsp_features(dsp_id,feature,enabled,changed_at) VALUES (?,?,?,?)",
-                params![dsp, feature.id, feature.default, iso()],
-            )?;
+            self.platform
+                .exec(sql, params![dsp, feature.id, on(feature), iso()])?;
         }
         Ok(())
     }
@@ -238,8 +233,8 @@ impl Store {
         self.platform.transaction(|| {
             self.find_dsp(dsp)?;
             let mut current = self.features(dsp)?;
-            let mut changed = Vec::new();
-            let mut flip = |current: &mut Vec<String>, f: &Feature, on: bool| {
+            let mut changed: Vec<(&Feature, bool)> = Vec::new();
+            let mut flip = |current: &mut Vec<String>, f: &'static Feature, on: bool| {
                 let is_on = current.iter().any(|e| e == f.id);
                 if is_on == on {
                     return;
@@ -249,10 +244,7 @@ impl Store {
                 } else {
                     current.retain(|e| e != f.id);
                 }
-                changed.push(FeatureChange {
-                    feature: f.id.to_owned(),
-                    enabled: on,
-                });
+                changed.push((f, on));
             };
             if enabled {
                 if let Some(capability) = feature.provides {
@@ -274,25 +266,23 @@ impl Store {
                     ensure(providers.len() == 1, "provider_required", 409)?;
                     flip(&mut current, providers[0], true);
                 }
-                flip(&mut current, &feature, true);
+                flip(&mut current, feature, true);
             } else {
-                flip(&mut current, &feature, false);
+                flip(&mut current, feature, false);
                 for page in all.iter().filter(|f| f.kind == Kind::Page) {
                     if !satisfied(page, &current) {
                         flip(&mut current, page, false);
                     }
                 }
             }
-            for change in &changed {
+            for (f, on) in &changed {
                 self.platform.exec(
                     "INSERT INTO dsp_features(dsp_id,feature,enabled,changed_by,changed_at) \
                      VALUES (?1,?2,?3,?4,?5) ON CONFLICT(dsp_id,feature) DO UPDATE SET \
                      enabled=?3,changed_by=?4,changed_at=?5",
-                    params![dsp, change.feature, change.enabled, actor, iso()],
+                    params![dsp, f.id, on, actor, iso()],
                 )?;
-                let label =
-                    find(&change.feature).map_or(change.feature.clone(), |f| f.label.to_owned());
-                let cause: Vec<AuditChange> = if change.feature == id {
+                let cause: Vec<AuditChange> = if f.id == id {
                     vec![]
                 } else {
                     vec![("cause", None, Some(feature.label.to_owned()))]
@@ -300,13 +290,13 @@ impl Store {
                 self.audit_with(
                     Some(actor),
                     Some(dsp),
-                    if change.enabled {
+                    if *on {
                         "dsp.feature_enabled"
                     } else {
                         "dsp.feature_disabled"
                     },
-                    &change.feature,
-                    Some(&label),
+                    f.id,
+                    Some(f.label),
                     &cause,
                 )?;
             }
@@ -317,7 +307,13 @@ impl Store {
             }
             Ok(DspFeatures {
                 features: self.features(dsp)?,
-                changed,
+                changed: changed
+                    .into_iter()
+                    .map(|(f, on)| FeatureChange {
+                        feature: f.id.to_owned(),
+                        enabled: on,
+                    })
+                    .collect(),
             })
         })
     }
@@ -357,7 +353,7 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), all.len(), "feature ids repeat");
         let mut owned = Vec::new();
-        for feature in &all {
+        for feature in all {
             for permission in feature.permissions {
                 assert!(
                     super::super::roles::PERMISSIONS.contains(permission),

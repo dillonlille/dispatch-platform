@@ -1,16 +1,24 @@
-import type { DspView, Feature, Permission } from '../../../shared/contracts/index.js';
+import type {
+  ConnectionFeature,
+  DspView,
+  Feature,
+  PageFeature,
+  Permission,
+} from '../../../shared/contracts/index.js';
 
-export type FeatureEntry = {
-  id: Feature;
+type Entry<Kind, Id> = {
+  id: Id;
   label: string;
-  kind: 'page' | 'connection';
+  kind: Kind;
   /** The permissions the feature owns; without it, nobody in the DSP holds them. */
   permissions: Permission[];
-  /** What a connection supplies. */
-  provides?: string;
   /** What a page needs one enabled connection of. */
   requires: string[];
 };
+export type PageEntry = Entry<'page', PageFeature> & { provides?: undefined };
+/** `provides` is what the connection supplies. */
+export type ConnectionEntry = Entry<'connection', ConnectionFeature> & { provides: string };
+export type FeatureEntry = PageEntry | ConnectionEntry;
 /** Mirrors `PAGES` and the collector registry in `backend/src/features.rs`. */
 export const featureCatalog: FeatureEntry[] = [
   {
@@ -44,27 +52,25 @@ export const featureCatalog: FeatureEntry[] = [
     requires: [],
   },
 ];
+/** The page whose schedules, collections and jobs run; mirrors `SCHEDULES` in the backend. */
+export const schedulesFeature: PageFeature = 'timecard';
+/** Every capability a page requires has a label; the mirror test checks. */
 const capabilities: Record<string, string> = {
   timecards: 'a timecard source',
   meal_breaks: 'a meal-break source',
 };
 export const capabilityLabel = (capability: string) => capabilities[capability] ?? capability;
-export const providerOf = (capability: string) =>
-  featureCatalog.find((feature) => feature.provides === capability);
-/** "Requires a timecard source (Paycom) and a meal-break source (Cortex, off)". */
-export const requirementText = (feature: FeatureEntry, enabled: readonly string[]) =>
-  `Requires ${feature.requires
-    .map((capability) => {
-      const provider = providerOf(capability);
-      const state = provider && !enabled.includes(provider.id) ? ', off' : '';
-      return `${capabilityLabel(capability)}${provider ? ` (${provider.label}${state})` : ''}`;
-    })
-    .join(' and ')}`;
+/** The connections among `features`, in catalog order. */
+export const connectionFeatures = (features: readonly string[]) =>
+  featureCatalog.filter(
+    (f): f is ConnectionEntry => f.kind === 'connection' && features.includes(f.id),
+  );
 /**
  * What switching `id` would change, mirroring `set_feature` in the backend: enabling a
  * page enables the one provider of each capability it lacks, enabling a provider switches
  * off another of the same capability, and disabling a provider disables the pages left
- * without one.
+ * without one. Undefined when a page needs a capability with several providers and none
+ * is on: the backend refuses that switch until one is chosen.
  */
 export function previewSwitch(enabled: readonly string[], id: Feature, on: boolean) {
   const current = new Set(enabled);
@@ -85,7 +91,8 @@ export function previewSwitch(enabled: readonly string[], id: Feature, on: boole
     for (const capability of feature.requires) {
       if (provided(capability)) continue;
       const providers = featureCatalog.filter((f) => f.provides === capability);
-      if (providers.length === 1) flip(providers[0]!, true);
+      if (providers.length !== 1) return undefined;
+      flip(providers[0]!, true);
     }
     flip(feature, true);
   } else {

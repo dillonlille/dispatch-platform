@@ -1,7 +1,7 @@
 import { ChevronLeft, Ellipsis, Eye } from 'lucide-react';
 import type { DspSummary } from '../../../../shared/contracts/index.js';
 import { useUpdateState } from '../../app/browser-update.js';
-import { featureCatalog } from '../../app/features.js';
+import { connectionFeatures } from '../../app/features.js';
 import { Badge, DspAvatar, Popover, Tabs } from '../../ui/index.js';
 import { deviceTimezone, time } from '../../lib/format.js';
 import { DspFeaturesTab } from './DspFeaturesTab.js';
@@ -41,9 +41,7 @@ export function DspDetail({
   // The View button stands on its own; the menu holds everything else.
   const menu = actions.filter(([action, , shown]) => shown && action !== 'view');
   const zone = deviceTimezone();
-  const connections = featureCatalog.filter(
-    (feature) => feature.kind === 'connection' && dsp.features.includes(feature.id),
-  );
+  const connections = connectionFeatures(dsp.features);
   const facts: [string, React.ReactNode][] = [
     [
       'Owner',
