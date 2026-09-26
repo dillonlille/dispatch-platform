@@ -148,23 +148,20 @@ fn review(pr: &Value) -> Review {
             .unwrap_or("none yet")
             .to_owned()
     };
+    // A push while it reviews leaves the review on the earlier commit, and a review asked
+    // for again outranks the one it follows. A request a push cancelled stays "in progress"
+    // on its commit for good, so a review completed on a later commit outranks it.
+    let completed = statuses
+        .iter()
+        .rposition(|(_, status)| status["state"] == "SUCCESS" && status["description"] == REVIEWED);
+    let running = statuses.iter().enumerate().any(|(index, (_, status))| {
+        status["state"] == "PENDING" && completed.is_none_or(|last| index > last)
+    });
     match head.and_then(|status| status["state"].as_str()) {
         Some("PENDING") => Review::Running,
         Some("FAILURE" | "ERROR") => Review::Failed(said(head)),
-        // A push while it reviews leaves the review on the earlier commit, and a review asked
-        // for again outranks the one it follows.
-        _ if statuses
-            .iter()
-            .any(|(_, status)| status["state"] == "PENDING") =>
-        {
-            Review::Running
-        }
-        _ if statuses.iter().any(|(_, status)| {
-            status["state"] == "SUCCESS" && status["description"] == REVIEWED
-        }) =>
-        {
-            Review::Done
-        }
+        _ if running => Review::Running,
+        _ if completed.is_some() => Review::Done,
         _ if failed.is_some() => Review::Failed(said(failed)),
         _ if said(head).to_lowercase().contains("rate limited") => Review::Limited(said(head)),
         _ => Review::Unstarted(said(head)),
@@ -974,6 +971,16 @@ mod tests {
             ],
         );
         assert_eq!(review(&rerun), Review::Running);
+        // A request a push cancelled stays "in progress" on its commit for good; the review
+        // that completed on a later commit outranks it.
+        let stale = labelled(
+            open(NEW),
+            &[
+                (OLD, "PENDING", "Review in progress"),
+                (MIDDLE, "SUCCESS", REVIEWED),
+            ],
+        );
+        assert_eq!(review(&stale), Review::Done);
         // Without the label, CodeRabbit's status holds nothing up.
         let mut unlabelled = labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]);
         unlabelled["labels"]["nodes"] = json!([]);
