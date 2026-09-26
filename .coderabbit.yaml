@@ -35,7 +35,7 @@ reviews:
     - '!Cargo.lock'
     - '!shared/contracts/generated/**'
   # The project's rules, which live outside the repository. Keep them in step with the docs
-  # they come from, named in each entry.
+  # or skills they come from, named in each entry.
   path_instructions:
     - path: '**'
       instructions: |
@@ -101,7 +101,7 @@ reviews:
     - path: 'backend/src/browsers/paycom/{extract.rs,timecard.js}'
       instructions: |
         `extract.rs` ports `timecard.js`'s detached reading. A change to one must be matched in
-        the other and proved with `http_extraction_parity`. (providers.md)
+        the other and proved with `http_extraction_parity`. (dispatch-collectors skill)
     - path: 'dashboard/src/**'
       instructions: |
         (ui.md, codebase.md)
