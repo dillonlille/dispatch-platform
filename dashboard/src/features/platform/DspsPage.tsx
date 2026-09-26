@@ -106,12 +106,7 @@ export function DspsPage() {
         )}
       </DataState>
       {creating && (
-        <Modal
-          title="Create new DSP"
-          description="Invite an owner. Their workspace will be prepared while they finish setup."
-          variant="sheet"
-          onClose={() => setCreating(false)}
-        >
+        <Modal title="Create new DSP" variant="sheet" onClose={() => setCreating(false)}>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
