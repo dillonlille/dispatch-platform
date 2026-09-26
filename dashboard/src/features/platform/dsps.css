@@ -233,13 +233,16 @@
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
+/* The switch leads its row, so the name is always right beside it. */
 .dsp-feature-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   padding: 12px 0;
   border-top: 1px solid var(--border);
+}
+.dsp-feature-row .status-indicator {
+  margin-left: auto;
 }
 .dsp-feature-row:first-of-type {
   border-top: 0;
@@ -250,12 +253,6 @@
 }
 .dsp-feature-row.off strong {
   color: var(--muted-foreground);
-}
-.dsp-feature-end {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  flex-shrink: 0;
 }
 .dsp-feature-row input[role='switch'] {
   appearance: none;

@@ -55,20 +55,18 @@ export function DspFeaturesTab({ dsp, changed }: { dsp: DspSummary; changed: () 
           const has = enabled.includes(feature.id);
           return (
             <div className={`dsp-feature-row ${has ? '' : 'off'}`} key={feature.id}>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label={feature.label}
+                checked={has}
+                disabled={!data}
+                onChange={(event) => setPending({ feature, on: event.target.checked })}
+              />
               <strong>{feature.label}</strong>
-              <div className="dsp-feature-end">
-                {feature.kind === 'connection' && has && (
-                  <Badge value={dsp.connections[feature.id] ?? 'not_connected'} />
-                )}
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-label={feature.label}
-                  checked={has}
-                  disabled={!data}
-                  onChange={(event) => setPending({ feature, on: event.target.checked })}
-                />
-              </div>
+              {feature.kind === 'connection' && has && (
+                <Badge value={dsp.connections[feature.id] ?? 'not_connected'} />
+              )}
             </div>
           );
         })}
