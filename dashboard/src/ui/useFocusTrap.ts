@@ -52,12 +52,12 @@ export function useFocusTrap(
         }
       }
     };
-    document.addEventListener('keydown', key, true);
+    document.addEventListener('keydown', key);
     return () => {
       const index = open.lastIndexOf(element);
       if (index >= 0) open.splice(index, 1);
       document.body.style.overflow = overflow;
-      document.removeEventListener('keydown', key, true);
+      document.removeEventListener('keydown', key);
       before?.focus();
     };
   }, [active, container, initialFocus]);
