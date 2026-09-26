@@ -290,12 +290,6 @@
   opacity: 0.5;
   cursor: default;
 }
-.dsp-detail-foot {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding-top: 32px;
-}
 .dsp-switch-effects {
   display: grid;
   gap: 8px;

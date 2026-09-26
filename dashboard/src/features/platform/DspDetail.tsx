@@ -38,8 +38,8 @@ export function DspDetail({
     ],
     ['disable', 'Disable DSP', dsp.status === 'active' && !dsp.permanent],
   ];
-  const available = actions.filter(([, , shown]) => shown);
-  const footer = available.filter(([action]) => action !== 'view');
+  // The View button stands on its own; the menu holds everything else.
+  const menu = actions.filter(([action, , shown]) => shown && action !== 'view');
   const zone = deviceTimezone();
   const connections = featureCatalog.filter(
     (feature) => feature.kind === 'connection' && dsp.features.includes(feature.id),
@@ -85,14 +85,14 @@ export function DspDetail({
             <Eye size={16} />
             View
           </button>
-          {available.length > 0 && (
+          {menu.length > 0 && (
             <Popover
               className="row-menu"
               label={`Actions for ${dsp.name}`}
               trigger={<Ellipsis size={18} />}
               anchored
             >
-              {available.map(([action, label]) => (
+              {menu.map(([action, label]) => (
                 <button
                   key={action}
                   className={action === 'disable' ? 'danger' : undefined}
@@ -125,19 +125,6 @@ export function DspDetail({
             </div>
           ))}
         </dl>
-      )}
-      {footer.length > 0 && (
-        <div className="dsp-detail-foot">
-          {footer.map(([action, label]) => (
-            <button
-              key={action}
-              className={action === 'disable' ? 'danger' : undefined}
-              onClick={() => act(action)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       )}
     </section>
   );
