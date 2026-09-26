@@ -182,6 +182,16 @@ impl System for Fake {
                 "html_url":format!("https://example.invalid/run/{id}")}),
             );
             Value::Null
+        } else if args.starts_with(&["gh", "attestation", "download"]) {
+            let build = Path::new(args[3]);
+            fs::write(
+                cwd.ok_or("Attestation download directory required")?
+                    .join(format!("sha256:{}.jsonl", artifact::file_hash(build)?)),
+                b"synthetic signed attestation\n",
+            )?;
+            Value::Null
+        } else if args.starts_with(&["gh", "attestation", "verify"]) {
+            Value::Null
         } else if args.starts_with(&["gh", "release", "create"]) {
             self.listed.replace(vec![json!({"id":9,"tag_name":"v1.0.0","draft":true,"prerelease":false,
                 "target_commitish":self.commit,"html_url":"https://example.invalid/release","assets":[]})]);
@@ -589,6 +599,8 @@ fn corrupt_saved_assets_and_incomplete_legacy_directories_stop_without_deletion(
         "dispatch-platform-1.0.0.tar.gz",
         "release.json",
         "provenance.json",
+        "dispatch-build.tar.gz",
+        "attestation.sigstore.jsonl",
         "SHA256SUMS",
     ] {
         let f = Fixture::new();
@@ -652,7 +664,7 @@ fn partial_uploads_and_lost_draft_creation_responses_resume_without_duplicates()
                 .as_array()
                 .unwrap()
                 .len(),
-            4
+            6
         );
         assert!(!f.system.has_call(&["PATCH"]));
         let calls = f.system.calls.borrow();
@@ -679,7 +691,7 @@ fn delayed_draft_visibility_is_awaited_before_uploading() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        6
     );
     assert!(!f.system.has_call(&["PATCH"]));
 }

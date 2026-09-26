@@ -120,7 +120,10 @@ async function run(app: Awaited<ReturnType<typeof prepare>>) {
         } catch {}
       }
     }, 25);
-    const headers: Record<string, string> = { origin, 'content-type': 'application/json' };
+    const headers: Record<string, string> = {
+      origin: env.DISPATCH_ORIGIN!,
+      'content-type': 'application/json',
+    };
     const request = (route: string, body?: unknown, client = headers) =>
       fetch(origin + route, {
         method: body === undefined ? 'GET' : 'POST',

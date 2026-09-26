@@ -10,6 +10,9 @@ fn egress_rejects_private_and_lookalike_destinations() {
         "169.254.169.254",
         "100.64.0.1",
         "198.18.0.1",
+        "192.0.2.1",
+        "198.51.100.1",
+        "203.0.113.1",
         "::1",
         "::ffff:8.8.8.8",
     ] {
@@ -17,6 +20,19 @@ fn egress_rejects_private_and_lookalike_destinations() {
             !egress::public_address(address.parse().unwrap()),
             "{address}"
         );
+    }
+    for address in [
+        [192, 0, 0, 1],
+        [192, 31, 196, 1],
+        [192, 52, 193, 1],
+        [192, 88, 99, 1],
+        [192, 175, 48, 1],
+        [233, 252, 0, 1],
+        [240, 0, 0, 1],
+    ] {
+        assert!(!egress::public_address(
+            std::net::Ipv4Addr::from(address).into()
+        ));
     }
     assert!(egress::public_address("8.8.8.8".parse().unwrap()));
     assert!(egress::allowed_host("time-and-attendance.paycomonline.net"));

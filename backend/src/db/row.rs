@@ -37,6 +37,11 @@ impl<A: FromSql, B: FromSql, C: FromSql> FromRow for (A, B, C) {
         Ok((row.0.get(0)?, row.0.get(1)?, row.0.get(2)?))
     }
 }
+impl<A: FromSql, B: FromSql, C: FromSql, D: FromSql> FromRow for (A, B, C, D) {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok((row.0.get(0)?, row.0.get(1)?, row.0.get(2)?, row.0.get(3)?))
+    }
+}
 
 /// A closed set of strings stored in a column and sent as JSON: one enum with its SQL
 /// text, `FromSql`/`ToSql`, and serde, so no caller compares the text.

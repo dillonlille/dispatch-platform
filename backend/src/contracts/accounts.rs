@@ -184,6 +184,47 @@ pub struct SessionResponse {
     pub release: String,
     pub provider_mode: ProviderMode,
     pub source: RuntimeSource,
+    pub security: SecurityStatus,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityStatus {
+    pub enrolled: bool,
+    pub required: bool,
+    pub verified: bool,
+    pub recent: bool,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub passkey_count: i64,
+    pub authenticator: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PasskeySummary {
+    pub id: String,
+    pub name: String,
+    #[cfg_attr(test, ts(type = "number"))]
+    pub created_at: i64,
+}
+impl FromRow for PasskeySummary {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct AuthenticatorSetup {
+    pub secret: String,
+    pub qr_code: String,
 }
 
 /// What the running build was made from, so the dashboard can link its source.
@@ -206,6 +247,7 @@ pub struct AccountSession {
     pub created_at: i64,
     #[cfg_attr(test, ts(type = "number"))]
     pub expires_at: i64,
+    pub device: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

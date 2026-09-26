@@ -197,8 +197,14 @@ impl Config {
             )?;
         }
         if c.mail_mode == "smtp" {
+            let smtp = c
+                .smtp_url
+                .as_deref()
+                .and_then(|value| url::Url::parse(value).ok());
             ensure(
-                c.smtp_url.is_some() && c.mail_from.is_some(),
+                smtp.as_ref()
+                    .is_some_and(|endpoint| secure_smtp_url(endpoint, c.development))
+                    && c.mail_from.is_some(),
                 "mail_configuration_required",
                 400,
             )?;
@@ -220,6 +226,20 @@ impl Config {
     pub fn mail_available(&self) -> bool {
         self.mail_mode != "disabled"
     }
+}
+
+fn secure_smtp_url(endpoint: &url::Url, development: bool) -> bool {
+    endpoint.host_str().is_some()
+        && endpoint.fragment().is_none()
+        && (endpoint.scheme() == "smtps"
+            || (endpoint.scheme() == "smtp"
+                && endpoint
+                    .query_pairs()
+                    .eq([("tls".into(), "required".into())]))
+            || (development
+                && endpoint.scheme() == "smtp"
+                && endpoint.host_str() == Some("127.0.0.1")
+                && endpoint.query().is_none()))
 }
 /// The commit a build was made from, and on Production its version: Production installs only
 /// published releases, whose manifest names it. Any other build still carries package.json's
@@ -264,5 +284,33 @@ mod tests {
             (production.version, production.commit),
             (Some("0.0.23".into()), commit)
         );
+    }
+
+    #[test]
+    fn smtp_requires_transport_security() {
+        for endpoint in [
+            "smtps://mail.example.com",
+            "smtps://user:password@mail.example:465",
+            "smtp://mail.example.com:587?tls=required",
+        ] {
+            assert!(super::secure_smtp_url(
+                &url::Url::parse(endpoint).unwrap(),
+                false
+            ));
+        }
+        for endpoint in [
+            "smtp://mail.example.com",
+            "smtp://mail.example.com?tls=opportunistic",
+            "smtp://mail.example.com?tls=required&tls=none",
+            "smtp://mail.example.com?tls=required#fragment",
+        ] {
+            assert!(!super::secure_smtp_url(
+                &url::Url::parse(endpoint).unwrap(),
+                false
+            ));
+        }
+        let loopback = url::Url::parse("smtp://127.0.0.1:2525").unwrap();
+        assert!(super::secure_smtp_url(&loopback, true));
+        assert!(!super::secure_smtp_url(&loopback, false));
     }
 }

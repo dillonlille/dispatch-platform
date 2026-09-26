@@ -25,6 +25,10 @@ import {
   type Job,
   type JobMetrics,
   type SessionView,
+  type SecurityStatus,
+  type AccountSession,
+  type AuthenticatorSetup,
+  type PasskeySummary,
   type User,
 } from './index.js';
 
@@ -79,6 +83,34 @@ const dspSummary = dsp
     members: count,
   })
   .passthrough() satisfies z.ZodType<DspSummary>;
+const securityStatus = z.object({
+  enrolled: z.boolean(),
+  required: z.boolean(),
+  verified: z.boolean(),
+  recent: z.boolean(),
+  passkeyCount: count,
+  authenticator: z.boolean(),
+}) satisfies z.ZodType<SecurityStatus>;
+const passkeySummary = z.object({
+  id: text.min(1),
+  name: text.min(1),
+  createdAt: milliseconds,
+}) satisfies z.ZodType<PasskeySummary>;
+const authenticatorSetup = z.object({
+  secret: text.regex(/^[A-Z2-7]{32}$/),
+  qrCode: text.startsWith('data:image/svg+xml;base64,'),
+}) satisfies z.ZodType<AuthenticatorSetup>;
+const accountSession = z.object({
+  id: text.min(1),
+  current: z.boolean(),
+  createdAt: milliseconds,
+  expiresAt: milliseconds,
+  device: text.nullable(),
+}) satisfies z.ZodType<AccountSession>;
+const recoveryCodes = z.object({ codes: z.array(text.min(32)).max(10) });
+const passkeyOptions = z.object({
+  publicKey: z.object({ challenge: text.min(1) }).passthrough(),
+});
 export const sessionSchema = z.object({
   user: userSchema,
   csrf: text.min(1),
@@ -88,6 +120,7 @@ export const sessionSchema = z.object({
   release: text,
   providerMode: z.enum(['fixture', 'native']),
   source: z.object({ version: text.nullable(), commit: text.nullable() }),
+  security: securityStatus,
 }) satisfies z.ZodType<SessionView>;
 const viewRole = z.object({ id: text, name: text, owner: z.boolean() });
 const viewSchema = z.object({
@@ -200,6 +233,9 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
   let schema: z.ZodType | undefined;
   if (method === 'GET') {
     if (route === '/api/session') schema = sessionSchema;
+    else if (route === '/api/auth/security/status') schema = securityStatus;
+    else if (route === '/api/auth/security/passkeys') schema = z.array(passkeySummary);
+    else if (route === '/api/auth/security/sessions') schema = z.array(accountSession);
     else if (route === '/api/dsp/collection-updates') schema = collectionUpdatesSchema;
     else if (route === '/api/dsp/uniforms') schema = uniformInventorySchema;
     else if (route === '/api/dsp/uniforms/updates') schema = uniformUpdatesSchema;
@@ -225,6 +261,20 @@ export function parseApiResponse(path: string, method: 'GET' | 'POST', value: un
       ].includes(route)
     )
       schema = okSchema;
+    else if (route === '/api/auth/security/authenticator/register/start')
+      schema = authenticatorSetup;
+    else if (
+      route === '/api/auth/security/passkeys/register/start' ||
+      route === '/api/auth/security/passkeys/verify/start'
+    )
+      schema = passkeyOptions;
+    else if (
+      route === '/api/auth/security/passkeys/register/finish' ||
+      route === '/api/auth/security/authenticator/register/finish' ||
+      route === '/api/auth/security/recovery-codes'
+    )
+      schema = recoveryCodes;
+    else if (route?.startsWith('/api/auth/security/')) schema = okSchema;
     else if (route === '/api/session/dsp') schema = viewSchema;
     else if (route?.startsWith('/api/dsp/uniforms/stock/')) schema = uniformAdjustmentSchema;
     else if (route === '/api/dsp/uniforms' || route?.startsWith('/api/dsp/uniforms/'))

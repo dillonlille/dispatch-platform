@@ -297,7 +297,7 @@ test('the audit log reads as sentences, shows what changed and folds repeated vi
   expect(exports).toHaveLength(1);
   expect(exports[0]!.get('actor')).toBe('usr_maria');
   expect(exports[0]!.get('q')).toBe('role');
-  expect(csv).toContain('Time,Person,DSP,Area,Event,Details,Action');
+  expect(csv).toContain('"Time","Person","DSP","Area","Event","Details","Action"');
   expect(csv).toContain('"Maria Lopez changed Jordan Pike’s role","Role Dispatcher → Manager"');
   expect(errors).toEqual([]);
 });

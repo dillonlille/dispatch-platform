@@ -23,7 +23,7 @@ export function MemberProfilePasswordField({
           type={visible ? 'text' : 'password'}
           autoComplete="new-password"
           required
-          minLength={8}
+          minLength={15}
           maxLength={128}
           disabled={disabled}
         />

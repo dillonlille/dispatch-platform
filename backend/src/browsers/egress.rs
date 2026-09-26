@@ -39,16 +39,25 @@ pub fn public_address(address: IpAddr) -> bool {
     let IpAddr::V4(ip) = address else {
         return false;
     };
-    let [a, b, _, _] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     !(a == 0
         || a == 10
         || a == 127
         || a >= 224
         || (a == 169 && b == 254)
         || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 0)
+        || (a == 192 && b == 2)
+        || (a == 192 && b == 31 && c == 196)
+        || (a == 192 && b == 52 && c == 193)
+        || (a == 192 && b == 88 && c == 99)
         || (a == 192 && b == 168)
+        || (a == 192 && b == 175 && c == 48)
         || (a == 100 && (64..=127).contains(&b))
-        || (a == 198 && (b == 18 || b == 19)))
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+        || (a == 233 && b == 252 && c == 0))
 }
 pub struct Egress {
     task: JoinHandle<()>,

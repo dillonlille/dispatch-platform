@@ -98,6 +98,16 @@ pub async fn pipeline(
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "same-origin"),
         ("x-frame-options", "DENY"),
+        ("cross-origin-opener-policy", "same-origin"),
+        ("cross-origin-resource-policy", "same-origin"),
+        (
+            "permissions-policy",
+            concat!(
+                "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), ",
+                "payment=(), usb=(), publickey-credentials-create=(self), ",
+                "publickey-credentials-get=(self)"
+            ),
+        ),
     ] {
         headers.insert(HeaderName::from_static(name), value.parse().unwrap());
     }

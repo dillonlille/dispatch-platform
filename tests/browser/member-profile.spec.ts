@@ -52,6 +52,8 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('request', (request) => assets.push(request.url()));
   await page.goto(url);
+  await expect(page).toHaveURL(/#invite$/);
+  expect(page.url()).not.toContain('token=');
   await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
   await expect(page.locator('.auth-layout, .onboarding-page')).toHaveCount(0);
   await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');
@@ -283,7 +285,7 @@ for (const variant of ['phone', 'reduced motion', 'unavailable artwork'] as cons
     await page.getByRole('button', { name: 'Create profile', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     await expect(page.locator('.member-completion')).toHaveCount(0);
-    await expect(page).toHaveURL(/#invite\?/);
+    await expect(page).toHaveURL(/#invite$/);
     await page.getByRole('button', { name: 'Create profile', exact: true }).click();
     await expect(page).toHaveURL(/#signin$/);
     await expect(page.locator('.auth-panel .notice')).toHaveCount(0);

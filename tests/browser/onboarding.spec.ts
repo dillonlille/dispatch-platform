@@ -78,8 +78,8 @@ test('owner onboarding stays light and fits desktop and phone viewports, includi
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByLabel('First name', { exact: true }).fill('Responsive');
   await page.getByLabel('Last name', { exact: true }).fill('Owner');
-  await page.getByLabel('Password', { exact: true }).fill('Different1');
-  await page.getByLabel('Confirm password', { exact: true }).fill('Different2');
+  await page.getByLabel('Password', { exact: true }).fill('Different-secure-1!');
+  await page.getByLabel('Confirm password', { exact: true }).fill('Different-secure-2!');
   await page.getByRole('button', { name: 'Finish setup' }).click();
   await expect(page.getByRole('alert')).toContainText('The passwords must match.');
   for (const [width, height] of [
@@ -153,7 +153,7 @@ test('desktop reveals map and form together and remains usable if the map fails'
   await fits(page);
   await page.unroute('**/onboarding-map-*.svg');
   await page.route('**/onboarding-map-*.svg', (route) => route.abort());
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await expect(heading).toBeVisible();
   await page
     .getByLabel('DSP name', { exact: true })

@@ -49,6 +49,50 @@ impl Store {
     }
 }
 impl crate::State {
+    pub async fn reauthenticate(
+        self: &std::sync::Arc<Self>,
+        auth: Auth,
+        password: String,
+        ip: String,
+    ) -> Result<()> {
+        let a = auth.clone();
+        let row = self
+            .run(move |db| {
+                db.authenticate(&a.raw)?;
+                db.password_attempt(&a.user.email, &ip)?;
+                UserRow::find(&db.platform, "id", &a.user.id)?
+                    .ok_or_else(|| Error::new("sign_in_required", 401))
+            })
+            .await?;
+        let expected = row.clone();
+        self.password_work(move || {
+            ensure(
+                crypto::check_password(&password, &expected.password),
+                "invalid_password",
+                403,
+            )
+        })
+        .await?;
+        self.run(move |db| {
+            db.authenticate(&auth.raw)?;
+            let fresh = UserRow::find(&db.platform, "id", &auth.user.id)?;
+            ensure(
+                fresh
+                    .as_ref()
+                    .is_some_and(|fresh| same_password_user(fresh, &row)),
+                "sign_in_required",
+                401,
+            )?;
+            db.platform.exec(
+                "INSERT INTO session_security(session_hash,password_verified_at) VALUES (?,?) \
+                 ON CONFLICT(session_hash) DO UPDATE SET password_verified_at=excluded.password_verified_at",
+                params![auth.hash, now()],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     pub(super) async fn password_work<T: Send + 'static>(
         &self,
         work: impl FnOnce() -> Result<T> + Send + 'static,

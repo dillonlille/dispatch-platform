@@ -1,8 +1,9 @@
 use super::*;
 impl Store {
     pub fn password_attempt(&self, email: &str, ip: &str) -> Result<()> {
-        self.throttle(
-            &format!("login:ip:{ip}"),
+        self.throttle_ip(
+            "login-ip",
+            ip,
             self.config.security.password_ip_attempts,
             self.config.security.password_window_seconds * 1000,
         )?;
@@ -16,8 +17,21 @@ impl Store {
         self.platform
             .transaction(|| self.reserve_quota(key, max, window))
     }
+    pub fn throttle_ip(&self, namespace: &str, ip: &str, max: i64, window: i64) -> Result<()> {
+        self.throttle(&format!("{namespace}:{}", quota_ip(ip)), max, window)
+    }
     // Called under the invitation transaction, so failed issuance releases the reservation.
     pub(super) fn reserve_quota(&self, key: &str, max: i64, window: i64) -> Result<()> {
+        let namespace = key.split(':').next().unwrap_or("unknown");
+        ensure(
+            !namespace.is_empty()
+                && namespace.len() <= 32
+                && namespace
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-'),
+            "invalid_throttle_key",
+            500,
+        )?;
         let key = crypto::sha(key);
         self.platform
             .exec("DELETE FROM throttle WHERE reset_at<?", [now()])?;
@@ -26,15 +40,33 @@ impl Store {
             .one_as("SELECT count FROM throttle WHERE key=?", [&key])?;
         ensure(row.as_ref().map_or(0, |r| r.0) < max, "rate_limited", 429)?;
         let known = row.is_some();
-        ensure(
-            known || self.platform.count("SELECT count(*) FROM throttle", [])? < 10000,
-            "rate_limited",
-            429,
-        )?;
+        if !known {
+            // High-cardinality input must not fill a global table and lock out every unrelated
+            // throttle. Retain frequently hit keys; evict a low-use key within the noisy
+            // namespace first, then globally if legacy rows already exceed the new bound.
+            if self.platform.count(
+                "SELECT count(*) FROM throttle WHERE namespace=?",
+                [namespace],
+            )? >= 4096
+            {
+                self.platform.exec(
+                    "DELETE FROM throttle WHERE key=(SELECT key FROM throttle WHERE namespace=? \
+                     ORDER BY count ASC,reset_at ASC,key ASC LIMIT 1)",
+                    [namespace],
+                )?;
+            }
+            if self.platform.count("SELECT count(*) FROM throttle", [])? >= 32768 {
+                self.platform.exec(
+                    "DELETE FROM throttle WHERE key=(SELECT key FROM throttle \
+                     ORDER BY count ASC,reset_at ASC,key ASC LIMIT 1)",
+                    [],
+                )?;
+            }
+        }
         self.platform.exec(
-            "INSERT INTO throttle(key,count,reset_at) VALUES (?,1,?) \
-             ON CONFLICT(key) DO UPDATE SET count=count+1",
-            params![key, now() + window],
+            "INSERT INTO throttle(key,count,reset_at,namespace) VALUES (?,1,?,?) \
+             ON CONFLICT(key) DO UPDATE SET count=count+1,namespace=excluded.namespace",
+            params![key, now() + window, namespace],
         )?;
         Ok(())
     }
@@ -158,12 +190,29 @@ impl Store {
         Ok(fresh)
     }
 }
+
+fn quota_ip(value: &str) -> String {
+    match value.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(ip)) => {
+            if let Some(ip) = ip.to_ipv4_mapped() {
+                return ip.to_string();
+            }
+            let [a, b, c, d, ..] = ip.segments();
+            format!("{a:x}:{b:x}:{c:x}:{d:x}::/64")
+        }
+        Ok(ip) => ip.to_string(),
+        // The request boundary normally supplies a parsed address. Keeping an invalid value
+        // in one fixed bucket is safer than letting malformed variants evade the quota.
+        Err(_) => "invalid".into(),
+    }
+}
 impl crate::State {
     pub async fn login(
         self: &std::sync::Arc<Self>,
         email: String,
         password: String,
         ip: String,
+        user_agent: String,
         lifetime: SessionLifetime,
     ) -> Result<String> {
         let permit = self
@@ -206,23 +255,85 @@ impl crate::State {
             )?;
             let raw = crypto::token()?;
             let created_at = now();
+            let device = device_label(&user_agent);
+            let hash = crypto::sha(&raw);
             db.platform.transaction(|| {
                 db.platform
                     .exec("DELETE FROM sessions WHERE expires_at<?", [now()])?;
                 db.platform.exec(
                     "INSERT INTO sessions VALUES (?,?,?,?,?)",
                     params![
-                        crypto::sha(&raw),
+                        hash,
                         row.user.id,
                         row.version,
                         created_at + lifetime.seconds() * 1000,
                         created_at
                     ],
                 )?;
+                db.platform.exec(
+                    "INSERT INTO session_metadata(session_hash,device) VALUES (?,?)",
+                    params![hash, device],
+                )?;
                 db.audit(Some(&row.user.id), None, "account.signed_in", "")
             })?;
             Ok(raw)
         })
         .await
+    }
+}
+
+fn device_label(user_agent: &str) -> String {
+    let browser = if user_agent.contains("Firefox/") {
+        "Firefox"
+    } else if user_agent.contains("Edg/") {
+        "Edge"
+    } else if user_agent.contains("Chrome/") || user_agent.contains("Chromium/") {
+        "Chrome"
+    } else if user_agent.contains("Safari/") {
+        "Safari"
+    } else {
+        "Browser"
+    };
+    let system = if user_agent.contains("Android") {
+        "Android"
+    } else if user_agent.contains("iPhone") || user_agent.contains("iPad") {
+        "iOS"
+    } else if user_agent.contains("Windows") {
+        "Windows"
+    } else if user_agent.contains("Macintosh") || user_agent.contains("Mac OS") {
+        "macOS"
+    } else if user_agent.contains("Linux") {
+        "Linux"
+    } else {
+        "unknown device"
+    };
+    format!("{browser} on {system}")
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::{device_label, quota_ip};
+
+    #[test]
+    fn user_agents_become_bounded_non_identifying_device_labels() {
+        assert_eq!(
+            device_label("Mozilla/5.0 (Macintosh) AppleWebKit Safari/605.1"),
+            "Safari on macOS"
+        );
+        assert_eq!(
+            device_label("arbitrary private detail"),
+            "Browser on unknown device"
+        );
+    }
+
+    #[test]
+    fn ipv6_throttles_share_their_network_prefix() {
+        assert_eq!(
+            quota_ip("2001:db8:12:34::1"),
+            quota_ip("2001:db8:12:34:ffff::2")
+        );
+        assert_ne!(quota_ip("2001:db8:12:34::1"), quota_ip("2001:db8:12:35::1"));
+        assert_eq!(quota_ip("::ffff:192.0.2.7"), "192.0.2.7");
+        assert_eq!(quota_ip("not-an-address"), "invalid");
     }
 }

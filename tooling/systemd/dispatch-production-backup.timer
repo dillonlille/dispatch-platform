@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Dispatch Production backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=30m
+Persistent=true
+Unit=dispatch-production-backup.service
+
+[Install]
+WantedBy=timers.target

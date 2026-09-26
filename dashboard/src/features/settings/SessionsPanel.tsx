@@ -44,6 +44,7 @@ export function SessionsPanel({ sessions }: { sessions: ReturnType<typeof useAcc
                   <div className="security-row-copy">
                     <span>{session.current ? 'This session' : 'Other session'}</span>
                     <small>
+                      {session.device && <>{session.device} · </>}
                       Signed in {time(new Date(session.createdAt).toISOString(), deviceTimezone())}
                     </small>
                   </div>

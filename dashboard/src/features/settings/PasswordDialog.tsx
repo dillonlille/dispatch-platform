@@ -44,7 +44,7 @@ export function PasswordDialog({ close }: { close: () => void }) {
               name="password"
               type="password"
               autoComplete="new-password"
-              minLength={8}
+              minLength={15}
               maxLength={128}
               required
               disabled={action.busy}
@@ -56,14 +56,17 @@ export function PasswordDialog({ close }: { close: () => void }) {
               name="confirmPassword"
               type="password"
               autoComplete="new-password"
-              minLength={8}
+              minLength={15}
               maxLength={128}
               required
               disabled={action.busy}
             />
           </label>
         </div>
-        <p className="muted">Changing your password signs out all sessions.</p>
+        <p className="muted">
+          Use at least 15 characters and avoid a commonly used password. Changing it signs out all
+          sessions.
+        </p>
         <ErrorBox message={action.error} />
         <div className="form-actions">
           <button type="submit" className="primary" disabled={action.busy}>

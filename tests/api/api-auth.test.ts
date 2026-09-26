@@ -164,6 +164,26 @@ test('Rust password recovery uses the private outbox, revokes sessions and consu
   assert.equal((await renewed.get('/api/session')).status, 401);
 });
 
+test('password recovery gives existing and absent accounts the same delayed public answer', async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const answers: { status: number; value: unknown; elapsed: number }[] = [];
+  for (const email of ['owner@dispatch.test', 'absent@dispatch.test']) {
+    const started = performance.now();
+    const answer = await f.request('/api/auth/forgot-password', { email });
+    answers.push({
+      status: answer.status,
+      value: answer.value,
+      elapsed: performance.now() - started,
+    });
+  }
+  for (const answer of answers) {
+    assert.equal(answer.status, 202);
+    assert.deepEqual(answer.value, { ok: true });
+    assert(answer.elapsed >= 280, `recovery response returned in ${answer.elapsed}ms`);
+  }
+});
+
 test('independent platforms reject each other’s sessions and signed views', async (t) => {
   const a = await fixture(false);
   t.after(a.close);

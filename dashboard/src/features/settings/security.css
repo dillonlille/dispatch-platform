@@ -88,6 +88,88 @@ button.security-quiet:hover {
   background: var(--card);
   overflow: hidden;
 }
+.security-mfa {
+  margin-bottom: 28px;
+}
+.security-factor-row {
+  align-items: flex-start;
+}
+.security-factor-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+.security-factor-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--muted);
+  font-size: 13px;
+}
+.security-factor-list button {
+  min-height: 30px;
+  padding: 4px 8px;
+}
+.security-factor-form {
+  display: flex;
+  gap: 8px;
+  max-width: 450px;
+  margin-top: 12px;
+}
+.security-factor-form input {
+  min-width: 0;
+  flex: 1;
+}
+.authenticator-setup {
+  display: grid;
+  gap: 16px;
+}
+.authenticator-setup img {
+  width: 220px;
+  max-width: 100%;
+  margin-inline: auto;
+  border-radius: 8px;
+  background: white;
+}
+.authenticator-setup code {
+  display: block;
+  padding: 10px;
+  border-radius: 7px;
+  background: var(--muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.recovery-codes pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  user-select: all;
+}
+.security-prompt {
+  width: min(480px, calc(100% - 32px));
+  margin: 8vh auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.modal .security-prompt {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+.security-prompt form {
+  display: grid;
+  gap: 16px;
+}
+.security-prompt > button {
+  margin: 14px 10px 0 0;
+}
 .security-sessions-heading {
   display: flex;
   justify-content: space-between;
@@ -195,5 +277,12 @@ button.security-quiet:hover {
   .security-password-fields {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;
+  }
+  .security-factor-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .security-prompt {
+    margin-block: 24px;
   }
 }
