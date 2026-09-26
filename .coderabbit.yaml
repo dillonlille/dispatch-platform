@@ -94,8 +94,10 @@ reviews:
     - path: '{backend/src/roles.rs,shared/contracts/accounts.ts,dashboard/src/app/permissions.ts}'
       instructions: |
         A permission lives in all three of `backend/src/roles.rs`, `shared/contracts/accounts.ts`
-        and `dashboard/src/app/permissions.ts`, with a label and a section in
-        `permissionGroups`. Flag a change that updates one without the others. (codebase.md)
+        and `dashboard/src/app/permissions.ts`, with a label. A feature's permissions take their
+        role-sheet section from the feature catalog; only a permission of no feature is listed in
+        `permissionGroups` directly. Flag a change that updates one file without the others.
+        (dispatch-features skill)
     - path: 'backend/src/browsers/paycom/{extract.rs,timecard.js}'
       instructions: |
         `extract.rs` ports `timecard.js`'s detached reading. A change to one must be matched in
