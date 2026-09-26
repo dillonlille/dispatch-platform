@@ -132,6 +132,17 @@ class ExportPrivacyTests(unittest.TestCase):
         self.assertEqual(len(self.audit.findings), 2)
         self.assertTrue(all(r[2] == "export-link-or-special-file" for r in self.audit.findings))
 
+    def test_walk_audits_a_scratch_directory_of_pr_screenshots(self):
+        (self.root / "screenshots/pr-flow/after").mkdir(parents=True)
+        data = b"\x89PNG\0synthetic image"
+        (self.root / "screenshots/pr-flow/after/team.png").write_bytes(data)
+        result = subprocess.CompletedProcess([], 0, b"Team & Roles", b"")
+        with patch.object(exports.subprocess, "run", return_value=result):
+            self.audit.walk(self.root)
+        self.assertEqual(list(self.audit.names.values()), ["screenshots/pr-flow/after/team.png"])
+        self.assertIn(("screenshots/pr-flow/after/team.png", 1, "image-needs-synthetic-data-review"),
+                      self.audit.findings)
+
     def test_private_review_manifest_cannot_disable_source_rules(self):
         p = self.root / "review.json"
         p.write_text(json.dumps({"assets": {}, "identitySha256": [],
