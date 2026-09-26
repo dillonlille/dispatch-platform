@@ -169,6 +169,8 @@ test('authenticator MFA gates new sessions, resists replay, and recovery can dis
   assert.equal(finished.status, 200);
   assert.equal(finished.value.codes.length, 10);
   assert.equal(new Set(finished.value.codes).size, 10);
+  for (const code of finished.value.codes)
+    assert.match(code, /^[A-Za-z0-9_.]{4}(?:-[A-Za-z0-9_.]{4}){3}$/);
   const storage = f.database('data/platform/accounts.sqlite', (db) => ({
     app: db.prepare('SELECT secret,last_counter FROM authenticator_apps').get() as {
       secret: string;

@@ -13,6 +13,7 @@ type Removing =
 export function MultiFactorPanel() {
   const status = useSecurityStatus();
   const passkeys = usePasskeys();
+  const [addingPasskey, setAddingPasskey] = useState(false);
   const [setup, setSetup] = useState<AuthenticatorSetup>();
   const [codes, setCodes] = useState<string[]>([]);
   const [removing, setRemoving] = useState<Removing>();
@@ -25,6 +26,15 @@ export function MultiFactorPanel() {
     async (work: () => Promise<void>) => {
       await work();
       refresh();
+    },
+    { inline: true },
+  );
+  const passkeyAction = useAction(
+    async (name: string) => {
+      const recovery = await registerPasskey(name);
+      refresh();
+      setAddingPasskey(false);
+      if (recovery.length) setCodes(recovery);
     },
     { inline: true },
   );
@@ -84,30 +94,13 @@ export function MultiFactorPanel() {
                     </div>
                   )}
                 </DataState>
-                <form
-                  className="security-factor-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = event.currentTarget;
-                    const name = String(new FormData(form).get('name'));
-                    run(async () => {
-                      const recovery = await registerPasskey(name);
-                      form.reset();
-                      if (recovery.length) setCodes(recovery);
-                    });
-                  }}
-                >
-                  <input
-                    name="name"
-                    aria-label="Passkey name"
-                    required
-                    maxLength={60}
-                    placeholder="Passkey name"
-                    disabled={action.busy}
-                  />
-                  <button disabled={action.busy || security.passkeyCount >= 10}>Add passkey</button>
-                </form>
               </div>
+              <button
+                disabled={action.busy || security.passkeyCount >= 10}
+                onClick={() => setAddingPasskey(true)}
+              >
+                Add passkey
+              </button>
             </div>
             <div className="security-row security-factor-row">
               <Smartphone size={18} aria-hidden="true" />
@@ -156,6 +149,14 @@ export function MultiFactorPanel() {
           </>
         )}
       </DataState>
+      {addingPasskey && (
+        <PasskeyDialog
+          busy={passkeyAction.busy}
+          error={passkeyAction.error}
+          close={() => setAddingPasskey(false)}
+          finish={(name) => void passkeyAction.run(name)}
+        />
+      )}
       {setup && (
         <AuthenticatorDialog
           setup={setup}
@@ -175,7 +176,12 @@ export function MultiFactorPanel() {
         />
       )}
       {codes.length > 0 && (
-        <Modal title="Recovery codes" dismissible={false} onClose={() => setCodes([])}>
+        <Modal
+          title="Recovery codes"
+          dismissible={false}
+          initialFocus="#recovery-codes-title"
+          onClose={() => setCodes([])}
+        >
           <RecoveryCodes codes={codes} done={() => setCodes([])} />
         </Modal>
       )}
@@ -203,6 +209,56 @@ export function MultiFactorPanel() {
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+function PasskeyDialog({
+  busy,
+  error,
+  close,
+  finish,
+}: {
+  busy: boolean;
+  error: string;
+  close: () => void;
+  finish: (name: string) => void;
+}) {
+  return (
+    <Modal
+      title="Add passkey"
+      initialFocus="input[name='name']"
+      onClose={close}
+      dismissible={!busy}
+    >
+      <form
+        className="security-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          finish(String(new FormData(event.currentTarget).get('name')));
+        }}
+      >
+        <label>
+          Passkey name
+          <input
+            name="name"
+            required
+            maxLength={60}
+            placeholder="For example, work phone"
+            disabled={busy}
+          />
+        </label>
+        <p className="muted">Use a name that will help you recognize this device later.</p>
+        <ErrorBox message={error} />
+        <div className="form-actions">
+          <button className="primary" disabled={busy}>
+            {busy ? 'Adding…' : 'Add passkey'}
+          </button>
+          <button type="button" className="security-quiet" disabled={busy} onClick={close}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

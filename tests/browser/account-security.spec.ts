@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import type { Page } from '@playwright/test';
 import { test, expect, login, openDsp, demo, signIn } from './fixtures.js';
 
@@ -51,11 +52,38 @@ test('passkeys gate new sessions, reject replay, and recovery codes work once', 
   await login(page);
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Security', exact: true }).click();
-  await page.getByLabel('Passkey name').fill('Test security key');
+  await expect(page.getByLabel('Passkey name')).toHaveCount(0);
   await page.getByRole('button', { name: 'Add passkey', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();
-  const codes = (await page.locator('.recovery-codes pre').innerText()).split('\n');
+  const passkeyDialog = page.getByRole('dialog', { name: 'Add passkey' });
+  await expect(passkeyDialog).toBeVisible();
+  await expect(passkeyDialog.getByLabel('Passkey name')).toBeFocused();
+  await passkeyDialog.getByLabel('Passkey name').fill('Test security key');
+  await passkeyDialog.getByRole('button', { name: 'Add passkey', exact: true }).click();
+  const recoveryHeading = page.getByRole('heading', { name: 'Save your recovery codes' });
+  await expect(recoveryHeading).toBeVisible();
+  await expect(recoveryHeading).toBeFocused();
+  const formatted = (await page.getByLabel('Formatted recovery codes').textContent())!;
+  const lines = formatted.split('\n');
+  expect(lines.slice(0, 2)).toEqual(['DISPATCH RECOVERY CODES', '']);
+  const codes = lines.slice(2).map((line, index) => {
+    const prefix = `Code ${String(index + 1).padStart(2, '0')}: `;
+    expect(line.startsWith(prefix)).toBe(true);
+    const code = line.slice(prefix.length);
+    expect(code).toMatch(/^[A-Za-z0-9_.]{4}(?:-[A-Za-z0-9_.]{4}){3}$/);
+    return code;
+  });
   expect(codes).toHaveLength(10);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: new URL(page.url()).origin,
+  });
+  await page.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(formatted);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download', exact: true }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('dispatch-recovery-codes.txt');
+  expect(fs.readFileSync(await file.path(), 'utf8')).toBe(formatted);
   expect((await older.get('/api/session')).status).toBe(401);
   await page.getByRole('button', { name: 'I saved my recovery codes' }).click();
   await expect(page.getByText('Test security key', { exact: true })).toBeVisible();
