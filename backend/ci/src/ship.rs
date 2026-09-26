@@ -32,7 +32,7 @@ const REVIEW_LABEL: &str = "ai-review";
 const REVIEWED: &str = "Review completed";
 /// CodeRabbit's login as the author of review comments.
 const CODERABBIT: &str = "coderabbitai";
-const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description}}}}} reviewThreads(first:100){nodes{id isResolved path line comments(first:1){totalCount nodes{author{login} url}} latest:comments(last:1){nodes{author{login}}}}}}}}";
+const LOOK: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id state isDraft headRefOid mergeable mergeCommit{oid} mergeQueueEntry{state position} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:50){nodes{__typename ...on CheckRun{name conclusion}}}}}}} timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}} labels(first:20){nodes{name}} reviewed:commits(last:100){nodes{commit{oid status{context(name:\"CodeRabbit\"){state description createdAt}}}}} reviewThreads(first:100){nodes{id isResolved path line comments(first:1){totalCount nodes{author{login} url}} latest:comments(last:1){nodes{author{login}}}}}}}}";
 /// The PR's newest comments, where CodeRabbit says when a rate limit ends.
 const NOTICES: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){notices:comments(last:30){nodes{author{login} body updatedAt}}}}}";
 const ENQUEUE: &str = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{position}}}";
@@ -148,23 +148,25 @@ fn review(pr: &Value) -> Review {
             .unwrap_or("none yet")
             .to_owned()
     };
+    // A push while it reviews leaves the review on the earlier commit, and a review asked
+    // for again outranks the one it follows. A request a push cancelled stays "in progress"
+    // on its commit for good, so a review completed after it outranks it. The nodes' order
+    // carries no promise; the statuses' own times order them.
+    let completed_at = statuses
+        .iter()
+        .filter(|(_, status)| status["state"] == "SUCCESS" && status["description"] == REVIEWED)
+        .filter_map(|(_, status)| status["createdAt"].as_str())
+        .max();
+    let running = statuses.iter().any(|(_, status)| {
+        status["state"] == "PENDING"
+            && completed_at
+                .is_none_or(|at| status["createdAt"].as_str().is_none_or(|made| made > at))
+    });
     match head.and_then(|status| status["state"].as_str()) {
         Some("PENDING") => Review::Running,
         Some("FAILURE" | "ERROR") => Review::Failed(said(head)),
-        // A push while it reviews leaves the review on the earlier commit, and a review asked
-        // for again outranks the one it follows.
-        _ if statuses
-            .iter()
-            .any(|(_, status)| status["state"] == "PENDING") =>
-        {
-            Review::Running
-        }
-        _ if statuses.iter().any(|(_, status)| {
-            status["state"] == "SUCCESS" && status["description"] == REVIEWED
-        }) =>
-        {
-            Review::Done
-        }
+        _ if running => Review::Running,
+        _ if completed_at.is_some() => Review::Done,
         _ if failed.is_some() => Review::Failed(said(failed)),
         _ if said(head).to_lowercase().contains("rate limited") => Review::Limited(said(head)),
         _ => Review::Unstarted(said(head)),
@@ -651,13 +653,29 @@ mod tests {
         value["mergeCommit"] = json!({"oid":"3333333"});
         value
     }
-    /// `pr` labelled for CodeRabbit's review, with its status on each listed commit.
-    fn labelled(mut pr: Value, statuses: &[(&str, &str, &str)]) -> Value {
+    /// `pr` labelled for CodeRabbit's review, with its status on each listed commit, each
+    /// made a second after the one before it.
+    fn labelled(pr: Value, statuses: &[(&str, &str, &str)]) -> Value {
+        let timed: Vec<_> = statuses
+            .iter()
+            .enumerate()
+            .map(|(index, (oid, state, description))| {
+                (
+                    *oid,
+                    *state,
+                    *description,
+                    format!("2026-01-01T00:00:{index:02}Z"),
+                )
+            })
+            .collect();
+        labelled_at(pr, &timed)
+    }
+    fn labelled_at(mut pr: Value, statuses: &[(&str, &str, &str, String)]) -> Value {
         pr["labels"] = json!({"nodes":[{"name":"collectors"},{"name":REVIEW_LABEL}]});
         let nodes: Vec<_> = statuses
             .iter()
-            .map(|(oid, state, description)| {
-                json!({"commit":{"oid":oid,"status":{"context":{"state":state,"description":description}}}})
+            .map(|(oid, state, description, at)| {
+                json!({"commit":{"oid":oid,"status":{"context":{"state":state,"description":description,"createdAt":at}}}})
             })
             .collect();
         pr["reviewed"] = json!({ "nodes": nodes });
@@ -974,6 +992,31 @@ mod tests {
             ],
         );
         assert_eq!(review(&rerun), Review::Running);
+        // A request a push cancelled stays "in progress" on its commit for good; the review
+        // that completed on a later commit outranks it.
+        let stale = labelled(
+            open(NEW),
+            &[
+                (OLD, "PENDING", "Review in progress"),
+                (MIDDLE, "SUCCESS", REVIEWED),
+            ],
+        );
+        assert_eq!(review(&stale), Review::Done);
+        // The nodes' order carries no promise: a request made after the newest completed
+        // review is running wherever it is listed.
+        let later = labelled_at(
+            open(NEW),
+            &[
+                (
+                    MIDDLE,
+                    "PENDING",
+                    "Review in progress",
+                    "2026-01-01T00:00:09Z".into(),
+                ),
+                (OLD, "SUCCESS", REVIEWED, "2026-01-01T00:00:01Z".into()),
+            ],
+        );
+        assert_eq!(review(&later), Review::Running);
         // Without the label, CodeRabbit's status holds nothing up.
         let mut unlabelled = labelled(open(OLD), &[(OLD, "PENDING", "Review in progress")]);
         unlabelled["labels"]["nodes"] = json!([]);
