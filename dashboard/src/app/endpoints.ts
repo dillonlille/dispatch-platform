@@ -22,8 +22,11 @@ import type {
   CollectionSchedules,
   Connection,
   CollectionUpdates,
+  DspFeatureReport,
+  DspFeatures,
   DspSummary,
   DspView,
+  Feature,
   EmployeeTimecardPeriod,
   EmployeesResponse,
   DailyTimecards,
@@ -86,6 +89,12 @@ export const openDsp = (dspId: string, roleId?: string) =>
 
 export const usePlatformDsps = (poll = 0) =>
   useCachedData<DspSummary[]>('/api/platform/dsps', poll);
+const dspFeatures = (dspId: string) => `/api/platform/dsps/${dspId}/features`;
+export const useDspFeatures = (dspId: string) =>
+  useCachedData<DspFeatureReport>(dspFeatures(dspId));
+/** Switches one feature and whatever depends on it; the answer lists every switch. */
+export const setDspFeature = (dspId: string, feature: Feature, enabled: boolean) =>
+  api<DspFeatures>(dspFeatures(dspId), { feature, enabled });
 export const usePlatformMail = (poll = 0) =>
   useCachedData<MailMessage[]>('/api/platform/mail', poll);
 /** Gives a failed message a fresh set of attempts, or drops it. */

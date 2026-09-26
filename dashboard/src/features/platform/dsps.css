@@ -1,25 +1,362 @@
-.dsp-panel-identity {
-  align-items: center;
-  gap: 12px;
+/* The DSPs page: counts, the list on the left of a divider, the chosen DSP on the right. */
+.dsp-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 26px;
+}
+.dsp-count {
   display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
 }
-.dsp-panel-identity .dsp-avatar {
-  flex-basis: 40px;
-  width: 40px;
-  height: 40px;
+.dsp-count strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
-.fleet-dsp-column {
-  width: 28%;
+.dsp-count > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.dsp-count.online > i {
+  background: var(--success);
+}
+.dsp-count.invited > i {
+  background: var(--warning);
+}
+.dsp-count.total {
+  background: var(--muted);
+  border-color: transparent;
+}
+.status-indicator.online > i {
+  background: var(--success);
+}
+.status-indicator.invited > i {
+  background: var(--warning);
+}
+.status-indicator.disabled > i {
+  background: var(--muted-foreground);
 }
 
-.dsp-detail-list {
-  margin-top: 24px;
+.dsps-master {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.dsps-list {
+  border-right: 1px solid var(--border);
+  padding-right: 24px;
+}
+.dsps-list-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.dsps-list-tools .search {
+  width: 100%;
+}
+.dsp-group {
+  padding: 18px 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.dsp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.dsp-row .dsp-avatar {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  font-size: 11px;
+}
+.dsp-row .dsp-identity-copy {
+  flex: 1;
+  gap: 1px;
+}
+.dsp-row .dsp-identity-copy strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.dsp-row .dsp-identity-copy strong,
+.dsp-row .dsp-identity-copy span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dsp-row[aria-current='true'] {
+  background: var(--selection);
+}
+.dsp-row[aria-current='true'] strong {
+  color: var(--primary);
+}
+
+.dsp-back {
+  display: none;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.dsp-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 0 22px;
+}
+.dsp-detail-head .dsp-avatar {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+  font-size: 14px;
+}
+.dsp-detail-copy {
+  flex: 1;
+  min-width: 0;
+}
+.dsp-detail-copy h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.dsp-detail-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
 }
 .dsp-detail-actions {
-  display: grid;
-  gap: 12px;
-  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
-.side-sheet .dsp-detail-list {
-  margin-top: 0;
+.dsps-detail .restored-tabs {
+  margin-bottom: 20px;
+}
+.dsp-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px 24px;
+  padding: 4px 0;
+}
+.dsp-facts dt {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.dsp-facts dd {
+  margin-top: 3px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* Features: areas on the left, the chosen area's switches on the right. */
+.dsp-features {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.dsp-features .error {
+  grid-column: 1 / -1;
+}
+.dsp-areas {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dsp-areas button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 450;
+  text-align: left;
+}
+.dsp-areas button svg {
+  color: var(--muted-foreground);
+}
+.dsp-areas button span {
+  flex: 1;
+}
+.dsp-areas button small {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.dsp-areas button[aria-selected='true'] {
+  background: var(--selection);
+  color: var(--primary);
+  font-weight: 550;
+}
+.dsp-areas button[aria-selected='true'] svg {
+  color: var(--primary);
+}
+.dsp-area h3 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.dsp-area h3 span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+/* The switch leads its row, so the name is always right beside it. */
+.dsp-feature-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.dsp-feature-row .status-indicator {
+  margin-left: auto;
+}
+.dsp-feature-row:first-of-type {
+  border-top: 0;
+}
+.dsp-feature-row strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.dsp-feature-row.off strong {
+  color: var(--muted-foreground);
+}
+.dsp-feature-row input[role='switch'] {
+  appearance: none;
+  position: relative;
+  width: 28px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--input);
+  border-radius: 10px;
+  background: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dsp-feature-row input[role='switch']::before {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: var(--foreground);
+}
+.dsp-feature-row input[role='switch']:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.dsp-feature-row input[role='switch']:checked::before {
+  left: 14px;
+  background: var(--primary-foreground);
+}
+.dsp-feature-row input[role='switch']:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.dsp-switch-effects {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.dsp-switch-effects li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.dsp-switch-effects li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.modal p + p {
+  margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .dsps-master {
+    grid-template-columns: 1fr;
+  }
+  /* A phone shows the list, then the chosen DSP with a way back. */
+  .dsps-master.chosen .dsps-list,
+  .dsps-master:not(.chosen) .dsps-detail {
+    display: none;
+  }
+  .dsps-list {
+    border-right: 0;
+    padding-right: 0;
+  }
+  .dsp-back {
+    display: inline-flex;
+  }
+  .dsp-detail-head {
+    flex-wrap: wrap;
+    padding: 0 0 16px;
+  }
+  .dsp-detail-copy {
+    flex: 1 1 60%;
+  }
+  .dsp-detail-copy h2 {
+    font-size: 18px;
+  }
+  .dsp-detail-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+  .dsp-facts {
+    grid-template-columns: 1fr 1fr;
+  }
+  .dsp-features {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .dsp-areas {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .dsp-counts {
+    margin-bottom: 18px;
+  }
 }

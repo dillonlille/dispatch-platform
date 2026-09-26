@@ -29,6 +29,11 @@ pub fn routes() -> Vec<Route> {
             PlatformOwner,
             set_support_visibility,
         ),
+        read(
+            "/api/platform/dsps/{id}/features",
+            PlatformOwner,
+            dsp_features,
+        ),
         async_post(
             "/api/platform/dsps/{id}/features",
             PlatformOwner,
@@ -154,6 +159,10 @@ async fn set_support_visibility(
         Ok(json!({"ok":true}))
     })
     .await
+}
+
+fn dsp_features(db: &Store, _: &User, input: &Input) -> Result<Reply> {
+    Reply::of(&db.feature_report(input.param("id"))?)
 }
 
 // Switching a feature off stops what it ran for the DSP: its jobs and live

@@ -44,6 +44,57 @@ export const featureCatalog: FeatureEntry[] = [
     requires: [],
   },
 ];
+const capabilities: Record<string, string> = {
+  timecards: 'a timecard source',
+  meal_breaks: 'a meal-break source',
+};
+export const capabilityLabel = (capability: string) => capabilities[capability] ?? capability;
+export const providerOf = (capability: string) =>
+  featureCatalog.find((feature) => feature.provides === capability);
+/** "Requires a timecard source (Paycom) and a meal-break source (Cortex, off)". */
+export const requirementText = (feature: FeatureEntry, enabled: readonly string[]) =>
+  `Requires ${feature.requires
+    .map((capability) => {
+      const provider = providerOf(capability);
+      const state = provider && !enabled.includes(provider.id) ? ', off' : '';
+      return `${capabilityLabel(capability)}${provider ? ` (${provider.label}${state})` : ''}`;
+    })
+    .join(' and ')}`;
+/**
+ * What switching `id` would change, mirroring `set_feature` in the backend: enabling a
+ * page enables the one provider of each capability it lacks, enabling a provider switches
+ * off another of the same capability, and disabling a provider disables the pages left
+ * without one.
+ */
+export function previewSwitch(enabled: readonly string[], id: Feature, on: boolean) {
+  const current = new Set(enabled);
+  const changed: { feature: Feature; enabled: boolean }[] = [];
+  const flip = (feature: FeatureEntry, to: boolean) => {
+    if (current.has(feature.id) === to) return;
+    if (to) current.add(feature.id);
+    else current.delete(feature.id);
+    changed.push({ feature: feature.id, enabled: to });
+  };
+  const provided = (capability: string) =>
+    featureCatalog.some((f) => f.provides === capability && current.has(f.id));
+  const feature = featureCatalog.find((f) => f.id === id)!;
+  if (on) {
+    if (feature.provides)
+      for (const other of featureCatalog)
+        if (other.provides === feature.provides && other.id !== feature.id) flip(other, false);
+    for (const capability of feature.requires) {
+      if (provided(capability)) continue;
+      const providers = featureCatalog.filter((f) => f.provides === capability);
+      if (providers.length === 1) flip(providers[0]!, true);
+    }
+    flip(feature, true);
+  } else {
+    flip(feature, false);
+    for (const page of featureCatalog)
+      if (page.kind === 'page' && !page.requires.every(provided)) flip(page, false);
+  }
+  return changed;
+}
 export const featureLabel = (id: string) =>
   featureCatalog.find((feature) => feature.id === id)?.label ?? id;
 export const hasFeature = (view: DspView | undefined, id: Feature) =>

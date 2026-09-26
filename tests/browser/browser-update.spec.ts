@@ -61,7 +61,7 @@ test('completed update waits for two idle seconds, restores filters, and reloads
     .toBe(initialLoads + 1);
   await clockVisible(page, page.getByLabel('Search DSPs'));
   await expect(page.getByLabel('Search DSPs')).toHaveValue('Summit');
-  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(page.locator('.dsp-row')).toHaveCount(1);
   await page.clock.runFor(12000);
   expect(loads).toBe(initialLoads + 1);
   expect(errors).toEqual([]);

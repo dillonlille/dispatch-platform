@@ -27,20 +27,19 @@ test('owner dashboard, search, workforce, timecards, connection verification and
   page.on('pageerror', (error) => errors.push(error.message));
   await login(page);
   await expect(page.getByRole('heading', { name: 'DSPs', exact: true })).toBeVisible();
-  await expect(page.getByRole('row').filter({ hasText: 'Northline Logistics' })).toBeVisible();
+  const list = page.getByRole('region', { name: 'DSPs', exact: true });
+  await expect(list.getByRole('button', { name: /Northline Logistics/ })).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath('dispatch-dashboard-desktop.png'),
     fullPage: true,
   });
   await page.getByLabel('Search DSPs').fill('Summit');
-  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await expect(list.locator('.dsp-row')).toHaveCount(1);
   await page.getByLabel('Search DSPs').fill('');
-  await page
-    .getByRole('row')
-    .filter({ hasText: 'Northline Logistics' })
-    .getByRole('button', { name: /Northline Logistics/ })
-    .click();
-  await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+  await list.getByRole('button', { name: /Northline Logistics/ }).click();
+  const pane = page.getByRole('region', { name: 'Northline Logistics', exact: true });
+  await expect(pane.getByRole('tab', { name: 'Details', exact: true })).toBeVisible();
+  await pane.getByRole('button', { name: 'View', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Currently under development', exact: true }),
   ).toBeVisible();
@@ -335,7 +334,10 @@ test('Timecard schedules can be created, edited, paused and deleted', async ({ p
     await route.continue();
   });
   try {
-    await page.getByRole('dialog').getByRole('button', { name: 'View', exact: true }).click();
+    await page
+      .getByRole('region', { name: 'Northline Logistics', exact: true })
+      .getByRole('button', { name: 'View', exact: true })
+      .click();
     await requested;
     const dspId = new URL(page.url()).hash.split('/')[1]!;
     const paycom = page.getByRole('link', { name: 'Timecard', exact: true });
@@ -438,5 +440,5 @@ test('archived Diagnostics creates a synthetic DSP and excludes Plugins and Back
     page.getByText('Synthetic data prepared · Available', { exact: true }),
   ).toBeVisible();
   await page.getByRole('link', { name: 'Manage test DSPs in DSPs', exact: true }).click();
-  await expect(page.getByRole('row').filter({ hasText: /Test DSP 20/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Test DSP 20/ })).toBeVisible();
 });

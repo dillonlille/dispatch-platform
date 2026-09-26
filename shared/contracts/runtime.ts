@@ -71,9 +71,12 @@ const dspSummary = dsp
     ownerEmail: text.nullable(),
     ownerStatus: z.enum(['active', 'invited', 'missing']),
     paycom: connectionStatus,
+    connections: z.record(text, connectionStatus),
     lastCollection: text.nullable(),
+    nextCollection: text.nullable(),
     role: text.nullable(),
     features: z.array(feature),
+    members: count,
   })
   .passthrough() satisfies z.ZodType<DspSummary>;
 export const sessionSchema = z.object({

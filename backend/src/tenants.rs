@@ -24,7 +24,8 @@ const DSPS: &str = "SELECT d.*,\
     CASE WHEN d.permanent=1 THEN \
      (SELECT MIN(email) FROM users WHERE platform_owner=1 AND status='active') END platform_email,\
     (SELECT email FROM invitations WHERE dsp_id=d.id AND role='owner' AND used_at IS NULL \
-     AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email \
+     AND expires_at>? ORDER BY expires_at DESC LIMIT 1) invite_email,\
+    (SELECT count(*) FROM memberships WHERE dsp_id=d.id) members \
     FROM dsps d LEFT JOIN memberships m ON m.dsp_id=d.id AND m.user_id=? \
     WHERE ? OR m.user_id IS NOT NULL ORDER BY d.permanent DESC,d.name";
 const MEMBERS: &str = "SELECT m.id,m.user_id,m.dsp_id,u.email,u.first_name||' '||u.last_name name,\
@@ -38,12 +39,14 @@ const REMOVABLE_ACCOUNT: &str = "SELECT first_name||' '||last_name FROM users u 
 
 struct DspListing {
     dsp: Dsp,
+    members: i64,
     legacy: DspSummaryLegacy,
 }
 impl FromRow for DspListing {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         Ok(Self {
             dsp: Dsp::from_row(row)?,
+            members: row.get("members")?,
             legacy: DspSummaryLegacy {
                 member_role: row.get("member_role")?,
                 owner_email: row.get("owner_email")?,
@@ -186,7 +189,12 @@ impl Store {
             .platform
             .query_as(DSPS, params![now(), a.user.id, platform])?;
         let mut result = Vec::new();
-        for DspListing { dsp, legacy } in rows {
+        for DspListing {
+            dsp,
+            members,
+            legacy,
+        } in rows
+        {
             let owner = legacy
                 .owner_email
                 .as_deref()
@@ -202,11 +210,14 @@ impl Store {
             let features = self.features(&dsp.id)?;
             let mut summary = DspSummary {
                 features,
+                members,
                 profile: profile_default(),
                 owner_email: owner.or(invite).map(str::to_owned),
                 owner_status,
                 paycom: ConnectionStatus::NotConnected,
+                connections: std::collections::BTreeMap::new(),
                 last_collection: None,
+                next_collection: None,
                 role: if platform {
                     Some("platform_owner".to_owned())
                 } else {
@@ -217,16 +228,29 @@ impl Store {
             };
             if [DspStatus::Active, DspStatus::Suspended].contains(&summary.dsp.status) {
                 let id = &summary.dsp.id;
-                let db = self.collector(id, Provider::Paycom)?;
                 summary.profile = self.profile(id)?;
-                let status: Option<(ConnectionStatus,)> =
-                    db.one_as("SELECT status FROM connections WHERE provider='paycom'", [])?;
-                if let Some((status,)) = status {
-                    summary.paycom = status;
+                for provider in Provider::ALL {
+                    let status: Option<(ConnectionStatus,)> =
+                        self.collector(id, *provider)?.one_as(
+                            "SELECT status FROM connections WHERE provider=?",
+                            [provider.id()],
+                        )?;
+                    if let Some((status,)) = status {
+                        summary.connections.insert(provider.id().to_owned(), status);
+                        if *provider == Provider::Paycom {
+                            summary.paycom = status;
+                        }
+                    }
                 }
-                let collected: Option<(String,)> =
-                    db.one_as("SELECT collected_at FROM publications WHERE active=1", [])?;
+                let collected: Option<(String,)> = self
+                    .collector(id, Provider::Paycom)?
+                    .one_as("SELECT collected_at FROM publications WHERE active=1", [])?;
                 summary.last_collection = collected.map(|(at,)| at);
+                let next: Option<(Option<String>,)> = self.dsp(id)?.one_as(
+                    "SELECT MIN(next_run) FROM collection_schedules WHERE enabled=1",
+                    [],
+                )?;
+                summary.next_collection = next.and_then(|(at,)| at);
             }
             result.push(summary);
         }

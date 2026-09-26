@@ -6,30 +6,13 @@
   color: var(--muted-foreground);
   font-size: 12px;
 }
-.identity-button:hover strong {
-  color: var(--primary);
-}
+
 .member-identity div {
   flex-direction: column;
   gap: 4px;
   display: flex;
 }
-@media (width <= 600px) {
-  .fleet-table .identity-button {
-    max-width: 170px;
-  }
-  .fleet-table .identity-button strong {
-    text-overflow: ellipsis;
-    max-width: 170px;
-    overflow: hidden;
-  }
-}
-.identity-button {
-  transition:
-    background-color var(--motion-duration),
-    border-color var(--motion-duration),
-    color var(--motion-duration);
-}
+
 .dsp-avatar {
   --identity-ink: var(--slate);
   --identity-surface: var(--slate-surface);
@@ -68,38 +51,7 @@
   min-width: 0;
   display: flex;
 }
-@media (width <= 600px) {
-  .fleet-table .identity-button {
-    gap: 8px;
-    max-width: none;
-  }
-  .fleet-table .dsp-identity-copy strong {
-    max-width: 120px;
-  }
-  .fleet-table .dsp-avatar {
-    flex-basis: 28px;
-    width: 28px;
-    height: 28px;
-    font-size: 10px;
-  }
-}
-.identity-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  text-align: left;
-}
-.identity-button:hover {
-  background: transparent;
-}
-.identity-button strong {
-  font-size: 14px;
-  font-weight: 500;
-}
+
 .dsp-identity-copy > span {
   color: var(--muted-foreground);
   font-size: 12px;
