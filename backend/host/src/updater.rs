@@ -4,6 +4,7 @@ use crate::{
     io::{self, System},
     management, releases, require,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     fs::{self, OpenOptions},
@@ -38,6 +39,22 @@ enum Checked {
     Passed(Value, Value),
     /// The run still deciding, or the one that failed, if there is one.
     Pending(Value),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublishedProvenance {
+    repository: String,
+    commit: String,
+    version: String,
+    workflow_run: u64,
+    workflow_attempt: u64,
+    artifact_id: u64,
+    artifact_digest: String,
+    build_sha256: String,
+    attestation_sha256: String,
+    runtime_digest: String,
+    archive_sha256: String,
 }
 pub struct Updater<'a> {
     pub root: PathBuf,
@@ -596,6 +613,10 @@ impl<'a> Updater<'a> {
     fn install_latest(&self) -> Result<()> {
         let current = artifact::verify(&self.active, None)?;
         let release = releases::public_github(self.system, "releases/latest")?;
+        require(
+            release["immutable"] == true,
+            "Production release must be immutable",
+        )?;
         let selected = releases::release_version(&release)?;
         let order = releases::version(&selected)?.cmp(&releases::version(&current.version)?);
         if order.is_lt() {
@@ -634,15 +655,91 @@ impl<'a> Updater<'a> {
             "release.json",
             &temp.path().join("release.json"),
         )?;
-        let candidate = temp.path().join("candidate");
-        artifact::unpack(&archive, &candidate)?;
-        let manifest = artifact::verify(&candidate, Some(&commit))?;
-        require(
-            manifest.version == selected,
-            "Artifact version does not match release",
+        releases::download_asset(
+            self.system,
+            &release,
+            "provenance.json",
+            &temp.path().join("provenance.json"),
+        )?;
+        releases::download_asset(
+            self.system,
+            &release,
+            "SHA256SUMS",
+            &temp.path().join("SHA256SUMS"),
+        )?;
+        let build_archive = temp.path().join("dispatch-build.tar.gz");
+        let attestation = temp.path().join("attestation.sigstore.jsonl");
+        releases::download_asset(
+            self.system,
+            &release,
+            "dispatch-build.tar.gz",
+            &build_archive,
+        )?;
+        releases::download_asset(
+            self.system,
+            &release,
+            "attestation.sigstore.jsonl",
+            &attestation,
         )?;
         let published: Manifest =
             serde_json::from_value(io::read_json(&temp.path().join("release.json"))?)?;
+        let provenance: PublishedProvenance =
+            serde_json::from_value(io::read_json(&temp.path().join("provenance.json"))?)?;
+        let archive_name = format!("dispatch-platform-{selected}.tar.gz");
+        let release_manifest = temp.path().join("release.json");
+        let provenance_file = temp.path().join("provenance.json");
+        let checksums = [
+            (archive_name.as_str(), &archive),
+            ("release.json", &release_manifest),
+            ("provenance.json", &provenance_file),
+            ("dispatch-build.tar.gz", &build_archive),
+            ("attestation.sigstore.jsonl", &attestation),
+        ]
+        .into_iter()
+        .map(|(name, path)| Ok(format!("{}  {name}\n", artifact::file_hash(path)?)))
+        .collect::<Result<String>>()?;
+        require(
+            fs::read_to_string(temp.path().join("SHA256SUMS"))? == checksums
+                && crate::REPOSITORIES.contains(&provenance.repository.as_str())
+                && provenance.commit == commit
+                && provenance.version == selected
+                && provenance.workflow_run > 0
+                && provenance.workflow_attempt > 0
+                && provenance.artifact_id > 0
+                && provenance
+                    .artifact_digest
+                    .strip_prefix("sha256:")
+                    .is_some_and(|value| artifact::hex(value, 64))
+                && provenance.build_sha256 == artifact::file_hash(&build_archive)?
+                && provenance.attestation_sha256 == artifact::file_hash(&attestation)?
+                && provenance.runtime_digest == published.digest
+                && provenance.archive_sha256 == artifact::file_hash(&archive)?,
+            "Published release provenance differs",
+        )?;
+        self.system.command(
+            &[
+                "/usr/local/bin/gh",
+                "attestation",
+                "verify",
+                build_archive.to_str().ok_or("Invalid build archive path")?,
+                "--bundle",
+                attestation.to_str().ok_or("Invalid attestation path")?,
+                "--repo",
+                crate::REPOSITORY,
+                "--signer-workflow",
+                &format!("{}/.github/workflows/checks.yml", crate::REPOSITORY),
+                "--source-digest",
+                &commit,
+                "--deny-self-hosted-runners",
+            ],
+            None,
+            120,
+            None,
+        )?;
+        let candidate = temp.path().join("candidate");
+        artifact::unpack(&build_archive, &candidate)?;
+        artifact::verify(&candidate, Some(&commit))?;
+        let manifest = artifact::stamp(&candidate, &commit, &selected)?;
         require(published == manifest, "Published release inventory differs")?;
         if releases::public_github(self.system, "releases/latest")?["id"] != release["id"] {
             return Ok(());

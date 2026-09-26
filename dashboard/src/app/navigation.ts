@@ -35,6 +35,13 @@ export function parseHash(hash: string) {
   };
 }
 export const hashQuery = () => new URLSearchParams(window.location.hash.split('?')[1]);
+/** Read a one-time link secret once, then remove it from browser history immediately. */
+export function consumeHashToken(kind: 'invite' | 'reset') {
+  if (!window.location.hash.startsWith(`#${kind}?`)) return undefined;
+  const token = hashQuery().get('token') ?? '';
+  history.replaceState(history.state, '', `${location.pathname}${location.search}#${kind}`);
+  return token;
+}
 /** Records a page's own state in the address without navigating. */
 export function replaceHashQuery(query: Record<string, string>) {
   history.replaceState(

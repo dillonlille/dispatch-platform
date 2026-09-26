@@ -108,7 +108,13 @@ const phrases: Record<string, (event: AuditEvent) => Part[]> = {
   'account.password_reset': () => ['reset their password'],
   'account.passkey_added': () => ['added a passkey'],
   'account.passkey_removed': () => ['removed a passkey'],
-  'account.second_factor_verified': () => ['verified their identity with a passkey'],
+  'account.authenticator_added': () => ['added an authenticator app'],
+  'account.authenticator_removed': () => ['removed an authenticator app'],
+  'account.second_factor_verified': (e) => [
+    e.detail === 'authenticator'
+      ? 'verified their identity with an authenticator app'
+      : 'verified their identity with a passkey',
+  ],
   'account.recovery_codes_created': () => ['created new recovery codes'],
   'account.recovery_code_used': () => ['used a recovery code'],
   'account.session_revoked': () => ['signed out a session'],

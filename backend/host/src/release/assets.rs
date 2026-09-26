@@ -19,6 +19,8 @@ pub(super) struct Prepared {
     workflow_attempt: u64,
     artifact_id: u64,
     artifact_digest: String,
+    build_sha256: String,
+    attestation_sha256: String,
     pub runtime_digest: String,
     archive_sha256: String,
 }
@@ -50,6 +52,8 @@ impl Release<'_> {
             self.archive(),
             "release.json".into(),
             "provenance.json".into(),
+            "dispatch-build.tar.gz".into(),
+            "attestation.sigstore.jsonl".into(),
             "SHA256SUMS".into(),
         ]
     }
@@ -76,12 +80,14 @@ impl Release<'_> {
                     .artifact_digest
                     .strip_prefix("sha256:")
                     .is_some_and(|h| artifact::hex(h, 64))
+                && artifact::hex(&prepared.build_sha256, 64)
+                && artifact::hex(&prepared.attestation_sha256, 64)
                 && artifact::hex(&prepared.runtime_digest, 64)
                 && artifact::hex(&prepared.archive_sha256, 64),
             "Prepared provenance does not match this release",
         )?;
         require(
-            fs::read_to_string(directory.join("SHA256SUMS"))? == checksums(directory, &names[..3])?
+            fs::read_to_string(directory.join("SHA256SUMS"))? == checksums(directory, &names[..5])?
                 && artifact::file_hash(&directory.join(self.archive()))? == prepared.archive_sha256,
             "Prepared release bytes changed; preserve this directory and inspect it",
         )?;
@@ -139,6 +145,71 @@ impl Release<'_> {
             .tempdir_in(&self.directory)?;
         let download = tempfile::tempdir_in(staging.path())?;
         releases::download_run(self.system, artifacts[0], download.path(), commit, None)?;
+        self.command(
+            &[
+                "gh",
+                "attestation",
+                "verify",
+                download
+                    .path()
+                    .join("build.tar.gz")
+                    .to_str()
+                    .ok_or("Invalid downloaded package path")?,
+                "--repo",
+                REPOSITORY,
+                "--signer-workflow",
+                &format!("{REPOSITORY}/.github/workflows/checks.yml"),
+                "--source-digest",
+                commit,
+                "--deny-self-hosted-runners",
+            ],
+            None,
+            120,
+        )?;
+        self.command(
+            &[
+                "gh",
+                "attestation",
+                "download",
+                download
+                    .path()
+                    .join("build.tar.gz")
+                    .to_str()
+                    .ok_or("Invalid downloaded package path")?,
+                "--repo",
+                REPOSITORY,
+            ],
+            Some(download.path()),
+            120,
+        )?;
+        let build_sha256 = artifact::file_hash(&download.path().join("build.tar.gz"))?;
+        let downloaded_attestation = download.path().join(format!("sha256:{build_sha256}.jsonl"));
+        regular(&downloaded_attestation)?;
+        self.command(
+            &[
+                "gh",
+                "attestation",
+                "verify",
+                download
+                    .path()
+                    .join("build.tar.gz")
+                    .to_str()
+                    .ok_or("Invalid downloaded package path")?,
+                "--bundle",
+                downloaded_attestation
+                    .to_str()
+                    .ok_or("Invalid attestation path")?,
+                "--repo",
+                REPOSITORY,
+                "--signer-workflow",
+                &format!("{REPOSITORY}/.github/workflows/checks.yml"),
+                "--source-digest",
+                commit,
+                "--deny-self-hosted-runners",
+            ],
+            None,
+            120,
+        )?;
         // CI built the version main's source names; the release publishes those bytes
         // under its own version, and only once Dev has served them.
         let candidate = download.path().join("candidate");
@@ -153,6 +224,14 @@ impl Release<'_> {
         let manifest = artifact::stamp(&candidate, commit, &self.version)?;
         artifact::pack(&candidate, &staging.path().join(self.archive()))?;
         fs::copy(
+            download.path().join("build.tar.gz"),
+            staging.path().join("dispatch-build.tar.gz"),
+        )?;
+        fs::copy(
+            downloaded_attestation,
+            staging.path().join("attestation.sigstore.jsonl"),
+        )?;
+        fs::copy(
             candidate.join("release.json"),
             staging.path().join("release.json"),
         )?;
@@ -166,6 +245,10 @@ impl Release<'_> {
                 .ok_or("Invalid workflow attempt")?,
             artifact_id: artifacts[0]["id"].as_u64().ok_or("Invalid artifact id")?,
             artifact_digest: io::text(artifacts[0], "digest"),
+            build_sha256,
+            attestation_sha256: artifact::file_hash(
+                &staging.path().join("attestation.sigstore.jsonl"),
+            )?,
             runtime_digest: manifest.digest,
             archive_sha256: artifact::file_hash(&staging.path().join(self.archive()))?,
         };
@@ -175,7 +258,7 @@ impl Release<'_> {
         )?;
         fs::write(
             staging.path().join("SHA256SUMS"),
-            checksums(staging.path(), &self.asset_names()[..3])?,
+            checksums(staging.path(), &self.asset_names()[..5])?,
         )?;
         download.close()?;
         self.verify_preparation(staging.path(), Some(commit))?;

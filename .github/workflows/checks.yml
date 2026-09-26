@@ -37,6 +37,10 @@ jobs:
   # this package instead of building again.
   build:
     if: contains('all build checks browser benchmark smoke', inputs.suite || 'all')
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     outputs:
       rust-key: ${{ steps.tools.outputs.binary-key }}
       # Named by the attempt that built it. Rerunning only failed jobs keeps this job's
@@ -61,6 +65,10 @@ jobs:
         run: |
           tar -czf dispatch-dev.tar.gz -C .build .
           echo "name=dispatch-candidate-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+      - name: Attest the runtime package
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: dispatch-dev.tar.gz
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.candidate.outputs.name }}
@@ -264,6 +272,30 @@ jobs:
         if: steps.audit-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-audit --version 0.22.2 --locked
       - run: cargo audit --deny warnings
+  codeql:
+    if: contains('all core', inputs.suite || 'all')
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, rust]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7999b86c43a865dc79d8923397f35af22de63401
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - name: Analyze
+        uses: github/codeql-action/analyze@7999b86c43a865dc79d8923397f35af22de63401
+        with:
+          category: /language:${{ matrix.language }}
   # Builds the tools and fixture this ref's inputs lack, off the critical path, and saves
   # them to this ref's cache: the jobs that start later restore them instead of compiling.
   # `main`'s copies come from caches.yml. Every other job builds with Cargo when a tool is
@@ -322,7 +354,8 @@ jobs:
   # verified build under the commit's name: Dev installs it and a release stamps it. A
   # manual run of one suite has no gate, so nothing partial is ever published.
   platform:
-    needs: [build, checks, browser, smoke, benchmark, core, api, collectors, rust-advisories]
+    needs:
+      [build, checks, browser, smoke, benchmark, core, api, collectors, rust-advisories, codeql]
     if: always() && (inputs.suite || 'all') == 'all'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

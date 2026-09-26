@@ -75,6 +75,10 @@ reviews:
           cookies, tokens or employee records. Session identifiers shown to users are HMAC
           identifiers, never bearer tokens or token hashes. Browser data and provider
           profiles are credentials. (security.md)
+        - MFA challenge state and authenticator secrets stay encrypted at rest; recovery codes
+          are high-entropy, hashed and one-use. Factor changes revoke other sessions, and
+          sensitive writes require recent verification. Existing retired passkeys must not
+          enroll or lock an account implicitly. (security.md)
         - Compare errors with `error.is(Code::X)`, never by their text. Never hard-code job
           titles; customizable roles stay in the role system. (codebase.md, security.md)
     - path: 'backend/src/http/routes/**'
@@ -83,6 +87,9 @@ reviews:
         no broader than what it reads or changes. Work that waits outside the database uses
         `async_get`/`async_post` and re-authorizes after each wait. A new route needs its row
         in `backend/tests/http_routes.rs`. A password change verifies the current password.
+        Security routes are exempt from the normal MFA gate only so verification can complete;
+        enrollment, factor removal, recovery-code replacement and session revocation must
+        enforce their own recent-authentication requirement.
         (codebase.md, security.md)
     - path: '{backend/src/roles.rs,shared/contracts/accounts.ts,dashboard/src/app/permissions.ts}'
       instructions: |

@@ -5,14 +5,13 @@ import { SignInPasswordField } from './SignInPasswordField.js';
 import { api } from '../../../app/api.js';
 import { ErrorBox } from '../../../ui/index.js';
 import { messageOf } from '../../../lib/errors.js';
-import { hashQuery, navigate, platformHash, signInHash } from '../../../app/navigation.js';
+import { consumeHashToken, navigate, platformHash, signInHash } from '../../../app/navigation.js';
 import { clearSignInHandoff, getSignInHandoff } from '../../../app/sign-in-handoff.js';
 export function SignInScreen({ onLogin }: { onLogin: () => Promise<void> }) {
   const [handoff] = useState(getSignInHandoff);
   useEffect(clearSignInHandoff, []);
-  const hash = window.location.hash.slice(1),
-    token = hashQuery().get('token');
-  const initial = hash.startsWith('reset?') ? 'reset' : 'login';
+  const [token] = useState(() => consumeHashToken('reset'));
+  const initial = token !== undefined ? 'reset' : 'login';
   const [mode, setMode] = useState(initial),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),

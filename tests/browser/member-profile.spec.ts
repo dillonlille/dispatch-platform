@@ -52,6 +52,8 @@ test('a DSP member invite creates a profile in its own responsive map screen', a
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('request', (request) => assets.push(request.url()));
   await page.goto(url);
+  await expect(page).toHaveURL(/#invite$/);
+  expect(page.url()).not.toContain('token=');
   await expect(page.getByRole('heading', { name: 'Create your profile' })).toBeVisible();
   await expect(page.locator('.auth-layout, .onboarding-page')).toHaveCount(0);
   await expect(page.getByLabel('Email address')).toHaveValue('new-member@dispatch.test');

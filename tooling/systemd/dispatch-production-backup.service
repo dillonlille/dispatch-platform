@@ -1,0 +1,37 @@
+[Unit]
+Description=Dispatch Production off-host backup and restore drill
+After=network-online.target dispatch-production.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/dispatch-production/backup.env
+Environment=DISPATCH_BACKUP_BINARY=/opt/dispatch-production/current/services/rust/dispatch-backend
+Environment=DISPATCH_BACKUP_STATE_ROOT=/var/lib/dispatch-production
+Environment=DISPATCH_BACKUP_STAGING=/var/cache/dispatch-production-backup
+ExecStart=/usr/bin/python3 /usr/local/libexec/dispatch-runtime/backup.py
+CacheDirectory=dispatch-production-backup
+CacheDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectHostname=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/var/lib/dispatch-production /opt/dispatch-production/current
+ReadWritePaths=/var/cache/dispatch-production-backup
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+MemoryMax=1G
+TasksMax=64
+TimeoutStartSec=6h

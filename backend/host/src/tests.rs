@@ -66,6 +66,9 @@ impl System for Fake {
         if args[0] == "git" && args[1] == "fetch" {
             return Ok(vec![]);
         }
+        if args.starts_with(&["/usr/local/bin/gh", "attestation", "verify"]) {
+            return Ok(vec![]);
+        }
         if args[0] == "gh" {
             if let Some(target) = output {
                 fs::write(
@@ -334,13 +337,35 @@ impl Fixture {
         );
     }
     fn production_release(&self) -> Value {
-        let mut release = json!({"id":42,"tag_name":"v0.1.1","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]});
+        let archive = self.package();
+        let build = archive.clone();
+        let attestation = b"synthetic signed attestation\n".to_vec();
+        let current_manifest = artifact::verify(&self.candidate, Some(&self.new)).unwrap();
+        let manifest = fs::read(self.candidate.join("release.json")).unwrap();
+        let provenance = serde_json::to_vec(&json!({
+            "repository":REPOSITORY,"commit":self.new,"version":"0.1.1","workflowRun":17,
+            "workflowAttempt":1,"artifactId":42,
+            "artifactDigest":format!("sha256:{}",artifact::hash(&archive)),
+            "buildSha256":artifact::hash(&build),
+            "attestationSha256":artifact::hash(&attestation),
+            "runtimeDigest":current_manifest.digest,
+            "archiveSha256":artifact::hash(&archive)
+        }))
+        .unwrap();
+        let checksums = format!(
+            "{}  dispatch-platform-0.1.1.tar.gz\n{}  release.json\n{}  provenance.json\n{}  dispatch-build.tar.gz\n{}  attestation.sigstore.jsonl\n",
+            artifact::hash(&archive),artifact::hash(&manifest),artifact::hash(&provenance),
+            artifact::hash(&build),artifact::hash(&attestation)
+        ).into_bytes();
+        let mut release = json!({"id":42,"tag_name":"v0.1.1","draft":false,"prerelease":false,
+            "immutable":true,"published_at":"2026-09-21T00:00:00Z","assets":[]});
         for (name, data) in [
-            ("dispatch-platform-0.1.1.tar.gz", self.package()),
-            (
-                "release.json",
-                fs::read(self.candidate.join("release.json")).unwrap(),
-            ),
+            ("dispatch-platform-0.1.1.tar.gz", archive),
+            ("release.json", manifest),
+            ("provenance.json", provenance),
+            ("dispatch-build.tar.gz", build),
+            ("attestation.sigstore.jsonl", attestation),
+            ("SHA256SUMS", checksums),
         ] {
             let url = format!("https://github.com/{REPOSITORY}/releases/download/v0.1.1/{name}");
             release["assets"].as_array_mut().unwrap().push(json!({"name":name,"state":"uploaded","size":data.len(),"digest":format!("sha256:{}",artifact::hash(&data)),"browser_download_url":url}));
@@ -915,7 +940,7 @@ fn production_hashes_its_runtime_only_when_there_may_be_something_to_do() {
     let u = f.updater();
     f.system.reply(
         &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
-        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
+        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"immutable":true,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
     );
     f.system.reply(
         &format!("https://github.com/{REPOSITORY}/releases/latest"),
@@ -965,7 +990,7 @@ fn production_adopts_the_updater_of_each_release_it_installs_and_only_then() {
     .unwrap();
     f.system.reply(
         &format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"),
-        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
+        vec![json!({"id":41,"tag_name":"v0.1.0","draft":false,"prerelease":false,"immutable":true,"published_at":"2026-09-21T00:00:00Z","assets":[]})],
     );
     u.run_locked().unwrap();
     assert!(fs::read_to_string(&installed).unwrap().contains("restored"));

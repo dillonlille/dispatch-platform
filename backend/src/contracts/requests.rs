@@ -25,7 +25,7 @@ impl PasswordRequest {
     pub fn parse(value: &Value) -> Result<Self> {
         let input = request(value)?;
         v::text(value, "currentPassword", 0, 128)?;
-        v::text(value, "password", 8, 128)?;
+        v::text(value, "password", 15, 128)?;
         Ok(input)
     }
 }
@@ -39,7 +39,7 @@ impl ResetRequest {
     pub fn parse(value: &Value) -> Result<Self> {
         let input = request(value)?;
         v::text(value, "token", 43, 43)?;
-        v::text(value, "password", 8, 128)?;
+        v::text(value, "password", 15, 128)?;
         Ok(input)
     }
 }
@@ -56,7 +56,7 @@ impl InvitationRequest {
         let mut input: Self = request(value)?;
         input.first_name = v::name(value, "firstName", 100)?;
         input.last_name = v::name(value, "lastName", 100)?;
-        v::text(value, "password", 8, 128)?;
+        v::text(value, "password", 15, 128)?;
         if input.dsp_profile.is_some() {
             input.dsp_profile = Some(DspSetupRequest::parse(&value["dspProfile"])?);
         }

@@ -373,6 +373,12 @@ async fn the_request_pipeline_checks_host_origin_content_type_and_size() {
         assert_eq!(answer.header("x-content-type-options"), "nosniff");
         assert_eq!(answer.header("referrer-policy"), "same-origin");
         assert_eq!(answer.header("x-frame-options"), "DENY");
+        assert_eq!(answer.header("cross-origin-opener-policy"), "same-origin");
+        assert_eq!(answer.header("cross-origin-resource-policy"), "same-origin");
+        assert_eq!(
+            answer.header("permissions-policy"),
+            "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=(), publickey-credentials-create=(self), publickey-credentials-get=(self)"
+        );
         assert_eq!(answer.header("cache-control"), "no-store");
         assert_eq!(
             answer.header("content-security-policy"),

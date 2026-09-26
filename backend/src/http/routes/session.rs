@@ -19,10 +19,15 @@ pub fn routes() -> Vec<Route> {
 }
 
 fn session(db: &Store, user: &User, _: &Input) -> Result<Reply> {
+    let security = db.security_status(user)?;
     Reply::of(&SessionResponse {
         user: user.user.clone(),
         csrf: user.csrf.clone(),
-        dsps: summaries(db, user)?,
+        dsps: if security.required && !security.verified {
+            Vec::new()
+        } else {
+            summaries(db, user)?
+        },
         development: db.config.development,
         environment: db.config.env(),
         release: db.config.release.clone(),
@@ -32,6 +37,7 @@ fn session(db: &Store, user: &User, _: &Input) -> Result<Reply> {
             ProviderMode::Native
         },
         source: db.config.source.clone(),
+        security,
     })
 }
 

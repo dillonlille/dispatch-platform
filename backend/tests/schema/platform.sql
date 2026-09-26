@@ -1,4 +1,6 @@
+CREATE TABLE account_passkeys ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, credential TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL );
 CREATE TABLE audit (id INTEGER PRIMARY KEY, at TEXT NOT NULL, actor_id TEXT REFERENCES users(id), dsp_id TEXT REFERENCES dsps(id), action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', actor_name TEXT, data TEXT, shown INTEGER);
+CREATE TABLE authenticator_apps ( user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, secret TEXT NOT NULL, created_at INTEGER NOT NULL, last_counter INTEGER NOT NULL DEFAULT -1 );
 CREATE TABLE dsp_features ( dsp_id TEXT NOT NULL REFERENCES dsps(id), feature TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), changed_by TEXT, changed_at TEXT NOT NULL, PRIMARY KEY(dsp_id,feature) );
 CREATE TABLE dsps (id TEXT PRIMARY KEY, name TEXT NOT NULL, environment TEXT NOT NULL CHECK(environment IN ('production','preview')), status TEXT NOT NULL CHECK(status IN ('provisioning','active','suspended','failed')), timezone TEXT NOT NULL, permanent INTEGER NOT NULL DEFAULT 0 CHECK(permanent IN (0,1)), revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
 CREATE TABLE invitations (hash TEXT PRIMARY KEY, dsp_id TEXT NOT NULL REFERENCES dsps(id), email TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('owner','manager','member')), expires_at INTEGER NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), used_at INTEGER, role_id TEXT);
@@ -10,10 +12,12 @@ CREATE TABLE resets (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES use
 CREATE TABLE roles (id TEXT PRIMARY KEY, dsp_id TEXT NOT NULL REFERENCES dsps(id), name TEXT NOT NULL COLLATE NOCASE, permissions TEXT NOT NULL DEFAULT '[]', system INTEGER NOT NULL DEFAULT 0 CHECK(system IN (0,1)), created_at TEXT NOT NULL, UNIQUE(dsp_id,name));
 CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
 CREATE TABLE security_challenges ( session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, kind TEXT NOT NULL, state TEXT NOT NULL, expires_at INTEGER NOT NULL );
+CREATE TABLE session_metadata ( session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, device TEXT NOT NULL );
 CREATE TABLE session_security ( session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE, verified_at INTEGER NOT NULL DEFAULT 0, password_verified_at INTEGER NOT NULL DEFAULT 0 );
 CREATE TABLE sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), user_version INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE throttle (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
+CREATE TABLE throttle (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL, namespace TEXT NOT NULL DEFAULT 'legacy');
 CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, first_name TEXT NOT NULL, last_name TEXT NOT NULL, password TEXT NOT NULL, platform_owner INTEGER NOT NULL DEFAULT 0 CHECK(platform_owner IN (0,1)), status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')), version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE INDEX account_passkeys_user ON account_passkeys(user_id);
 CREATE INDEX audit_dsp_time ON audit(dsp_id,id DESC);
 CREATE INDEX invitations_dsp_owner ON invitations(dsp_id,role,expires_at DESC) WHERE used_at IS NULL;
 CREATE INDEX invitations_expiry ON invitations(expires_at);
@@ -30,3 +34,4 @@ CREATE INDEX resets_expiry ON resets(expires_at);
 CREATE UNIQUE INDEX roles_owner ON roles(dsp_id) WHERE system=1;
 CREATE INDEX session_expiry ON sessions(expires_at);
 CREATE INDEX throttle_expiry ON throttle(reset_at);
+CREATE INDEX throttle_namespace_expiry ON throttle(namespace, reset_at);

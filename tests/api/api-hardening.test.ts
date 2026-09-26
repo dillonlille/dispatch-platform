@@ -12,10 +12,12 @@ test('trusted tunnel clients have separate IP allowances and retain account thro
   const full = (key: string, count: number) =>
     f.database('data/platform/accounts.sqlite', (db) =>
       db
-        .prepare('INSERT OR REPLACE INTO throttle VALUES (?,?,?)')
+        .prepare(
+          "INSERT OR REPLACE INTO throttle(key,count,reset_at,namespace) VALUES (?,?,?,'login-ip')",
+        )
         .run(createHash('sha256').update(key).digest('hex'), count, Date.now() + 900000),
     );
-  full('login:ip:203.0.113.1', 30);
+  full('login-ip:203.0.113.1', 30);
   const body = { email: 'owner@dispatch.test', password: demo.password };
   const login = (ip: string) => f.request('/api/auth/login', body, { 'cf-connecting-ip': ip });
   assert.equal((await login('203.0.113.1')).status, 429);
@@ -30,9 +32,9 @@ test('untrusted forwarding headers cannot bypass the peer throttle', async (t) =
   t.after(f.close);
   f.database('data/platform/accounts.sqlite', (db) =>
     db
-      .prepare('INSERT INTO throttle VALUES (?,?,?)')
+      .prepare("INSERT INTO throttle(key,count,reset_at,namespace) VALUES (?,?,?,'login-ip')")
       .run(
-        createHash('sha256').update('login:ip:127.0.0.1').digest('hex'),
+        createHash('sha256').update('login-ip:127.0.0.1').digest('hex'),
         30,
         Date.now() + 900000,
       ),
@@ -47,6 +49,38 @@ test('untrusted forwarding headers cannot bypass the peer throttle', async (t) =
     },
   );
   assert.equal(result.status, 429);
+});
+
+test('high-cardinality throttle input evicts noisy keys instead of exhausting every login', async (t) => {
+  const f = await fixture({ env: { DISPATCH_TRUSTED_PROXY: 'cloudflare' } });
+  t.after(f.close);
+  f.database('data/platform/accounts.sqlite', (db) => {
+    db.exec('BEGIN IMMEDIATE');
+    const insert = db.prepare(
+      "INSERT INTO throttle(key,count,reset_at,namespace) VALUES (?,1,?,'login-ip')",
+    );
+    for (let index = 0; index < 4096; index++)
+      insert.run(createHash('sha256').update(`noise-${index}`).digest('hex'), Date.now() + 900_000);
+    db.exec('COMMIT');
+  });
+  const result = await f.request(
+    '/api/auth/login',
+    { email: demo.email, password: demo.password },
+    { 'cf-connecting-ip': '2606:4700:abcd:1::1' },
+  );
+  assert.equal(result.status, 200);
+  assert.equal(
+    f.database(
+      'data/platform/accounts.sqlite',
+      (db) =>
+        (
+          db.prepare("SELECT count(*) n FROM throttle WHERE namespace='login-ip'").get() as {
+            n: number;
+          }
+        ).n,
+    ),
+    4096,
+  );
 });
 
 test('production rejects conflicting modes and unsafe defaults before opening storage', async (t) => {

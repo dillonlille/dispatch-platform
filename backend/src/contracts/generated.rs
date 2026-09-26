@@ -120,6 +120,9 @@ fn bindings() -> BTreeMap<PathBuf, String> {
         ScorecardWeek,
         ScorecardWeeks,
         SessionResponse,
+        SecurityStatus,
+        PasskeySummary,
+        AuthenticatorSetup,
         AccountSession,
     )
 }

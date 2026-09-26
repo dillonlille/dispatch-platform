@@ -28,7 +28,7 @@ export function SignInPasswordField({
           name={name}
           autoFocus={autoFocus}
           type={visible ? 'text' : 'password'}
-          minLength={current ? 1 : 8}
+          minLength={current ? 1 : 15}
           maxLength={128}
           autoComplete={current ? 'current-password' : 'new-password'}
           placeholder={current ? 'Enter your password' : undefined}

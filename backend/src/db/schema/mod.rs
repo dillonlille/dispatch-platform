@@ -45,6 +45,11 @@ pub const PLATFORM: &[Migration] = &[
         name: "dsp_features",
         apply: Sql(include_str!("platform/0007_dsp_features.sql")),
     },
+    Migration {
+        id: 8,
+        name: "security_hardening",
+        apply: Code(security_hardening),
+    },
 ];
 pub const JOBS: &[Migration] = &[
     Migration {
@@ -136,4 +141,18 @@ fn outbox_context(db: &Db) -> Result<()> {
 fn audit_data_and_shown(db: &Db) -> Result<()> {
     add_column(db, "audit", "data", "TEXT")?;
     add_column(db, "audit", "shown", "INTEGER")
+}
+
+fn security_hardening(db: &Db) -> Result<()> {
+    db.0.execute_batch(include_str!("platform/0008_security_hardening.sql"))?;
+    add_column(
+        db,
+        "throttle",
+        "namespace",
+        "TEXT NOT NULL DEFAULT 'legacy'",
+    )?;
+    db.0.execute_batch(
+        "CREATE INDEX IF NOT EXISTS throttle_namespace_expiry ON throttle(namespace, reset_at)",
+    )?;
+    Ok(())
 }

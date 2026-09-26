@@ -115,6 +115,8 @@ test('mobile loads only the form; reset and password reveal still work', async (
   const mail = await capturedMail(dispatch.root, demo.email);
   const token = /token=([A-Za-z0-9_-]{43})/.exec(mail.text)![1];
   await page.goto(`/#reset?token=${token}`);
+  await expect(page).toHaveURL(/#reset$/);
+  expect(page.url()).not.toContain(token);
   await page.getByLabel('Password', { exact: true }).fill('New-login-password-2026!');
   await page.getByLabel('Confirm password', { exact: true }).fill('New-login-password-2026!');
   await page.getByRole('button', { name: 'Update password' }).click();

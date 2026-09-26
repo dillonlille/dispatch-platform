@@ -98,7 +98,7 @@ export function OwnerOnboarding({
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={15}
               maxLength={128}
               disabled={save.busy}
             />
@@ -110,7 +110,7 @@ export function OwnerOnboarding({
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={15}
               maxLength={128}
               disabled={save.busy}
             />

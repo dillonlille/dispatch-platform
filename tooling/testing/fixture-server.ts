@@ -55,7 +55,11 @@ export async function prepare(options: boolean | FixtureOptions = true) {
     binary = executable;
   }
   const port = await freePort();
-  const origin = `http://127.0.0.1:${port}`;
+  // Keep the server transport pinned to loopback, while advertising localhost as
+  // the application origin. WebAuthn permits localhost for development but does
+  // not permit an IP address as a relying-party ID.
+  const address = `http://127.0.0.1:${port}`;
+  const origin = `http://localhost:${port}`;
   const env = {
     ...process.env,
     NODE_ENV: 'development',
@@ -77,7 +81,7 @@ export async function prepare(options: boolean | FixtureOptions = true) {
       stdio: 'pipe',
     });
   else cli(['bootstrap', demo.email, 'Fresh', 'Owner'], demo.password);
-  return { root, binary, env, port, address: origin, cli };
+  return { root, binary, env, port, address, cli };
 }
 export async function fixture(options: boolean | FixtureOptions = true) {
   const { root, binary, env, address: origin, cli } = await prepare(options);
@@ -206,6 +210,7 @@ export async function fixture(options: boolean | FixtureOptions = true) {
   await start();
   return {
     root,
+    binary,
     env,
     cli,
     start,

@@ -31,6 +31,16 @@ export class ApiError extends Error {
 const labels: Record<string, string> = {
   already_a_member: 'This person already has access. Change their role in the member list.',
   email_queue_full: 'Email capacity is temporarily full. Try again later.',
+  mfa_required: 'Verify your identity to continue.',
+  reauthentication_required: 'Verify your identity, then retry this action.',
+  sign_in_again: 'Verify your password, then retry this action.',
+  passkey_failed: 'Passkey verification failed. Try again with a registered passkey.',
+  passkeys_unavailable: 'Passkeys are unavailable for this Dispatch origin.',
+  passkey_unavailable: 'No passkey is available for this account.',
+  passkey_exists: 'This passkey is already registered.',
+  invalid_authenticator_code: 'That authenticator code is invalid, expired, or already used.',
+  authenticator_exists: 'An authenticator app is already registered.',
+  invalid_recovery_code: 'That recovery code is invalid or has already been used.',
   uniform_changed:
     'This uniform changed in another session. Close and reopen the editor before saving.',
   uniform_not_found: 'This uniform was removed. Refresh the inventory.',
@@ -121,6 +131,9 @@ export async function api<T>(url: string, body?: unknown, signal?: AbortSignal):
     });
     const value = await response.json();
     if (!response.ok) {
+      if (['reauthentication_required', 'sign_in_again'].includes(value.error))
+        window.dispatchEvent(new Event('dispatch-reauthenticate'));
+      if (value.error === 'mfa_required') window.dispatchEvent(new Event('dispatch-mfa-required'));
       if (response.status === 401 && url !== '/api/auth/login')
         window.dispatchEvent(new Event('dispatch-signed-out'));
       if (value.error === 'dsp_view_expired' && url !== '/api/session/dsp')

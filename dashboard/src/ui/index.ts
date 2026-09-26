@@ -13,6 +13,7 @@ export { Modal } from './Modal.js';
 export { Pagination } from './Pagination.js';
 export { Popover } from './Popover.js';
 export { SearchInput } from './SearchInput.js';
+export { RecoveryCodes } from './RecoveryCodes.js';
 export { SortHeader } from './SortHeader.js';
 export { downloadTable } from './tableCsv.js';
 export { Tabs } from './Tabs.js';

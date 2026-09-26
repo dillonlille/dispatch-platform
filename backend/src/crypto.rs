@@ -39,7 +39,7 @@ pub fn equal(a: &str, b: &str) -> bool {
 }
 pub fn hash_password(value: &str) -> Result<String> {
     ensure(
-        (8..=128).contains(&value.chars().count()),
+        (15..=128).contains(&value.chars().count()) && !compromised_password(value),
         "invalid_password",
         400,
     )?;
@@ -47,6 +47,29 @@ pub fn hash_password(value: &str) -> Result<String> {
         .hash_password_with_salt(value.as_bytes(), &random::<16>()?)
         .map(|h| h.to_string())
         .map_err(|_| Error::new("password_failed", 500))
+}
+fn compromised_password(value: &str) -> bool {
+    // Kept local so password material (including a derived prefix) never leaves Dispatch.
+    const COMMON: &[&str] = &[
+        "123456789012345",
+        "1234567890123456",
+        "111111111111111",
+        "aaaaaaaaaaaaaaa",
+        "abcdefghijklmno",
+        "administrator123",
+        "changemechangeme",
+        "correcthorsebatterystaple",
+        "iloveyouiloveyou",
+        "letmeinletmeinletmein",
+        "passwordpassword",
+        "password123456",
+        "qwertyqwertyqwerty",
+        "qwertyuiopasdfgh",
+        "thisisapassword",
+        "welcome123456789",
+    ];
+    let folded = value.trim().to_lowercase();
+    COMMON.contains(&folded.as_str())
 }
 pub fn check_password(value: &str, encoded: &str) -> bool {
     PasswordHash::new(encoded).is_ok_and(|h| {
@@ -135,5 +158,17 @@ mod tests {
         assert_eq!(decrypt(&key, "binding", &sealed).unwrap(), json!({"a":1}));
         let (nonce, body) = sealed.split_once('.').unwrap();
         assert!(decrypt(&key, "binding", &format!("{nonce}A.{body}")).is_err());
+    }
+
+    #[test]
+    fn new_passwords_are_long_and_not_common() {
+        for value in [
+            "short-password",
+            "passwordpassword",
+            " CorrectHorseBatteryStaple ",
+        ] {
+            assert_eq!(hash_password(value).unwrap_err().code, "invalid_password");
+        }
+        assert!(hash_password("a unique dispatch password").is_ok());
     }
 }
